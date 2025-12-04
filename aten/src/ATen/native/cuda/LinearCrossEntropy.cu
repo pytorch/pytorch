@@ -105,7 +105,88 @@ ForwardResult forward_naive(
     int64_t reduction,
     int64_t ignore_index,
     double label_smoothing,
-    bool save_for_backward);
+    bool save_for_backward) {
+
+  Tensor input_buffer;
+  const Tensor& input_ref = contiguous_if_needed(input, input_buffer);
+  Tensor linear_weight_buffer;
+  const Tensor& linear_weight_ref = contiguous_if_needed(linear_weight, linear_weight_buffer);
+  Tensor target_buffer;
+  const Tensor& target_ref = contiguous_if_needed(target, target_buffer);
+  Tensor linear_bias_tensor;
+  if (linear_bias_opt.has_value()) {
+    linear_bias_tensor = linear_bias_opt.value();
+  }
+  Tensor linear_bias_buffer;
+  const Tensor& linear_bias_ref = linear_bias_tensor.defined()
+      ? contiguous_if_needed(linear_bias_tensor, linear_bias_buffer)
+      : linear_bias_tensor;
+  std::optional<Tensor> linear_bias_use;
+  if (linear_bias_ref.defined()) {
+    linear_bias_use = linear_bias_ref;
+  }
+
+  auto logits = at::linear(input_ref, linear_weight_ref, linear_bias_use);
+  auto logits_flat = logits.reshape({-1, logits.size(-1)});
+  auto target_flat = target_ref.reshape({-1});
+  auto options = logits_flat.options();
+  const int64_t vocab_size = linear_weight_ref.size(0);
+
+  Tensor valid_mask = at::ne(target_flat, ignore_index);
+  Tensor logsumexp = at::logsumexp(logits_flat, {1}, false);
+  Tensor target_logits = at::zeros(logsumexp.sizes(), options);
+
+  auto valid_indices = valid_mask.nonzero().reshape({-1});
+  if (valid_indices.numel() > 0) {
+    auto gathered_targets = at::index_select(target_flat, 0, valid_indices);
+    auto gathered_logits = at::index_select(logits_flat, 0, valid_indices);
+    auto gathered = at::gather(gathered_logits, 1, gathered_targets.unsqueeze(1)).squeeze(1);
+    target_logits.scatter_(0, valid_indices, gathered);
+  }
+
+  Tensor losses = logsumexp;
+  if (label_smoothing > 0.0) {
+    const double smoothing = label_smoothing;
+    const double uniform = smoothing / static_cast<double>(vocab_size);
+    auto sum_logits = logits_flat.sum(-1);
+    losses = losses - target_logits.mul(1.0 - smoothing) - sum_logits.mul(uniform);
+  } else {
+    losses = losses - target_logits;
+  }
+
+  losses.masked_fill_(at::logical_not(valid_mask), 0);
+
+  Tensor loss_result;
+  if (reduction == Reduction::None) {
+    loss_result = losses.reshape(target.sizes());
+  } else {
+    auto total_loss = losses.sum();
+    if (reduction == Reduction::Sum) {
+      loss_result = total_loss;
+    } else {
+      auto denom_long = valid_mask.sum();
+      auto denom = denom_long.to(total_loss.scalar_type());
+      if (denom_long.item<int64_t>() == 0) {
+        loss_result = denom.div(denom);
+      } else {
+        loss_result = total_loss.div(denom);
+      }
+    }
+  }
+
+  ForwardResult result;
+  result.loss = std::move(loss_result);
+
+  if (save_for_backward) {
+    SavedForBackward saved;
+    saved.logsumexp = std::move(logsumexp);
+    saved.strategy = ChunkingStrategy::NAIVE;
+    saved.chunk_size = logits_flat.size(0);
+    result.saved = std::move(saved);
+  }
+
+  return result;
+}
 
 ForwardResult forward_vocab_chunking(
     const Tensor& input,
@@ -116,7 +197,139 @@ ForwardResult forward_vocab_chunking(
     int64_t ignore_index,
     double label_smoothing,
     int64_t chunk_size,
-    bool save_for_backward);
+    bool save_for_backward) {
+
+  Tensor input_buffer;
+  const Tensor& input_ref = contiguous_if_needed(input, input_buffer);
+  Tensor linear_weight_buffer;
+  const Tensor& linear_weight_ref = contiguous_if_needed(linear_weight, linear_weight_buffer);
+  Tensor target_buffer;
+  const Tensor& target_ref = contiguous_if_needed(target, target_buffer);
+  Tensor linear_bias_tensor;
+  if (linear_bias_opt.has_value()) {
+    linear_bias_tensor = linear_bias_opt.value();
+  }
+  Tensor linear_bias_buffer;
+  const Tensor& linear_bias_ref = linear_bias_tensor.defined()
+      ? contiguous_if_needed(linear_bias_tensor, linear_bias_buffer)
+      : linear_bias_tensor;
+  std::optional<Tensor> linear_bias_use;
+  if (linear_bias_ref.defined()) {
+    linear_bias_use = linear_bias_ref;
+  }
+
+  auto input_flat = input_ref.reshape({-1, input_ref.size(-1)});
+  auto target_flat = target_ref.reshape({-1});
+  const int64_t vocab_size = linear_weight_ref.size(0);
+  const auto options = input_flat.options();
+  auto long_options = options.dtype(at::kLong);
+  const double neg_inf = -std::numeric_limits<double>::infinity();
+
+  Tensor running_max = at::full({input_flat.size(0)}, neg_inf, options);
+  Tensor exp_sums = at::zeros({input_flat.size(0)}, options);
+  Tensor target_logits = at::zeros({input_flat.size(0)}, options);
+  Tensor target_found = at::zeros({input_flat.size(0)}, long_options);
+  Tensor sum_logits;
+  if (label_smoothing > 0.0) {
+    sum_logits = at::zeros({input_flat.size(0)}, options);
+  }
+
+  Tensor valid_mask = at::ne(target_flat, ignore_index);
+  const int64_t num_chunks = (vocab_size + chunk_size - 1) / chunk_size;
+
+  for (int64_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+    const int64_t start_idx = chunk_idx * chunk_size;
+    const int64_t end_idx = std::min(start_idx + chunk_size, vocab_size);
+
+    auto weight_chunk = linear_weight_ref.slice(0, start_idx, end_idx);
+    std::optional<Tensor> bias_chunk;
+    if (linear_bias_ref.defined()) {
+      bias_chunk = linear_bias_ref.slice(0, start_idx, end_idx);
+    }
+
+    auto logits_chunk = at::linear(input_flat, weight_chunk, bias_chunk);
+
+    if (label_smoothing > 0.0) {
+      sum_logits = sum_logits + logits_chunk.sum(-1);
+    }
+
+    auto chunk_max = std::get<0>(logits_chunk.max(-1));
+    auto new_max = at::maximum(running_max, chunk_max);
+
+    auto exp_scale_old = at::exp(running_max.sub(new_max));
+    auto shifted_logits = logits_chunk.sub(new_max.unsqueeze(-1));
+    auto exp_chunk = at::sum(at::exp(shifted_logits), {-1});
+    exp_sums = exp_sums.mul(exp_scale_old).add_(exp_chunk);
+    running_max = new_max;
+
+    auto lower_bound = at::ge(target_flat, start_idx);
+    auto upper_bound = at::lt(target_flat, end_idx);
+    auto target_chunk_mask = at::logical_and(valid_mask, lower_bound);
+    target_chunk_mask = at::logical_and(target_chunk_mask, upper_bound);
+
+    auto indices = target_chunk_mask.nonzero().reshape({-1});
+    if (indices.numel() > 0) {
+      auto selected_targets = at::index_select(target_flat, 0, indices);
+      auto local_targets = at::sub(selected_targets, start_idx);
+      auto selected_logits = at::index_select(logits_chunk, 0, indices);
+      auto gathered = at::gather(selected_logits, 1, local_targets.unsqueeze(1)).squeeze(1);
+      target_logits = target_logits.scatter(0, indices, gathered);
+      target_found.index_put_({indices}, at::ones(indices.sizes(), long_options));
+    }
+  }
+
+  auto target_found_mask = target_found.gt(0);
+  auto coverage_mask = at::logical_or(target_found_mask, at::logical_not(valid_mask));
+  TORCH_CHECK(
+      coverage_mask.all().item<bool>(),
+      "linear_cross_entropy: target index not found in vocabulary chunks");
+
+  auto logsumexp = running_max.add(exp_sums.log());
+
+  Tensor losses;
+  if (label_smoothing > 0.0) {
+    const double smoothing = label_smoothing;
+    const double uniform = smoothing / static_cast<double>(vocab_size);
+    auto main_term = target_logits.mul(1.0 - smoothing);
+    auto uniform_term = sum_logits.mul(uniform);
+    losses = logsumexp - main_term - uniform_term;
+  } else {
+    losses = logsumexp - target_logits;
+  }
+
+  losses.masked_fill_(at::logical_not(valid_mask), 0);
+
+  Tensor loss_result;
+  if (reduction == Reduction::None) {
+    loss_result = losses.reshape(target.sizes());
+  } else {
+    auto total_loss = losses.sum();
+    if (reduction == Reduction::Sum) {
+      loss_result = total_loss;
+    } else {
+      auto denom_long = valid_mask.sum();
+      auto denom = denom_long.to(total_loss.scalar_type());
+      if (denom_long.item<int64_t>() == 0) {
+        loss_result = denom.div(denom);
+      } else {
+        loss_result = total_loss.div(denom);
+      }
+    }
+  }
+
+  ForwardResult result;
+  result.loss = std::move(loss_result);
+
+  if (save_for_backward) {
+    SavedForBackward saved;
+    saved.logsumexp = std::move(logsumexp);
+    saved.strategy = ChunkingStrategy::VOCAB_CHUNKING;
+    saved.chunk_size = chunk_size;
+    result.saved = std::move(saved);
+  }
+
+  return result;
+}
 
 ForwardResult forward_batch_chunking(
     const Tensor& input,
@@ -302,6 +515,69 @@ ForwardResult forward_batch_chunking(
   }
 
   return result;
+}
+
+ForwardResult forward_impl(
+    const Tensor& input,
+    const Tensor& linear_weight,
+    const Tensor& target,
+    const std::optional<Tensor>& linear_bias_opt,
+    int64_t reduction,
+    int64_t ignore_index,
+    double label_smoothing,
+    ChunkingStrategy strategy,
+    int64_t vocab_chunk_size,
+    int64_t batch_chunk_size,
+    bool save_for_backward) {
+
+  TORCH_CHECK(input.dim() >= 2, "Expected input to have at least 2 dimensions, got ", input.dim());
+  TORCH_CHECK(linear_weight.dim() == 2, "Expected linear_weight to be 2-dimensional, got ", linear_weight.dim());
+  TORCH_CHECK(input.size(-1) == linear_weight.size(1),
+              "Expected input.size(-1) to match linear_weight.size(1), got ",
+              input.size(-1), " and ", linear_weight.size(1));
+
+  switch (strategy) {
+    case ChunkingStrategy::VOCAB_CHUNKING:
+      TORCH_CHECK(
+          vocab_chunk_size > 0,
+          "linear_cross_entropy: vocab_chunk_size must be positive, got ",
+          vocab_chunk_size);
+      return forward_vocab_chunking(
+          input,
+          linear_weight,
+          target,
+          linear_bias_opt,
+          reduction,
+          ignore_index,
+          label_smoothing,
+          vocab_chunk_size,
+          save_for_backward);
+    case ChunkingStrategy::BATCH_CHUNKING:
+      TORCH_CHECK(
+          batch_chunk_size > 0,
+          "linear_cross_entropy: batch_chunk_size must be positive, got ",
+          batch_chunk_size);
+      return forward_batch_chunking(
+          input,
+          linear_weight,
+          target,
+          linear_bias_opt,
+          reduction,
+          ignore_index,
+          label_smoothing,
+          batch_chunk_size,
+          save_for_backward);
+    default:
+      return forward_naive(
+          input,
+          linear_weight,
+          target,
+          linear_bias_opt,
+          reduction,
+          ignore_index,
+          label_smoothing,
+          save_for_backward);
+  }
 }
 
 inline Tensor zeros_like_tensor(const Tensor& src) {
