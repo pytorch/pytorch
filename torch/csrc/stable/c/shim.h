@@ -133,6 +133,20 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_cuda_stream_from_pool(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_cuda_stream_synchronize(void* stream, int32_t device_index);
 
+// Wrapper around c10_cuda_check_implementation that captures the error message
+// without propagating the exception. The caller must free error_msg using
+// torch_c10_cuda_free_error_msg if it is non-null.
+AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
+    int32_t err,
+    const char* filename,
+    const char* function_name,
+    uint32_t line_number,
+    bool include_device_assertions,
+    char** error_msg);
+
+// Free error message allocated by torch_c10_cuda_check_msg
+AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
+
 #endif // USE_CUDA
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
