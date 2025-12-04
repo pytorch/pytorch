@@ -3586,7 +3586,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         try:
             # Do n warmups
-            total_time = cls._run_collective_benchmark(
+            cls._run_collective_benchmark(
                 choice, inputs, output, nwarmup, process_group, timeout
             )
 
@@ -3842,8 +3842,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+            config.cutlass.cutlass_prescreening
+            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
