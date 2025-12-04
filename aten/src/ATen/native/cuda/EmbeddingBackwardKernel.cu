@@ -24,7 +24,7 @@ namespace at::native {
 namespace {
 
 /* This code computes the sum of the weights in two-steps:
-  1) Each GPU warp sums `NROWS_PER_THREAD` number of row given by `indeces`
+  1) Each GPU warp sums `NROWS_PER_THREAD` number of row given by `indices`
   2) Each partial-sum from 1) are summed and scatter into `grad_weight`
 
   Notice, `NROWS_PER_THREAD` impacts the Achieved Occupancy of the
