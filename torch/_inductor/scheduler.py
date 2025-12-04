@@ -5514,9 +5514,15 @@ class Scheduler:
                 return False
 
             if isinstance(buf.node.layout, NoneLayout):
+                # For MutationOutput, check the underlying mutated buffer
                 if isinstance(buf.node, ir.MutationOutput) and (
                     real_name := self.mutation_real_name.get(buf_name, None)
                 ):
+                    return is_none_layout(real_name)
+
+                # For other operations that have NoneLayout but mutate an existing buffer
+                # (e.g., ScatterFallback, IndexPutFallback), check the mutated buffer
+                if (real_name := self.mutation_real_name.get(buf_name, None)):
                     return is_none_layout(real_name)
 
                 return True

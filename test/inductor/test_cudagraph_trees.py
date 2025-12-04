@@ -569,6 +569,58 @@ if HAS_CUDA_AND_TRITON:
                 # Restore original state
                 torch.use_deterministic_algorithms(orig_deterministic)
 
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_scatter_reduce_deterministic(self):
+            """
+            Test that scatter_reduce_ is properly handled when deterministic
+            algorithms are enabled. This tests that graph partition correctly
+            passes mutation output buffers between partitions.
+
+            The issue was that ScatterFallback (used for scatter_reduce_ when
+            deterministic mode is on) has NoneLayout, and the is_none_layout
+            check was incorrectly filtering out the mutation output buffer,
+            causing subsequent partitions to reference undefined variables.
+            """
+
+            def fn(x, index, src):
+                # Create a zeros tensor that will be mutated by scatter_reduce
+                out = x.new_zeros(10, 64)
+                # scatter_reduce_ mutates out in-place - this becomes ScatterFallback
+                # when deterministic mode is enabled
+                out.scatter_reduce_(0, index, src, reduce="amax")
+                # Use the result - this ends up in a separate partition
+                # and needs `out` to be passed as an input
+                return out.relu()
+
+            # Save the original state
+            orig_deterministic = torch.are_deterministic_algorithms_enabled()
+
+            try:
+                # Enable deterministic algorithms
+                torch.use_deterministic_algorithms(True)
+
+                fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+                def args():
+                    x = torch.randn(20, 64, device="cuda")
+                    # index tensor for scatter_reduce
+                    index = torch.randint(0, 10, (20, 64), device="cuda")
+                    src = torch.randn(20, 64, device="cuda")
+                    return x, index, src
+
+                # Run multiple iterations - should not raise NameError
+                for i in range(3):
+                    eager_args = args()
+                    compiled_args = tuple(a.clone() for a in eager_args)
+                    eager_out = fn(*eager_args)
+                    compiled_out = fn_c(*compiled_args)
+                    self.assertEqual(eager_out, compiled_out)
+
+            finally:
+                # Restore original state
+                torch.use_deterministic_algorithms(orig_deterministic)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
