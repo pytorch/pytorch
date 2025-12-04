@@ -756,7 +756,11 @@ class AutogradFunctionApply(HigherOrderOperator):
             # pyrefly: ignore [bad-override]
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *fwd_args)
+
+                # The Interpreter here is required to propagate metadata
+                # from the dynamo graph body to the local_map graph body.
+                # This is required for fx_traceback.annotate for work.
+                output, saved_values = torch.fx.Interpreter(fwd).run(None, *fwd_args)
 
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
@@ -770,7 +774,12 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def backward(ctx, *grad):
-                return bwd(None, *grad, *saved_values)
+                # The Interpreter here is required to propagate metadata
+                # from the dynamo graph body to the local_map graph body.
+                # This is required for fx_traceback.annotate for work.
+
+                # pyrefly: ignore [not-iterable]
+                return torch.fx.Interpreter(bwd).run(None, *grad, *saved_values)
 
         return ApplyTemplate.apply(*new_fwd_args)
 
