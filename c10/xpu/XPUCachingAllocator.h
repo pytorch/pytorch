@@ -111,8 +111,6 @@ struct SnapshotInfo {
   AllocatorConfigInfo config_metadata;
 };
 
-C10_XPU_API Allocator* get();
-
 inline XPUAllocator* get() {
   return allocator.load();
 }
