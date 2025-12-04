@@ -136,6 +136,23 @@ struct UnboxType<std::string_view> {
   using type = std::string;
 };
 
+// Remove lvalue references
+template <typename T>
+struct UnboxType<T&> {
+  using type = typename UnboxType<T>::type;
+};
+
+// Remove rvalue references
+template <typename T>
+struct UnboxType<T&&> {
+  using type = typename UnboxType<T>::type;
+};
+
+template <typename T>
+struct UnboxType<const T> {
+  using type = typename UnboxType<T>::type;
+};
+
 template <typename T>
 using unbox_type_t = typename UnboxType<T>::type;
 

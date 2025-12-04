@@ -37,8 +37,8 @@ void inline sgd_math(
 using torch::stable::Tensor;
 
 Tensor sgd_out_of_place(
-    const Tensor param,
-    const Tensor grad,
+    const Tensor& param,
+    const Tensor& grad,
     const double weight_decay,
     const double lr,
     const bool maximize) {
