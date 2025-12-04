@@ -383,7 +383,7 @@ class FSDPMemTracker(MemTracker):
                     if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
                         unique_handlers[fsdp_state._post_forward_hook_handle] = True
         # call remove on the handles once
-        for f_hook_handle in unique_handlers.keys():
+        for f_hook_handle in unique_handlers:
             f_hook_handle.remove()
         # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
