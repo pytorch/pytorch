@@ -691,7 +691,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         num_chunks: int,
         rank: int,
         return_first_offset: bool = True,
-    ) -> tuple[int, list[int]]:
+    ) -> tuple[int, int | list[int]]:
         return _StridedShard.local_shard_size_and_offset(
             self, curr_local_size, num_chunks, rank, return_first_offset
         )
