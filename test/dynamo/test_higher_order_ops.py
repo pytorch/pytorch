@@ -4645,7 +4645,7 @@ class GraphModule(torch.nn.Module):
             return torch.cond(
                 pred,
                 step_fn,  # True branch: calls functional_call
-                lambda x: x,  # False branch: identity
+                lambda x: x.clone(),  # False branch: return non-aliased tensor
                 [x],  # Operands
             )
 
@@ -4654,11 +4654,15 @@ class GraphModule(torch.nn.Module):
         compiled_fn = torch.compile(run_logic, fullgraph=True)
         true_pred = torch.tensor(True)
         false_pred = torch.tensor(False)
-        
+
         # Test true branch
-        self.assertTrue(torch.allclose(run_logic(true_pred, x), compiled_fn(true_pred, x)))
+        self.assertTrue(
+            torch.allclose(run_logic(true_pred, x), compiled_fn(true_pred, x))
+        )
         # Test false branch
-        self.assertTrue(torch.allclose(run_logic(false_pred, x), compiled_fn(false_pred, x)))
+        self.assertTrue(
+            torch.allclose(run_logic(false_pred, x), compiled_fn(false_pred, x))
+        )
 
     def test_functional_call_with_scan(self):
         """Test that functional_call works with torch.scan"""
