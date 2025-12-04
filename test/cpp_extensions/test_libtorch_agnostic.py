@@ -860,7 +860,6 @@ if not IS_WINDOWS:
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
         @skipIfTorchVersionLessThan(2, 10)
-<<<<<<< HEAD
         @onlyCUDA
         def test_my_get_current_cuda_stream(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -922,7 +921,8 @@ if not IS_WINDOWS:
             stream = torch.cuda.current_stream(device_index).cuda_stream
             # sanity check for torch_cuda_stream_synchronize:
             libtorch_agnostic.ops.my_cuda_stream_synchronize(stream, device_index)
-=======
+
+        @skipIfTorchVersionLessThan(2, 10)
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_from_blob(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -977,7 +977,6 @@ if not IS_WINDOWS:
 
             reference_transposed = module.reference_from_blob(transposed)
             self.assertEqual(stable_transposed, reference_transposed)
->>>>>>> 23df333592c (Add C++ wrapper for shim from_blob in stable/csrc/ops.h)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
