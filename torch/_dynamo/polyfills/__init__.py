@@ -97,8 +97,6 @@ def accumulate_grad(x, new_grad):
     new_grad_strided.copy_(new_grad)
     if x.grad is None:
         x.grad = new_grad_strided
-    elif torch.is_grad_enabled():
-        x.grad = x.grad + new_grad_strided
     else:
         x.grad.add_(new_grad_strided)
 
