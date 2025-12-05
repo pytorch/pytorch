@@ -36,6 +36,11 @@ from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
+from torch._dynamo.variables.misc import (
+    DatetimeNowVariable,
+    DatetimeScalarVariable,
+    TimedeltaVariable,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -892,6 +897,53 @@ class BuiltinVariable(VariableTracker):
 
             return result
 
+        def datetime_sub_handler(tx: "InstructionTranslator", a, b) -> Any:
+            a_proxy = a.as_proxy()
+            b_proxy = b.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.sub,
+                (a_proxy, b_proxy),
+                {},
+            )
+            return TimedeltaVariable(proxy=proxy, source=a.source)
+
+        datetime_sub_handlers: list[
+            tuple[
+                tuple[type[VariableTracker], type[VariableTracker]],
+                _HandlerCallback,
+            ]
+        ] = [
+            (
+                (DatetimeNowVariable, DatetimeNowVariable),
+                datetime_sub_handler,
+            ),
+            (
+                (TimedeltaVariable, TimedeltaVariable),
+                datetime_sub_handler,
+            ),
+        ]
+        op_handlers[operator.sub].extend(datetime_sub_handlers)
+
+        def datetime_scalar_sub_handler(tx: "InstructionTranslator", a, b):
+            a_proxy = a.as_proxy()
+            b_proxy = b.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.sub,
+                (a_proxy, b_proxy),
+                {},
+            )
+            proxy.node.meta["example_value"] = 0.0
+            return DatetimeScalarVariable(proxy=proxy, source=a.source)
+
+        op_handlers[operator.sub].append(
+            (
+                (DatetimeScalarVariable, DatetimeScalarVariable),
+                datetime_scalar_sub_handler,
+            )
+        )
+
         for op in supported_comparison_ops.values():
             assert callable(op)
             assert op not in op_handlers
@@ -1207,6 +1259,29 @@ class BuiltinVariable(VariableTracker):
                     "Please report an issue to PyTorch.",
                 ],
             )
+
+        try:
+            from .misc import datetime_now, DatetimeNowVariable
+
+            if fn is datetime_now:
+                obj = BuiltinVariable(fn)
+
+                def call_datetime_now(
+                    tx: "InstructionTranslator",
+                    args: Sequence[VariableTracker],
+                    kwargs: dict[str, VariableTracker],
+                ) -> VariableTracker:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        datetime_now,
+                        (),
+                        {},
+                    )
+                    return DatetimeNowVariable(proxy=proxy, source=None)
+
+                return call_datetime_now
+        except Exception:
+            datetime_now = None
 
         if len(handlers) == 0:
             return lambda tx, args, kwargs: call_unimplemented(args)

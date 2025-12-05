@@ -105,6 +105,8 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CellVariable,
+    DatetimeClassVariable,
+    DatetimeNowVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
