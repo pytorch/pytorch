@@ -277,6 +277,7 @@ class RedistributeModel(torch.nn.Module):
         # and precompile needs this class to be available at the module
         # level.
         from torch.distributed.tensor import Replicate
+
         y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
 
         return x, y
@@ -796,8 +797,8 @@ from user code:
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     def test_aot_compile_with_redistribute(self):
-        from torch.distributed.tensor import DTensor, Replicate
         from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate
         from torch.testing._internal.distributed.fake_pg import FakeStore
 
         fake_store = FakeStore()
