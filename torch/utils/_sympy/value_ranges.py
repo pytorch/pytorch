@@ -794,8 +794,8 @@ class SymPyValueRangeAnalysis:
         y = ValueRanges.wrap(y)
         if x.lower >= 0 and y.lower >= 0:
             return SymPyValueRangeAnalysis.mod(x, y)
-        lower = 0 if y.upper > 0 else y.lower + 1
-        upper = 0 if y.lower < 0 else y.upper - 1
+        lower = y.lower + 1 if y.lower < 0 else 0
+        upper = y.upper - 1 if y.upper > 0 else 0
         return ValueRanges(lower, upper)
 
     @classmethod

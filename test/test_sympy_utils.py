@@ -433,6 +433,12 @@ class TestValueRanges(TestCase):
         self.assertEqual(r.lower, -int_oo)  # -int_oo + 1 == -int_oo
         self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
 
+        # x % [0, int_oo] should be in [0, int_oo - 1] = [0, int_oo]
+        # (assuming y != 0 at runtime, lower bound should be 0, not 1)
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-int_oo, int_oo), ValueRanges(0, int_oo))
+        self.assertEqual(r.lower, 0)
+        self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
+
         # Test edge case: y = [1, 1] -> result is always 0
         r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(1, 1))
         self.assertEqual(r, ValueRanges(0, 0))
