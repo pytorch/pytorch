@@ -754,6 +754,8 @@ class PallasKernel(SIMDKernel):
         self.tensor_masks = {}  # Map tensor name to mask variable name
         # Track which output param each store uses: list of (out_ptr_name, store_line)
         self.store_with_output: list[tuple[str, str]] = []
+        # Track load index expressions for argmax/argmin axis detection
+        self.load_index_exprs: dict[str, sympy.Expr] = {}
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -998,6 +1000,9 @@ class PallasKernel(SIMDKernel):
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
+        # Track the load index expression for argmax/argmin axis detection
+        self.load_index_exprs[name] = index
+
         # Determine masked ops strategy on first load/store if not yet determined
         if self.use_masked_ops is None:
             self.use_masked_ops = self._determine_masked_ops_for_kernel()
@@ -1225,6 +1230,8 @@ class PallasKernel(SIMDKernel):
             "max": "jnp.max",
             "min": "jnp.min",
             "any": "jnp.any",
+            "argmax": "jnp.argmax",
+            "argmin": "jnp.argmin",
         }
 
         # Determine if this is a partial reduction (has pointwise dimensions)
@@ -1265,11 +1272,74 @@ class PallasKernel(SIMDKernel):
                     reduction_numel = None
                     break
 
+        # Count the number of pointwise and reduction dimensions
+        n_reduction_dims = sum(
+            1
+            for var, entry in self.range_tree_nodes.items()
+            if entry.prefix.startswith("r")
+        )
+
         if reduction_type == "xor_sum":
             if has_pointwise and pointwise_numel and reduction_numel:
                 reduction_expr = f"jnp.bitwise_xor.reduce({value}.reshape({pointwise_numel}, -1), axis=-1)"
             else:
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+        elif reduction_type in ("argmax", "argmin"):
+            # For argmax/argmin, we need to preserve the axis information
+            # because the result is indices, not values.
+            reduction_op = reduction_ops[reduction_type]
+            # Check if this is a true partial reduction (pointwise numel > 1)
+            # When pointwise_numel == 1, it's effectively a full reduction to scalar
+            is_partial_reduction = (
+                has_pointwise and pointwise_numel and pointwise_numel > 1
+            )
+            if is_partial_reduction and n_reduction_dims > 0:
+                # Partial reduction: determine the reduction axis from load index
+                # The reduction variable's coefficient in the index expression tells us its stride
+                # Higher stride = outer axis (lower axis number in row-major order)
+                reduction_axis = 0  # Default to axis 0
+                if self.load_index_exprs:
+                    # Get the first load index expression
+                    load_index = next(iter(self.load_index_exprs.values()))
+                    # Find the reduction variable (starts with 'r')
+                    reduction_vars = [
+                        var
+                        for var, entry in self.range_tree_nodes.items()
+                        if entry.prefix.startswith("r")
+                    ]
+                    if reduction_vars:
+                        r_var = reduction_vars[0]
+                        # Get the coefficient (stride) of the reduction variable
+                        r_coeff = load_index.coeff(r_var)
+                        try:
+                            r_stride = int(r_coeff) if r_coeff != 0 else 1
+                        except (TypeError, ValueError):
+                            r_stride = 1
+                        # Get pointwise variable
+                        pw_vars = [
+                            var
+                            for var, entry in self.range_tree_nodes.items()
+                            if not entry.prefix.startswith("r")
+                        ]
+                        if pw_vars:
+                            pw_var = pw_vars[0]
+                            pw_coeff = load_index.coeff(pw_var)
+                            try:
+                                pw_stride = int(pw_coeff) if pw_coeff != 0 else 1
+                            except (TypeError, ValueError):
+                                pw_stride = 1
+                            # Higher stride = earlier (outer) axis
+                            # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
+                            reduction_axis = 0 if r_stride > pw_stride else 1
+                if n_reduction_dims == 1:
+                    reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
+                else:
+                    # Multiple reduction dims - reduce over all of them
+                    axes = tuple(range(n_reduction_dims))
+                    reduction_expr = f"{reduction_op}({value}, axis={axes})"
+            else:
+                # Full reduction to scalar
+                reduction_expr = f"{reduction_op}({value})"
         elif reduction_type in reduction_ops:
             if (
                 has_pointwise
@@ -1288,12 +1358,13 @@ class PallasKernel(SIMDKernel):
                 #
                 # Generate code to dynamically determine and reorder axes:
                 pw_sizes_str = str(pointwise_sizes)
+                reduction_op = reduction_ops[reduction_type]
                 reduction_expr = (
                     f"(lambda v: (lambda pw_sizes: "
-                    f"jnp.sum(v.reshape(-1, {reduction_numel}), axis=-1) "
+                    f"{reduction_op}(v.reshape(-1, {reduction_numel}), axis=-1) "
                     f"if v.ndim == 2 else "
                     f"(lambda input_shape, pw_axes: "
-                    f"{reduction_ops[reduction_type]}("
+                    f"{reduction_op}("
                     f"jnp.moveaxis(v, pw_axes, list(range(len(pw_axes)))).reshape({pointwise_numel}, -1), axis=-1)"
                     f")("
                     f"v.shape, "
