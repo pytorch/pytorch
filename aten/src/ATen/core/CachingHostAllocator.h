@@ -305,7 +305,7 @@ struct CachingHostAllocatorImpl {
 
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
-    if (pinned_use_background_threads()) {
+    if (pinned_use_background_threads() && mempool_id.first == 0 && mempool_id.second == 0) {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         active_ = true;
@@ -742,7 +742,7 @@ struct CachingHostAllocatorImpl {
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway_.emplace_back(pool_id, std::move(filter));
-    captures_underway_size_.fetch_add(1, std::memory_order_relaxed);
+    captures_underway_empty_.store(false, std::memory_order_relaxed);
   }
 
   void end_allocate_to_pool(c10::MempoolId_t pool_id) {
@@ -751,7 +751,7 @@ struct CachingHostAllocatorImpl {
          ++it) {
       if (it->first == pool_id) {
         captures_underway_.erase(it);
-        captures_underway_size_.fetch_sub(1, std::memory_order_relaxed);
+        captures_underway_empty_.store(captures_underway_.empty(), std::memory_order_relaxed);
         return;
       }
     }
@@ -782,7 +782,7 @@ struct CachingHostAllocatorImpl {
 
  private:
   std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool_for_current_stream() {
-    if (C10_LIKELY(captures_underway_size_.load(std::memory_order_relaxed) == 0)) {
+    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
       return {c10::MempoolId_t{0, 0}, default_pool_};
     }
 
@@ -828,7 +828,7 @@ struct CachingHostAllocatorImpl {
     // Stream capture can allocate only to private pools. If there
     // are no private pools for which capture is currently underway,
     // then by modus tollens the current stream is not capturing.
-    if (C10_LIKELY(captures_underway_size_.load(std::memory_order_relaxed) == 0)) {
+    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
       return false;
     }
     return stream_is_capturing(get_current_stream());
@@ -921,14 +921,16 @@ struct CachingHostAllocatorImpl {
   // which has its own mutex.
   alignas(hardware_destructive_interference_size) mutable std::shared_mutex instance_mutex_;
 
-  // we manually maintain the invariant that captures_underway_size_
-  // == captures_underway_.size(). This trick allows for us to check
-  // whether any captures are currently underway without ever taking a
-  // lock on instance_mutex_ (which guards captures_underway_), which
-  // is much more expensive than a relaxed memory load on this
-  // atomic. Read more here:
+  // We manually maintain the invariant that captures_underway_empty_
+  // == captures_underway_.empty() outside of zones guarded by
+  // instance_mutex_. This trick allows for us to check whether any
+  // captures are currently underway without ever taking a lock on
+  // instance_mutex_ (which guards captures_underway_), which is much
+  // more expensive than a relaxed memory load on this atomic. Read
+  // more here:
   // https://github.com/pytorch/pytorch/pull/167507#discussion_r2586418965
-  std::atomic<size_t> captures_underway_size_;
+  // It is important to use only "relaxed" loads and stores.
+  std::atomic<bool> captures_underway_empty_;
 
   // Private pools for captures
   ska::flat_hash_map<c10::MempoolId_t, std::unique_ptr<PrivatePool>, c10::MempoolIdHash>
