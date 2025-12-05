@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: periodic-quantization-build
     with:
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      build-environment: ${{ needs.periodic-quantization-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-quantization-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-quantization-build.outputs.test-matrix }}
     secrets: inherit
