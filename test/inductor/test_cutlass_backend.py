@@ -1487,9 +1487,9 @@ class TestCutlassBackend(TestCase):
             assert len(sources) >= 1
 
             # Get names for temporary source and executable files.
-            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)
+            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)  # noqa: SIM115
             cu_file.close()
-            exe_file = NamedTemporaryFile("w", suffix="", delete=False)
+            exe_file = NamedTemporaryFile("w", suffix="", delete=False)  # noqa: SIM115
             exe_file.close()
 
             # Save the generated code into the .cu file.
