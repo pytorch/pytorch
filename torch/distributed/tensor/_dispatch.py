@@ -459,14 +459,13 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+                    ExplicitRedistributionContext.observe_redistribution(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                    ):
-                        raise RuntimeError(
-                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
-                        )
+                        message=f"Implicit redistribution occurred for {op_info.schema} "
+                        "while ExplicitRedistributionContext was active",
+                    )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
@@ -567,7 +566,9 @@ class OpDispatcher:
             if runtime_schema_info is None:
                 # Try to detect if there are DTensors hidden in list/tuple args
                 for arg in args_list:
-                    if isinstance(arg, (list, tuple)) and any(isinstance(x, dtensor.DTensor) for x in arg):
+                    if isinstance(arg, (list, tuple)) and any(
+                        isinstance(x, dtensor.DTensor) for x in arg
+                    ):
                         raise RuntimeError(
                             f"Operator {op_call} is not registered for DTensor. "
                             f"The operator takes a list/tuple of DTensors as input, but no sharding "
@@ -577,7 +578,9 @@ class OpDispatcher:
                         )
                 # Also check the original args before any flattening
                 for arg in args:
-                    if isinstance(arg, (list, tuple)) and any(isinstance(x, dtensor.DTensor) for x in arg):
+                    if isinstance(arg, (list, tuple)) and any(
+                        isinstance(x, dtensor.DTensor) for x in arg
+                    ):
                         raise RuntimeError(
                             f"Operator {op_call} is not registered for DTensor. "
                             f"The operator takes a list/tuple of DTensors as input, but no sharding "
@@ -586,9 +589,7 @@ class OpDispatcher:
                             f"See torch/distributed/tensor/_ops/_math_ops.py::foreach_max_strategy for an example."
                         )
 
-            raise RuntimeError(
-                f"found no DeviceMesh from dtensor args for {op_call}!"
-            )
+            raise RuntimeError(f"found no DeviceMesh from dtensor args for {op_call}!")
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
