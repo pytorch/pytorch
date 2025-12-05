@@ -1051,6 +1051,31 @@ class TestViewOps(TestCase):
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
 
+    @skipLazy  # Lazy backend has issues with this operation
+    def test_maybe_view_chunk_cat(self, device):
+        """Test _maybe_view_chunk_cat is equivalent to torch.cat(torch.chunk(...))"""
+        from torch.distributed._functional_collectives import _maybe_view_chunk_cat
+
+        # Helper to test a configuration
+        def test_config(shape, group_size, gather_dim):
+            x = torch.randn(shape, device=device)
+            result = _maybe_view_chunk_cat(x, group_size=group_size, gather_dim=gather_dim)
+            expected = torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
+            self.assertEqual(result, expected)
+            self.assertTrue(result.is_contiguous())
+
+        # Test various configurations - one per line as requested
+        test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
+        test_config((4, 8, 16), group_size=4, gather_dim=1)  # docstring example 1
+        test_config((4, 2, 8), group_size=4, gather_dim=2)   # docstring example 2
+        test_config((2, 10, 20), group_size=2, gather_dim=1) # different group_size
+        test_config((4, 16), group_size=4, gather_dim=1)     # 2D tensor
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=0)  # 4D, gather_dim=0
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=1)  # 4D, gather_dim=1
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
+        test_config((8, 4, 6), group_size=8, gather_dim=1)   # group_size=8
+
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
