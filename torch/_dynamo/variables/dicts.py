@@ -20,13 +20,10 @@ None values for efficiency and code reuse.
 
 import collections
 import functools
-import inspect
 import operator
 import types
-from collections.abc import Hashable as py_Hashable, Sequence
+from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
-
-from torch._subclasses.fake_tensor import is_fake
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -55,8 +52,8 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Add its tracker type to is_hashable
-# - (perhaps) Define how it is compared in _HashableTracker._eq_impl
+# - Implement is_python_hashable() method in the VariableTracker subclass
+# - Implement get_python_hash() and is_python_equal() methods for hashable types
 
 
 def was_instancecheck_override(obj: Any) -> bool:
@@ -70,10 +67,19 @@ def raise_unhashable(
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
+    try:
+        arg_type = arg.python_type()
+    except Exception:
+        arg_type = type(arg)
+
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(f"unhashable type: {type(arg.realize())}")],
+        args=[
+            ConstantVariable(
+                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}"
+            )
+        ],
     )
 
 
@@ -88,52 +94,7 @@ def is_hashable(x: VariableTracker) -> bool:
         and x.is_hashable()
     ):
         return True
-
-    if isinstance(x, variables.TensorVariable):
-        # Tensors are hashable if they have an example_value (a fake tensor)
-        # Most VT's should have one.
-        # It'd be nice if at some point we could assert that they all have one
-        return x.as_proxy().node.meta.get("example_value") is not None
-    elif isinstance(x, variables.TupleVariable):
-        return all(is_hashable(e) for e in x.items)
-    elif isinstance(x, variables.FrozenDataClassVariable):
-        return all(is_hashable(e) for e in x.fields.values())
-    elif (
-        isinstance(x, variables.UserDefinedObjectVariable)
-        and not was_instancecheck_override(x.value)
-        and inspect.getattr_static(x.value, "__hash__") is int.__hash__
-        and isinstance(x.value, int)
-    ):
-        return isinstance(x.value, py_Hashable)
-    elif isinstance(x, variables.FunctoolsPartialVariable):
-        return (
-            is_hashable(x.func)
-            and all(is_hashable(arg) for arg in x.args)
-            and all(is_hashable(value) for value in x.keywords.values())
-        )
-    else:
-        return isinstance(
-            x,
-            (
-                variables.BuiltinVariable,
-                variables.SymNodeVariable,
-                variables.ConstantVariable,
-                variables.EnumVariable,
-                variables.FrozensetVariable,
-                variables.UserDefinedClassVariable,
-                variables.UserFunctionVariable,
-                variables.SkipFunctionVariable,
-                variables.misc.NumpyVariable,
-                variables.NNModuleVariable,
-                variables.UnspecializedNNModuleVariable,
-                variables.MethodWrapperVariable,
-                variables.TorchInGraphFunctionVariable,
-                variables.TypingVariable,
-                variables.FunctoolsPartialVariable,
-                variables.WeakRefVariable,
-                variables.TorchHigherOrderOperatorVariable,
-            ),
-        )
+    return x.is_python_hashable()
 
 
 class ConstDictVariable(VariableTracker):
@@ -154,88 +115,47 @@ class ConstDictVariable(VariableTracker):
         def __init__(self, vt: VariableTracker) -> None:
             # We specialize SymNodes
             vt = specialize_symnode(vt)
-            # TODO Temporarily remove to figure out what keys are we breaking on
-            # and add proper support for them
+
+            # If Dynamo does not know the hashability of the vt, it will raise unsupported here
             if not is_hashable(vt):
                 raise_unhashable(vt)
             self.vt = vt
 
-        @property
-        def underlying_value(self) -> Any:
+        def __hash__(self) -> int:
+            """
+            Computes the hash value for the wrapped VariableTracker.
+
+            For unrealized LazyVariableTrackers, uses the hash of the original value
+            to avoid realizing the tracker and inserting unnecessary guards.
+            For all other cases, delegates to the VariableTracker's get_python_hash method.
+
+            Returns:
+                The hash value of the underlying variable tracker
+            """
             if (
                 isinstance(self.vt, variables.LazyVariableTracker)
                 and not self.vt.is_realized()
                 and self.vt.is_hashable()
             ):
-                return self.vt.original_value()
-            if isinstance(self.vt, variables.TensorVariable):
-                x = self.vt.as_proxy().node.meta["example_value"]
-            elif isinstance(self.vt, variables.TupleVariable):
-                Hashable = ConstDictVariable._HashableTracker
-                x = tuple(Hashable(e).underlying_value for e in self.vt.items)
-            elif isinstance(self.vt, variables.NNModuleVariable):
-                return self.vt.value
-            elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
-                return self.vt.value
-            elif isinstance(self.vt, variables.UserFunctionVariable):
-                return self.vt.get_function()
-            elif isinstance(self.vt, variables.WeakRefVariable):
-                # Access the underlying value inside the referent_vt for the key representation
-                Hashable = ConstDictVariable._HashableTracker
-                return Hashable(self.vt.referent_vt).underlying_value
-            elif isinstance(self.vt, variables.FrozenDataClassVariable):
-                Hashable = ConstDictVariable._HashableTracker
-                fields_values = {
-                    k: Hashable(v).underlying_value
-                    for k, v in self.vt.fields.items()  # type: ignore[attr-defined]
-                }
-                return variables.FrozenDataClassVariable.HashWrapper(
-                    self.vt.python_type(), fields_values
-                )
-            elif isinstance(self.vt, variables.UserDefinedObjectVariable):
-                # The re module in Python 3.13+ has a dictionary (_cache2) with
-                # an object as key (`class _ZeroSentinel(int): ...`):
-                # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual
-                return self.vt.value  # type: ignore[attr-defined,union-attr]
-            elif isinstance(self.vt, variables.FunctoolsPartialVariable):
-                Hashable = ConstDictVariable._HashableTracker
-                items = (self.vt.func, *self.vt.args, *self.vt.keywords.values())
-                x = tuple(Hashable(e).underlying_value for e in items)
-                return x
-            else:
-                x = self.vt.as_python_constant()
-            return x
+                return hash(self.vt.original_value())
+            return self.vt.get_python_hash()
 
-        def __hash__(self) -> int:
-            return hash(self.underlying_value)
+        def __eq__(self, other) -> bool:
+            """
+            Checks equality between two _HashableTracker instances.
 
-        @staticmethod
-        def _eq_impl(a: Any, b: Any) -> bool:
-            # TODO: Put this in utils and share it between variables/builtin.py and here
-            type_a, type_b = type(a), type(b)
-            if not (issubclass(type_a, type_b) or issubclass(type_b, type_a)):
-                return False
+            Delegates to the VariableTracker's is_python_equal method to compare
+            the underlying variable trackers for Python-level equality.
 
-            if isinstance(a, tuple):
-                Hashable = ConstDictVariable._HashableTracker
-                return len(a) == len(b) and all(
-                    Hashable._eq_impl(u, v) for u, v in zip(a, b)
-                )
-            elif is_fake(a):
-                return a is b
-            else:
-                return a == b
+            Args:
+                other: Another _HashableTracker instance to compare with
 
-        def __eq__(self, other: object) -> bool:
-            Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
-                type(other)
-            )
-            if isinstance(other, Hashable):
-                return Hashable._eq_impl(self.underlying_value, other.underlying_value)
-
-            # constant
-            return Hashable._eq_impl(self.underlying_value, other)
+            Returns:
+                True if the underlying variable trackers are Python-equal, False otherwise
+            """
+            if self.vt is other.vt:
+                return True
+            return self.vt.is_python_equal(other.vt)
 
     def __init__(
         self,
@@ -324,7 +244,7 @@ class ConstDictVariable(VariableTracker):
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
         return (
-            is_hashable(vt)
+            vt.is_python_hashable()
             and Hashable(vt) in self.items
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
@@ -538,8 +458,6 @@ class ConstDictVariable(VariableTracker):
 
         Hashable = ConstDictVariable._HashableTracker
 
-        arg_hashable = args and is_hashable(args[0])
-
         if name == "__init__":
             temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
                 tx, *args, **kwargs
@@ -608,6 +526,7 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and self.is_mutable():
+            arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
@@ -622,16 +541,21 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
-        elif name == "__delitem__" and arg_hashable and self.is_mutable():
-            self.install_dict_keys_match_guard()
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-            self.items.__delitem__(Hashable(args[0]))
-            return ConstantVariable.create(None)
+        elif name == "__delitem__" and self.is_mutable():
+            arg_hashable = args and is_hashable(args[0])
+            if arg_hashable:
+                self.install_dict_keys_match_guard()
+                self.should_reconstruct_all = True
+                tx.output.side_effects.mutation(self)
+                self.items.__delitem__(Hashable(args[0]))
+                return ConstantVariable.create(None)
+            else:
+                return super().call_method(tx, name, args, kwargs)
         elif name == "get":
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
+            arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
@@ -647,6 +571,7 @@ class ConstDictVariable(VariableTracker):
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
+            arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
@@ -738,6 +663,7 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
+            arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
@@ -753,6 +679,7 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
+            arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
@@ -904,6 +831,12 @@ class ConstDictVariable(VariableTracker):
     def clone(self, **kwargs: Any) -> VariableTracker:
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
+
+    def is_python_hashable(self):
+        """
+        Dictionaries are mutable and therefore not hashable in Python.
+        """
+        return False
 
 
 class MappingProxyVariable(VariableTracker):
@@ -1418,6 +1351,18 @@ class FrozensetVariable(SetVariable):
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
 
+    def is_python_hashable(self):
+        """
+        Frozensets are immutable and hashable in Python.
+        """
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class DictKeySetVariable(SetVariable):
     def debug_repr(self) -> str:
@@ -1607,3 +1552,9 @@ class DictItemsVariable(DictViewVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
             return ConstantVariable.create(False)
         return super().call_method(tx, name, args, kwargs)
+
+    def is_python_hashable(self):
+        """
+        Dictionary item views are not hashable in Python.
+        """
+        return False
