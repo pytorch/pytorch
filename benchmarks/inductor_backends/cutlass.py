@@ -9,8 +9,9 @@ import logging
 import time
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from tabulate import tabulate
 from tqdm import tqdm
@@ -124,7 +125,7 @@ class CutlassExperimentConfig(ExperimentConfig):
     def to_options(self) -> dict[str, Any]:
         return {
             **super().to_options(),
-            "cuda.cutlass_instantiation_level": self.cutlass_instantiation_level,
+            "cutlass.cutlass_instantiation_level": self.cutlass_instantiation_level,
         }
 
 

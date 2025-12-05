@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -76,7 +75,6 @@ test_failures = {
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
-    "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
@@ -93,17 +91,6 @@ if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
         ("cuda",)
     )
-
-if TEST_WITH_ROCM:
-    # Tensor-likes are not close
-    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    )
-    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    )
-    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
-
 
 if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
@@ -160,7 +147,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        TestCase.setUp(self)
+        super().setUp()
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -286,7 +273,6 @@ class TestInductorDynamic(TestCase):
         def f():
             full = torch.full((), 11)
             i0 = full.item()
-            torch._check_is_size(i0)
             return torch.full((i0,), 0)
 
         opt_f = torch.compile(f, fullgraph=True)
@@ -451,8 +437,6 @@ class TestInductorDynamic(TestCase):
     def test_return_unbacked_view_split(self, device):
         def f(values, length_per_key):
             u0, u1 = length_per_key.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             v1, v2 = torch.functional.split(values, [u0, u1])
             return v1, v2
 
@@ -484,7 +468,6 @@ class TestInductorDynamic(TestCase):
 
         @torch.library.register_fake("_test::_cat")
         def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
-            [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
         def _cat_setup_context(ctx, inputs, output):
@@ -984,7 +967,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._check_is_size(a)
             torch._check(a >= 1)
             torch._check(a <= 10)
             return torch.ones(a, a)
@@ -996,8 +978,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile()
         def f(xt):
             xs = xt.tolist()
-            for x in xs:
-                torch._check_is_size(x)
             y = sum(xs)
             return torch.zeros(y, device=device)
 

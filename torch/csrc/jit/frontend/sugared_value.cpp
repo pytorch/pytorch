@@ -2,9 +2,7 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch::jit {
 
@@ -867,7 +865,7 @@ std::shared_ptr<SugaredValue> TorchCheckValue::call(
     }
   }
 
-  if (args.size() >= 1) {
+  if (!args.empty()) {
     if (found_cond_kwarg) {
       throw(
           ErrorReport(loc)

@@ -17,9 +17,10 @@ _compiled_autograd_enabled: bool = False
 
 
 def detect_compiled_autograd():
-    assert not torch.compiler.is_compiling(), (
-        "`detect_compiled_autograd()` is designed to be called in eager mode"
-    )
+    if torch.compiler.is_compiling():
+        raise AssertionError(
+            "`detect_compiled_autograd()` is designed to be called in eager mode"
+        )
     global _compiled_autograd_enabled
     import torch._dynamo.compiled_autograd as ca
 
@@ -138,11 +139,14 @@ def _from_local_no_grad(
     """
 
     if not compiled_autograd_enabled():
+        # pyrefly: ignore [bad-argument-type]
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
+            # pyrefly: ignore [bad-argument-count]
             local_tensor,
             sharding_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=local_tensor.requires_grad,
         )
     else:
@@ -171,3 +175,7 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
     ):
         return x
     return x.to(dtype)
+
+
+def is_bw() -> bool:
+    return torch._C._current_graph_task_id() != -1

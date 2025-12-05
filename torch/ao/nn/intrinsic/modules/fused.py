@@ -245,7 +245,7 @@ class LinearLeakyReLU(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
 
     def __init__(self, linear, leaky_relu):
-        assert type(linear) == Linear and type(leaky_relu) == torch.nn.LeakyReLU, (
+        assert type(linear) is Linear and type(leaky_relu) is torch.nn.LeakyReLU, (
             f"Incorrect types for input modules{type(linear)}{type(leaky_relu)}"
         )
         super().__init__(linear, leaky_relu)
@@ -256,7 +256,7 @@ class LinearTanh(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
 
     def __init__(self, linear, tanh):
-        assert type(linear) == Linear and type(tanh) == torch.nn.Tanh, (
+        assert type(linear) is Linear and type(tanh) is torch.nn.Tanh, (
             f"Incorrect types for input modules{type(linear)}{type(tanh)}"
         )
         super().__init__(linear, tanh)
@@ -271,6 +271,7 @@ class ConvAdd2d(_FusedModule):
         self.add = add
 
     def forward(self, x1, x2):  # type: ignore[override]
+        r"""Applies convolution to x1 and adds the result to x2."""
         return self.add(self[0](x1), x2)
 
 
@@ -284,4 +285,5 @@ class ConvAddReLU2d(_FusedModule):
         self.relu = relu
 
     def forward(self, x1, x2):  # type: ignore[override]
+        r"""Applies convolution to x1, adds the result to x2, and applies ReLU."""
         return self.relu(self.add(self[0](x1), x2))

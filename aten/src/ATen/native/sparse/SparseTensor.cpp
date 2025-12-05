@@ -55,7 +55,6 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>
@@ -274,7 +273,7 @@ Tensor sparse_coo_tensor(IntArrayRef size,
 
 // helper
 namespace {
-static inline Tensor expand_values_if_needed(const Tensor& values) {
+inline Tensor expand_values_if_needed(const Tensor& values) {
   // expand
   if (values.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -468,6 +467,28 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
+
+  if (indices.numel() > 0) {
+    Tensor min_indices =
+        std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    Tensor cpu_min_indices;
+    if (!indices.is_cpu()) {
+      cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+    } else {
+      cpu_min_indices = min_indices;
+    }
+    auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
+    for (const auto d : c10::irange(indices.size(0))) {
+      int64_t min_index_in_dim = cpu_min_indices_accessor[d];
+      TORCH_CHECK(
+          min_index_in_dim >= 0,
+          "found negative index ",
+          min_index_in_dim,
+          " for dim ",
+          d);
+    }
+  }
+
   return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,

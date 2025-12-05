@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple
 
 import torch
 import torch.nn.functional as F
@@ -46,10 +47,10 @@ __all__ = [
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
 class QuantizationConfig:
-    input_activation: Optional[QuantizationSpec]
-    output_activation: Optional[QuantizationSpec]
-    weight: Optional[QuantizationSpec]
-    bias: Optional[QuantizationSpec]
+    input_activation: QuantizationSpec | None
+    output_activation: QuantizationSpec | None
+    weight: QuantizationSpec | None
+    bias: QuantizationSpec | None
     # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
     is_qat: bool = False
 
@@ -63,10 +64,10 @@ OperatorPatternType.__module__ = (
 AnnotatorType = Callable[
     [
         torch.fx.GraphModule,
-        Optional[QuantizationConfig],
-        Optional[Callable[[Node], bool]],
+        QuantizationConfig | None,
+        Callable[[Node], bool] | None,
     ],
-    Optional[list[list[Node]]],
+    list[list[Node]] | None,
 ]
 OP_TO_ANNOTATOR: dict[str, AnnotatorType] = {}
 
@@ -114,36 +115,43 @@ def _mark_nodes_as_annotated(nodes: list[Node]):
             node.meta["quantization_annotation"]._annotated = True
 
 
-def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_input_act_qspec(quantization_config: QuantizationConfig | None):
     if quantization_config is None:
         return None
     if quantization_config.input_activation is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.input_activation
-    assert quantization_spec.qscheme in [
+    if quantization_spec.qscheme not in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
-    ]
+    ]:
+        raise AssertionError(
+            f"Unsupported activation qscheme: {quantization_spec.qscheme}"
+        )
     return quantization_spec
 
 
-def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_output_act_qspec(quantization_config: QuantizationConfig | None):
     if quantization_config is None:
         return None
     if quantization_config.output_activation is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.output_activation
-    assert quantization_spec.qscheme in [
+    if quantization_spec.qscheme not in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
-    ]
+    ]:
+        raise AssertionError(
+            f"Unsupported activation qscheme: {quantization_spec.qscheme}"
+        )
     return quantization_spec
 
 
-def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_weight_qspec(quantization_config: QuantizationConfig | None):
     if quantization_config is None:
         return None
-    assert quantization_config is not None
+    if quantization_config is None:
+        raise AssertionError("quantization_config must not be None")
     if quantization_config.weight is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.weight
@@ -158,25 +166,27 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
-def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_bias_qspec(quantization_config: QuantizationConfig | None):
     if quantization_config is None:
         return None
-    assert quantization_config is not None
+    if quantization_config is None:
+        raise AssertionError("quantization_config must not be None")
     if quantization_config.bias is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.bias
-    assert quantization_spec.dtype == torch.float, (
-        "Only float dtype for bias is supported for bias right now"
-    )
+    if quantization_spec.dtype != torch.float:
+        raise AssertionError(
+            "Only float dtype for bias is supported for bias right now"
+        )
     return quantization_spec
 
 
 @register_annotator("linear")
 def _annotate_linear(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
@@ -222,9 +232,9 @@ def _annotate_linear(
 @register_annotator("linear_relu")
 def _annotate_linear_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
@@ -252,11 +262,13 @@ def _annotate_linear_relu(
 
         input_qspec_map = {}
         input_act = linear_node.args[0]
-        assert isinstance(input_act, Node)
+        if not isinstance(input_act, Node):
+            raise AssertionError("input activation must be a FX Node")
         input_qspec_map[input_act] = input_act_qspec
 
         weight = linear_node.args[1]
-        assert isinstance(weight, Node)
+        if not isinstance(weight, Node):
+            raise AssertionError("weight must be a FX Node")
         input_qspec_map[weight] = weight_qspec
 
         # adding weight node to the partition as well
@@ -288,9 +300,9 @@ def _annotate_linear_relu(
 @register_annotator("conv")
 def _annotate_conv(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     for n in gm.graph.nodes:
         if n.op != "call_function" or n.target not in [
@@ -302,11 +314,13 @@ def _annotate_conv(
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
+        if not isinstance(input_act, Node):
+            raise AssertionError("input activation must be a FX Node")
         input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
         weight = conv_node.args[1]
-        assert isinstance(weight, Node)
+        if not isinstance(weight, Node):
+            raise AssertionError("weight must be a FX Node")
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
         # adding weight node to the partition as well
@@ -335,8 +349,8 @@ def _annotate_conv(
 
 def _do_annotate_conv_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
     is_conv_transpose: bool = False,
 ):
     annotated_partitions = []
@@ -361,11 +375,13 @@ def _do_annotate_conv_relu(
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
+        if not isinstance(input_act, Node):
+            raise AssertionError("input activation must be a FX Node")
         input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
         weight = conv_node.args[1]
-        assert isinstance(weight, Node)
+        if not isinstance(weight, Node):
+            raise AssertionError("weight must be a FX Node")
         input_qspec_map[weight] = get_weight_qspec(quantization_config)
 
         # adding weight node to the partition as well
@@ -375,9 +391,11 @@ def _do_annotate_conv_relu(
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
             partition.append(bias)
 
+        # pyrefly: ignore [bad-argument-type]
         if _is_annotated(partition):
             continue
 
+        # pyrefly: ignore [bad-argument-type]
         if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
@@ -388,6 +406,7 @@ def _do_annotate_conv_relu(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
+        # pyrefly: ignore [bad-argument-type]
         _mark_nodes_as_annotated(partition)
         annotated_partitions.append(partition)
     return annotated_partitions
@@ -396,9 +415,9 @@ def _do_annotate_conv_relu(
 @register_annotator("conv_relu")
 def _annotate_conv_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     return _do_annotate_conv_relu(
         gm, quantization_config, filter_fn, is_conv_transpose=False
     )
@@ -407,9 +426,9 @@ def _annotate_conv_relu(
 @register_annotator("conv_transpose_relu")
 def _annotate_conv_transpose_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     return _do_annotate_conv_relu(
         gm, quantization_config, filter_fn, is_conv_transpose=True
     )
@@ -418,9 +437,9 @@ def _annotate_conv_transpose_relu(
 @register_annotator("conv_bn")
 def _annotate_conv_bn(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     """
     Find conv + batchnorm partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -431,9 +450,9 @@ def _annotate_conv_bn(
 @register_annotator("conv_bn_relu")
 def _annotate_conv_bn_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     """
     Find conv + batchnorm + relu partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -444,9 +463,9 @@ def _annotate_conv_bn_relu(
 @register_annotator("conv_transpose_bn")
 def _annotate_conv_transpose_bn(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     """
     Find conv_transpose + batchnorm partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -459,9 +478,9 @@ def _annotate_conv_transpose_bn(
 @register_annotator("conv_transpose_bn_relu")
 def _annotate_conv_transpose_bn_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     """
     Find conv_transpose + batchnorm + relu partitions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
@@ -473,8 +492,8 @@ def _annotate_conv_transpose_bn_relu(
 
 def _do_annotate_conv_bn(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]],
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None,
     has_relu: bool,
     is_conv_transpose: bool = False,
 ) -> list[list[Node]]:
@@ -614,9 +633,9 @@ def _do_annotate_conv_bn(
 @register_annotator("gru_io_only")
 def _annotate_gru_io_only(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU], filter_fn)
     gru_partitions = list(itertools.chain.from_iterable(gru_partitions.values()))
     annotated_partitions = []
@@ -631,8 +650,10 @@ def _annotate_gru_io_only(
         # subgraph
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
-        assert isinstance(input_act, Node)
-        assert isinstance(input_act_user, Node)
+        if not isinstance(input_act, Node):
+            raise AssertionError("input activation must be a FX Node")
+        if not isinstance(input_act_user, Node):
+            raise AssertionError("input activation user must be a FX Node")
         input_act_user.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 input_act: get_input_act_qspec(quantization_config),
@@ -642,8 +663,10 @@ def _annotate_gru_io_only(
 
         hidden_state = input_nodes[1]
         hidden_state_user = next(iter(hidden_state.users.keys()))
-        assert isinstance(hidden_state, Node)
-        assert isinstance(hidden_state_user, Node)
+        if not isinstance(hidden_state, Node):
+            raise AssertionError("hidden state must be a FX Node")
+        if not isinstance(hidden_state_user, Node):
+            raise AssertionError("hidden state user must be a FX Node")
         hidden_state_user.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
                 hidden_state: get_input_act_qspec(quantization_config),
@@ -651,7 +674,8 @@ def _annotate_gru_io_only(
             _annotated=True,
         )
 
-        assert len(output_nodes) == 2, "expecting GRU to have two outputs"
+        if len(output_nodes) != 2:
+            raise AssertionError("expecting GRU to have two outputs")
         for output in output_nodes:
             output.meta["quantization_annotation"] = QuantizationAnnotation(
                 output_qspec=get_output_act_qspec(quantization_config),
@@ -665,9 +689,9 @@ def _annotate_gru_io_only(
 @register_annotator("adaptive_avg_pool2d")
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     """Always annotate adaptive_avg_pool2d op"""
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d], filter_fn
@@ -687,7 +711,8 @@ def _annotate_adaptive_avg_pool2d(
 
         annotated_partitions.append(partition.nodes)
         input_act = pool_node.args[0]
-        assert isinstance(input_act, Node)
+        if not isinstance(input_act, Node):
+            raise AssertionError("input activation must be a FX Node")
 
         # only annotate input output sharing operator
         # when the output of the input node is annotated
@@ -739,9 +764,9 @@ def _is_input_non_float_tensor(node: Node):
 @register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -814,9 +839,9 @@ def _annotate_add_relu(
 @register_annotator("add")
 def _annotate_add(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -867,9 +892,9 @@ def _annotate_add(
 @register_annotator("mul_relu")
 def _annotate_mul_relu(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -941,9 +966,9 @@ def _annotate_mul_relu(
 @register_annotator("mul")
 def _annotate_mul(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     annotated_partitions = []
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
@@ -995,9 +1020,9 @@ def _annotate_mul(
 @register_annotator("cat")
 def _annotate_cat(
     gm: torch.fx.GraphModule,
-    quantization_config: Optional[QuantizationConfig],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
-) -> Optional[list[list[Node]]]:
+    quantization_config: QuantizationConfig | None,
+    filter_fn: Callable[[Node], bool] | None = None,
+) -> list[list[Node]] | None:
     cat_partitions = get_source_partitions(gm.graph, [torch.cat], filter_fn)
     cat_partitions = list(itertools.chain.from_iterable(cat_partitions.values()))
     annotated_partitions = []

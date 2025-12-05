@@ -38,9 +38,9 @@
 
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -179,6 +179,20 @@ aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 // c10::IValue <int64_t> object conversion
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
+
+// c10::IValue <const char** > object conversions
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue);
+
+// c10::IValue <const char* > object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_str_to_ivalue(const char* val, C10IValueHandle* ivalue);
+
+// c10::IValue <at::Tensor> object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_tensor_to_ivalue(AtenTensorHandle val, C10IValueHandle* ivalue);
 
 // Free the c10::IValue object
 AOTI_TORCH_EXPORT AOTITorchError

@@ -292,7 +292,7 @@ class TestRemoveMutation(JitTestCase):
             FileCheck().check_not("aten::add_").run(mod_script.forward.graph)
             self.assertEqual(mod(), mod_script())
 
-            # test that the output doesnt alias the input
+            # test that the output doesn't alias the input
             for inputs in [torch.rand(2, 2)], [torch.rand(2, 2) for _ in range(2)]:
                 result = torch_op(inputs)
                 sums = [ten.sum() for ten in result]

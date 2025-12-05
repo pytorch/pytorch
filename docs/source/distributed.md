@@ -51,7 +51,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
+| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 | barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+-----+-----+
@@ -59,14 +59,14 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 ### Backends that come with PyTorch
 
-PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+PyTorch distributed package supports Linux (stable), macOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
 included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
 :::{note}
-As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+As of PyTorch v1.8, Windows supports all collective communications backends but NCCL,
 If the `init_method` argument of {func}`init_process_group` points to a file it must adhere
 to the following schema:
 
@@ -221,6 +221,16 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+.. autofunction:: torch.distributed.distributed_c10d.batch_isend_irecv
+.. autofunction:: torch.distributed.distributed_c10d.destroy_process_group
+.. autofunction:: torch.distributed.distributed_c10d.is_backend_available
+.. autofunction:: torch.distributed.distributed_c10d.irecv
+.. autofunction:: torch.distributed.distributed_c10d.is_gloo_available
+.. autofunction:: torch.distributed.distributed_c10d.is_initialized
+.. autofunction:: torch.distributed.distributed_c10d.is_mpi_available
+.. autofunction:: torch.distributed.distributed_c10d.is_nccl_available
+.. autofunction:: torch.distributed.distributed_c10d.is_torchelastic_launched
+.. autofunction:: torch.distributed.distributed_c10d.is_ucc_available
 ```
 
 ```{eval-rst}
@@ -382,6 +392,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 
 ```{eval-rst}
 .. autofunction:: new_group
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
 ```
 
 ```{eval-rst}
@@ -972,6 +986,24 @@ For fine-grained control of the debug level during runtime the functions {func}`
 In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
+
+
+### torch.distributed.debug HTTP Server
+
+The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
+be started by calling {func}`torch.distributed.debug.start_debug_server`. This
+allows users to collect data across all workers at runtime.
+
+```{eval-rst}
+.. automodule:: torch.distributed.debug
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :special-members: __init__
+    :member-order: bysource
+
+```
+
 
 ## Logging
 

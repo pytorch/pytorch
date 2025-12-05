@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import sympy
 
@@ -24,6 +24,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     OpaqueUnaryFn_cos,
+    BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -66,10 +67,12 @@ BINARY_OPS = [
     "mod",
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 BITWISE_OPS = [
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -870,6 +873,10 @@ class TestSympySolve(TestCase):
 class TestSympyFunctions(TestCase):
     def test_pickle(self):
         x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
+
+        x = BitwiseFn_bitwise_and(sympy.Symbol("a"), sympy.Symbol("b"))
         r = pickle.loads(pickle.dumps(x))
         self.assertEqual(x, r)
 

@@ -170,12 +170,12 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         with:
           driver-version: ${{ matrix.config == 'legacy_nvidia_driver' && '525.105.17' || '580.82.07' }}
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && !contains(matrix.runner, 'b200') }}
+        if: ${{ !contains(matrix.runner, 'b200') }}
 
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
+        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
 
       - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
         id: setup-sscache-port-flag
@@ -223,6 +223,46 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
+
+      - name: Download Windows torch wheel for cross-compilation
+        if: matrix.win_torch_wheel_artifact != ''
+        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+        with:
+          name: ${{ matrix.win_torch_wheel_artifact }}
+          path: win-torch-wheel
+
+      - name: Extract Windows wheel and setup CUDA libraries
+        if: matrix.win_torch_wheel_artifact != ''
+        shell: bash
+        run: |
+          set -x
+
+          # Find the wheel file
+          WHEEL_FILE=$(find win-torch-wheel -name "*.whl" -type f | head -n 1)
+          if [ -z "$WHEEL_FILE" ]; then
+            echo "Error: No wheel file found in win-torch-wheel directory"
+            exit 1
+          fi
+          echo "Found wheel file: $WHEEL_FILE"
+
+          # Unzip the wheel file
+          unzip -q "$WHEEL_FILE" -d win-torch-wheel-extracted
+          echo "Extracted wheel contents"
+
+          # Setup CUDA libraries (cuda.lib and cudart.lib) directory
+          mkdir -p win-torch-wheel-extracted/lib/x64
+          if [ -f "win-torch-wheel/cuda.lib" ]; then
+            mv win-torch-wheel/cuda.lib win-torch-wheel-extracted/lib/x64/
+            echo "Moved cuda.lib to win-torch-wheel-extracted/lib/x64/"
+          fi
+          if [ -f "win-torch-wheel/cudart.lib" ]; then
+            mv win-torch-wheel/cudart.lib win-torch-wheel-extracted/lib/x64/
+            echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
+          fi
+
+          # Verify CUDA libraries are present
+          echo "CUDA libraries:"
+          ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
 
       - name: Parse ref
         id: parse-ref
@@ -273,6 +313,8 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
+          OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
@@ -283,8 +325,9 @@ jobs:
           # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
-          SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          SHM_SIZE: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && '2g' || '1g' }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE_S390X: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
@@ -318,10 +361,12 @@ jobs:
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
+            USED_IMAGE="${DOCKER_IMAGE_S390X}"
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
             DOCKER_SHELL_CMD=
+            USED_IMAGE="${DOCKER_IMAGE}"
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -384,11 +429,9 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
+            "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
-          # Propagate download.pytorch.org IP to container
-          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
@@ -491,7 +534,7 @@ jobs:
       # As both the root cause and recovery path are unclear, let's take the runner out of
       # service so that it doesn't get any more jobs
       - name: Check NVIDIA driver installation step
-        if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
+        if: failure() && steps.install-nvidia-driver.outputs.has-nvidia == 'true' && !contains(matrix.runner, 'b200')
         shell: bash
         run: |
           set +e

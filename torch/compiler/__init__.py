@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -35,6 +36,7 @@ __all__ = [
     "skip_guard_on_all_nn_modules_unsafe",
     "keep_tensor_guards_unsafe",
     "skip_guard_on_globals_unsafe",
+    "skip_all_guards_unsafe",
     "nested_compile_region",
 ]
 
@@ -49,6 +51,7 @@ def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
+    # pyrefly: ignore [not-iterable]
     return torch.compile(*args, **kwargs)
 
 
@@ -500,7 +503,12 @@ def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     - Execute torch.compile
     - Call torch.compiler.save_cache_artifacts()
     """
-    from ._cache import CacheArtifactManager, CacheInfo
+    from ._cache import CacheArtifactManager
+
+    if torch._dynamo.config.caching_precompile:
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        PrecompileContext.save_to_dynamo_cache()
 
     return CacheArtifactManager.serialize()
 
@@ -610,6 +618,23 @@ def skip_guard_on_globals_unsafe(guard_entries):
     return [not entry.is_global for entry in guard_entries]
 
 
+def skip_all_guards_unsafe(guard_entries):
+    """
+    A function for skipping all guards on a compiled function.
+
+    WARNING: This function will drop all the safety guarantees from Dynamo
+             compiled function. Use this with caution.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+    >> )
+    """
+    return [False for entry in guard_entries]
+
+
 def nested_compile_region(fn=None):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
@@ -643,7 +668,9 @@ def nested_compile_region(fn=None):
     return _mark_compile_region(fn)
 
 
-def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
+def load_compiled_function(
+    file: io.IOBase, *, f_globals: Optional[dict[str, object]] = None
+) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
 
@@ -653,6 +680,7 @@ def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
 
     Args:
         file: A file-like object containing the serialized compiled function.
+        f_globals: Optional globals to be loaded into the compiled function.
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
@@ -660,4 +688,4 @@ def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data)
+    return AOTCompiledFunction.deserialize(data, f_globals)
