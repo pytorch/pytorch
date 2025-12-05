@@ -49,23 +49,6 @@ class SkipPatternTest(TestBase):
         torch.compile(f)(x)
         self.assertEqual(2, metrics.generated_kernel_count)
 
-    @inductor_config.patch(split_reductions=False)
-    def test_skip_if_outer_reduction_followed_by_full_pointwise(self):
-        """
-        Skip for now if the outer reduction is followed by a pointwise node
-        accessing the original tensor. Accessing the reduced tensor is fine
-        (e.g. to support torch.mean).
-        """
-
-        def f(x):
-            out1 = x.sum(dim=1)
-            out2 = x.sum(dim=0, keepdim=True) + x
-            return out1, out2
-
-        x = torch.randn(32768, 768, device=GPU_TYPE)
-        self.check_numeric(f, (x,))
-        self.assertEqual(0, metrics.codegen_mix_order_reduction)
-
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
@@ -613,6 +596,33 @@ class MixOrderReductionTest(TestBase):
 
         # a single mix order reduction kernel get shared
         FileCheck().check_count("MixOrderReductionGrid", 1, exactly=True).run(wrapper)
+
+    @inductor_config.patch(split_reductions=False)
+    def test_dont_fuse_nodes_that_introduce_producer_consumer_rel(self):
+        """
+        The test constructs an inner reduction, an outer reduction and
+        a pointwise kernel.
+
+        The inner reduction and outer reduction will be fused first.
+        We don't further fuse the pointwise kernel (with the inner reduction part)
+        since that introduces producer/consumer relationship between
+        the inner and outer reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            out1 = x.sum(dim=1)
+            out2 = x.sum(dim=0, keepdim=True) + x
+            return out1, out2
+
+        x = torch.randn(32768, 768, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(1, metrics.codegen_mix_order_reduction)
+        # two kernels
+        # one is the mix-order reduction kernel
+        # the other is the piontwise kernel
+        self.assertTrue(2, metrics.generated_kernel_count)
 
 
 @inductor_config.patch(

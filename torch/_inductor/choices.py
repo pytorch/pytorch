@@ -622,7 +622,12 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score = scheduler.score_fusion_memory(node1, node2)
+        memory_score, is_mix_order_reduction = typing.cast(
+            tuple[int, bool],
+            scheduler.score_fusion_memory(
+                node1, node2, return_is_mix_order_reduction=True
+            ),
+        )
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
@@ -637,10 +642,12 @@ class InductorChoices:
                 and memory_score > 0
             )
 
+        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
+
         # pyrefly: ignore [bad-return]
         return FusionScore(
             template_score,
-            node1.is_reduction() == node2.is_reduction() and memory_score > 0,
+            type_score,
             memory_score,
             proximity_score,
         )
