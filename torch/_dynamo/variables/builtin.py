@@ -26,7 +26,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -880,10 +879,17 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
-                    if (
-                        istype(left, variables.ExceptionVariable)
-                        and istype(right, variables.ExceptionVariable)
-                        and left.exc_type is not right.exc_type
+
+                    # In CPython, exceptions compare equal only when they are the same object
+                    # (identity-based). In Dynamo, a single exception object cannot be represented
+                    # by multiple distinct ExceptionVariables. Therefore, the following scenarios
+                    # are impossible:
+                    # + is(a, b) == True but should be False => impossible, since a and b would be
+                    #   the same underlying object.
+                    # + is(a, b) == False but should be True => impossible, since Dynamo cannot
+                    #   create two different ExceptionVariables for the same exception instance.
+                    if istype(left, variables.ExceptionVariable) and istype(
+                        right, variables.ExceptionVariable
                     ):
                         return ConstantVariable.create(op(left, right))
                     return None
@@ -1503,17 +1509,10 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if (
-            self.fn in (float, complex)
-            and len(args) == 1
-            and (
-                (self.fn is float and name in ("fromhex", "hex"))
-                or (name == "from_number" and sys.version_info >= (3, 14))
-            )
-        ):
+        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
             if isinstance(args[0], ConstantVariable):
                 try:
-                    fn = getattr(self.fn, name)
+                    fn = getattr(float, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:
@@ -2482,31 +2481,8 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self,
-        tx: "InstructionTranslator",
-        fn: VariableTracker,
-        *seqs: VariableTracker,
-        **kwargs: VariableTracker,
+        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
     ) -> VariableTracker:
-        strict = ConstantVariable.create(False)
-        if kwargs:
-            if sys.version_info >= (3, 14):
-                if not (len(kwargs) == 1 and "strict" in kwargs):
-                    raise_args_mismatch(
-                        tx,
-                        "map",
-                        "1 kwargs (`strict`)",
-                        f"{len(kwargs)} kwargs",
-                    )
-                strict = kwargs.pop("strict", ConstantVariable.create(False))
-            else:
-                raise_args_mismatch(
-                    tx,
-                    "map",
-                    "0 kwargs",
-                    f"{len(kwargs)} kwargs",
-                )
-
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2514,7 +2490,6 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
-            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
