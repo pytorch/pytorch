@@ -94,7 +94,7 @@ RANK_TYPES = Union[
     dist.ProcessGroup,
     DeviceMesh,
     tuple["dist.tensor.DeviceMesh", int],
-    str,
+    c10d.GroupName,
 ]
 
 
@@ -778,7 +778,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
-def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
@@ -787,7 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
-        return group
+        return c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(
@@ -1000,6 +1000,14 @@ def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
     return inp.new_empty(shape)
 
 
+def _reduce_scatter_tensor_out_native_meta(
+    inp, reduce_op, group_size, group_name, *, out
+):
+    shape = list(inp.size())
+    shape[0] //= group_size
+    return inp.new_empty(shape)
+
+
 def _reduce_scatter_tensor_coalesced_native_meta(
     inputs, reduce_op, group_size, group_name
 ):
@@ -1026,6 +1034,9 @@ lib_impl.impl(
     "Meta",
 )
 lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+lib_impl.impl(
+    "reduce_scatter_tensor_out", _reduce_scatter_tensor_out_native_meta, "Meta"
+)
 lib_impl.impl(
     "reduce_scatter_tensor_coalesced",
     _reduce_scatter_tensor_coalesced_native_meta,

@@ -38,6 +38,14 @@ __all__ = [
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
+_WARNINGS_SHOWN = set()
+
+
+def _warn_once(msg, category=UserWarning, stacklevel=2):
+    if msg not in _WARNINGS_SHOWN:
+        _WARNINGS_SHOWN.add(msg)
+        warn(msg, category=category, stacklevel=stacklevel)
+
 
 class _NumpyEncoder(json.JSONEncoder):
     """
@@ -204,6 +212,12 @@ class _KinetoProfile:
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
+            )
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle."
+                "Only events from the current cycle will be reported."
+                "To keep events across cycles, set acc_events=True."
             )
         self.profiler._prepare_trace()
 
@@ -951,16 +965,18 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
             try:
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)  # noqa:SIM115
+                with tempfile.NamedTemporaryFile(
+                    "w+t", suffix=".et.json", delete=False
+                ) as fp:
+                    filename = fp.name
             except Exception as e:
                 warn(
                     f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
                     stacklevel=2,
                 )
                 return None
-            fp.close()
             et = ExecutionTraceObserver()
-            et.register_callback(fp.name)
+            et.register_callback(filename)
             # additionally, check if the env requires us to collect extra resources
             if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS", "0") == "1":
                 et.set_extra_resource_collection(True)
@@ -989,9 +1005,8 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
 
         def get_temp_uncompressed_file() -> str:
-            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
-            fp.close()
-            return fp.name
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False) as fp:
+                return fp.name
 
         if not self._registered:
             self.output_file_path = output_file_path

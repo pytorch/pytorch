@@ -253,23 +253,29 @@ class MixOrderReduction:
         # small workload. When a workload is small enough, data can be
         # fully cached by L2
         size_thres = 5 * 2**20
-        if not V.graph.sizevars.statically_known_geq(nrow * ncol, size_thres):
+
+        # Call evaluate_expr rather than statically_known_geq since nrow can
+        # have dynamic shape in real models.
+        # Don't use hint directly since hint can be non-representative.
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
             return False
 
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
             return False
 
         # When nrow is small, ncol should also be small (due to the check
         # above). Thus the entire tensor should be well cached in L2.
         # Mix order reduction is less beneficial.
-        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if g1[1] == ncol else (node2, node1)
+            (node1, node2)
+            if V.graph.sizevars.evaluate_expr(sympy.Eq(g1[1], ncol))
+            else (node2, node1)
         )
 
         # We previously only check the contiguous_node has contiguous
@@ -301,6 +307,8 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
+        # We don't see real use cases with dynamic ncol. But if we do,
+        # we should call evaluete_expr here which adds guards.
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
@@ -2275,10 +2283,23 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 len(extern),
                 [node.node.get_origins() for node in extern if node.node is not None],
             )
+        grouped = [x for x in nodes if isinstance(x, GroupedSchedulerNode)]
+        if grouped:
+            log.debug(
+                "ComboKernels: %d grouped nodes are filtered",
+                len(grouped),
+            )
         filtered_nodes = [
             x
             for x in nodes
-            if not isinstance(x, (NopKernelSchedulerNode, ExternKernelSchedulerNode))
+            if not isinstance(
+                x,
+                (
+                    NopKernelSchedulerNode,
+                    ExternKernelSchedulerNode,
+                    GroupedSchedulerNode,
+                ),
+            )
         ]
         foreach_nodes = [
             x for x in filtered_nodes if isinstance(x, ForeachKernelSchedulerNode)
@@ -2309,12 +2330,24 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         grouped_nodes = []
         max_num_nodes = 8
         for nodes in sorted_nodes:
-            grouped_nodes.extend(
-                [
-                    nodes[i : i + max_num_nodes]
-                    for i in range(0, len(nodes), max_num_nodes)
-                ]
+            # Group nodes by device first to avoid mixed-device fusion
+            device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
+                defaultdict(list)
             )
+            for node in nodes:
+                device = node.get_device()
+                if device and (device.type == "mps" or device.type == "cpu"):
+                    continue
+                device_groups[device].append(node)
+
+            # Chunk each device group separately
+            for device_nodes in device_groups.values():
+                grouped_nodes.extend(
+                    [
+                        device_nodes[i : i + max_num_nodes]
+                        for i in range(0, len(device_nodes), max_num_nodes)
+                    ]
+                )
 
         return grouped_nodes
 
@@ -2458,6 +2491,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
+
+    def get_device(self) -> Optional[torch.device]:
+        return self.snodes[0].get_device() if self.snodes else None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -2714,12 +2750,22 @@ class Scheduler:
             if (
                 used_non_deterministic_runtime_estimations()
                 and config_comms.runtime_estimations_align_across_all_distributed_ranks
-            ):
-                from .comms import (
-                    align_runtime_estimations_across_all_distributed_ranks,
+                and (
+                    config.runtime_estimations_mms_benchmark
+                    or config_comms.runtime_estimations_use_nccl_lib_estimations
                 )
+            ):
+                has_collectives = False
+                for node in self.nodes:
+                    if is_collective(node.node):
+                        has_collectives = True
+                        break
+                if has_collectives:
+                    from .comms import (
+                        align_runtime_estimations_across_all_distributed_ranks,
+                    )
 
-                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
+                    align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
             from torch._logging import trace_structured
 
@@ -2742,8 +2788,11 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if (
+            # pyrefly: ignore[unbound-name]
             config.graph_partition
+            # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
+            # pyrefly: ignore[unbound-name]
             and config.triton.reorder_for_reducing_graph_partitions
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
@@ -2755,6 +2804,7 @@ class Scheduler:
             self.insert_memory_check_nodes()
 
         log_ir_post_fusion(self.nodes)
+        # pyrefly: ignore[unbound-name]
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -3038,6 +3088,10 @@ class Scheduler:
                 add_user(add_dep, node, is_weak=True)
                 node.add_fake_dep(WeakDep(add_dep, node.get_name()))
 
+            for add_dep in V.graph.additional_star_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=False)  # Strong dependency
+                node.add_fake_dep(StarDep(add_dep))
+
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
@@ -3269,6 +3323,7 @@ class Scheduler:
                 ExternKernelSchedulerNode,
                 NopKernelSchedulerNode,
                 FusedSchedulerNode,
+                GroupedSchedulerNode,
             ),
         ):
             for dep in snode.unmet_dependencies:
@@ -6107,14 +6162,15 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_combo_kernel:
-            return True
 
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        # don't support benchmark fusion for CPU C++ backend right now.
-        if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
+        assert all(node.get_device() == device for node in subkernel_nodes), (
+            "All nodes in a combo kernel group must be on the same device"
+        )
+
+        if not config.benchmark_combo_kernel:
             return True
 
         from triton.compiler.errors import CompilationError

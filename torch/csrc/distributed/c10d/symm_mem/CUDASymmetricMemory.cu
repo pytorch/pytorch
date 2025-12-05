@@ -134,10 +134,6 @@ size_t CUDASymmetricMemory::get_buffer_size() {
   return buffer_size_;
 }
 
-size_t CUDASymmetricMemory::get_signal_pad_size() {
-  return signal_pad_size;
-}
-
 bool CUDASymmetricMemory::has_multicast_support() {
   return mc_addr_ != nullptr;
 }
@@ -153,7 +149,8 @@ void check_channel(int channel, int world_size) {
       "must be greater than 0 (got ",
       channel,
       ")");
-  const size_t num_channels = signal_pad_size / sizeof(uint32_t) * world_size;
+  const size_t num_channels = c10d::symmetric_memory::get_signal_pad_size() /
+      sizeof(uint32_t) * world_size;
   TORCH_CHECK(
       static_cast<size_t>(channel) < num_channels,
       "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
@@ -348,7 +345,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
     int device_idx,
     const std::optional<std::string>& group_name) {
   size_t signal_pad_offset = at::round_up(size, 16UL);
-  size_t block_size = signal_pad_offset + signal_pad_size;
+  size_t block_size = signal_pad_offset + get_signal_pad_size();
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)

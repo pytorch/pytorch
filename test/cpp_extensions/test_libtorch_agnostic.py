@@ -14,7 +14,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
+    parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
@@ -618,7 +620,11 @@ if not IS_WINDOWS:
             self.assertEqual(num_threads, expected_num_threads)
 
         @skipIfTorchVersionLessThan(2, 10)
-        def test_my_empty(self, device):
+        @parametrize("layout", [None, torch.strided, torch.sparse_coo])
+        @parametrize(
+            "memory_format", [None, torch.channels_last, torch.contiguous_format]
+        )
+        def test_my_empty(self, device, layout, memory_format):
             import libtorch_agnostic_2_10 as libtorch_agnostic
 
             deterministic = torch.are_deterministic_algorithms_enabled()
@@ -626,35 +632,80 @@ if not IS_WINDOWS:
                 # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
 
-                size = [2, 3]
-                result = libtorch_agnostic.ops.my_empty(size, None, None, None)
-                expected = torch.empty(size)
-                self.assertEqual(result, expected, exact_device=True)
+                # Use 4D size for channels_last, 2D otherwise
+                size = [2, 3, 4, 5] if memory_format == torch.channels_last else [2, 3]
 
+                # sparse_coo layout doesn't support memory_format parameter
+                if layout == torch.sparse_coo and memory_format is not None:
+                    return
+
+                # Test default parameters
+                result = libtorch_agnostic.ops.my_empty(
+                    size, None, layout, None, None, memory_format
+                )
+                expected = torch.empty(size, layout=layout, memory_format=memory_format)
+                self.assertEqual(result, expected, exact_device=True, exact_layout=True)
+
+                # Test with dtype
                 result_float = libtorch_agnostic.ops.my_empty(
-                    size, torch.float32, None, None
+                    size, torch.float32, layout, None, None, memory_format
                 )
-                expected_float = torch.empty(size, dtype=torch.float32)
-                self.assertEqual(result_float, expected_float, exact_device=True)
-
-                result_with_device = libtorch_agnostic.ops.my_empty(
-                    size, torch.float64, device, None
-                )
-                expected_with_device = torch.empty(
-                    size, dtype=torch.float64, device=device
+                expected_float = torch.empty(
+                    size,
+                    dtype=torch.float32,
+                    layout=layout,
+                    memory_format=memory_format,
                 )
                 self.assertEqual(
-                    result_with_device, expected_with_device, exact_device=True
+                    result_float, expected_float, exact_device=True, exact_layout=True
                 )
 
-                if device == "cuda":
+                # Test with dtype and device
+                result_with_device = libtorch_agnostic.ops.my_empty(
+                    size, torch.float64, layout, device, None, memory_format
+                )
+                expected_with_device = torch.empty(
+                    size,
+                    dtype=torch.float64,
+                    layout=layout,
+                    device=device,
+                    memory_format=memory_format,
+                )
+                self.assertEqual(
+                    result_with_device,
+                    expected_with_device,
+                    exact_device=True,
+                    exact_layout=True,
+                )
+
+                # Verify layout if specified
+                if layout is not None:
+                    self.assertEqual(result_with_device.layout, layout)
+
+                # Verify memory format if specified
+                if memory_format == torch.channels_last:
+                    self.assertTrue(
+                        result_with_device.is_contiguous(
+                            memory_format=torch.channels_last
+                        )
+                    )
+                elif memory_format == torch.contiguous_format:
+                    self.assertTrue(result_with_device.is_contiguous())
+
+                # Test pin_memory on CUDA (only once, not for every parameter combination)
+                if device == "cuda" and layout is None and memory_format is None:
                     result_pinned = libtorch_agnostic.ops.my_empty(
-                        size, torch.float32, "cpu", True
+                        [2, 3], torch.float32, None, "cpu", True, None
                     )
                     expected_pinned = torch.empty(
-                        size, dtype=torch.float32, device="cpu", pin_memory=True
+                        [2, 3], dtype=torch.float32, device="cpu", pin_memory=True
                     )
-                    self.assertEqual(result_pinned, expected_pinned)
+                    self.assertEqual(
+                        result_pinned,
+                        expected_pinned,
+                        exact_device=True,
+                        exact_layout=True,
+                    )
                     self.assertTrue(result_pinned.is_pinned())
             finally:
                 torch.use_deterministic_algorithms(deterministic)
@@ -674,6 +725,23 @@ if not IS_WINDOWS:
             result_range = libtorch_agnostic.ops.my_flatten(t, 2, -1)
             expected_range = torch.flatten(t, 2, -1)
             self.assertEqual(result_range, expected_range)
+
+        @onlyCPU
+        @xfailIfTorchDynamo
+        def test_my_optional_tensor_ref(self, device):
+            """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            # Test with a tensor provided
+            t = torch.randn(5, device=device)
+            result = libtorch_agnostic.ops.my_optional_tensor_ref(t, 10)
+            self.assertEqual(result, t)
+
+            # Test with None (should return zeros tensor of specified size)
+            result_none = libtorch_agnostic.ops.my_optional_tensor_ref(None, 7)
+            expected_zeros = torch.zeros(7)
+            self.assertEqual(result_none, expected_zeros)
+            self.assertEqual(result_none.shape, (7,))
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_reshape(self, device):
@@ -710,6 +778,15 @@ if not IS_WINDOWS:
             result_flat = libtorch_agnostic.ops.my_view(t, [-1])
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_shape(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            expected = (3, 5)
+            t = torch.rand(*expected, device=device)
+            shape = libtorch_agnostic.ops.my_shape(t)
+            self.assertEqual(shape, expected)
 
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic_2_9 as libtorch_agnostic
@@ -765,6 +842,361 @@ if not IS_WINDOWS:
                                 libtorch_agnostic.ops.get_template_any_data_ptr(
                                     t, rdtype, mutable
                                 )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_curr_cuda_blas_handle(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
+            expected = torch.cuda.current_blas_handle()
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op(t, "dim", "ice")
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "ice"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op(
+                t, "size", "cream"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "cream"])
+            self.assertEqual(result_size, t.size(0))
+
+            stride_vec, result_stride = libtorch_agnostic.ops.my_string_op(
+                t, "stride", "cake"
+            )
+            self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "cake"])
+            self.assertEqual(result_stride, t.stride(0))
+
+            with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
+                libtorch_agnostic.ops.my_string_op(t, "invalid", "")
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my__foreach_mul_vec(self, device):
+            """Test my__foreach_mul_vec which uses const std::vector<Tensor>& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            result = libtorch_agnostic.ops.my__foreach_mul_vec(tensors, others)
+            expected = torch._foreach_mul(tensors, others)
+
+            for result_t, expected_t in zip(result, expected):
+                self.assertEqual(result_t, expected_t)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_const_string_ref(self, device):
+            """Test my_string_op_const_string_ref which uses const std::string& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op_const_string_ref(
+                t, "dim", "test1"
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "test1"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op_const_string_ref(
+                t, "size", "test2"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "test2"])
+            self.assertEqual(result_size, t.size(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_const_string_view_ref(self, device):
+            """Test my_string_op_const_string_view_ref which uses const std::string_view& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = (
+                libtorch_agnostic.ops.my_string_op_const_string_view_ref(
+                    t, "dim", "view1"
+                )
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "view1"])
+            self.assertEqual(result_dim, t.dim())
+
+            stride_vec, result_stride = (
+                libtorch_agnostic.ops.my_string_op_const_string_view_ref(
+                    t, "stride", "view2"
+                )
+            )
+            self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "view2"])
+            self.assertEqual(result_stride, t.stride(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_string_ref(self, device):
+            """Test my_string_op_string_ref which uses std::string& (non-const) parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op_string_ref(
+                t, "dim", "ref1"
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "ref1"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op_string_ref(
+                t, "size", "ref2"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "ref2"])
+            self.assertEqual(result_size, t.size(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            res = libtorch_agnostic.ops.my_get_current_cuda_stream(device_index)
+            expected = torch.cuda.current_stream(device_index).cuda_stream
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_set_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+            new_stream = torch.cuda.streams.Stream(device_index).cuda_stream
+
+            try:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    new_stream, device_index
+                )
+                expected = torch.cuda.current_stream(device_index).cuda_stream
+                self.assertEqual(new_stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_cuda_stream_from_pool(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+
+            try:
+                for high_priority in [False, True]:
+                    stream = libtorch_agnostic.ops.my_get_cuda_stream_from_pool(
+                        high_priority, device_index
+                    )
+                    libtorch_agnostic.ops.my_set_current_cuda_stream(
+                        stream, device_index
+                    )
+                    expected = torch.cuda.current_stream(device_index).cuda_stream
+                    self.assertEqual(stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_cuda_stream_synchronize(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            stream = torch.cuda.current_stream(device_index).cuda_stream
+            # sanity check for torch_cuda_stream_synchronize:
+            libtorch_agnostic.ops.my_cuda_stream_synchronize(stream, device_index)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_my_from_blob(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Create reference implementation using unstable torch::from_blob via load_inline
+            source = """
+            #include <torch/extension.h>
+
+            at::Tensor reference_from_blob(at::Tensor t) {
+                void* data_ptr = t.storage().data_ptr().get();
+                auto options = torch::TensorOptions()
+                    .dtype(t.dtype())
+                    .device(t.device());
+
+                return torch::from_blob(
+                    data_ptr,
+                    t.sizes(),
+                    t.strides(),
+                    options);
+            }
+            """
+
+            module = torch.utils.cpp_extension.load_inline(
+                name="test_from_blob_reference",
+                cpp_sources=[source],
+                functions=["reference_from_blob"],
+            )
+
+            # Test basic from_blob with contiguous tensor
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            stable_result = libtorch_agnostic.ops.my_from_blob(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+            reference_result = module.reference_from_blob(original)
+            self.assertEqual(stable_result, reference_result)
+            self.assertEqual(stable_result.data_ptr(), original.data_ptr())
+
+            # Test with non-contiguous strides
+            transposed = torch.rand(4, 6, device=device, dtype=torch.float32).t()
+
+            stable_transposed = libtorch_agnostic.ops.my_from_blob(
+                transposed.data_ptr(),
+                transposed.size(),
+                transposed.stride(),
+                device,
+                transposed.dtype,
+            )
+
+            reference_transposed = module.reference_from_blob(transposed)
+            self.assertEqual(stable_transposed, reference_transposed)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_check_success(self, device):
+            """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            result = libtorch_agnostic.ops.test_std_cuda_check_success()
+            expected_device = torch.cuda.current_device()
+            self.assertEqual(result, expected_device)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        @parametrize("show_cpp_stacktraces", [False, True])
+        def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
+
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertTrue(
+                "CUDA error: invalid device ordinal" in error_message
+                or "HIP error: invalid device ordinal" in error_message,
+                f"Expected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
+            )
+            self.assertIn(
+                "GPU device may be out of range, do you have enough GPUs?",
+                error_message,
+            )
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_.*_check_error at .*test_std_.*check\..*:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_kernel_launch_check_success(self, device):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_success()
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        @parametrize("show_cpp_stacktraces", [False, True])
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
+
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertTrue(
+                "CUDA error: invalid configuration argument" in error_message
+                or "HIP error: invalid configuration argument" in error_message,
+                f"Expected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            )
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_.*_kernel_launch_check_error at .*test_std_.*_check\..*:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

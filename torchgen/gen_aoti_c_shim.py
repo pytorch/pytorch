@@ -31,7 +31,6 @@ from torchgen.utils import FileManager, mapMaybe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Optional
 
 
 base_type_to_c_type = {
@@ -393,7 +392,7 @@ def gen_static_dispatch_backend_call_signature(
 
 def gen_static_dispatch_backend_call(
     f: NativeFunction,
-    backend_index: Optional[BackendIndex] = None,
+    backend_index: BackendIndex | None = None,
 ) -> str:
     sig = DispatcherSignature.from_schema(f.func)
     cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
@@ -421,7 +420,7 @@ def gen_static_dispatch_backend_call(
 def get_backend_index_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
@@ -463,7 +462,7 @@ def get_backend_index_for_aoti(
 def get_header_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> str | None:
@@ -490,7 +489,7 @@ def gen_c_shim(
     func: NativeFunction,
     version_info: dict[str, list[str]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -528,7 +527,7 @@ def gen_c_shim(
 class ShimGenerator:
     inductor_fallback_ops: dict[str, dict[str, list[str]]]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
-    dispatch_key: Optional[DispatchKey]
+    dispatch_key: DispatchKey | None
     backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
     extend_aoti_c_shim: bool
@@ -555,7 +554,7 @@ def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
     inductor_fallback_ops: dict[str, dict[str, list[str]]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -646,7 +645,7 @@ def gen_aoti_c_shim(
 
 def gen_aoti_c_shim_files(
     aoti_fm: FileManager,
-    aoti_backends: set[Optional[DispatchKey]],
+    aoti_backends: set[DispatchKey | None],
     native_functions: Sequence[NativeFunction],
     backend_indices: dict[DispatchKey, BackendIndex],
     structured_native_functions: Sequence[NativeFunctionsGroup],

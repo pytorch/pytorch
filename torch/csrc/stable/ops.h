@@ -326,24 +326,26 @@ inline uint32_t get_num_threads() {
   return num_threads;
 }
 
-// We expect this to be the stable version of the empty op that takes in
-// device and dtype parameters. The empty op creates a tensor with uninitialized
-// values of the specified size, dtype, and device.
-// This function is only available in 2.10 because it uses the stableivalue
-// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
+// We expect this to be the stable version of the empty.memory_format op that
+// takes in device and dtype parameters. This function is only available in 2.10
+// because it uses the stableivalue conversion for HeaderOnlyArrayRef<T>, which
+// is only available in 2.10.
 inline torch::stable::Tensor empty(
     torch::headeronly::IntHeaderOnlyArrayRef size,
     std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
-    std::optional<bool> pin_memory = std::nullopt) {
+    std::optional<bool> pin_memory = std::nullopt,
+    std::optional<torch::headeronly::MemoryFormat> memory_format =
+        std::nullopt) {
   const auto num_args = 6;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(size),
       torch::stable::detail::from(dtype),
-      torch::stable::detail::from(std::nullopt),
+      torch::stable::detail::from(layout),
       torch::stable::detail::from(device),
       torch::stable::detail::from(pin_memory),
-      torch::stable::detail::from(std::nullopt)};
+      torch::stable::detail::from(memory_format)};
   TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
@@ -377,6 +379,37 @@ inline torch::stable::Tensor view(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-#endif
+inline torch::stable::Tensor from_blob(
+    void* data,
+    torch::headeronly::IntHeaderOnlyArrayRef sizes,
+    torch::headeronly::IntHeaderOnlyArrayRef strides,
+    torch::stable::Device device,
+    torch::headeronly::ScalarType dtype,
+    int64_t storage_offset = 0,
+    torch::headeronly::Layout layout = torch::headeronly::Layout::Strided) {
+  auto shim_dtype =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype));
+  auto shim_device_type = torch::stable::detail::to<int32_t>(
+      torch::stable::detail::from(device.type()));
+  auto shim_layout =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+      data,
+      sizes.size(),
+      sizes.data(),
+      strides.data(),
+      storage_offset,
+      shim_dtype,
+      shim_device_type,
+      device.index(),
+      &ath,
+      shim_layout,
+      nullptr,
+      0));
+  return torch::stable::Tensor(ath);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

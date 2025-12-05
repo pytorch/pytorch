@@ -390,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
+        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -410,6 +411,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.named_buffers: dict[str, torch.Tensor] = (
             const_module.named_buffers if const_module else {}
+        )
+        self.mutated_named_buffers: OrderedSet[torch.Tensor] = gm.meta.get(
+            "mutated_named_buffers", OrderedSet()
         )
         self.named_parameters: dict[str, torch.Tensor] = (
             const_module.named_parameters if const_module else {}
@@ -1114,10 +1118,34 @@ class GraphLowering(torch.fx.Interpreter):
         with torch.utils._python_dispatch._disable_current_modes():
             # caller might have OrderedSet fake tensor mode which will create a fake tensor
             # when calling .to, so unset modes here
-            return self.allocate_non_dup_const_name(
+            non_dup_const_name = self.allocate_non_dup_const_name(
                 f"{name}_{device_override.type}{device_override.index or 0}",
                 self.constants[name].to(device_override),
             )
+
+            assert non_dup_const_name in self.constants, (
+                f"{non_dup_const_name} should be in V.graph.constants already"
+            )
+
+            # register device-copied buffers and parameters to graph as well
+            # to codegen correct torch::aot_inductor::ConstantType for them rather than `Unknown`
+            if any(
+                name == normalize_name(buffer_name)
+                for buffer_name in self.named_buffers
+            ):
+                self.named_buffers[non_dup_const_name] = self.constants[
+                    non_dup_const_name
+                ]
+
+            if any(
+                name == normalize_name(param_name)
+                for param_name in self.named_parameters
+            ):
+                self.named_parameters[non_dup_const_name] = self.constants[
+                    non_dup_const_name
+                ]
+
+            return non_dup_const_name
 
     # pyrefly: ignore [bad-override]
     def placeholder(
@@ -1384,6 +1412,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
+            or target in self.mutated_named_buffers
         ):
             return self.add_tensor_constant(value, target)
 
@@ -2345,6 +2374,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code = parent_graph.wrapper_code
             self.device_ops = parent_graph.device_ops
             self.cpp_wrapper = parent_graph.cpp_wrapper
+            self.device_types = parent_graph.device_types
+            self.device_idxs = parent_graph.device_idxs
+            self.device_type = parent_graph.device_type
 
             self._update_scheduler()
             self.scheduler.codegen()
