@@ -1,6 +1,0 @@
-ERROR
-  File "/tmp/tmpvdoe6rc3/oi/coif6gk7rzaudzwacutf62zb4po6k6waa23fpyntdao7i2xtw22n.py", line 14, in pallas_fused_add_63defd09_kernel
-    out_ptr0[...] = tmp3.reshape(s77, s27, s53)
-                                 ^^^
-NameError: name 's77' is not defined
-
