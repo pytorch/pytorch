@@ -311,7 +311,10 @@ struct CachingHostAllocatorImpl {
         active_ = true;
         getBackgroundThreadPool()->run([&]() {
           while (active_) {
-            // Background thread conservatively processes default pool events.
+            // Background thread conservatively processes default pool
+            // events only. Private pools never use a background
+            // thread because cuda stream capture does not benefit
+            // from asynchronous event processing.
             process_events(default_pool_);
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
