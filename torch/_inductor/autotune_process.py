@@ -368,7 +368,9 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]],
+        *,
+        hint_override: Optional[int] = None
     ) -> Union[TensorMeta, list[TensorMeta]]:
         if isinstance(irnodes, Sequence):
             result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
@@ -390,14 +392,17 @@ class TensorMeta:
             sizes=V.graph.sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             strides=V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             offset=V.graph.sizevars.size_hint(
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             name=node.get_name(),
         )
@@ -589,6 +594,7 @@ class CPUDeviceBenchmarkMixin:
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
+    
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
     def __init__(
