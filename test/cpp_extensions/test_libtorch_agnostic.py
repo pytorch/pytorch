@@ -1005,8 +1005,7 @@ if not IS_WINDOWS:
             self.assertTrue(t.requires_grad)
 
             with torch.no_grad():
-                result = libtorch_agnostic.ops.my_set_requires_grad(t, False)
-            self.assertFalse(result.requires_grad)
+                libtorch_agnostic.ops.my_set_requires_grad(t, False)
             self.assertFalse(t.requires_grad)
 
         @skipIfTorchVersionLessThan(2, 10)
