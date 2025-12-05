@@ -351,7 +351,7 @@ void BlockCodeGen::Initialize() {
 
   stmt_v->accept(printer_.get());
 
-  GRAPH_DEBUG("Generated Block code: ", oss_.str(), "\n");
+  GRAPH_DEBUG("Generated Block code: ", oss_.str(), '\n');
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {

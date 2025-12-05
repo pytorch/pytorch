@@ -46,6 +46,14 @@ class ProcessException(Exception):
 class ProcessRaisedException(ProcessException):
     """Exception raised when a process failed due to an exception raised by the code."""
 
+    def __init__(
+        self,
+        msg: str,
+        error_index: int,
+        error_pid: int,
+    ):
+        super().__init__(msg, error_index, error_pid)
+
 
 class ProcessExitedException(ProcessException):
     """Exception raised when a process failed due to signal or exited with a specific code."""
@@ -257,7 +265,7 @@ def start_processes(
         # used a multiprocessing.Queue but that can be prone to
         # deadlocks, so we went with a simpler solution for a one-shot
         # message between processes.
-        tf = tempfile.NamedTemporaryFile(
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix="pytorch-errorfile-", suffix=".pickle", delete=False
         )
         tf.close()
