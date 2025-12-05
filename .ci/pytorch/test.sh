@@ -867,13 +867,8 @@ test_inductor_halide() {
   assert_git_not_dirty
 }
 
-test_inductor_pallas_cpu() {
-  PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu python test/run_test.py --include inductor/test_pallas.py --verbose
-  assert_git_not_dirty
-}
-
-test_inductor_pallas_gpu() {
-  PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda python test/run_test.py --include inductor/test_pallas.py --verbose
+test_inductor_pallas() {
+  python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
 
@@ -1903,10 +1898,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
-elif [[ "${TEST_CONFIG}" == *inductor-pallas-cpu* ]]; then
-  test_inductor_pallas_cpu
-elif [[ "${TEST_CONFIG}" == *inductor-pallas-gpu* ]]; then
-  test_inductor_pallas_gpu
+elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
+  test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then

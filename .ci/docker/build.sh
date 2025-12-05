@@ -261,6 +261,11 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
