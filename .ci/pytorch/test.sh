@@ -1898,6 +1898,10 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
+  # TPU Pallas tests - unset device restriction to allow CPU tensors for TPU backend
+  unset PYTORCH_TESTING_DEVICE_ONLY_FOR
+  test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   # NS: Remove me later, but pallas tests are pretty small
   unset PYTORCH_TESTING_DEVICE_ONLY_FOR

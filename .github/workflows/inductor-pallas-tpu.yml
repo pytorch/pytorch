@@ -1,0 +1,55 @@
+# Workflow: Inductor Pallas TPU Tests
+# Runs Pallas backend tests on TPU hardware.
+name: inductor-pallas-tpu
+
+on:
+  workflow_call:
+  schedule:
+    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
+  pull_request:
+    paths:
+      - .github/workflows/inductor-pallas-tpu.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-pallas-tpu
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  inductor-pallas-tpu-build:
+    name: inductor-pallas-tpu-build
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
+      runner: linux.12xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv6e.1" },
+        ]}
+    secrets: inherit
+
+  inductor-pallas-tpu-test:
+    name: inductor-pallas-tpu-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: inductor-pallas-tpu-build
+    with:
+      build-environment: ${{ needs.inductor-pallas-tpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-pallas-tpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-pallas-tpu-build.outputs.test-matrix }}
+    secrets: inherit

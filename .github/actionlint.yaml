@@ -76,3 +76,7 @@ self-hosted-runner:
     - macos-14-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
+    # Organization-wide Google Cloud TPU runners
+    - linux.google.tpuv6e.1
+    - linux.google.tpuv7x.1
+    - linux.google.tpuv7x.4
