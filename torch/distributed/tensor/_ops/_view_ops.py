@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import cast, Optional
 
 import torch
 from torch import Tensor
@@ -542,10 +542,13 @@ def propagate_shape_and_sharding(
 
     def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim,
-    ) -> tuple[int | None, Shard | None]:
+    ) -> tuple[Optional[int], Optional[Shard | _StridedShard]]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
-            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
+            if (
+                isinstance(placement, Shard | _StridedShard)
+                and placement.dim == input_dim.input_dim
+            ):
                 return i, placement
         return None, None
 
@@ -569,6 +572,7 @@ def propagate_shape_and_sharding(
                     maybe_get_shard_mesh_dim_and_placement(dim)
                 )
                 input_sharded = shard_mesh_dim is not None
+
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
@@ -616,7 +620,10 @@ def propagate_shape_and_sharding(
                     out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
                 ]
 
-                shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
+                shard_mesh_dim, shard_placement = (
+                    maybe_get_shard_mesh_dim_and_placement(in_dim)
+                )
+
                 if strict_view and shard_mesh_dim is not None:
                     if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
                         raise RuntimeError(
@@ -627,7 +634,7 @@ def propagate_shape_and_sharding(
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard) and shard.dim == in_dim:
+                    if isinstance(shard, Shard | _StridedShard) and shard.dim == in_dim:
                         submesh_size *= size
                 if not out_size % submesh_size == 0:
                     raise AssertionError(
@@ -654,13 +661,14 @@ def propagate_shape_and_sharding(
     input_tgt_placements = [
         (
             Replicate()
-            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+            if isinstance(p, Shard | _StridedShard)
+            and not shardable_dims[p.dim][mesh_dim]
             else p
         )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
 
-    def _rewrite_shard_dim(p: Shard):
+    def _rewrite_shard_dim(p: Shard | _StridedShard):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -682,7 +690,7 @@ def propagate_shape_and_sharding(
             return Shard(shard_dim_map[p.dim])
 
     output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p) if isinstance(p, Shard | _StridedShard) else p
         for p in input_tgt_placements
     ]
 
@@ -709,6 +717,7 @@ def register_op_strategy_map(
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
     def reshape_strategy(op_schema: OpSchema) -> StrategyType:
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
+        print(rules)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
         mesh = op_schema.get_mesh_from_args(validate=False)
 
