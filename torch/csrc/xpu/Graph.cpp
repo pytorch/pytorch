@@ -17,7 +17,7 @@ void THXPGraph_init(PyObject* module) {
   // but CI linter and some builds prefer "module".
   auto torch_C_m = py::handle(module).cast<py::module>();
 
-  torch_C_m.def("_graph_pool_handle", &::at::xpu::graph_pool_handle);
+  torch_C_m.def("_xpu_graph_pool_handle", &::at::xpu::graph_pool_handle);
 
   shared_ptr_class_<::at::xpu::XPUGraph>(torch_C_m, "_XPUGraph")
       .def(py::init<bool>(), py::arg("keep_graph") = false)
