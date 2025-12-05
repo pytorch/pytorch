@@ -139,6 +139,10 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Include triton and blackwell custom nodes in the saved value selection
+# mechanism. Without this flag seems all triton nodes are automatically
+# recomputed without going to the knapsack algorithm
+include_blackwell_and_triton_kernel_wrappers_in_recompute = False
 
 # Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
 # This optimization minimizes activation checkpoint node lifetimes by computing them
