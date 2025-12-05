@@ -211,7 +211,7 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
             except Exception as e:
                 raise_observed_exception(type(e), tx)
-        elif isinstance(self.value, (float, int)):
+        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -254,8 +254,11 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
-            # pyrefly: ignore [bad-argument-type]
-            return ConstantVariable.create(len(self.value))
+            try:
+                # pyrefly: ignore [bad-argument-type]
+                return ConstantVariable.create(len(self.value))
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
