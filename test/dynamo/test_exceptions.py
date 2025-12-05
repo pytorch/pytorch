@@ -721,6 +721,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             pass
         assert sys.exc_info()[0] is None
 
+    @make_dynamo_test
+    def test_cmp_exceptions(self):
+        a = ValueError("error")
+        b = ValueError("error")
+        assert (a is not b) and (b is not a)
+        assert (a is a) and (b is b)
+
     def test_reconstruct___context__(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
