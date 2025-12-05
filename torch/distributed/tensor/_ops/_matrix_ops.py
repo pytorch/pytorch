@@ -83,8 +83,10 @@ def _mm_like_strategy(
             )
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
-        if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
-            mat2_strategy.shape, mat2_spec
+        if is_tensor_shardable(
+            self_strategy.shape, self_spec, allow_unbacked_sharding=True
+        ) and is_tensor_shardable(
+            mat2_strategy.shape, mat2_spec, allow_unbacked_sharding=True
         ):
             redistribute_cost = [
                 generate_redistribute_costs(self_strategy, self_spec),
@@ -138,8 +140,10 @@ def _addmm_like_strategy(
         )
         self_spec = DTensorSpec(mesh=mesh, placements=self_placements)
 
-        if is_tensor_shardable(mat1_strategy.shape, mat1_spec) and is_tensor_shardable(
-            mat2_strategy.shape, mat2_spec
+        if is_tensor_shardable(
+            mat1_strategy.shape, mat1_spec, allow_unbacked_sharding=True
+        ) and is_tensor_shardable(
+            mat2_strategy.shape, mat2_spec, allow_unbacked_sharding=True
         ):
             # update input specs with new self spec
             strtg.input_specs = (self_spec, mat1_spec, mat2_spec)
@@ -210,10 +214,18 @@ def _scaled_mm_like_strategy(
         )
         strtg.input_specs = list(strtg.input_specs) + [scale_self_spec, scale_mat2_spec]
         if (
-            is_tensor_shardable(self_strategy.shape, self_spec)
-            and is_tensor_shardable(mat2_strategy.shape, mat2_spec)
-            and is_tensor_shardable(scale_self_strategy.shape, scale_self_spec)
-            and is_tensor_shardable(scale_mat2_strategy.shape, scale_mat2_spec)
+            is_tensor_shardable(
+                self_strategy.shape, self_spec, allow_unbacked_sharding=True
+            )
+            and is_tensor_shardable(
+                mat2_strategy.shape, mat2_spec, allow_unbacked_sharding=True
+            )
+            and is_tensor_shardable(
+                scale_self_strategy.shape, scale_self_spec, allow_unbacked_sharding=True
+            )
+            and is_tensor_shardable(
+                scale_mat2_strategy.shape, scale_mat2_spec, allow_unbacked_sharding=True
+            )
         ):
             redistribute_cost = [
                 generate_redistribute_costs(self_strategy, self_spec),
@@ -1035,7 +1047,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             meta: TensorMeta = spec.output_specs.tensor_meta
             local_stride = compute_local_stride(meta.stride, mesh, placements)
             local_shape, _ = compute_local_shape_and_global_offset(
-                meta.shape, mesh, placements
+                meta.shape, mesh, placements, skip_offset=True
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
