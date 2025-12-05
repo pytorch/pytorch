@@ -1,13 +1,14 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, TYPE_CHECKING
+import math
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pallas import has_tpu_pallas
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..ir import IRNode
+    from ..ops_handler import ReductionType
     from ..scheduler import BaseSchedulerNode
 
 
@@ -201,6 +203,14 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.asarray({x}).astype({jax_dtype})"
 
     @staticmethod
+    def to_dtype_bitcast(x: str, dtype: torch.dtype, src_dtype: torch.dtype) -> str:
+        """Bitcast a value from one dtype to another with the same size."""
+        jax_dtype = torch_dtype_to_jax(dtype)
+        jax_src_dtype = torch_dtype_to_jax(src_dtype)
+        # First ensure the value is the correct source dtype, then bitcast
+        return f"jax.lax.bitcast_convert_type(jnp.asarray({x}).astype({jax_src_dtype}), {jax_dtype})"
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
@@ -217,7 +227,504 @@ class PallasKernelOverrides(OpOverrides):
         jax_dtype = torch_dtype_to_jax(dtype)
         if dtype == torch.bool:
             return "True" if val else "False"
+        # Handle special float values
+        if isinstance(val, float):
+            if math.isnan(val):
+                return "jnp.nan"
+            if math.isinf(val):
+                return "jnp.inf" if val > 0 else "-jnp.inf"
         return f"jnp.array({val}, dtype={jax_dtype})"
+
+    @staticmethod
+    def real(x: str) -> str:
+        return f"jnp.real({x})"
+
+    @staticmethod
+    def imag(x: str) -> str:
+        return f"jnp.imag({x})"
+
+    @staticmethod
+    def conj(x: str) -> str:
+        return f"jnp.conj({x})"
+
+    @staticmethod
+    def angle(x: str) -> str:
+        return f"jnp.angle({x})"
+
+    @staticmethod
+    def view_as_real(x: str) -> str:
+        """View complex tensor as real tensor with extra dimension."""
+        return f"jnp.stack([jnp.real({x}), jnp.imag({x})], axis=-1)"
+
+    @staticmethod
+    def view_as_complex(x: str) -> str:
+        """View real tensor as complex tensor."""
+        return f"({x}[..., 0] + 1j * {x}[..., 1])"
+
+    # Comparison operations
+    @staticmethod
+    def eq(a: str, b: str) -> str:
+        return f"({a} == {b})"
+
+    @staticmethod
+    def ne(a: str, b: str) -> str:
+        return f"({a} != {b})"
+
+    @staticmethod
+    def lt(a: str, b: str) -> str:
+        return f"({a} < {b})"
+
+    @staticmethod
+    def le(a: str, b: str) -> str:
+        return f"({a} <= {b})"
+
+    @staticmethod
+    def gt(a: str, b: str) -> str:
+        return f"({a} > {b})"
+
+    @staticmethod
+    def isnan(x: str) -> str:
+        return f"jnp.isnan({x})"
+
+    @staticmethod
+    def isinf(x: str) -> str:
+        return f"jnp.isinf({x})"
+
+    @staticmethod
+    def isfinite(x: str) -> str:
+        return f"jnp.isfinite({x})"
+
+    @staticmethod
+    def ge(a: str, b: str) -> str:
+        return f"({a} >= {b})"
+
+    # Logical operations
+    @staticmethod
+    def logical_and(a: str, b: str) -> str:
+        return f"jnp.logical_and({a}, {b})"
+
+    @staticmethod
+    def logical_or(a: str, b: str) -> str:
+        return f"jnp.logical_or({a}, {b})"
+
+    @staticmethod
+    def logical_not(x: str) -> str:
+        return f"jnp.logical_not({x})"
+
+    @staticmethod
+    def logical_xor(a: str, b: str) -> str:
+        return f"jnp.logical_xor({a}, {b})"
+
+    # Math operations
+    @staticmethod
+    def atan2(a: str, b: str) -> str:
+        return f"jnp.arctan2({a}, {b})"
+
+    @staticmethod
+    def hypot(a: str, b: str) -> str:
+        return f"jnp.hypot({a}, {b})"
+
+    @staticmethod
+    def fmod(a: str, b: str) -> str:
+        return f"jnp.fmod({a}, {b})"
+
+    @staticmethod
+    def remainder(a: str, b: str) -> str:
+        return f"jnp.remainder({a}, {b})"
+
+    @staticmethod
+    def clamp(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    @staticmethod
+    def clip(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    # Sign operations
+    @staticmethod
+    def sign(x: str) -> str:
+        return f"jnp.sign({x})"
+
+    @staticmethod
+    def signbit(x: str) -> str:
+        return f"jnp.signbit({x})"
+
+    # Special math functions
+    @staticmethod
+    def erf(x: str) -> str:
+        return f"jax.scipy.special.erf({x})"
+
+    @staticmethod
+    def erfc(x: str) -> str:
+        return f"jax.scipy.special.erfc({x})"
+
+    @staticmethod
+    def erfinv(x: str) -> str:
+        return f"jax.scipy.special.erfinv({x})"
+
+    @staticmethod
+    def lgamma(x: str) -> str:
+        return f"jax.scipy.special.gammaln({x})"
+
+    @staticmethod
+    def digamma(x: str) -> str:
+        return f"jax.scipy.special.digamma({x})"
+
+    @staticmethod
+    def bessel_j0(x: str) -> str:
+        # bessel_jn requires float64 and has numerical issues at x=0 (returns NaN)
+        # bessel_jn(x, v=n) returns array of shape (n+1, ...) with J_0 to J_n
+        # Handle by: convert to float64, compute, handle x=0, convert back
+        # J0(0) = 1.0
+        return (
+            f"jnp.where({x}.astype(jnp.float64) == 0.0, 1.0, "
+            f"jax.scipy.special.bessel_jn({x}.astype(jnp.float64), v=0)[0])"
+            f".astype({x}.dtype)"
+        )
+
+    @staticmethod
+    def bessel_j1(x: str) -> str:
+        # bessel_jn requires float64 and has numerical issues at x=0 (returns NaN)
+        # bessel_jn(x, v=n) returns array of shape (n+1, ...) with J_0 to J_n
+        # Handle by: convert to float64, compute, handle x=0, convert back
+        # J1(0) = 0.0
+        return (
+            f"jnp.where({x}.astype(jnp.float64) == 0.0, 0.0, "
+            f"jax.scipy.special.bessel_jn({x}.astype(jnp.float64), v=1)[1])"
+            f".astype({x}.dtype)"
+        )
+
+    @staticmethod
+    def modified_bessel_i0(x: str) -> str:
+        # Modified Bessel function of the first kind I_0(x)
+        # I_0(x) = bessel_i0e(x) * exp(|x|) where bessel_i0e is the scaled version
+        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def modified_bessel_i1(x: str) -> str:
+        # Modified Bessel function of the first kind I_1(x)
+        # I_1(x) = bessel_i1e(x) * exp(|x|) where bessel_i1e is the scaled version
+        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def spherical_bessel_j0(x: str) -> str:
+        # Spherical Bessel function of the first kind j_0(x) = sin(x) / x
+        # Handle x=0: j_0(0) = 1
+        return f"jnp.where({x} == 0.0, 1.0, jnp.sin({x}) / {x})"
+
+    @staticmethod
+    def i0(x: str) -> str:
+        # Modified Bessel function I_0 (same as modified_bessel_i0)
+        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def i0e(x: str) -> str:
+        # Exponentially scaled modified Bessel function I_0
+        return f"jax.lax.bessel_i0e({x})"
+
+    @staticmethod
+    def i1(x: str) -> str:
+        # Modified Bessel function I_1 (same as modified_bessel_i1)
+        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def i1e(x: str) -> str:
+        # Exponentially scaled modified Bessel function I_1
+        return f"jax.lax.bessel_i1e({x})"
+
+    @staticmethod
+    def gammainc(x: str, y: str) -> str:
+        # Regularized lower incomplete gamma function P(a, x)
+        # Note: PyTorch uses gammainc(input, other) where input is a (shape param)
+        return f"jax.scipy.special.gammainc({x}, {y})"
+
+    @staticmethod
+    def gammaincc(x: str, y: str) -> str:
+        # Regularized upper incomplete gamma function Q(a, x)
+        return f"jax.scipy.special.gammaincc({x}, {y})"
+
+    @staticmethod
+    def igamma(x: str, y: str) -> str:
+        # Regularized lower incomplete gamma function (alias for gammainc)
+        return f"jax.scipy.special.gammainc({x}, {y})"
+
+    @staticmethod
+    def igammac(x: str, y: str) -> str:
+        # Regularized upper incomplete gamma function (alias for gammaincc)
+        return f"jax.scipy.special.gammaincc({x}, {y})"
+
+    @staticmethod
+    def polygamma(x: str, y: str) -> str:
+        # Polygamma function psi^(n)(x), x is order n, y is the value
+        # Note: JAX uses polygamma(n, x) where n is integer order
+        return f"jax.scipy.special.polygamma({x}.astype(jnp.int32), {y})"
+
+    @staticmethod
+    def ndtri(x: str) -> str:
+        # Inverse of the standard normal CDF
+        return f"jax.scipy.special.ndtri({x})"
+
+    @staticmethod
+    def zeta(x: str, y: str) -> str:
+        # Hurwitz zeta function zeta(x, q) = sum_{k=0}^inf 1/(k+q)^x
+        return f"jax.scipy.special.zeta({x}, {y})"
+
+    @staticmethod
+    def xlogy(x: str, y: str) -> str:
+        # x * log(y), with proper handling of x=0
+        return f"jax.scipy.special.xlogy({x}, {y})"
+
+    @staticmethod
+    def xlog1py(x: str, y: str) -> str:
+        # x * log1p(y), with proper handling of x=0
+        return f"jax.scipy.special.xlog1py({x}, {y})"
+
+    @staticmethod
+    def chebyshev_polynomial_t(x: str, n: str) -> str:
+        # Chebyshev polynomial of the first kind T_n(x)
+        # For |x| <= 1: T_n(x) = cos(n * arccos(x))
+        # For x > 1: T_n(x) = cosh(n * arccosh(x))
+        # For x < -1: T_n(x) = (-1)^n * cosh(n * arccosh(-x))
+        return (
+            f"jnp.where(jnp.abs({x}) <= 1, "
+            f"jnp.cos({n} * jnp.arccos(jnp.clip({x}, -1, 1))), "
+            f"jnp.where({x} > 1, "
+            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({x}, 1.0))), "
+            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{x}, 1.0)))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_u(x: str, n: str) -> str:
+        # Chebyshev polynomial of the second kind U_n(x)
+        # For |x| < 1: U_n(x) = sin((n+1) * arccos(x)) / sqrt(1 - x^2)
+        # For x = 1: U_n(1) = n+1
+        # For x = -1: U_n(-1) = (-1)^n * (n+1)
+        # For x > 1: U_n(x) = sinh((n+1) * arccosh(x)) / sqrt(x^2 - 1)
+        # For x < -1: U_n(x) = (-1)^n * U_n(-x) (symmetry)
+        return (
+            f"jnp.where(jnp.abs({x}) < 1, "
+            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({x}, -1, 1))) / "
+            f"jnp.sqrt(jnp.maximum(1 - {x}**2, 1e-10)), "
+            f"jnp.where({x} >= 1, "
+            f"jnp.where({x} == 1, {n} + 1.0, "
+            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({x}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({x}**2 - 1, 1e-10))), "
+            f"jnp.where({x} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
+            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{x}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({x}**2 - 1, 1e-10)))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_v(x: str, n: str) -> str:
+        # Chebyshev polynomial of the third kind V_n(x)
+        # V_n(x) = (T_n(x) - T_{n+1}(x)) / (1 - x) for x != 1
+        # V_n(1) = 1, recurrence: V_0 = 1, V_1 = 2x - 1, V_n = 2x*V_{n-1} - V_{n-2}
+        # Explicit: V_0 = 1, V_1 = 2x-1, V_2 = 4x^2-2x-1, V_3 = 8x^3-4x^2-4x+1
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{x} - 1, "
+            f"jnp.where({n} == 2, 4*{x}**2 - 2*{x} - 1, "
+            f"jnp.where({n} == 3, 8*{x}**3 - 4*{x}**2 - 4*{x} + 1, "
+            f"jnp.where({n} == 4, 16*{x}**4 - 8*{x}**3 - 12*{x}**2 + 4*{x} + 1, "
+            f"jnp.where({n} == 5, 32*{x}**5 - 16*{x}**4 - 32*{x}**3 + 12*{x}**2 + 6*{x} - 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_w(x: str, n: str) -> str:
+        # Chebyshev polynomial of the fourth kind W_n(x)
+        # W_n(x) = (T_n(x) + T_{n+1}(x)) / (1 + x) for x != -1
+        # W_n(-1) = (-1)^n, recurrence: W_0 = 1, W_1 = 2x + 1, W_n = 2x*W_{n-1} - W_{n-2}
+        # Explicit: W_0 = 1, W_1 = 2x+1, W_2 = 4x^2+2x-1, W_3 = 8x^3+4x^2-4x-1
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{x} + 1, "
+            f"jnp.where({n} == 2, 4*{x}**2 + 2*{x} - 1, "
+            f"jnp.where({n} == 3, 8*{x}**3 + 4*{x}**2 - 4*{x} - 1, "
+            f"jnp.where({n} == 4, 16*{x}**4 + 8*{x}**3 - 12*{x}**2 - 4*{x} + 1, "
+            f"jnp.where({n} == 5, 32*{x}**5 + 16*{x}**4 - 32*{x}**3 - 12*{x}**2 + 6*{x} + 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_t(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the first kind T*_n(x) = T_n(2x - 1)
+        # T_n(y) where y = 2x - 1
+        # Use same formula as chebyshev_polynomial_t
+        y = f"(2 * {x} - 1)"
+        return (
+            f"jnp.where(jnp.abs({y}) <= 1, "
+            f"jnp.cos({n} * jnp.arccos(jnp.clip({y}, -1, 1))), "
+            f"jnp.where({y} > 1, "
+            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({y}, 1.0))), "
+            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{y}, 1.0)))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_u(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the second kind U*_n(x) = U_n(2x - 1)
+        # Use same formula as chebyshev_polynomial_u
+        y = f"(2 * {x} - 1)"
+        return (
+            f"jnp.where(jnp.abs({y}) < 1, "
+            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({y}, -1, 1))) / "
+            f"jnp.sqrt(jnp.maximum(1 - ({y})**2, 1e-10)), "
+            f"jnp.where({y} >= 1, "
+            f"jnp.where({y} == 1, {n} + 1.0, "
+            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({y}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10))), "
+            f"jnp.where({y} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
+            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{y}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10)))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_v(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the third kind V*_n(x) = V_n(2x - 1)
+        y = f"(2 * {x} - 1)"  # shifted variable
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{y} - 1, "
+            f"jnp.where({n} == 2, 4*{y}**2 - 2*{y} - 1, "
+            f"jnp.where({n} == 3, 8*{y}**3 - 4*{y}**2 - 4*{y} + 1, "
+            f"jnp.where({n} == 4, 16*{y}**4 - 8*{y}**3 - 12*{y}**2 + 4*{y} + 1, "
+            f"jnp.where({n} == 5, 32*{y}**5 - 16*{y}**4 - 32*{y}**3 + 12*{y}**2 + 6*{y} - 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_w(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the fourth kind W*_n(x) = W_n(2x - 1)
+        y = f"(2 * {x} - 1)"  # shifted variable
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{y} + 1, "
+            f"jnp.where({n} == 2, 4*{y}**2 + 2*{y} - 1, "
+            f"jnp.where({n} == 3, 8*{y}**3 + 4*{y}**2 - 4*{y} - 1, "
+            f"jnp.where({n} == 4, 16*{y}**4 + 8*{y}**3 - 12*{y}**2 - 4*{y} + 1, "
+            f"jnp.where({n} == 5, 32*{y}**5 + 16*{y}**4 - 32*{y}**3 - 12*{y}**2 + 6*{y} + 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def hermite_polynomial_h(x: str, n: str) -> str:
+        # Physicist's Hermite polynomial H_n(x)
+        # H_n(x) = 2^n * x^n - n*(n-1)/2 * 2^(n-2) * x^(n-2) + ...
+        # Use explicit formula: H_n(x) = n! * sum_{m=0}^{n//2} (-1)^m / (m! * (n-2m)!) * (2x)^(n-2m)
+        # For simplicity, use the relation: H_n(x) = 2^(n/2) * He_n(x * sqrt(2)) where He is probabilist's
+        # Actually simpler: use recurrence or closed form
+        # H_0 = 1, H_1 = 2x, H_2 = 4x^2 - 2, H_3 = 8x^3 - 12x
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2 * {x}, "
+            f"jnp.where({n} == 2, 4 * {x}**2 - 2, "
+            f"jnp.where({n} == 3, 8 * {x}**3 - 12 * {x}, "
+            f"jnp.where({n} == 4, 16 * {x}**4 - 48 * {x}**2 + 12, "
+            f"jnp.where({n} == 5, 32 * {x}**5 - 160 * {x}**3 + 120 * {x}, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def hermite_polynomial_he(x: str, n: str) -> str:
+        # Probabilist's Hermite polynomial He_n(x)
+        # He_0 = 1, He_1 = x, He_2 = x^2 - 1, He_3 = x^3 - 3x
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, {x}, "
+            f"jnp.where({n} == 2, {x}**2 - 1, "
+            f"jnp.where({n} == 3, {x}**3 - 3 * {x}, "
+            f"jnp.where({n} == 4, {x}**4 - 6 * {x}**2 + 3, "
+            f"jnp.where({n} == 5, {x}**5 - 10 * {x}**3 + 15 * {x}, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def laguerre_polynomial_l(x: str, n: str) -> str:
+        # Laguerre polynomial L_n(x)
+        # L_0 = 1, L_1 = 1 - x, L_2 = (x^2 - 4x + 2)/2, L_3 = (-x^3 + 9x^2 - 18x + 6)/6
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 1 - {x}, "
+            f"jnp.where({n} == 2, ({x}**2 - 4*{x} + 2) / 2, "
+            f"jnp.where({n} == 3, (-{x}**3 + 9*{x}**2 - 18*{x} + 6) / 6, "
+            f"jnp.where({n} == 4, ({x}**4 - 16*{x}**3 + 72*{x}**2 - 96*{x} + 24) / 24, "
+            f"jnp.where({n} == 5, (-{x}**5 + 25*{x}**4 - 200*{x}**3 + 600*{x}**2 - 600*{x} + 120) / 120, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def legendre_polynomial_p(x: str, n: str) -> str:
+        # Legendre polynomial P_n(x)
+        # P_0 = 1, P_1 = x, P_2 = (3x^2 - 1)/2, P_3 = (5x^3 - 3x)/2
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, {x}, "
+            f"jnp.where({n} == 2, (3 * {x}**2 - 1) / 2, "
+            f"jnp.where({n} == 3, (5 * {x}**3 - 3 * {x}) / 2, "
+            f"jnp.where({n} == 4, (35 * {x}**4 - 30 * {x}**2 + 3) / 8, "
+            f"jnp.where({n} == 5, (63 * {x}**5 - 70 * {x}**3 + 15 * {x}) / 8, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    # Reciprocal and square
+    @staticmethod
+    def reciprocal(x: str) -> str:
+        return f"jnp.reciprocal({x})"
+
+    @staticmethod
+    def square(x: str) -> str:
+        return f"jnp.square({x})"
+
+    # Additional operations
+    @staticmethod
+    def fma(a: str, b: str, c: str) -> str:
+        """Fused multiply-add: a * b + c"""
+        return f"jnp.fma({a}, {b}, {c})"
+
+    @staticmethod
+    def copysign(a: str, b: str) -> str:
+        return f"jnp.copysign({a}, {b})"
+
+    @staticmethod
+    def nextafter(a: str, b: str) -> str:
+        return f"jnp.nextafter({a}, {b})"
+
+    @staticmethod
+    def ldexp(a: str, b: str) -> str:
+        return f"jnp.ldexp({a}, {b})"
+
+    @staticmethod
+    def frexp(x: str) -> str:
+        return f"jnp.frexp({x})"
+
+    @staticmethod
+    def modf(x: str) -> str:
+        return f"jnp.modf({x})"
+
+    # Bitwise operations
+    @staticmethod
+    def bitwise_and(a: str, b: str) -> str:
+        return f"jnp.bitwise_and({a}, {b})"
+
+    @staticmethod
+    def bitwise_or(a: str, b: str) -> str:
+        return f"jnp.bitwise_or({a}, {b})"
+
+    @staticmethod
+    def bitwise_xor(a: str, b: str) -> str:
+        return f"jnp.bitwise_xor({a}, {b})"
+
+    @staticmethod
+    def bitwise_not(x: str) -> str:
+        return f"jnp.bitwise_not({x})"
+
+    @staticmethod
+    def left_shift(a: str, b: str) -> str:
+        return f"jnp.left_shift({a}, {b})"
+
+    @staticmethod
+    def right_shift(a: str, b: str) -> str:
+        return f"jnp.right_shift({a}, {b})"
 
 
 class PallasKernel(SIMDKernel):
@@ -230,10 +737,21 @@ class PallasKernel(SIMDKernel):
     - Compute expression with Python operators (compatible with jax.numpy broadcasting)
     - Generate Python code that defines a Pallas kernel and a host entrypoint.
     - Use async_compile.pallas path to compile and load Python code.
+
+    For GPU (Triton backend):
+    - Use masked loads/stores with power-of-2 block sizes to handle non-power-of-2 shapes
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pexpr  # Use Python expression printer
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Determine device type once at initialization
+        device = V.graph.get_current_device_or_throw()
+        self.is_gpu = device.type == "cuda"
+        self.use_masked_ops: bool | None = None
+        self.tensor_masks = {}  # Map tensor name to mask variable name
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -404,14 +922,98 @@ class PallasKernel(SIMDKernel):
         else:
             return self._get_index_str(index), False
 
+    def _determine_masked_ops_for_kernel(self) -> bool:
+        """
+        Determine if we should use masked ops for this entire kernel.
+
+        Masked ops with pl.ds(block_size) flatten tensors to 1D, which works when:
+        1. We're on GPU (CUDA backend uses Triton which requires power-of-2 sizes)
+        2. All tensors are already 1D (so flattening doesn't change dimensionality)
+        3. All tensors have the same size (so broadcasting works correctly)
+
+        With per-tensor masks, each tensor gets its own mask based on its size.
+
+        This should be called once in codegen_kernel() before generating the kernel body.
+        """
+        if not self.is_gpu:
+            return False
+
+        # Get all buffer sizes
+        # We need ALL buffers - inputs, outputs, and intermediates
+        all_buffer_names = OrderedSet()
+
+        # Get input buffers from args
+        all_buffer_names.update(self.args.input_buffers.keys())
+        # Get output buffers from args
+        all_buffer_names.update(self.args.output_buffers.keys())
+        # Also get any intermediate buffers from the graph
+        all_buffer_names.update(V.graph.name_to_buffer.keys())
+
+        # Get shapes and sizes for all buffers
+        buf_info = []
+        for buf_name in all_buffer_names:
+            try:
+                buf = V.graph.get_buffer(buf_name)
+                size = buf.get_size()
+                shape = tuple(int(s) if hasattr(s, "__int__") else s for s in size)
+                # Calculate flattened size
+                total_size = 1
+                for s in size:
+                    if hasattr(s, "__int__"):
+                        total_size *= int(s)
+                    else:
+                        total_size *= s
+                buf_info.append((buf_name, shape, total_size))
+            except Exception:
+                pass
+
+        # Only use masked ops if:
+        # 1. All buffers are 1D (single-element shape tuples)
+        # 2. All buffers have the same size
+        # This ensures that pl.ds(block_size) flattening works correctly
+        # and masks can be properly applied without broadcasting issues.
+        if buf_info and len(buf_info) > 0:
+            # Check if all are 1D
+            all_1d = all(len(shape) == 1 for _, shape, _ in buf_info)
+            if not all_1d:
+                return False
+
+            # Check if all have the same size
+            first_size = buf_info[0][2]
+            all_same_size = all(size == first_size for _, _, size in buf_info)
+            return all_same_size
+
+        return False
+
+    def _get_or_create_mask(self, buf_name: str) -> str:
+        """Get or create a unique mask variable for a buffer."""
+        if buf_name not in self.tensor_masks:
+            mask_var = f"mask_{buf_name}"
+            self.tensor_masks[buf_name] = mask_var
+        return self.tensor_masks[buf_name]
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
+        # Determine masked ops strategy on first load/store if not yet determined
+        if self.use_masked_ops is None:
+            self.use_masked_ops = self._determine_masked_ops_for_kernel()
+
         index_str, needs_flatten = self._get_index_expr(index)
-        if needs_flatten:
+
+        # Build load expression using string concatenation
+        use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
+
+        if use_masked:
+            # GPU masked load: flatten tensor and apply per-tensor mask
+            mask_var = self._get_or_create_mask(name)
+            load_expr = f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
+        elif needs_flatten:
+            # Flatten then index for non-contiguous access
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
+            # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
 
         return self.cse.generate(
@@ -466,8 +1068,105 @@ class PallasKernel(SIMDKernel):
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
-        index_str, _ = self._get_index_expr(index)
-        self.stores.writeline(f"{out}[{index_str}] = {value}")
+        # Determine masked ops strategy on first load/store if not yet determined
+        if self.use_masked_ops is None:
+            self.use_masked_ops = self._determine_masked_ops_for_kernel()
+
+        # Check if this is a scalar output (reduction to scalar)
+        # Only shape () is a true scalar, not (1,) which is a 1-element tensor
+        try:
+            buf = V.graph.get_buffer(name)
+            output_shape = buf.get_size()
+            is_scalar = len(output_shape) == 0
+        except Exception:
+            is_scalar = False
+
+        if is_scalar:
+            # For scalar outputs, use [...] to assign the entire scalar
+            store_expr = f"{out}[...] = {value}"
+        else:
+            index_str, needs_flatten = self._get_index_expr(index)
+
+            # Build store expression using string concatenation
+            use_masked = (
+                index_str == "..." and not needs_flatten and self.use_masked_ops
+            )
+
+            if use_masked:
+                # GPU masked store: flatten tensor and apply per-tensor mask
+                mask_var = self._get_or_create_mask(name)
+                store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            else:
+                # Direct indexed assignment
+                store_expr = f"{out}[{index_str}] = {value}"
+
+        self.stores.writeline(store_expr)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:  # type: ignore[override]
+        """
+        Generate code for reduction operations in JAX/Pallas.
+
+        Reductions in Pallas work by:
+        1. Loading the input data into the kernel
+        2. Applying JAX reduction operations (jnp.sum, jnp.max, etc.)
+        3. Storing the reduced result
+
+        The reduction happens over the loaded block of data.
+        """
+        assert self.inside_reduction
+
+        if isinstance(value, tuple):
+            raise Unsupported(
+                "Tuple reductions (e.g., welford_combine) not supported in Pallas backend"
+            )
+
+        # Check if this reduction is already cached
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
+        # Map reduction types to JAX functions
+        reduction_ops = {
+            "sum": "jnp.sum",
+            "prod": "jnp.prod",  # CPU only - not supported in Pallas GPU (Triton) backend
+            "max": "jnp.max",
+            "min": "jnp.min",
+            "any": "jnp.any",
+        }
+
+        if reduction_type == "xor_sum":
+            reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+        elif reduction_type in reduction_ops:
+            # Apply reduction over all axes to get scalar result
+            reduction_expr = f"{reduction_ops[reduction_type]}({value})"
+        else:
+            raise Unsupported(
+                f"Reduction type '{reduction_type}' not yet supported in Pallas backend. "
+                f"Supported types: {list(reduction_ops.keys())}, xor_sum"
+            )
+
+        # Generate CSE variable for the reduction result
+        result = self.cse.generate(
+            self.compute,
+            reduction_expr,
+            dtype=dtype,
+        )
+
+        # Cache the result
+        self.cse.reduction_cache[cache_key] = result
+        return result
+
+    @staticmethod
+    def _buffer_is_contiguous(buffer_name: str) -> bool:
+        buf = V.graph.get_buffer(buffer_name)
+        layout = buf.get_layout()
+        return layout.is_contiguous()
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
@@ -484,115 +1183,368 @@ class PallasKernel(SIMDKernel):
         Returns:
             str: Complete Python source code for the Pallas kernel
         """
-        # Ensure one (1) output for now
-        live_outs = list(self.args.live_output_buffers())
-        if len(live_outs) != 1:
-            raise Unsupported(
-                "Pallas backend currently supports single-output elementwise kernels only"
-            )
-
-        # Get output dtype at compile time
-        output_name = live_outs[0]
-        output_dtype = V.graph.get_dtype(output_name)
-        output_dtype_jax = torch_dtype_to_jax(output_dtype)
-
         code = IndentedBuffer()
-        code.splice(
-            """
-            import functools
-            import torch
-            import jax
-            import jax.numpy as jnp
-            from jax.experimental import pallas as pl
-            """,
-            strip=True,
-        )
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
         arg_defs, _, _, _ = self.args.python_argdefs()
-        # Order: inputs (in_ptr*), then outputs (out_ptr*), then sizes/workspaces
         kernel_params = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_params if p.startswith("out_ptr")]
+        output_params = [
+            p for p in kernel_params if p.startswith(("out_ptr", "in_out_ptr"))
+        ]
+        if not output_params:
+            raise RuntimeError("Pallas backend requires at least one output buffer")
+
+        output_buffer_lookup = {
+            inner: outer
+            for outer, inner in self.args.output_buffers.items()
+            if isinstance(inner, str)
+        }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_literal = (
-            "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
+        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        if is_tpu:
+            if not torch._inductor.config.pallas_take_first_jax_device_only:
+                raise RuntimeError(
+                    "Pallas backend currently only supports using the first JAX device."
+                )
+            if not has_tpu_pallas():
+                raise RuntimeError(
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                )
+        interpret_literal = "True" if interpret_is_cpu else "False"
+
+        # For GPU (Triton backend), import pltriton for masked loads/stores
+        # Import math at module level if we'll use it for masked ops
+        imports = (
+            """
+            import functools
+            """
+            + ("import math\n            " if self.use_masked_ops else "")
+            + """import torch
+            import jax
+            import jax.numpy as jnp
+            from jax.experimental import pallas as pl
+            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
+            """
+            + (
+                "\n            from jax.experimental.pallas import triton as pltriton"
+                if not interpret_is_cpu
+                else ""
+            )
+            + (
+                "\n            from torch._inductor.runtime.runtime_utils import next_power_of_2"
+                if self.use_masked_ops
+                else ""
+            )
         )
-        code.writeline(f"def {kernel_name}_kernel({', '.join(kernel_params)}):")
+        code.splice(imports, strip=True)
+
+        aliasable_flags: dict[str, bool] = {}
+        for param in pure_out_params:
+            buffer_name = output_buffer_lookup.get(param)
+            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
+                buffer_name
+            )
+            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
+        alias_params = [
+            f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
+        ]
+        pointer_tail = [
+            p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
+        ]
+        kernel_input_params = alias_params + pointer_tail
+        full_kernel_params = alias_params + kernel_params
+        non_alias_out_set = OrderedSet(
+            [name for name, flag in aliasable_flags.items() if not flag]
+        )
+        copy_output_indices = [
+            idx for idx, name in enumerate(output_params) if name in non_alias_out_set
+        ]
+        self.aliasable_out_ptrs = aliasable_flags
+
+        # For GPU with masked ops, add block_size as keyword-only parameter
+        kernel_signature = (
+            f"def {kernel_name}_kernel({', '.join(full_kernel_params)}"
+            + (", *, block_size" if self.use_masked_ops else "")
+            + "):"
+        )
+        code.writeline(kernel_signature)
         with code.indent():
-            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly
-            # The iteration variables are implicitly handled by JAX's vectorization
-            # When using [...], it processes the whole array
-            # When using explicit indices, they should be JAX-traced values
+            # For masked ops on GPU, generate per-tensor masks at the start
+            if self.use_masked_ops and self.tensor_masks:
+                # Create a mapping from buffer name to parameter name
+                buf_to_param = {}
+                for outer, inner in self.args.input_buffers.items():
+                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
+                for outer, inner in self.args.output_buffers.items():
+                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
+
+                # Generate a mask for each tensor that was accessed
+                for buf_name, mask_var in sorted(self.tensor_masks.items()):
+                    param_name = buf_to_param.get(buf_name, buf_name)
+                    # Find the corresponding parameter in kernel_params
+                    matching_param = None
+                    for p in kernel_params:
+                        # Check if this parameter corresponds to the buffer
+                        if param_name == p or buf_name in str(p):
+                            matching_param = p
+                            break
+
+                    if matching_param:
+                        # Calculate flattened size for this tensor
+                        code.writeline(f"# Mask for {buf_name}")
+                        code.writeline(f"{mask_var}_size = {matching_param}.size")
+                        code.writeline(
+                            f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
+                        )
+
+            # Generate iteration variables as jnp.arange arrays
+            # These are used by index_expr operations like torch.arange
+            # Skip on GPU with masked ops - iteration vars would create non-power-of-2 arrays
+            # which are not supported by Pallas Triton backend
+            if self.range_tree_nodes and not self.use_masked_ops:
+                code.writeline("# Define iteration variables as JAX arrays")
+                # Get the first output buffer's shape for reshaping
+                first_output_shape = None
+                first_output_numel = None
+                if output_params:
+                    first_out_param = output_params[0]
+                    first_out_buf_name = output_buffer_lookup.get(first_out_param)
+                    if first_out_buf_name:
+                        try:
+                            buf = V.graph.get_buffer(first_out_buf_name)
+                            size = buf.get_size()
+                            first_output_shape = tuple(
+                                int(s) if hasattr(s, "__int__") else s for s in size
+                            )
+                            first_output_numel = 1
+                            for s in first_output_shape:
+                                first_output_numel *= s
+                        except Exception:
+                            pass
+
+                for var_sym, entry in self.range_tree_nodes.items():
+                    var_name = str(var_sym)
+                    length = entry.length
+                    length_str = self.kexpr(length)
+                    # If the iteration variable length matches the output numel,
+                    # reshape it to match the output shape for proper broadcasting
+                    try:
+                        length_val = int(length) if hasattr(length, "__int__") else None
+                    except (TypeError, ValueError):
+                        length_val = None
+
+                    # Skip symbolic lengths - jnp.arange requires concrete values
+                    # This happens with dynamic shapes
+                    if length_val is None:
+                        continue
+
+                    if (
+                        first_output_shape
+                        and len(first_output_shape) > 1
+                        and length_val == first_output_numel
+                    ):
+                        shape_str = ", ".join(str(s) for s in first_output_shape)
+                        code.writeline(
+                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                        )
+                    else:
+                        code.writeline(f"{var_name} = jnp.arange({length_str})")
+
+            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
             for line in self.compute._lines:
                 code.writeline(str(line))
             for line in self.stores._lines:
                 code.writeline(str(line))
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
-        code.writeline("@functools.partial(jax.jit, static_argnums=(0, 1))")
-        code.writeline(f"def {jit_wrapper_name}(out_shape, out_dtype, *kernel_refs):")
+        donate_indices = []
+        for idx, name in enumerate(kernel_input_params):
+            if (name in alias_params) or name.startswith("in_out_ptr"):
+                donate_indices.append(idx + 2)
+        if donate_indices:
+            donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
+        else:
+            donate_literal = "()"
+        code.writeline(
+            "@functools.partial("
+            "jax.jit, static_argnums=(0, 1), donate_argnums="
+            f"{donate_literal})"
+        )
+        code.writeline(
+            f"def {jit_wrapper_name}(out_shapes, out_dtypes, {', '.join(kernel_input_params)}):"
+        )
         with code.indent():
-            code.writeline("out_spec = jax.ShapeDtypeStruct(out_shape, out_dtype)")
+            code.writeline("out_specs = tuple(")
+            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+
+            # For masked ops, calculate block_size as next power of 2 of max flattened size
+            if self.use_masked_ops:
+                code.writeline(
+                    "# Calculate block_size as next power of 2 for Triton backend"
+                )
+                code.writeline("# Find maximum flattened size across all tensors")
+                code.writeline("max_size = 0")
+                # Calculate size for all input tensors
+                for param in kernel_input_params:
+                    code.writeline(f"max_size = max(max_size, {param}.size)")
+                # Also consider output shapes
+                code.writeline("for shape in out_shapes:")
+                code.writeline(
+                    "    tensor_size = shape[0] if len(shape) == 1 else math.prod(shape)"
+                )
+                code.writeline("    max_size = max(max_size, tensor_size)")
+                code.writeline("block_size = next_power_of_2(max_size)")
+
+            alias_pairs: list[tuple[int, int]] = []
+            for out_idx, name in enumerate(output_params):
+                if name.startswith("out_ptr"):
+                    if aliasable_flags.get(name, False):
+                        alias_name = f"{name}_alias"
+                        input_idx = kernel_input_params.index(alias_name)
+                        alias_pairs.append((input_idx, out_idx))
+                else:
+                    input_idx = kernel_input_params.index(name)
+                    alias_pairs.append((input_idx, out_idx))
+            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+
+            # For masked ops, wrap kernel with functools.partial to pass block_size
+            kernel_arg = (
+                f"functools.partial({kernel_name}_kernel, block_size=block_size),"
+                if self.use_masked_ops
+                else f"{kernel_name}_kernel,"
+            )
             code.writeline("return pl.pallas_call(")
-            code.writeline(f"    {kernel_name}_kernel,")
-            code.writeline("    out_shape=out_spec,")
+            code.writeline("    " + kernel_arg)
+
+            code.writeline("    out_shape=out_specs,")
             code.writeline(f"    interpret={interpret_literal},")
             code.writeline("    grid=(1,),")
-            code.writeline(")(*kernel_refs)")
+            code.writeline(
+                f"    input_output_aliases={{ {alias_map_literal} }},"
+                if alias_pairs
+                else "    input_output_aliases={},"
+            )
+            code.writeline(")(")
+            if kernel_input_params:
+                code.writeline(f"    {', '.join(kernel_input_params)},")
+            code.writeline(")")
 
-        # Host entry: convert torch tensors <-> jax, call pallas_call and copy back
         main_name = f"{kernel_name}_main"
-        code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
+        code.writeline(
+            f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+        )
         with code.indent():
-            # Enable JAX x64 mode to support float64/int64 types
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Identify inputs (in_ptr*) and output (out_ptr*)
-            input_params = [
-                p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
-            ]
-            output_params = [p for p in kernel_params if p.startswith("out_ptr")]
+            if alias_params:
+                code.writeline("# Convert Torch -> JAX for donated outputs")
+                for alias_name in alias_params:
+                    # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
+                    # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
+                    # `torch.Tensor` on a TPU device, this should be reverted to use the
+                    #  `jax.dlpack.from_dlpack` path.
+                    if is_tpu:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                        )
+            code.writeline("# Convert Torch -> JAX for in-place tensors")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_out_ptr"):
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+            code.writeline("# Convert Torch -> JAX for inputs")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_ptr"):
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                        )
 
-            if len(output_params) != 1:
-                raise RuntimeError(
-                    f"Expected exactly 1 output, got {len(output_params)}"
-                )
-
-            output_param = output_params[0]
-
-            # Convert inputs to JAX arrays
-            for inp in input_params:
-                code.writeline(
-                    f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())"
-                )
-
-            # Get output metadata from PyTorch tensor
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline(f"out_shape = tuple({output_param}.shape)")
-            code.writeline(f"out_dtype = {output_dtype_jax}")
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in output_params])
+                + ",)"
+            )
+            code.writeline(
+                "out_dtypes = ("
+                + ", ".join(
+                    [
+                        f"torch_dtype_to_jax_runtime({name}.dtype)"
+                        for name in output_params
+                    ]
+                )
+                + ",)"
+            )
+            arg_name_map: dict[str, str] = {}
+            for alias_name in alias_params:
+                arg_name_map[alias_name] = f"{alias_name}_jax"
+            for ptr in pointer_tail:
+                arg_name_map[ptr] = f"{ptr}_jax"
 
-            call_args = ["out_shape", "out_dtype"] + [
-                f"{inp}_jax" for inp in input_params
-            ]
-            call_arg_str = ", ".join(call_args)
-            code.writeline(f"res = {jit_wrapper_name}({call_arg_str})")
-
-            # Copy result back
-            code.writeline("# Copy result back into the provided torch output tensor")
-            code.writeline("res_t = torch.from_dlpack(res)")
-            code.writeline(f"{output_param}.copy_(res_t)")
+            if kernel_input_params:
+                alias_args_str = ", ".join(
+                    arg_name_map[name] for name in kernel_input_params
+                )
+                code.writeline(
+                    f"res = {jit_wrapper_name}(out_shapes, out_dtypes, {alias_args_str})"
+                )
+            else:
+                code.writeline(f"res = {jit_wrapper_name}(out_shapes, out_dtypes)")
+            if copy_output_indices:
+                code.writeline(
+                    "result_values = res if isinstance(res, tuple) else (res,)"
+                )
+                for idx in copy_output_indices:
+                    name = output_params[idx]
+                    if is_tpu:
+                        code.writeline(
+                            f"res_cpu = jax.device_get(result_values[{idx}])"
+                        )
+                        code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
+                    else:
+                        code.writeline(
+                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                        )
 
         return code.getvalue()
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        arg_defs, call_args, _, _ = self.args.python_argdefs()
+        kernel_param_names = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_param_names if p.startswith("out_ptr")]
+        call_arg_strs = list(map(str, call_args))
+        aliasable = getattr(self, "aliasable_out_ptrs", {})
+        alias_call_args = [
+            call_arg_strs[kernel_param_names.index(p)]
+            for p in pure_out_params
+            if aliasable.get(p, False)
+        ]
 
         # Generate kernel call: kernel_name.run(arg1, arg2, ...)
         # Note: async_compile.pallas loads {name}_main function and wraps it in PallasKernelWrapper
         # which exposes a run() method
-        kernel_call = f"{name}.run({', '.join(map(str, call_args))})"
+        kernel_call = f"{name}.run({', '.join(alias_call_args + call_arg_strs)})"
         wrapper.writeline(kernel_call)
 
 
@@ -601,8 +1553,9 @@ class PallasScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
-        # Start minimal: no special features advertised
-        return OrderedSet()
+        # Pallas/JAX can handle reductions to single elements efficiently
+        # without requiring split reductions
+        return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
     def define_kernel(
         self,

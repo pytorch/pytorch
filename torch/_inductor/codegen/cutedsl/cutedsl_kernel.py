@@ -433,7 +433,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
-                f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
             )
 
             self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")

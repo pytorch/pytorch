@@ -7,7 +7,12 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet
+from torch.fx.passes.tools_common import (  # noqa: F401
+    legalize_graph,
+    NodeList,
+    NodeSet,
+    stable_topological_sort,
+)
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
@@ -226,11 +231,11 @@ def insert_subgm(
                 return node
         return None
 
-    last_input_node: Node | None = last_node(orig_inputs)
-    assert last_input_node is not None
+    last_output_node: Node | None = last_node(orig_outputs)
+    assert last_output_node is not None
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(last_input_node):
+    with gm.graph.inserting_after(last_output_node):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
@@ -283,7 +288,7 @@ def fuse_by_partitions(
 
         erase_nodes(gm, sorted_nodes)
 
-    legalize_graph(gm, stable_topo_sort=True)
+    stable_topological_sort(gm)
     gm.graph.lint()
 
     return gm
