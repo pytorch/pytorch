@@ -2243,18 +2243,13 @@ the output has the same batch dimensions.
 
 Letting `*` be zero or more batch dimensions:
 
-- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(*, n)` (a batch of vectors),  
-  the batch dimensions of :attr:`B` must exactly match those of :attr:`A`.  
-  Internally, :attr:`B` is treated as `(*, n, 1)` for solving, and the result is returned as `(*, n)`.
+- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n)` or `(*, n)` (a batch of vectors),  
+  this function returns `X` of shape `(*, n)`. The batch dimensions `*` of :attr:`A` and :attr:`B` must match exactly.
 
-- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(*, n, k)` (a batch of matrices or  
-  “multiple right-hand sides”), the batch dimensions of :attr:`A` and :attr:`B` must be broadcastable,  
-  and the result has shape `(*, n, k)`.
-
-- In ambiguous cases (e.g., :attr:`B` has shape `(n, n)`),  
-  :attr:`B` is interpreted as a batch of vectors.
+- Otherwise, if :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n, k)` or `(*, n, k)` (a batch of matrices or “multiple right-hand sides”),  
+  this function returns `X` of shape `(*, n, k)`. The batch dimensions `*` of :attr:`A` and :attr:`B` need only be broadcastable.
   
-- Otherwise, if :attr:`A` has shape `(*, n, n)` and  :attr:`B` has shape `(n,)`  or `(n, k)`, :attr:`B`
+- Specifically, if :attr:`A` has shape `(*, n, n)` and  :attr:`B` has shape `(n,)`  or `(n, k)`, :attr:`B`
   is broadcasted to have shape `(*, n)` or `(*, n, k)` respectively.
   This function then returns the solution of the resulting batch of systems of linear equations.
 
