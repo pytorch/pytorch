@@ -1,11 +1,13 @@
 #include <ATen/ATen.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch::mtia {
@@ -56,6 +58,30 @@ void initModule(PyObject* module) {
     TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kMTIA));
     torch::utils::register_fork_handler_for_device_init(at::kMTIA);
     at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
+
+    // Initialize default generators for each MTIA device
+    auto m = THPObjectPtr(PyImport_ImportModule("torch.mtia"));
+    if (!m) {
+      throw python_error();
+    }
+
+    auto set_module_attr = [&](const char* name, PyObject* v) {
+      // PyObject_SetAttrString doesn't steal reference. So no need to incref.
+      if (PyObject_SetAttrString(m, name, v) < 0) {
+        throw python_error();
+      }
+    };
+
+    auto num_devices = at::detail::getMTIAHooks().deviceCount();
+    auto default_mtia_generators =
+        PyTuple_New(static_cast<Py_ssize_t>(num_devices));
+    for (const auto i : c10::irange(num_devices)) {
+      auto cast_gen = THPGenerator_initDefaultGenerator(
+          at::detail::getMTIAHooks().getDefaultGenerator(i));
+      // This reference is meant to be given away, so no need to incref here.
+      PyTuple_SetItem(default_mtia_generators, i, cast_gen);
+    }
+    set_module_attr("default_generators", default_mtia_generators);
   });
 
   m.def("_mtia_isBuilt", []() {

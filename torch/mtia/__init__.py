@@ -21,6 +21,8 @@ _device_t = Union[_device, str, int]
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
 Stream = torch.Stream
+# Default generators are initialized inside _mtia_init
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 _initialized = False
 _queued_calls: list[
