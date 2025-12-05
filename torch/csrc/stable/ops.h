@@ -439,6 +439,7 @@ inline torch::stable::Tensor to(
 }
 
 // Convenience overload for to(device)
+// We add this for convenience since stable does not support .to(TensorOptions)
 inline torch::stable::Tensor to(
     const torch::stable::Tensor& self,
     torch::stable::Device device,
@@ -458,6 +459,8 @@ inline torch::stable::Tensor to(
 // We expect this to be the stable version of the contiguous op.
 // This function is only available in 2.10 because it uses the stableivalue
 // conversion for MemoryFormat, which is only available in 2.10.
+// Contiguous is also a method on (non-stable Tensor), for now we only
+// support the function version.
 inline torch::stable::Tensor contiguous(
     const torch::stable::Tensor& self,
     torch::headeronly::MemoryFormat memory_format =
