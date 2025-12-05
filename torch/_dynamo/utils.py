@@ -3409,6 +3409,7 @@ def get_fake_value(
     from torch.utils._sympy.value_ranges import ValueRangeError
 
     from .exc import (
+        raise_observed_exception,
         TorchRuntimeError,
         unimplemented,
         Unsupported,
@@ -3575,6 +3576,31 @@ def get_fake_value(
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
                 hints=[],
+            )
+
+        # Check if the current instruction has an exception handler.
+        has_exception_handler = False
+        if sys.version_info >= (3, 11):
+            # Python 3.11+ uses exception table entries
+            has_exception_handler = (
+                hasattr(tx, "current_instruction")
+                and tx.current_instruction is not None
+                and getattr(tx.current_instruction, "exn_tab_entry", None) is not None
+            )
+        else:
+            # Python < 3.11 uses block stack
+            has_exception_handler = (
+                hasattr(tx, "block_stack") and len(tx.block_stack) > 0
+            )
+
+        if has_exception_handler:
+            from .variables import ConstantVariable
+
+            # Set up the exception on the exception stack and raise an observed
+            # exception so that dynamo's exception handler can catch it and jump
+            # to the user's except block.
+            raise_observed_exception(
+                RuntimeError, tx, args=[ConstantVariable.create(str(e))]
             )
 
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
