@@ -110,6 +110,8 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     auto& allocator = *c10::cuda::CUDACachingAllocator::get();
     buffers_dev_dp_ = allocator.allocate(arr_size);
     signal_pads_dev_dp_ = allocator.allocate(arr_size);
+    buffers_.resize(world_size_);
+    signal_pads_.resize(world_size_);
 
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
@@ -117,17 +119,29 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, reinterpret_cast<void**>(signal_pads_dev_dp_.get()), world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    C10_CUDA_CHECK(cudaMemcpy(
+      buffers_.data(),  // dst (host)
+      buffers_dev_dp_.get(),  // src (device)
+      arr_size,
+      cudaMemcpyDeviceToHost));
+    C10_CUDA_CHECK(cudaMemcpy(
+      signal_pads_.data(),  // dst (host)
+      signal_pads_dev_dp_.get(),  // src (device)
+      arr_size,
+      cudaMemcpyDeviceToHost));
   }
 
 
   ~NCCLSymmetricMemory() override = default;
 
   std::vector<void*> get_buffer_ptrs() override {
-    return {};
+    return buffers_;
   }
 
   std::vector<void*> get_signal_pad_ptrs() override {
-    return {};
+    return signal_pads_;
   }
 
   void** get_buffer_ptrs_dev() override {
@@ -137,7 +151,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   void** get_signal_pad_ptrs_dev() override {
     return reinterpret_cast<void**>(signal_pads_dev_dp_.get());
   }
-
 
   size_t get_buffer_size() override {
     return buffer_size_;
@@ -203,6 +216,8 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   int device_idx_;
   int rank_;
   int world_size_;
+  std::vector<void*> buffers_;
+  std::vector<void*> signal_pads_;
   c10::DataPtr buffers_dev_dp_;
   c10::DataPtr signal_pads_dev_dp_;
   std::string group_name_;
