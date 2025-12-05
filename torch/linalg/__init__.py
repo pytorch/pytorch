@@ -2243,7 +2243,7 @@ the output has the same batch dimensions.
 
 Letting `*` be zero or more batch dimensions:
 
-- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n)` or `(*, n)` (a batch of vectors),  
+- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n,)` or `(*, n)` (a batch of vectors),  
   this function returns `X` of shape `(*, n)`. The batch dimensions `*` of :attr:`A` and :attr:`B` must match exactly.
 
 - Otherwise, if :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n, k)` or `(*, n, k)` (a batch of matrices or “multiple right-hand sides”),  
