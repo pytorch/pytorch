@@ -1564,7 +1564,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
