@@ -1,10 +1,12 @@
 import glob
 import hashlib
 import os
+import os.path
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import mktemp
 
 import click
 import spin
@@ -284,6 +286,71 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
     _check_linters()
 
 
+def _extract_take_skip_tee(lintrunner_args):
+    take = None
+    skip = None
+    args_iter = iter(lintrunner_args)
+    remaining_args = []
+    tee_file = None
+    for arg in args_iter:
+        if arg == "--take":
+            take = set(next(args_iter).split(","))
+        elif arg == "--skip":
+            skip = set(next(args_iter).split(","))
+        elif arg.startswith("--tee-json"):
+            _, sep, tee_file = arg.partition("=")
+            if sep == "":
+                tee_file = next(args_iter)
+            elif sep == "=":
+                tee_file = tee_file.trim()
+        else:
+            remaining_args.append(arg)
+    return remaining_args, take, skip, tee_file
+
+
+def _run_lintrunner(
+    default_linters,
+    take,
+    skip,
+    apply_patches=False,
+    all_files=False,
+    lintrunner_args=None,
+    return_json_output=False,
+):
+    cmd = LINTRUNNER_BASE_CMD
+    if return_json_output:
+        tee_file = mktemp(prefix="spinlint_", suffix=".json")
+        tee_cmd = ["--tee-json", tee_file]
+    else:
+        tee_file = None
+        tee_cmd = []
+    linters = default_linters.copy()
+    if take is not None:
+        linters &= take
+    if skip is not None:
+        linters -= skip
+    full_cmd = (
+        cmd
+        + tee_cmd
+        + [
+            "--take",
+            ",".join(linters),
+        ]
+        + (["--apply-patches"] if apply_patches else [])
+        + (["--all-files"] if all_files else [])
+        + (list(lintrunner_args) if lintrunner_args else [])
+    )
+    p = spin.util.run(full_cmd, sys_exit=False)
+    lint_found = not bool(p.returncode)
+    if tee_file:
+        tee_path = Path(tee_file)
+        json_output = tee_path.read_text()
+        tee_path.unlink()
+    else:
+        json_output = None
+    return lint_found, json_output
+
+
 @click.command()
 @click.option("-a", "--apply-patches", is_flag=True)
 @click.argument("lintrunner_args", metavar="", nargs=-1)
@@ -291,30 +358,33 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
 def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
+    lintrunner_args, take, skip, tee_file = _extract_take_skip_tee(lintrunner_args)
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
-    cmd = LINTRUNNER_BASE_CMD
-    if apply_patches:
-        cmd += ["--apply-patches"]
-    all_files_cmd = (
-        cmd
-        + [
-            "--take",
-            ",".join(all_files_linters),
-            "--all-files",
-        ]
-        + list(lintrunner_args)
+    write_json_output = bool(tee_file)
+    lint_found_all, json_output_all = _run_lintrunner(
+        all_files_linters,
+        take=take,
+        skip=skip,
+        apply_patches=apply_patches,
+        all_files=True,
+        lintrunner_args=lintrunner_args,
+        return_json_output=write_json_output,
     )
-    spin.util.run(all_files_cmd)
-    changed_files_cmd = (
-        cmd
-        + [
-            "--take",
-            ",".join(changed_files_linters),
-        ]
-        + list(lintrunner_args)
+    lint_found_changed, json_output_changed = _run_lintrunner(
+        changed_files_linters,
+        take=take,
+        skip=skip,
+        apply_patches=apply_patches,
+        all_files=False,
+        lintrunner_args=lintrunner_args,
+        return_json_output=write_json_output,
     )
-    spin.util.run(changed_files_cmd)
+    lint_found = lint_found_all or lint_found_changed
+    if write_json_output:
+        Path(tee_file).write_text(json_output_all + json_output_changed)
+    if lint_found:
+        raise SystemExit(1)
 
 
 @click.command()
