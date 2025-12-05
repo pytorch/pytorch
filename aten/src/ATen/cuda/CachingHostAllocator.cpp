@@ -1,9 +1,6 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 
-#include <ATen/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/detail/CUDAHooks.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 
