@@ -50,6 +50,7 @@ CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aar
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
+        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' | "
@@ -67,6 +68,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux'"
     ),
     "12.8": (
+        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc-cu12==12.8.93; platform_system == 'Linux' | "
         "nvidia-cuda-runtime-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-cuda-cupti-cu12==12.8.90; platform_system == 'Linux' | "
@@ -84,6 +86,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux'"
     ),
     "12.9": (
+        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | "
         "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | "
         "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | "
@@ -101,6 +104,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
     ),
     "13.0": (
+        "cuda-bindings==13.0.3; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc==13.0.88; platform_system == 'Linux' | "
         "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux' | "
         "nvidia-cuda-cupti==13.0.85; platform_system == 'Linux' | "
@@ -111,33 +115,34 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver==12.0.4.66; platform_system == 'Linux' | "
         "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
         "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
         "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.2.1 | "
-        "intel-cmplr-lib-ur==2025.2.1 | "
-        "intel-cmplr-lic-rt==2025.2.1 | "
-        "intel-sycl-rt==2025.2.1 | "
-        "oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-sycl-blas==2025.2.0 | "
-        "onemkl-sycl-dft==2025.2.0 | "
-        "onemkl-sycl-lapack==2025.2.0 | "
-        "onemkl-sycl-rng==2025.2.0 | "
-        "onemkl-sycl-sparse==2025.2.0 | "
-        "dpcpp-cpp-rt==2025.2.1 | "
-        "intel-opencl-rt==2025.2.1 | "
-        "mkl==2025.2.0 | "
-        "intel-openmp==2025.2.1 | "
-        "tbb==2022.2.0 | "
-        "tcmlib==1.4.0 | "
-        "umf==0.11.0 | "
-        "intel-pti==0.13.1"
+        "intel-cmplr-lib-rt==2025.3.1 | "
+        "intel-cmplr-lib-ur==2025.3.1 | "
+        "intel-cmplr-lic-rt==2025.3.1 | "
+        "intel-sycl-rt==2025.3.1 | "
+        "oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2025.3.0 | "
+        "onemkl-sycl-blas==2025.3.0 | "
+        "onemkl-sycl-dft==2025.3.0 | "
+        "onemkl-sycl-lapack==2025.3.0 | "
+        "onemkl-sycl-rng==2025.3.0 | "
+        "onemkl-sycl-sparse==2025.3.0 | "
+        "dpcpp-cpp-rt==2025.3.1 | "
+        "intel-opencl-rt==2025.3.1 | "
+        "mkl==2025.3.0 | "
+        "intel-openmp==2025.3.1 | "
+        "tbb==2022.3.0 | "
+        "tcmlib==1.4.1 | "
+        "umf==1.0.2 | "
+        "intel-pti==0.15.0"
     ),
 }
 

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -195,8 +194,8 @@ void CudaPrinter::print_flat_alloc(const AllocatePtr& alloc) {
       throw std::runtime_error("Only integer dimensions are supported for now");
     }
   }
-  os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
-       << "[" << flat_size << "];" << '\n';
+  os() << dtypeToCppString(alloc->dtype()) << ' ' << (*alloc->buffer_var())
+       << '[' << flat_size << "];" << '\n';
 }
 
 void CudaPrinter::visit(const AllocatePtr& v) {
@@ -234,9 +233,9 @@ void CudaPrinter::visit(const CastPtr& v) {
       : v->src_value()->dtype().scalar_type() == ScalarType::BFloat16
       ? "__bfloat162float"
       : ("(" + dtypeToCppString(v->dtype()) + ")");
-  os() << castFn << "(";
+  os() << castFn << '(';
   v->src_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const IntrinsicsPtr& v) {
@@ -265,14 +264,14 @@ void CudaPrinter::visit(const IntrinsicsPtr& v) {
     func_name = "isnan";
   }
 
-  os() << func_name << "(";
+  os() << func_name << '(';
   for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
     os() << *v->param(i);
   }
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const ExternalCallPtr& v) {
@@ -293,15 +292,15 @@ void CudaPrinter::visit(const LoadPtr& v) {
       v->dtype().scalar_type() == ScalarType::Half ||
       v->dtype().scalar_type() == ScalarType::BFloat16) {
     // There's no __ldg overload for bool or half.
-    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    os() << *v->base_handle() << '[' << *v->flat_index() << ']';
     return;
   }
   if (cuda_analysis_->is_buf_store_target(v->buf())) {
     // Cuda __ldg can only be applied on read-only buffers.
-    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    os() << *v->base_handle() << '[' << *v->flat_index() << ']';
     return;
   }
-  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ')';
 }
 
 // TODO: maybe this should be a more shared location?
@@ -412,9 +411,9 @@ void CudaPrinter::visit(const StorePtr& v) {
   if (v->indices().empty()) {
     os() << *v->base_handle() << " = ";
   } else {
-    os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+    os() << *v->base_handle() << '[' << *v->flat_index() << "] = ";
   }
-  os() << *v->value() << ";";
+  os() << *v->value() << ';';
   os() << '\n';
 }
 
@@ -422,10 +421,10 @@ void CudaPrinter::visit(const AtomicAddPtr& v) {
   emitIndent();
   if (cuda_analysis_->thread_local_bufs().count(v->base_handle()) > 0) {
     // atomicAdd only works on global and shared memory
-    os() << *v->base_handle() << "[" << *v->flat_index()
-         << "] += " << *v->value() << ";";
+    os() << *v->base_handle() << '[' << *v->flat_index()
+         << "] += " << *v->value() << ';';
   } else {
-    os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+    os() << "atomicAdd(&" << *v->base_handle() << '[' << *v->flat_index() << ']'
          << ", " << *v->value() << ");";
   }
   os() << '\n';
@@ -438,9 +437,9 @@ void CudaPrinter::visit(const MaxPtr& v) {
     os() << "maximum(";
   }
   v->lhs()->accept(this);
-  os() << ",";
+  os() << ',';
   v->rhs()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const MinPtr& v) {
@@ -450,9 +449,9 @@ void CudaPrinter::visit(const MinPtr& v) {
     os() << "minimum(";
   }
   v->lhs()->accept(this);
-  os() << ",";
+  os() << ',';
   v->rhs()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const IfThenElsePtr& v) {
@@ -462,11 +461,11 @@ void CudaPrinter::visit(const IfThenElsePtr& v) {
   v->true_value()->accept(this);
   os() << " : ";
   v->false_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const BlockPtr& v) {
-  os() << "{" << '\n';
+  os() << '{' << '\n';
   indent_++;
 
   for (const StmtPtr& s : v->stmts()) {
@@ -475,15 +474,15 @@ void CudaPrinter::visit(const BlockPtr& v) {
 
   indent_--;
   emitIndent();
-  os() << "}";
+  os() << '}';
 }
 
 void CudaPrinter::visit(const LetPtr& v) {
   emitIndent();
   os() << dtypeToCppString(v->var()->dtype());
-  os() << " " << *v->var() << " = ";
+  os() << ' ' << *v->var() << " = ";
   v->value()->accept(this);
-  os() << ";" << '\n';
+  os() << ';' << '\n';
 }
 
 class PrioritizeLoad : public IRMutator {
@@ -911,7 +910,7 @@ void CudaCodeGen::Initialize() {
   // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
 #endif
-  os() << "void " << func_name << "(";
+  os() << "void " << func_name << '(';
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
@@ -932,7 +931,7 @@ void CudaCodeGen::Initialize() {
     rand_seed = alloc<Var>("rand_seed", kInt);
     rand_offset = alloc<Var>("rand_offset", kInt);
     std::string uint64_str = "unsigned long long";
-    os() << ", " << uint64_str << " " << *rand_seed << ", " << uint64_str << " "
+    os() << ", " << uint64_str << ' ' << *rand_seed << ", " << uint64_str << ' '
          << *rand_offset;
   }
   os() << ") {";
@@ -942,7 +941,7 @@ void CudaCodeGen::Initialize() {
     VarPtr idx = alloc<Var>("idx", kInt);
     os() << "int " << *idx << " = blockIdx.x*blockDim.x + threadIdx.x;" << '\n';
     VarPtr rand_func = printer_->rand_func();
-    os() << "Philox " << *rand_func << "(" << *rand_seed << ", " << *idx << ", "
+    os() << "Philox " << *rand_func << '(' << *rand_seed << ", " << *idx << ", "
          << *rand_offset << ");" << '\n';
     os() << '\n';
   }
@@ -969,7 +968,7 @@ void CudaCodeGen::Initialize() {
 
   stmt_v->accept(printer_.get());
   os() << '\n';
-  os() << "}";
+  os() << '}';
 
   // Check that all block extents had been set.
   const std::vector<ExprPtr>& gpu_block_extents =

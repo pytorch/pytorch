@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 #include <ATen/core/functional.h>
@@ -131,9 +130,9 @@ std::string sanitizeName(const std::string& input_name) {
     } else {
       if (i == 0) {
         // Don't start names with underscore
-        sanitized_name << "v";
+        sanitized_name << 'v';
       }
-      sanitized_name << "_";
+      sanitized_name << '_';
     }
   }
   return sanitized_name.str();

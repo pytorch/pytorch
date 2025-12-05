@@ -311,7 +311,7 @@ class _OnDiskCacheImpl(_CacheImpl):
 
         r_fp, w_fp, inserted = None, None, False
         try:
-            w_fp = open(fpath, "xb")
+            w_fp = open(fpath, "xb")  # noqa: SIM115
         except FileExistsError:
             is_stale: bool = False
             with open(fpath, "rb") as r_fp:
@@ -322,7 +322,7 @@ class _OnDiskCacheImpl(_CacheImpl):
                 # match so we choose to remove the old entry so that the new
                 # k/v pair can be cached
                 fpath.unlink()
-                w_fp = open(fpath, "xb")
+                w_fp = open(fpath, "xb")  # noqa: SIM115
             else:
                 w_fp = None
         finally:

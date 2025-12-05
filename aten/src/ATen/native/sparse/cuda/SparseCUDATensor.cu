@@ -33,7 +33,6 @@
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
-#include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
 namespace at::native {
@@ -89,7 +88,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  thrust::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  auto newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );

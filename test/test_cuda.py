@@ -5710,6 +5710,37 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.cuda.empty_cache()
+        pool1 = torch.cuda.MemPool()
+        pool2 = torch.cuda.MemPool()
+        pool3 = torch.cuda.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="cuda")
+            data.append(x)
+
+        with torch.cuda.use_mem_pool(pool1):
+            allocate_data()
+            with torch.cuda.use_mem_pool(pool2):
+                allocate_data()
+                with torch.cuda.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.cuda.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.cuda.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.cuda.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -5856,15 +5887,31 @@ class TestMemPool(TestCase):
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
+        torch.cuda.empty_cache()
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool = torch.cuda.MemPool(allocator.allocator())
 
-        # torch.cuda.MemPool doesn't work with expandable segments
-        with self.assertRaises(RuntimeError):
-            nelem_1mb = 1024 * 1024 // 4
-            with torch.cuda.use_mem_pool(pool):
-                out_0 = torch.randn(nelem_1mb, device="cuda")
+        data = []
+        nelem = 1024 * 1024 // 4
+        with torch.cuda.use_mem_pool(pool):
+            data.append(torch.empty(nelem, device="cuda"))
+
+        # the second allocation should be in expandable segment
+        data.append(torch.empty(nelem, device="cuda"))
+
+        segments = torch.cuda.memory.memory_snapshot()
+
+        num_expandable_segments = 0
+        for segment in segments:
+            if segment["is_expandable"]:
+                num_expandable_segments += 1
+
+        self.assertEqual(len(segments), 2, "Expected to have 2 segment")
+        self.assertEqual(
+            num_expandable_segments, 1, "Expected to have 1 expandable segment only"
+        )
+
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
     @serialTest()

@@ -45,12 +45,16 @@ def initial_seed() -> int:
     return default_generator.initial_seed()
 
 
+# LITERALINCLUDE START: OPENREG MANUAL SEED
 def manual_seed(seed: int) -> None:
     seed = int(seed)
 
     idx = current_device()
     default_generator = torch_openreg._C._get_default_generator(idx)
     default_generator.manual_seed(seed)
+
+
+# LITERALINCLUDE END: OPENREG MANUAL SEED
 
 
 def manual_seed_all(seed: int) -> None:

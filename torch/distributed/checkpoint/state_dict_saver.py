@@ -6,15 +6,12 @@ import warnings
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Optional, Union
+from typing import cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import STATE_DICT_TYPE
-from torch.distributed.checkpoint._async_executor import (  # noqa: TC001
-    _AsyncCheckpointExecutor,
-)
 from torch.distributed.checkpoint._async_process_executor import (
     _ProcessBasedAsyncCheckpointExecutor,
 )
@@ -36,6 +33,10 @@ from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
 from torch.distributed.distributed_c10d import _get_default_group
 
 from .utils import _api_bc_check, _DistWrapper, _profile
+
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
 
 
 __all__ = [

@@ -74,7 +74,7 @@ HingeEmbeddingLossImpl::HingeEmbeddingLossImpl(
 void HingeEmbeddingLossImpl::reset() {}
 
 void HingeEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ")";
+  stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ')';
 }
 
 Tensor HingeEmbeddingLossImpl::forward(
@@ -104,7 +104,7 @@ void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiMarginLoss(p=" << options.p()
          << ", margin=" << options.margin() << ", weight=" << options.weight()
          << ", reduction=" << enumtype::get_enum_name(options.reduction())
-         << ")";
+         << ')';
 }
 
 Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -126,7 +126,7 @@ CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
 void CosineEmbeddingLossImpl::reset() {}
 
 void CosineEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::CosineEmbeddingLoss(margin=" << options.margin() << ")";
+  stream << "torch::nn::CosineEmbeddingLoss(margin=" << options.margin() << ')';
 }
 
 Tensor CosineEmbeddingLossImpl::forward(
@@ -169,7 +169,7 @@ void TripletMarginLossImpl::reset() {}
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin()
          << ", p=" << options.p() << ", eps=" << options.eps() << std::boolalpha
-         << ", swap=" << options.swap() << ")";
+         << ", swap=" << options.swap() << ')';
 }
 
 Tensor TripletMarginLossImpl::forward(
@@ -199,7 +199,7 @@ void TripletMarginWithDistanceLossImpl::pretty_print(
     std::ostream& stream) const {
   stream << "torch::nn::TripletMarginWithDistanceLoss(margin="
          << options.margin() << std::boolalpha << ", swap=" << options.swap()
-         << ")";
+         << ')';
 }
 
 Tensor TripletMarginWithDistanceLossImpl::forward(

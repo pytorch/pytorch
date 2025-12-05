@@ -384,15 +384,14 @@ class SerializationMixin:
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
         i = 41
-        f2 = tempfile.NamedTemporaryFile(delete=False)
-        with tempfile.NamedTemporaryFile() as f1:
+        with TemporaryFileName() as tmp_file, tempfile.NamedTemporaryFile() as f1:
             pickle.dump(i, f1)
             torch.save(a, f1)
             f1.seek(0)
-            with gzip.open(f2.name, 'wb') as f_out:
+            with gzip.open(tmp_file, 'wb') as f_out:
                 shutil.copyfileobj(f1, f_out)
 
-            with gzip.open(f2.name, 'rb') as f:
+            with gzip.open(tmp_file, 'rb') as f:
                 j = pickle.load(f)
                 b = torch.load(f)
                 self.assertTrue(torch.equal(a, b))
@@ -4506,7 +4505,7 @@ class TestSerialization(TestCase, SerializationMixin):
             exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
             with self.assertRaisesRegex(
                 exc,
-                "Can't (get|pickle) local object (<function |')WeakValueDictionary.__init__.<locals>.remove"
+                r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)

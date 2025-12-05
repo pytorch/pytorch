@@ -7,7 +7,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
@@ -483,7 +483,6 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
-    @skipIfXpu
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)
     def test_fake_distributed_inductor(self):

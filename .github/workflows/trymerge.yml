@@ -45,6 +45,7 @@ jobs:
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          HUD_API_TOKEN: ${{ secrets.HUD_API_TOKEN }}
         run: |
           set -x
           if [ -n "${REBASE}" ]; then

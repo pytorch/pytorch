@@ -8525,6 +8525,30 @@ class TestNNDeviceType(NNTestCase):
         # reduce memory usage
         self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
+    @onlyCUDA
+    @largeTensorTest("24GB", "cpu")
+    @largeTensorTest("24GB", "cuda")
+    def test_large_max_pool_contig(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/167253
+        size = [74, 32, 24300, 40]
+        out_size = [74, 32, 24300, 20]
+        inp = torch.rand(size, device=device, dtype=torch.bfloat16, requires_grad=True)
+        inp_cpu = inp.detach().cpu()
+        inp_cpu.requires_grad = True
+        o = torch.nn.functional.max_pool2d(
+            inp, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o_cpu = torch.nn.functional.max_pool2d(
+            inp_cpu, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o.sum().backward()
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(o.sum(), o_cpu.sum())
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
+
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @skipIfRocmArch(MI300_ARCH)
@@ -12124,6 +12148,16 @@ class TestNNDeviceType(NNTestCase):
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
             # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
+
+    def test_softmax_bfloat16_half_to_float(self):
+        # half_to_float is only supported on MTIA
+        # Test meta tensors - both dtypes work for meta regardless of target device
+        for dtype in [torch.half, torch.bfloat16]:
+            x_meta = torch.randn(8, 16, device='meta', dtype=dtype)
+            result_meta = torch._softmax(x_meta, dim=1, half_to_float=True)
+            # Meta tensor result should also be float32
+            self.assertEqual(result_meta.dtype, torch.float32)
+            self.assertEqual(result_meta.shape, (8, 16))
 
     def test_nll_loss_1d_input_1d_target_invalid_size(self, device):
         x = torch.randn(10, device=device)

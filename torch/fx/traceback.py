@@ -38,6 +38,9 @@ current_meta: dict[str, Any] = {}
 current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
 
+GRADIENT_ACC_SPECIAL_STACK = (
+    "Gradient addition node due to multiple use of tensor around:"
+)
 # =============================================================================
 # FX Metadata Registry for Memory Profiler
 # =============================================================================
@@ -276,6 +279,8 @@ def annotate(annotation_dict: dict):
     This context manager allows you to insert arbitrary metadata into the PT2
     tracing system by updating the global `current_meta["custom"]` dictionary.
     The annotations are automatically reverted after the context exits.
+
+    Gradient accumulation nodes will not be annotated.
 
     This is intended for advanced users who need to attach additional metadata to the fx nodes
     (e.g., for debugging, analysis, or external tooling) during export tracing.

@@ -81,7 +81,6 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-        "test_broadcast_with_singleton_dims",
     ),
     TMA_XFAIL,
 )
@@ -168,8 +167,6 @@ class BlockDescriptorTestBase(InductorTestCase):
         self.assertEqual(len(code), expected_num_programs)
         count_code("@triton.jit", expected_num_triton_kernels)
         count_code(self.block_descriptor_constructor_str, expected_num_block_pointers)
-        # Verify that 1D shapes aren't being transposed for the TMA store.
-        count_code("tl.trans", 0)
 
         return result, code
 
@@ -246,9 +243,9 @@ class CommonTemplate:
     )
     def test_pointwise(
         self,
-        full_size: tuple[int],
-        view_size: tuple[int],
-        stride: Optional[tuple[int]],
+        full_size: tuple[int, ...],
+        view_size: tuple[int, ...],
+        stride: Optional[tuple[int, ...]],
         offset: Optional[int],
         require_block_ptr: bool,
         prefer_nd_tiling: bool,
@@ -298,7 +295,7 @@ class CommonTemplate:
         ],
     )
     def test_broadcast(
-        self, x_size: tuple[int], y_size: tuple[int], prefer_nd_tiling: bool
+        self, x_size: tuple[int, ...], y_size: tuple[int, ...], prefer_nd_tiling: bool
     ):
         """
         Test that we can generate strided block pointers when inputs have different
@@ -415,7 +412,7 @@ class CommonTemplate:
             ((5, 6, 1, 1), (5, 6, 4, 3)),
         ],
     )
-    def test_expand_broadcast(self, x_size: tuple[int], y_size: tuple[int]):
+    def test_expand_broadcast(self, x_size: tuple[int, ...], y_size: tuple[int, ...]):
         """
         When the load and store have different shapes, we should use broadcast.
         """
@@ -423,7 +420,7 @@ class CommonTemplate:
         def foo(x, y_size):
             return x.expand(y_size).clone()
 
-        def get_input(size: tuple[int]) -> torch.Tensor:
+        def get_input(size: tuple[int, ...]) -> torch.Tensor:
             device = torch.device(self.device)
             full = torch.randn(size).to(device)
             view = torch.as_strided(full, size, full.stride())
@@ -522,7 +519,7 @@ class CommonTemplate:
     )
     def test_reduction(
         self,
-        view_size: tuple[int],
+        view_size: tuple[int, ...],
         num_block_pointers: int,
         num_triton_kernels: int,
         prefer_nd_tiling: bool,
@@ -574,7 +571,10 @@ class CommonTemplate:
         ],
     )
     def test_mixed_pointwise_reduction(
-        self, view_size: tuple[int], num_block_pointers: int, num_triton_kernels: int
+        self,
+        view_size: tuple[int, ...],
+        num_block_pointers: int,
+        num_triton_kernels: int,
     ):
         """
         Tests mixing pointwise with reduction ops.
@@ -657,7 +657,6 @@ class CommonTemplate:
             (False, 0),  # We can't infer that the load is a power of 2.
         ],
     )
-    @skipIfXpu(msg="Remove this after Intel triton issue #4000 resolved.")
     def test_dynamic_shapes_reduction(self, with_tiling: bool, num_block_pointers: int):
         """
         Test a reduction kernel with dynamic shapes.
@@ -745,8 +744,8 @@ class CommonTemplate:
     )
     def test_nd_tiling_odd_shapes_pointwise(
         self,
-        full_size: tuple[int],
-        view_size: tuple[int],
+        full_size: tuple[int, ...],
+        view_size: tuple[int, ...],
         num_block_pointers: int,
         num_tiles: int,
     ):
@@ -795,7 +794,7 @@ class CommonTemplate:
     )
     def test_2d_reduction_odd_shapes(
         self,
-        view_size: tuple[int],
+        view_size: tuple[int, ...],
         num_block_pointers: int,
         num_triton_kernels: int,
         reduction_op: Callable,
@@ -830,7 +829,7 @@ class CommonTemplate:
     )
     def test_2d_welford_reduction(
         self,
-        size: tuple[int],
+        size: tuple[int, ...],
         expected_num_block_pointers: int,
         expected_num_triton_kernels: int,
         expect_fallback: bool,
@@ -906,7 +905,10 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
-    @xfail_if_use_tensor_descriptor  # Cannot use TMA API for store with no x dimension.
+    @skipIfXpu(
+        msg="AssertionError: Scalars are not equal!, "
+        "https://github.com/intel/torch-xpu-ops/issues/2332"
+    )
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
@@ -1017,7 +1019,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
-    @xfail_if_use_tensor_descriptor
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
@@ -1236,7 +1237,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @xfail_if_use_tensor_descriptor
     @skipIfXpu(
         msg="Triton issue exposed by new driver, will be resolved after next triton update."
     )
@@ -1406,9 +1406,50 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
+@instantiate_parametrized_tests
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
+    @parametrize(
+        "view_size,permute_order,num_tensor_descriptors,expect_transpose",
+        [
+            ((128,), (0,), 3, False),
+            ((128, 128), (0, 1), 3, False),
+            ((128, 64), (1, 0), 3, True),
+            ((256, 32, 16), (2, 0, 1), 3, True),
+            ((16, 32, 256), (2, 0, 1), 3, True),
+        ],
+    )
+    def test_match_with_transpose(
+        self,
+        view_size: tuple[int],
+        permute_order: tuple[int],
+        num_tensor_descriptors: int,
+        expect_transpose: bool,
+    ):
+        a = self._discontiguous_tensor(view_size, self.device)
+        pre_permute_size = [1] * len(view_size)
+        for i, value in zip(permute_order, view_size):
+            pre_permute_size[i] = value
+        b = self._discontiguous_tensor(pre_permute_size, self.device)
+        b = b.permute(permute_order)
+
+        def fn(a, b):
+            return a * b
+
+        result, (code,) = self._run_and_compare(
+            fn,
+            a,
+            b,
+            expected_num_block_pointers=num_tensor_descriptors,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        transpose_count = code.count("tl.trans")
+        self.assertEqual(transpose_count, 1 if expect_transpose else 0)
 
 
 test_torchinductor.copy_tests(

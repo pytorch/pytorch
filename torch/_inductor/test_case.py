@@ -32,7 +32,10 @@ class TestCase(DynamoTestCase):
             )
         )
 
-        if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+        if (
+            "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ
+            and "TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT" not in os.environ
+        ):
             self._inductor_test_stack.enter_context(
                 config.patch({"fx_graph_cache": True})
             )
