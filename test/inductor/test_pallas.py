@@ -847,12 +847,12 @@ class PallasTestsTPU(PallasTestsMixin, TestCase):
             )
 
 
-if test_torchinductor.HAS_CPU and HAS_PALLAS:
+if test_torchinductor.RUN_CPU and HAS_PALLAS:
     make_pallas(test_torchinductor.SweepInputsCpuTest)
     make_pallas(test_torchinductor.CpuTests)
 
 
-if test_torchinductor.HAS_GPU and HAS_PALLAS:
+if test_torchinductor.RUN_GPU and HAS_PALLAS:
     # make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
     pass

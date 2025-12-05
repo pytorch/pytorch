@@ -1319,7 +1319,7 @@ class PallasKernel(SIMDKernel):
                         pw_vars = [
                             var
                             for var, entry in self.range_tree_nodes.items()
-                            if not var.is_reduction()
+                            if not entry.prefix.startswith("r")
                         ]
                         if pw_vars:
                             pw_var = pw_vars[0]
