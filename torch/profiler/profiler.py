@@ -965,16 +965,18 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
             try:
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)  # noqa:SIM115
+                with tempfile.NamedTemporaryFile(
+                    "w+t", suffix=".et.json", delete=False
+                ) as fp:
+                    filename = fp.name
             except Exception as e:
                 warn(
                     f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
                     stacklevel=2,
                 )
                 return None
-            fp.close()
             et = ExecutionTraceObserver()
-            et.register_callback(fp.name)
+            et.register_callback(filename)
             # additionally, check if the env requires us to collect extra resources
             if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS", "0") == "1":
                 et.set_extra_resource_collection(True)
