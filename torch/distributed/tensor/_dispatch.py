@@ -561,9 +561,35 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert compute_mesh is not None, (
-            f"found no DeviceMesh from dtensor args for {op_call}!"
-        )
+        if compute_mesh is None:
+            # Check if the operator is not registered and if args contain DTensors in nested structures
+            if runtime_schema_info is None:
+                # Try to detect if there are DTensors hidden in list/tuple args
+                for arg in args_list:
+                    if isinstance(arg, (list, tuple)) and any(
+                        isinstance(x, dtensor.DTensor) for x in arg
+                    ):
+                        raise RuntimeError(
+                            f"Operator {op_call} is not registered for DTensor. "
+                            f"The operator takes a list/tuple of DTensors as input, but no sharding "
+                            f"strategy has been registered. Please register a sharding strategy with "
+                            f"`needs_pytree=True` in RuntimeSchemaInfo. "
+                            f"See torch/distributed/tensor/_ops/_math_ops.py::foreach_max_strategy for an example."
+                        )
+                # Also check the original args before any flattening
+                for arg in args:
+                    if isinstance(arg, (list, tuple)) and any(
+                        isinstance(x, dtensor.DTensor) for x in arg
+                    ):
+                        raise RuntimeError(
+                            f"Operator {op_call} is not registered for DTensor. "
+                            f"The operator takes a list/tuple of DTensors as input, but no sharding "
+                            f"strategy has been registered. Please register a sharding strategy with "
+                            f"`needs_pytree=True` in RuntimeSchemaInfo. "
+                            f"See torch/distributed/tensor/_ops/_math_ops.py::foreach_max_strategy for an example."
+                        )
+
+            raise RuntimeError(f"found no DeviceMesh from dtensor args for {op_call}!")
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
