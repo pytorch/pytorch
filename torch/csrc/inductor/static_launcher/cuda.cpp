@@ -123,7 +123,7 @@ CUfunction loadKernel(
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
       &shared_optin,
-      hipDeviceAttributeSharedMemPerBlockOptin,
+      hipDeviceAttributeMaxSharedMemoryPerBlock,
       device));
 
 #else
