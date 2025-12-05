@@ -5654,18 +5654,21 @@ def _avg_poolnd(
         else contextlib.nullcontext()
     )
 
+    device = x.get_device()
+    assert device is not None
+
     with context:
         rv = Reduction.create(
             reduction_type="sum",
             input_node=x,
-            device=x.get_device(),
+            device=device,
             dst_dtype=output_dtype,
             src_dtype=dtype,
             inner_fn=fn_inner,
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
-    if isinstance(rv.data.data, Reduction):
+    if hasattr(rv.data, "data") and isinstance(rv.data.data, Reduction):
         # Only realize if reduction isn't unrolled
         rv.realize()
 
