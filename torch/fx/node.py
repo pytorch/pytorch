@@ -5,7 +5,7 @@ import logging
 import operator
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -28,36 +28,35 @@ __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
 log = logging.getLogger(__name__)
 
-BaseArgumentTypes = Union[
-    str,
-    int,
-    float,
-    bool,
-    complex,
-    torch.dtype,
-    torch.Tensor,
-    torch.device,
-    torch.memory_format,
-    torch.layout,
-    torch._ops.OpOverload,
-    torch.SymInt,
-    torch.SymBool,
-    torch.SymFloat,
-]
-base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
+BaseArgumentTypes = (
+    str
+    | int
+    | float
+    | bool
+    | complex
+    | torch.dtype
+    | torch.Tensor
+    | torch.device
+    | torch.memory_format
+    | torch.layout
+    | torch._ops.OpOverload
+    | torch.SymInt
+    | torch.SymBool
+    | torch.SymFloat
+)
+base_types = BaseArgumentTypes.__args__  # pyrefly: ignore [missing-attribute]
 
-Target: TypeAlias = Union[Callable[..., Any], str]
+Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[
-    Union[
-        tuple["Argument", ...],
-        Sequence["Argument"],
-        Mapping[str, "Argument"],
-        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-        range,
-        "Node",
-        BaseArgumentTypes,
-    ]
+Argument = Union[
+    tuple["Argument", ...],
+    Sequence["Argument"],
+    Mapping[str, "Argument"],
+    slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
+    "Node",
+    BaseArgumentTypes,
+    None,
 ]
 # pyrefly: ignore [invalid-annotation]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
@@ -267,7 +266,7 @@ class Node(_NodeBase):
     op: str
     # for method/module/function, the name of the method/module/function/attr
     # being invoked, e.g add, layer1, or torch.add
-    target: "Target"
+    target: Target
     # All `Node`-valued inputs. Key is the Node, value is don't-care.
     # The public API for this is `all_input_nodes`, this private attribute
     # should not be accessed directly.
@@ -287,10 +286,10 @@ class Node(_NodeBase):
     # generated function return type. (Note this is a special case. ``return``
     # does not produce a value, it's more of a notation. Thus, this value
     # describes the type of args[0] in the ``return`` node.
-    type: Optional[Any]
+    type: Any | None
     _sort_key: Any
     # If set, use this fn to print this node
-    _repr_fn: Optional[Callable[["Node"], str]]
+    _repr_fn: Callable[["Node"], str] | None
     # Dictionary to store metadata passes need to do their
     # transformations. This metadata is preserved across node copies
     meta: dict[str, Any]
@@ -301,10 +300,10 @@ class Node(_NodeBase):
         graph: "Graph",
         name: str,
         op: str,
-        target: "Target",
+        target: Target,
         args: tuple["Argument", ...],
         kwargs: dict[str, "Argument"],
-        return_type: Optional[Any] = None,
+        return_type: Any | None = None,
     ) -> None:
         """
         Instantiate an instance of ``Node``. Note: most often, you want to use the
@@ -537,7 +536,7 @@ class Node(_NodeBase):
         self.kwargs = {**self.kwargs, key: arg}
 
     @property
-    def stack_trace(self) -> Optional[str]:
+    def stack_trace(self) -> str | None:
         """
         Return the Python stack trace that was recorded during tracing, if any.
         When traced with fx.Tracer, this property is usually populated by
@@ -551,7 +550,7 @@ class Node(_NodeBase):
         return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
-    def stack_trace(self, trace: Optional[str]) -> None:
+    def stack_trace(self, trace: str | None) -> None:
         self.meta["stack_trace"] = trace
 
     def __repr__(self) -> str:
@@ -587,11 +586,11 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def format_node(
         self,
-        placeholder_names: Optional[list[str]] = None,
-        maybe_return_typename: Optional[list[str]] = None,
+        placeholder_names: list[str] | None = None,
+        maybe_return_typename: list[str] | None = None,
         *,
         include_tensor_metadata: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Return a descriptive string representation of ``self``.
 
@@ -682,7 +681,7 @@ class Node(_NodeBase):
     def replace_all_uses_with(
         self,
         replace_with: "Node",
-        delete_user_cb: Optional[Callable[["Node"], bool]] = None,
+        delete_user_cb: Callable[["Node"], bool] | None = None,
         *,
         propagate_meta: bool = False,
     ) -> list["Node"]:
@@ -773,10 +772,10 @@ class Node(_NodeBase):
     def normalized_arguments(
         self,
         root: torch.nn.Module,
-        arg_types: Optional[tuple[Any]] = None,
-        kwarg_types: Optional[dict[str, Any]] = None,
+        arg_types: tuple[Any] | None = None,
+        kwarg_types: dict[str, Any] | None = None,
         normalize_to_only_use_kwargs: bool = False,
-    ) -> Optional[ArgsKwargsPair]:
+    ) -> ArgsKwargsPair | None:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's
