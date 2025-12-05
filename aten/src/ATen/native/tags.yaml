@@ -86,10 +86,6 @@
   desc: |
           Reduction operations aggregate tensor elements along one or more dimensions,
           producing an output with fewer dimensions.
-- tag: view
-  desc: |
-          This tag indicates that the operator creates a pure view/alias Tensor and has an explicit
-          derivative formula in derivates.yaml.
 - tag: maybe_aliasing_or_mutating
   desc: |
           For some ops, we can't statically determine whether the op is functional or not. Note that this is only
