@@ -35,7 +35,7 @@ from .common import (
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import TritonKernel, TritonScheduling
+from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
