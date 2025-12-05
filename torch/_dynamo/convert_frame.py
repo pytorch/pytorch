@@ -1903,6 +1903,13 @@ def _compile(
                     else _get_error_on_graph_break()
                 )
 
+            if tracer_output.output_graph is not None:
+                nodes = tracer_output.output_graph.graph.nodes
+                for node in nodes:
+                    if "example_value" in node.meta:
+                        del node.meta["example_value"]
+                gc.collect()
+import gc
 
 class ConvertFrame:
     def __init__(
