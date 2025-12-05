@@ -696,7 +696,7 @@ def register_addmm_activation_fusions():
         if torch.version.hip:
             return False
 
-        if config.max_autotune_gemm:
+        if config.max_autotune or config.max_autotune_gemm:
             return False
 
         inp = match.kwargs["inp"].meta["val"]

@@ -22,6 +22,7 @@ from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.distributed.tensor import DTensor, Replicate
 from torch.fx._graph_pickler import GraphPickler
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -267,6 +268,17 @@ def _subprocess_aot_compile_module():
                 expected = mod(*eager_inputs)
                 actual = model(*eager_inputs)
                 assert torch.allclose(expected, actual)
+
+
+class RedistributeModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(32, 32)
+
+    def forward(self, x, d_x, mesh):
+        x = self.linear(x)
+        y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
+        return x, y
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
@@ -779,6 +791,36 @@ from user code:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*test_inputs)
             self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
+            self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_redistribute(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=4
+        )
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+        input_tensor = torch.randn(32, 32, device="cpu")
+        placements = (Replicate(), Replicate())
+        d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
+        mod = RedistributeModel()
+
+        compiled_fn = torch.compile(
+            mod,
+            fullgraph=True,
+        ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
+        inputs = (input_tensor, d_input_tensor, mesh)
+        expected = mod(*inputs)
+        actual = compiled_fn(mod, *inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(mod, *inputs)
             self.assertEqual(expected, actual)
 
     def test_aot_compile_with_checkpoint(self):

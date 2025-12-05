@@ -246,7 +246,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         with config.patch(compile_threads=1):
             fn(*inputs)
 
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)  # noqa: SIM115
         fp.close()
 
         with torch.profiler.profile(
