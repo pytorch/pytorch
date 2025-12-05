@@ -18,8 +18,7 @@ Tensor my_contiguous_memory_format(
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def("my_contiguous(Tensor self) -> Tensor");
-  m.def(
-      "my_contiguous_memory_format(Tensor self, MemoryFormat memory_format) -> Tensor");
+  m.def("my_contiguous_memory_format(Tensor self, MemoryFormat memory_format) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_10, CompositeExplicitAutograd, m) {

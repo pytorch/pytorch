@@ -64,8 +64,11 @@ inline torch::stable::Tensor narrow(
   return torch::stable::Tensor(ret0);
 }
 
+#if TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 // We expect this to be a stable version of the new_empty op that takes in
 // only dtype information.
+// This is gated to < 2.10 to avoid ambiguity with the full new_empty overload
+// in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
@@ -105,6 +108,8 @@ inline torch::stable::Tensor new_empty(
 
 // We expect this to be a stable version of the new_zeros op that takes in
 // only dtype information.
+// This is gated to < 2.10 to avoid ambiguity with the full new_zeros overload
+// in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_zeros(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
@@ -141,6 +146,7 @@ inline torch::stable::Tensor new_zeros(
 
   return torch::stable::Tensor(ath);
 }
+#endif // TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 
 // We expect this to be the stable version of the pad.default op.
 // pad.default takes in a SymInt[] as the pad argument however pad is typed as
@@ -471,6 +477,56 @@ inline torch::stable::Tensor contiguous(
       torch::stable::detail::from(memory_format)};
   TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::contiguous", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the new_empty op with all kwargs.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for Device, HeaderOnlyArrayRef, Layout which are only available
+// in 2.10. In versions < 2.10, a simpler new_empty overload that only takes
+// dtype is available instead.
+inline torch::stable::Tensor new_empty(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::new_empty", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the new_zeros op with all kwargs.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for Device, HeaderOnlyArrayRef, Layout which are only available
+// in 2.10. In versions < 2.10, a simpler new_zeros overload that only takes
+// dtype is available instead.
+inline torch::stable::Tensor new_zeros(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::new_zeros", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
