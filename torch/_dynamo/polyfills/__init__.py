@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         pytree as pytree,
         struct as struct,
         sys as sys,
+        torch_c_nn as torch_c_nn,
     )
 
 from torch.overrides import BaseTorchFunctionMode
