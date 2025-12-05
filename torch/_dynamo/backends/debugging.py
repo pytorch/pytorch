@@ -249,9 +249,21 @@ def aot_eager(
 
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
-aot_eager_default_partitioner = aot_autograd(
-    fw_compiler=boxed_nop, keep_inference_input_mutations=True
-)
+
+def aot_eager_default_partitioner(
+    gm: torch.fx.GraphModule,
+    fake_tensor_inputs: list[torch.Tensor],
+    fw_compiler: Optional[Callable[..., Any]] = None,
+    bw_compiler: Optional[Callable[..., Any]] = None,
+    **kwargs: Any,
+) -> Callable[..., Any]:
+    return aot_autograd(
+        fw_compiler=fw_compiler or boxed_nop,
+        bw_compiler=bw_compiler or boxed_nop,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs, **kwargs)
+
+
 register_backend(
     name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
 )

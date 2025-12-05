@@ -984,8 +984,10 @@ def _extract_fwd_bwd_modules(
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes
-        + saved_values
+        # The ordering here should match the ordering of the output
+        # of fwd_graph
+        saved_values
+        + saved_sym_nodes
         + tangent_inputs
         + bwd_seed_offset_inputs
         + backward_state_inputs,

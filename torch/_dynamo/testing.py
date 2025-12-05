@@ -30,7 +30,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
-from torch._dynamo.backends.debugging import aot_eager
+from torch._dynamo.backends.debugging import aot_eager, aot_eager_default_partitioner
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -295,10 +295,11 @@ class EagerAndRecordGraphs:
 
 
 class AotEagerAndRecordGraphs:
-    def __init__(self) -> None:
+    def __init__(self, partitioner: str | None = None) -> None:
         self.graphs: list[torch.fx.GraphModule] = []
         self.fw_graphs: list[torch.fx.GraphModule] = []
         self.bw_graphs: list[torch.fx.GraphModule] = []
+        self.partitioner = partitioner
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -317,12 +318,22 @@ class AotEagerAndRecordGraphs:
             self.bw_graphs.append(gm)
             return gm.forward
 
-        return aot_eager(
-            gm,
-            example_inputs,
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-        )
+        if self.partitioner is None:
+            return aot_eager(
+                gm,
+                example_inputs,
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+            )
+        elif self.partitioner == "default":
+            return aot_eager_default_partitioner(
+                gm,
+                example_inputs,
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
+            )
+        else:
+            raise NotImplementedError(f"Unknown partitioner: {self.partitioner}")
 
 
 class InductorAndRecordGraphs:

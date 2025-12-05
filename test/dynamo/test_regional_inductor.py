@@ -552,6 +552,36 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
 
+    def test_regional_inductor_unbacked_expr(self):
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return x + 1
+
+        def fn(c):
+            d = torch.concat([c, c], dim=0)
+            d = gn(d)
+            return d
+
+        c = torch.randn((64, 32), requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        ref = fn(c)
+
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs(partitioner="default")
+        res = torch.compile(fn, backend=backend, fullgraph=True)(c)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        fw_graph = backend.fw_graphs[0]
+        bw_graph = backend.bw_graphs[0]
+        output_node = fw_graph.graph.output_node()
+        fw_graph_outputs = [n.name for n in output_node.args[0]]
+        bw_graph_inputs = [
+            n.name for n in bw_graph.graph.nodes if n.op == "placeholder"
+        ]
+        # ['getitem_4', 'primals_1', 'ge_1'] the orders should match
+        self.assertEqual(fw_graph_outputs[1:], bw_graph_inputs[0:3])
+        self.assertEqual(ref, res)
+
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
