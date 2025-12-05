@@ -399,7 +399,7 @@ class OverlapScheduler:
 
         domination_index = self.compute_index_domination[start_node]
 
-        # If off-path, assume it doesn't increase memory
+        # If off-path, assume it doesn't increase memory (conservative - revisit if needed)
         if domination_index == sys.maxsize:
             return False
 
@@ -662,6 +662,11 @@ class OverlapScheduler:
                 self._force_oldest_wait()
                 continue
 
+            # When memory is high but no in-flight to force, prioritize scheduling
+            # any ready wait nodes to reduce memory pressure
+            if self._memory_over_budget() and self._schedule_any_ready_wait():
+                continue
+
             _, node = heapq.heappop(self.ready)
 
             # we don't always remove nodes from the heap when we schedule them
@@ -686,6 +691,29 @@ class OverlapScheduler:
             self._add_effect_tokens_for_overlap()
 
         return self.gm
+
+    def _memory_over_budget(self) -> bool:
+        """Check if current memory exceeds allowed peak."""
+        return self.memory_tracker.current_memory_bytes > self.allowed_peak_memory_bytes
+
+    def _schedule_any_ready_wait(self) -> bool:
+        """Try to schedule any ready wait node to reduce memory. Returns True if scheduled."""
+        # Look through ready heap for any wait node that's ready
+        for i, (score, node) in enumerate(self.ready):
+            if node in self.scheduled:
+                continue
+            if _schedulable_wait_node(node):
+                # Check all dependencies are scheduled
+                if all(n in self.scheduled for n in node.all_input_nodes):
+                    # Remove from heap and schedule
+                    self.ready.pop(i)
+                    heapq.heapify(self.ready)
+                    self._handle_wait(node)
+                    if not hasattr(self, '_prioritized_wait_count'):
+                        self._prioritized_wait_count = 0
+                    self._prioritized_wait_count += 1
+                    return True
+        return False
 
     def _add_effect_tokens_for_overlap(self) -> None:
         """
@@ -855,9 +883,27 @@ class OverlapScheduler:
     def _should_force_wait_for_memory(self) -> bool:
         """Check if we need to force a wait due to memory pressure"""
         if not self.in_flight:
+            # Track when we can't force wait due to no in-flight
+            current_mem = self.memory_tracker.current_memory_bytes
+            if current_mem > self.allowed_peak_memory_bytes:
+                if not hasattr(self, '_no_in_flight_skip_count'):
+                    self._no_in_flight_skip_count = 0
+                self._no_in_flight_skip_count += 1
             return False
 
-        return self.in_flight_bytes >= self.max_in_flight_bytes
+        # Check in-flight limit (for CUDA allocator fragmentation)
+        if self.in_flight_bytes >= self.max_in_flight_bytes:
+            return True
+
+        # Also check if current tracked memory exceeds allowed peak
+        current_mem = self.memory_tracker.current_memory_bytes
+        if current_mem > self.allowed_peak_memory_bytes:
+            if not hasattr(self, '_force_wait_count'):
+                self._force_wait_count = 0
+            self._force_wait_count += 1
+            return True
+
+        return False
 
     def _force_oldest_wait(self) -> None:
         """Schedule the oldest in flight wait"""
@@ -952,12 +998,12 @@ class OverlapScheduler:
             candidates.append(collective)
 
         # Sort candidates prioritizing:
-        # 1. reduce_scatter operations (reduce memory pressure)
+        # 1. Off-path collectives first (reduce_scatter outputs that don't block compute)
         # 2. Earlier domination index
         # 3. Original order for stability
         candidates.sort(
             key=lambda n: (
-                not is_reduce_scatter(n),  # reduce_scatter first
+                not self.off_compute_path(n),  # off-path first (they reduce memory)
                 self.compute_index_domination[n],
                 self.node_idx[n],
             ),
@@ -1171,6 +1217,13 @@ class OverlapScheduler:
         counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
         counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
 
+        # Debug: print memory budget info
+        print(f"[overlap_scheduling] Memory budget: allowed_peak={self.allowed_peak_memory_bytes / 1024**3:.2f} GB")
+        print(f"[overlap_scheduling] Memory budget: max_in_flight={self.max_in_flight_bytes / 1024**3:.2f} GB")
+        print(f"[overlap_scheduling] Force wait count: {getattr(self, '_force_wait_count', 0)}")
+        print(f"[overlap_scheduling] No in-flight skip count: {getattr(self, '_no_in_flight_skip_count', 0)}")
+        print(f"[overlap_scheduling] Prioritized wait count: {getattr(self, '_prioritized_wait_count', 0)}")
+
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
             "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
@@ -1291,3 +1344,38 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
     ).run()
+
+
+def schedule_overlap_bucketing_from_inductor_configs(
+    gm: torch.fx.GraphModule,
+) -> torch.fx.GraphModule:
+    """Schedule nodes to maximize compute-collective overlap using inductor configs.
+
+    Reads configuration from torch._inductor.config.aten_distributed_optimizations
+    and calls schedule_overlap_bucketing with those settings.
+    """
+    from torch._inductor import config
+
+    dist_opts = config.aten_distributed_optimizations
+
+    # by default, insert overlap deps within inductor
+    kwargs: dict[str, object] = {"insert_overlap_deps": True}
+
+    config_keys = (
+        "collective_bucketing",
+        "max_compute_pre_fetch",
+        "custom_runtime_estimation",
+        "insert_overlap_deps",
+        "collective_estimator",
+        "max_memory_increase_gb",
+        "max_memory_increase_ratio",
+        "compute_overlap_multipler",
+        "max_in_flight_gb",
+        "max_coll_distance",
+    )
+    for key in config_keys:
+        if (val := getattr(dist_opts, key, None)) is not None:
+            kwargs[key] = val
+
+    return schedule_overlap_bucketing(gm, **kwargs)  # type: ignore[arg-type]
+
