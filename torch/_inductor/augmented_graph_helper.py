@@ -80,10 +80,17 @@ class AugmentedGraphHelper:
         """
         deps: OrderedSet[fx.Node] = OrderedSet()
 
+        # Handle nodes not in merge_sets (e.g., erased nodes)
+        if node not in self.merge_sets:
+            return deps
+
         # For each node in the merge set
         for merged_node in self.merge_sets[node]:
             # Add direct dependencies from all_input_nodes
-            deps.update(merged_node.all_input_nodes)
+            # Filter to only include nodes that are still valid in merge_sets
+            for input_node in merged_node.all_input_nodes:
+                if input_node in self.merge_sets:
+                    deps.add(input_node)
             # Add extra dependencies
             deps.update(self.extra_deps[merged_node])
 
@@ -168,6 +175,49 @@ class AugmentedGraphHelper:
             self.extra_deps[old_node].clear()
             self.extra_uses[old_node].clear()
             del self.merge_sets[old_node]
+
+    def fixup_replaced_nodes(self, replaced: dict[fx.Node, fx.Node]) -> None:
+        """Fixup extra_deps and extra_uses after nodes have been replaced."""
+        if not replaced:
+            return
+
+        def resolve(node: fx.Node) -> fx.Node:
+            """Follow replacement chain to get final node."""
+            visited = set()
+            while node in replaced and node not in visited:
+                visited.add(node)
+                node = replaced[node]
+            return node
+
+        # Fixup extra_deps
+        new_extra_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node, deps in self.extra_deps.items():
+            resolved_node = resolve(node)
+            for dep in deps:
+                resolved_dep = resolve(dep)
+                new_extra_deps[resolved_node].add(resolved_dep)
+        self.extra_deps = new_extra_deps
+
+        # Fixup extra_uses
+        new_extra_uses: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node, uses in self.extra_uses.items():
+            resolved_node = resolve(node)
+            for use in uses:
+                resolved_use = resolve(use)
+                new_extra_uses[resolved_node].add(resolved_use)
+        self.extra_uses = new_extra_uses
+
+        # Fixup merge_sets - remove stale nodes, add resolved ones
+        nodes_to_remove = []
+        for node in self.merge_sets:
+            if node in replaced:
+                nodes_to_remove.append(node)
+
+        for node in nodes_to_remove:
+            resolved = resolve(node)
+            if resolved not in self.merge_sets:
+                self.merge_sets[resolved] = OrderedSet([resolved])
+            del self.merge_sets[node]
 
     def get_all_extra_deps(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """
