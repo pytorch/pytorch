@@ -12,7 +12,6 @@
 
 namespace c10::openreg {
 
-// LITERALINCLUDE START: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = c10::DeviceType::PrivateUse1;
 
@@ -22,13 +21,13 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     TORCH_CHECK(t == static_type, "OpenRegGuardImpl initialized with non-PrivateUse1 DeviceType: ", t);
   }
 
+  // LITERALINCLUDE START: OPENREG ALL DEVICE GUARD IMPL
   /**
    * Return the type of device managed by this guard implementation.
    */
   DeviceType type() const override {
     return static_type;
   }
-
   /**
    * Set the current device to device d, and return the previous Device.
    */
@@ -65,7 +64,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     set_device(d.index());
   }
-// LITERALINCLUDE END: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 
   /**
    * Set the current device to device d, without checking for errors
@@ -75,6 +73,27 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(d.index());
   }
 
+  /**
+   * Get the number of devices.
+   *
+   * WARNING: This is REQUIRED to not raise an exception.
+   * If there is some sort of problem, e.g., driver error,
+   * you should report that there are zero available devices.
+   */
+  DeviceIndex deviceCount() const noexcept override {
+    return device_count();
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work has
+   * completed running on the device.
+   */
+  void synchronizeDevice(const DeviceIndex device_index) const override {
+    OPENREG_CHECK(orDeviceSynchronize());
+  }
+  // LITERALINCLUDE END: OPENREG ALL DEVICE GUARD IMPL
+
+  // LITERALINCLUDE START: OPENREG ALL STREAM GUARD IMPL
   /**
    * Get the current stream for a given device.
    */
@@ -118,16 +137,25 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   /**
-   * Get the number of devices.
-   *
-   * WARNING: This is REQUIRED to not raise an exception.
-   * If there is some sort of problem, e.g., driver error,
-   * you should report that there are zero available devices.
+   * Return true if all the work previously enqueued on the stream for
+   * asynchronous execution has completed running on the device.
    */
-  DeviceIndex deviceCount() const noexcept override {
-    return device_count();
+  bool queryStream(const Stream& stream) const override {
+    OpenRegStream or_stream{stream};
+    return or_stream.query();
   }
 
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the stream has completed running on the device.
+   */
+  void synchronizeStream(const Stream& stream) const override {
+    OpenRegStream or_stream{stream};
+    or_stream.synchronize();
+  }
+  // LITERALINCLUDE END: OPENREG ALL STREAM GUARD IMPL
+
+  // LITERALINCLUDE START: OPENREG ALL EVENT GUARD IMPL
   /**
    * Destroys the given event.
    */
@@ -223,24 +251,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   /**
-   * Return true if all the work previously enqueued on the stream for
-   * asynchronous execution has completed running on the device.
-   */
-  bool queryStream(const Stream& stream) const override {
-    OpenRegStream or_stream{stream};
-    return or_stream.query();
-  }
-
-  /**
-   * Wait (by blocking the calling thread) until all the work previously
-   * enqueued on the stream has completed running on the device.
-   */
-  void synchronizeStream(const Stream& stream) const override {
-    OpenRegStream or_stream{stream};
-    or_stream.synchronize();
-  }
-
-  /**
    * Wait (by blocking the calling thread) until all the work previously
    * recorded on the event has completed running on the device.
    */
@@ -250,14 +260,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     orEvent_t or_event = static_cast<orEvent_t>(event);
     OPENREG_CHECK(orEventSynchronize(or_event));
-  }
-
-  /**
-   * Wait (by blocking the calling thread) until all the work has
-   * completed running on the device.
-   */
-  void synchronizeDevice(const DeviceIndex device_index) const override {
-    OPENREG_CHECK(orDeviceSynchronize());
   }
 
   /**
@@ -277,6 +279,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     return static_cast<double>(time_ms);
   }
+  // LITERALINCLUDE END: OPENREG ALL EVENT GUARD IMPL
 };
 
 } // namespace c10::openreg
