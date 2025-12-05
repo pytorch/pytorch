@@ -92,6 +92,16 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install_through_forge libstdcxx-ng=14
   fi
 
+  # NS: Workaround for https://github.com/pytorch/pytorch/issues/169586
+  # Downgrade cpython to 3.14.0
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
+    if [[ "$PYTHON_FREETHREADED" == "1" ]]; then
+      conda_install python-freethreading==3.14.0
+    else
+      conda_install python==3.14.0
+    fi
+  fi
+
   if [[ "$ANACONDA_PYTHON_VERSION" == "3.13" ]] && [[ "$PYTHON_FREETHREADED" == "1" ]]; then
     # needed for the 3.13t build to build lxml from source
     conda_install_through_forge libxslt libxml2-devel
