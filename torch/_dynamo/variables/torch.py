@@ -1884,7 +1884,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
             # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
-            raise RuntimeError("unreachable")
+            raise RuntimeError("unreachable")  # noqa: B904
 
         assert flat_apply.out_spec is not None
         out_spec_vt = VariableTracker.build(tx, flat_apply.out_spec)
