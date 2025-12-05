@@ -1503,21 +1503,25 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn in (float, complex) and len(args) == 1:
-            if (self.fn is float and name in ("fromhex", "hex")) or (
-                name == "from_number" and sys.version_info >= (3, 14)
-            ):
-                if isinstance(args[0], ConstantVariable):
-                    try:
-                        fn = getattr(self.fn, name)
-                        res = fn(args[0].as_python_constant())
-                        return variables.ConstantVariable.create(res)
-                    except (OverflowError, ValueError) as e:
-                        raise_observed_exception(
-                            type(e),
-                            tx,
-                            args=list(map(ConstantVariable.create, e.args)),
-                        )
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
+            if isinstance(args[0], ConstantVariable):
+                try:
+                    fn = getattr(self.fn, name)
+                    res = fn(args[0].as_python_constant())
+                    return variables.ConstantVariable.create(res)
+                except (OverflowError, ValueError) as e:
+                    raise_observed_exception(
+                        type(e),
+                        tx,
+                        args=list(map(ConstantVariable.create, e.args)),
+                    )
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
