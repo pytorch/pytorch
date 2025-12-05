@@ -140,3 +140,7 @@ def fn(x):
 
 print(fn(torch.ones(3, 3)))
 ```
+
+If you do not need to run the printing or logging function, then consider using
+`torch.compiler.is_compiling()` or `torch._dyanmo.config.ignore_logging_functions` to skip the function
+entirely. See [this page for more details](programming_model.fullgraph_true.skipping_functions).
