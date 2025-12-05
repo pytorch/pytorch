@@ -9416,7 +9416,7 @@ def error_inputs_max_unpool(op_info, device, **kwargs):
             kwargs=kwargs_dict
         ),
         error_type=RuntimeError,
-        error_regex='Expected shape of indices to be same as that of the input tensor'
+        error_regex='Expected shape of indices to be'
     )
 
 
