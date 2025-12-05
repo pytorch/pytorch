@@ -16483,7 +16483,7 @@ class GraphModule(torch.nn.Module):
 
         # Expect builtin round in the export graph
         round_nodes = [
-            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target is round
         ]
         self.assertEqual(len(round_nodes), 1)
 
