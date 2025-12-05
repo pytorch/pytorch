@@ -23,7 +23,6 @@ from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch.distributed.tensor import DTensor, Replicate
 from torch.fx._graph_pickler import GraphPickler
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -273,7 +272,13 @@ class RedistributeModel(torch.nn.Module):
 
     def forward(self, x, d_x, mesh):
         x = self.linear(x)
+
+        # need to do local import since tests don't always have c10d
+        # and precompile needs this class to be available at the module
+        # level.
+        from torch.distributed.tensor import Replicate
         y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
+
         return x, y
 
 
@@ -791,6 +796,7 @@ from user code:
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     def test_aot_compile_with_redistribute(self):
+        from torch.distributed.tensor import DTensor, Replicate
         from torch.distributed.device_mesh import init_device_mesh
         from torch.testing._internal.distributed.fake_pg import FakeStore
 
