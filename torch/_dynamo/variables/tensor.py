@@ -1056,6 +1056,9 @@ class TensorVariable(VariableTracker):
             grad_kwargs["retain_graph"] = retain_graph
         if create_graph is not None:
             grad_kwargs["create_graph"] = create_graph
+        # allow_unused=True matches eager backward() behavior where unconnected tensors
+        # simply don't get gradients (no error is raised)
+        grad_kwargs["allow_unused"] = VariableTracker.build(tx, True)
 
         # Call autograd.grad
         grad_args = [self, inputs]

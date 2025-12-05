@@ -271,7 +271,7 @@ class <lambda>(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "autograd.grad with external grad_fn input",
+            r"autograd.grad with external grad_fn \(input\)",
         ):
             fn(external_computation)
 
@@ -433,7 +433,7 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
@@ -472,7 +472,7 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
@@ -549,7 +549,7 @@ class GraphModule(torch.nn.Module):
 
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
-        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient);  gradient = None
+        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = True);  gradient = None
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
@@ -592,7 +592,7 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], retain_graph = True)
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], retain_graph = True, allow_unused = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_)
@@ -600,18 +600,18 @@ class GraphModule(torch.nn.Module):
         new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_)
         copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
-        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
         new_grad_strided_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy__2: "f32[4, 4]" = new_grad_strided_2.copy_(getitem_2);  getitem_2 = copy__2 = None
-        add: "f32[4, 4]" = new_grad_strided + new_grad_strided_2;  new_grad_strided = new_grad_strided_2 = None
+        add_: "f32[4, 4]" = new_grad_strided.add_(new_grad_strided_2);  new_grad_strided_2 = add_ = None
         new_grad_strided_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__3: "f32[4]" = new_grad_strided_3.copy_(getitem_3);  getitem_3 = copy__3 = None
-        add_1: "f32[4]" = new_grad_strided_1 + new_grad_strided_3;  new_grad_strided_1 = new_grad_strided_3 = None
+        add__1: "f32[4]" = new_grad_strided_1.add_(new_grad_strided_3);  new_grad_strided_3 = add__1 = None
 
         detach: "f32[]" = loss.detach();  loss = None
-        return (detach, add, add_1)
+        return (detach, new_grad_strided, new_grad_strided_1)
 """,  # noqa: B950
         )
 
