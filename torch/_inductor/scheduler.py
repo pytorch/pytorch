@@ -2087,7 +2087,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         assert not isinstance(node1, FusedMixOrderReductions)
         assert not isinstance(node2, FusedMixOrderReductions)
 
-        if not self.scheduler.can_fuse(node1, node2):
+        # When we fuse extra nodes into a FusedMixOrderReductions node,
+        # we should not allow recursive mix-order reduction being
+        # created.
+        if not self.scheduler.can_fuse(node1, node2, allow_mix_order_reduction=False):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
@@ -4858,6 +4861,7 @@ class Scheduler:
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
+        allow_mix_order_reduction: bool = True,
     ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -4980,7 +4984,9 @@ class Scheduler:
             return False
         del device2
 
-        shared_data_score = self.score_fusion_memory(node1, node2)
+        shared_data_score = self.score_fusion_memory(
+            node1, node2, allow_mix_order_reduction=allow_mix_order_reduction
+        )
         assert isinstance(shared_data_score, int)
 
         if (
@@ -5180,6 +5186,7 @@ class Scheduler:
         node2: BaseSchedulerNode,
         count_bytes: bool = True,
         return_is_mix_order_reduction: bool = False,
+        allow_mix_order_reduction: bool = True,
     ) -> int | tuple[int, bool]:
         """
         The first term in our fusion score that estimates number of saved
@@ -5193,7 +5200,7 @@ class Scheduler:
                 else score
             )
 
-        if MixOrderReduction.can_fuse(node1, node2):
+        if allow_mix_order_reduction and MixOrderReduction.can_fuse(node1, node2):
             # The fusion score for mix order reduction only count
             # numel so far. It's actually fine. This makes other fusions
             # sharing the same amount of numels go first; but make
