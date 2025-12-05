@@ -6802,7 +6802,15 @@ def _internal_new_from_data(
 
     # TODO: test for numpy input with PyArray_Check
 
-    device = device_opt if device_opt is not None else options["device"]
+    # Resolve device: check explicit device_opt, then default device from context manager,
+    # then fall back to options["device"]
+    if device_opt is not None:
+        device = device_opt
+    else:
+        # Check for default device from torch.device() context manager
+        # This handles the case: with torch.device("meta"): torch.tensor(3.0)
+        default_device = torch.get_default_device()
+        device = default_device if default_device.type != "cpu" else options["device"]
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
