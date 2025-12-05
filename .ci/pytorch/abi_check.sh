@@ -170,7 +170,8 @@ compare_abi() {
 # Generate a summary report for GitHub
 generate_summary() {
     local has_failures="$1"
-    local summary_file="${GITHUB_STEP_SUMMARY:-/dev/null}"
+    # Write to a file that can be read by the workflow
+    local summary_file="$REPORT_DIR/summary.md"
 
     {
         echo "# ABI Compatibility Check - ${BUILD_TYPE^^}"
@@ -208,7 +209,12 @@ generate_summary() {
         done
         echo ""
         echo "</details>"
-    } >> "$summary_file"
+    } > "$summary_file"
+
+    # Also try to append to GITHUB_STEP_SUMMARY if available (for non-Docker runs)
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -f "${GITHUB_STEP_SUMMARY:-}" ]; then
+        cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 # Main execution
