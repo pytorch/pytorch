@@ -69,6 +69,11 @@ class GroupRegistry {
         canonical_name,
         "' is not registered");
 
+    {
+      auto group = canonical_it->second.lock();
+      group->setGroupNameAlias(alias_name);
+    }
+
     auto [_, inserted] =
         group_name_aliases_.try_emplace(alias_name, canonical_name);
     TORCH_CHECK(
