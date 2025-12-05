@@ -5400,6 +5400,19 @@ def caching_host_allocator_use_host_register(use_cuda_host_register: bool):
             )
 
 
+@contextlib.contextmanager
+def caching_host_allocator_use_background_threads(use_background_threads: bool):
+    if use_background_threads:
+        torch.cuda.memory._set_allocator_settings("pinned_use_background_threads:True")
+    try:
+        yield
+    finally:
+        if use_background_threads:
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_background_threads:False"
+            )
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorCudaGraph(TestCase):
     # As soon as pinned host memory allocated by a private pool is
@@ -5444,15 +5457,21 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
             assert data2.data_ptr() != old_data_ptr
 
     @parametrize("use_cuda_host_register", [True, False])
+    @parametrize("use_background_threads", [True, False])
     @parametrize(
         "use_memory, delete_memory",
         [(True, True), (True, False), (False, True), (False, False)],
     )
-    def test_two_graphs(self, use_cuda_host_register, use_memory, delete_memory):
+    def test_two_graphs(
+        self, use_background_threads, use_cuda_host_register, use_memory, delete_memory
+    ):
         # Pinned host memory belongs to private pools, not to
         # graphs. Therefore, using two graphs that share a pool
         # instead of one graph does not change any of our invariants.
-        with caching_host_allocator_use_host_register(use_cuda_host_register):
+        with (
+            caching_host_allocator_use_background_threads(use_background_threads),
+            caching_host_allocator_use_host_register(use_cuda_host_register),
+        ):
             shared_pool = torch.cuda.graph_pool_handle()
             graph1 = torch.cuda.CUDAGraph()
             graph2 = torch.cuda.CUDAGraph()
