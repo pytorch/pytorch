@@ -861,6 +861,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_pallas(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_pallas_backend(self.device):
+            raise unittest.SkipTest("pallas not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1023,6 +1033,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_dtype_device_layout(self):
@@ -1066,6 +1077,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_out(self):
@@ -1121,6 +1133,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_str(self):
@@ -1161,6 +1174,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_cache_hit(self):
@@ -1205,6 +1219,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_persistent_cache(self):
@@ -1252,6 +1267,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_scalar(self):
@@ -1325,6 +1341,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_override_registration(self):
