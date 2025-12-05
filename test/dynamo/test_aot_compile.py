@@ -15,6 +15,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.distributed as c10d
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
@@ -788,6 +789,7 @@ from user code:
             self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
             self.assertEqual(expected, actual)
 
+    @unittest.skipIf(not c10d.is_available(), "requires c10d")
     def test_aot_compile_with_redistribute(self):
         from torch.distributed.device_mesh import init_device_mesh
         from torch.testing._internal.distributed.fake_pg import FakeStore
