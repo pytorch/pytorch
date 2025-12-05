@@ -2335,6 +2335,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
 
 class ExternKernelCaller(ChoiceCaller):
+    """
+    Caller for external kernel implementations
+    """
+
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -2369,6 +2373,19 @@ class ExternKernelCaller(ChoiceCaller):
             if config.profile_bandwidth_with_do_bench_using_profiling:
                 return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
+
+    def benchmark_collective(self, *args, out):
+        """
+        Called by benchmark_collective_choice, only run once, timing handled externally with barrier sync.
+        """
+        if out.numel() == 0:
+            return
+
+        algo = self.to_callable()
+        if self.has_out_variant:
+            algo(*args, out=out)
+        else:
+            algo(*args)
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -2733,6 +2750,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_multi_template=False,
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
+        is_collective=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2843,6 +2861,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             precompile_fn,
             best_config_future=best_config_future,
+            is_collective=is_collective,
         )
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
@@ -2874,6 +2893,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
         node = choice.output_node()
+
         log.debug("Autotuning selected choice: %s", node)
         if return_choice:
             return node, choice
@@ -2886,12 +2906,18 @@ class AlgorithmSelectorCache(PersistentCache):
         layout,
         input_gen_fns,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
         # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
         benchmark_fn = self.make_benchmark_fn(
-            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            choices,
+            input_nodes,
+            layout,
+            input_gen_fns,
+            hint_override=hint_override,
+            is_collective=is_collective,
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
@@ -2905,6 +2931,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         choices,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         log.debug("Starting autotuning")
 
@@ -2915,7 +2942,12 @@ class AlgorithmSelectorCache(PersistentCache):
             metadata=_autotune_metadata(input_nodes),
         ):
             benchmark_results = self.benchmark(
-                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+                choices,
+                input_nodes,
+                layout,
+                input_gen_fns,
+                hint_override=hint_override,
+                is_collective=is_collective,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -2934,6 +2966,7 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_fn,
         hint_override: Optional[int] = None,
         best_config_future=None,
+        is_collective=False,
     ):
         """Execute the autotuning process for kernel algorithm selection.
 
@@ -3071,6 +3104,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 choices,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
 
         timings = self.lookup(
@@ -3084,6 +3118,17 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_elapse = time.time() - autotune_start_ts
         log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
+        # For collective: if any choice returned inf (timeout or failure), fallback to default
+        if is_collective and timings:
+            has_inf = any(not math.isfinite(timing) for timing in timings.values())
+            if has_inf:
+                log.warning(
+                    "At least one choice failed or timed out during collective benchmarking. "
+                    "Falling back to default implementation."
+                )
+                return {}
+
+        # For regular: if all choices returned inf, raise error
         if timings and all(not math.isfinite(timing) for timing in timings.values()):
             raise NoValidChoicesError
 
@@ -3100,6 +3145,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompile_elapse,
                 prescreening_elapse,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
 
         def profiler_bench_function():
@@ -3462,15 +3508,161 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @classmethod
+    def _run_collective_benchmark(
+        cls,
+        choice: ChoiceCaller,
+        inputs: tuple,
+        output: torch.Tensor,
+        nruns: int,
+        process_group,
+        timeout,
+    ) -> float:
+        """
+        Single function for benchmarking collective operations.
+        Used for both warmup and actual benchmarking.
+
+        Returns total time in milliseconds, or raises TimeoutError if any collective times out.
+        """
+        import torch.distributed as dist
+
+        work = dist.barrier(group=process_group, async_op=True)
+        if not work.wait(timeout):
+            raise TimeoutError("Barrier timeout before benchmarking")
+
+        torch.cuda.synchronize()
+
+        total_time = 0.0
+
+        for i in range(nruns):
+            torch.cuda.synchronize()
+
+            start_evt = torch.cuda.Event(enable_timing=True)
+            end_evt = torch.cuda.Event(enable_timing=True)
+
+            start_evt.record()
+            choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
+            end_evt.record()
+            end_evt.synchronize()
+
+            total_time += start_evt.elapsed_time(end_evt)
+
+        return total_time
+
+    @classmethod
+    def benchmark_collective_choice(
+        cls,
+        choice: ChoiceCaller,
+        autotune_args: AutotuneArgs,
+    ) -> float:
+        """
+        Benchmark a choice for collective operations with cross-rank synchronization.
+        This method ensures all ranks synchronize before benchmarking
+        to get accurate measurements for distributed collective operations.
+
+        Timeout/Error handling: If ANY rank times out or encounters an error during
+        the collective operations, ALL ranks will naturally time out (since the collective
+        won't complete), allowing the autotuner to fall back to the default implementation.
+        """
+        from datetime import timedelta
+
+        import torch.distributed as dist
+
+        timeout_seconds = config.collective_benchmark_timeout
+
+        nruns = config.collective_benchmark_nruns
+        nwarmup = ir.autotune_warmup
+
+        # Use default process group (None = all ranks)
+        process_group = None
+        rank = dist.get_rank(process_group)
+
+        benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
+            cls._is_extern(choice)
+        )
+        inputs, output = benchmark_tensors.unpack()
+        output.zero_()
+
+        timeout = timedelta(seconds=timeout_seconds)
+
+        try:
+            # Do n warmups
+            cls._run_collective_benchmark(
+                choice, inputs, output, nwarmup, process_group, timeout
+            )
+
+            # Do n actual benchmarking runs
+            total_time = cls._run_collective_benchmark(
+                choice, inputs, output, nruns, process_group, timeout
+            )
+
+            avg_time = total_time / nruns
+
+            # All-reduce to get avg time across ranks
+            time_tensor = torch.tensor(
+                [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
+            )
+            work = dist.all_reduce(
+                time_tensor,
+                op=dist.ReduceOp.AVG,
+                group=process_group,
+                async_op=True,
+            )
+            if not work.wait(timeout):
+                raise TimeoutError(
+                    "All-reduce timeout when collecting benchmark results"
+                )
+
+            timing = time_tensor.item()
+
+            log.info(
+                "Collective benchmark for %s: %.6f ms",
+                choice.name,
+                timing,
+            )
+
+            return timing
+
+        except Exception:
+            log.warning(
+                "Collective benchmark exception for choice %s. Skipping this choice.",
+                getattr(choice, "name", "<unknown>"),
+                exc_info=True,
+            )
+            return float("inf")
+
+    @classmethod
     def benchmark_choices(
         cls,
         choices: Sequence[ChoiceCaller],
         autotune_args: AutotuneArgs,
+        is_collective: bool = False,
     ) -> dict[ChoiceCaller, float]:
+        """
+        Benchmark a list of choices and return timing dict.
+        """
+        if is_collective:
+            import torch.distributed as dist
+
+            if not dist.is_initialized():
+                log.warning(
+                    "Collective op detected but distributed not initialized. "
+                    "Falling back to regular benchmarking."
+                )
+                is_collective = False
+            else:
+                rank = dist.get_rank(None)  # Use default process group
+                log.debug(
+                    "Using collective benchmarking for %d choices on rank %d",
+                    len(choices),
+                    rank,
+                )
         timings = {}
         for choice in choices:
             try:
-                timing = cls.benchmark_choice(choice, autotune_args)
+                if is_collective:
+                    timing = cls.benchmark_collective_choice(choice, autotune_args)
+                else:
+                    timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -3524,6 +3716,16 @@ class AlgorithmSelectorCache(PersistentCache):
 
             timings[choice] = timing
 
+            # If a collective choice failed or timed out, skip the rest of the choices
+            if is_collective and not math.isfinite(timing):
+                log.warning(
+                    "Choice %s failed or timed out during collective benchmarking. "
+                    "Stopping further benchmarking to avoid NCCL corruption.",
+                    getattr(choice, "name", "<unknown>"),
+                )
+                timings.update({c: float("inf") for c in choices if c not in timings})
+                break
+
         return timings
 
     @classmethod
@@ -3534,11 +3736,16 @@ class AlgorithmSelectorCache(PersistentCache):
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
+        is_collective=False,
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
-        return cls.benchmark_choices(choices, inputs)
+        return cls.benchmark_choices(
+            choices,
+            inputs,
+            is_collective=is_collective,
+        )
 
     @classmethod
     def benchmark_in_sub_process(
@@ -3570,21 +3777,24 @@ class AlgorithmSelectorCache(PersistentCache):
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        if config.autotune_in_subproc:
+        # Collective ops must use current process
+        if is_collective or not config.autotune_in_subproc:
             return functools.partial(
-                cls.benchmark_in_sub_process,
+                cls.benchmark_in_current_process,
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
         else:
             return functools.partial(
-                cls.benchmark_in_current_process,
+                cls.benchmark_in_sub_process,
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
@@ -3632,8 +3842,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+            config.cutlass.cutlass_prescreening
+            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -3816,8 +4026,26 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_elapse: float,
         prescreening_elapse: Optional[float] = None,
         hint_override: Optional[int] = None,
+        is_collective: bool = False,
     ):
-        """Log the autotuning results, currently only handles mm and flex"""
+        """Log the autotuning results, currently only handles mm and flex. Log Collective op autotuning result"""
+        if is_collective and timings:
+            import torch.distributed as dist
+
+            # Only rank 0 logs to avoid duplicate logs
+            rank = dist.get_rank() if dist.is_initialized() else 0
+            if rank == 0:
+                best_choice = min(timings, key=timings.__getitem__)
+                log.warning("[COLLECTIVE AUTOTUNING] All timings:")
+                for c, t in sorted(timings.items(), key=lambda x: x[1]):
+                    choice_name = getattr(c, "name", str(c))
+                    log.warning(
+                        "  - %s: %.6f ms %s",
+                        choice_name,
+                        t if math.isfinite(t) else float("inf"),
+                        "← SELECTED" if c == best_choice else "",
+                    )
+
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
         )
