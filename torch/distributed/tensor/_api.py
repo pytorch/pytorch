@@ -90,6 +90,7 @@ class _ToTorchTensor(torch.autograd.Function):
         dtensor_spec = ctx.dtensor_spec
         mesh = dtensor_spec.mesh
         grad_placements = ctx.grad_placements
+        dtensor_meta = dtensor_spec.tensor_meta
 
         _, tensor_stride = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements

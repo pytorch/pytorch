@@ -920,8 +920,8 @@ class RedistributeBackward(torch.autograd.Function):
         grad_output: "dtensor.DTensor",
         previous_spec,
         async_op: bool = False,
-        backward_dtype: Optional[torch.dtype] = None,
-        original_dtype: Optional[torch.dtype] = None,
+        backward_dtype: torch.dtype = None,
+        original_dtype: torch.dtype = None,
     ):
         ctx.original_dtype = original_dtype
         ctx.async_op = async_op
