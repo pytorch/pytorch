@@ -811,8 +811,7 @@ class DistMathOpsTest(DTensorTestBase):
         # Create test tensors
         local_shards = [torch.randn(4, 8) for _ in range(3)]
         dt_list = [
-            distribute_tensor(shard, device_mesh, [Shard(0)])
-            for shard in local_shards
+            distribute_tensor(shard, device_mesh, [Shard(0)]) for shard in local_shards
         ]
 
         # First operation: foreach_abs
