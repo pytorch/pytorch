@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     load_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfXpu,
     TemporaryFileName,
     TEST_CUDA,
 )
@@ -4533,6 +4534,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
 class DeviceRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu  # profiler_legacy profiler is not compatible with xpu
     @dist_init
     def test_profiler_remote_device(self):
         if self.rank != 1:
@@ -5210,7 +5212,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _gpu_add(x, y):
-        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]) or all(
+            [x.is_xpu, x.device.index == 1, y.is_xpu, y.device.index == 1]
+        ):
             return (x + y).to(_get_device_name(0))
         else:
             raise ValueError("Wrong device affinity")
@@ -5466,7 +5470,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _gpu_add_multi_gpu(x, y):
-        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 0]):
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 0]) or all(
+            [x.is_xpu, x.device.index == 1, y.is_xpu, y.device.index == 0]
+        ):
             return x.to(_get_device_name(0)) + y, x - y.to(_get_device_name(1))
         else:
             raise ValueError("Wrong device affinity")
@@ -5776,6 +5782,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(ret, 2 * x)
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_custom_stream(self):
         self._test_custom_stream(
             self._test_stream_sync, {_get_device_name(0): _get_device_name(1)}
@@ -5799,6 +5808,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
             )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_custom_stream_multi(self):
         self._test_custom_stream(
             self._test_stream_multi_async, {_get_device_name(0): _get_device_name(1)}
@@ -5825,6 +5837,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(ret, 6 * x)
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_custom_stream_nested(self):
         self._test_custom_stream(
             self._test_stream_nested_sync,
@@ -5859,6 +5874,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 self.assertEqual(futs[i].wait(), xs[i] + ys[i] + zs[i])
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_custom_stream_nested_multi(self):
         self._test_custom_stream(
             self._test_stream_nested_multi_async,
@@ -5933,18 +5951,30 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_to_here_synchronization1(self):
         self._test_rref_synchronization(_get_device_name(0), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_to_here_synchronization2(self):
         self._test_rref_synchronization(_get_device_name(1), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_to_here_synchronization3(self):
         self._test_rref_synchronization(_get_device_name(1), _get_device_name(1))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_to_here_synchronization4(self):
         self._test_rref_synchronization(_get_device_name(0), _get_device_name(1))
 
@@ -5985,22 +6015,37 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_as_arg_synchronization1(self):
         self._test_rref_as_arg_synchronization(_get_device_name(0), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_as_arg_synchronization2(self):
         self._test_rref_as_arg_synchronization(_get_device_name(1), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_as_arg_synchronization3(self):
         self._test_rref_as_arg_synchronization(_get_device_name(1), _get_device_name(1))
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_as_arg_synchronization4(self):
         self._test_rref_as_arg_synchronization(_get_device_name(0), _get_device_name(1))
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_as_arg_synchronization5(self):
         self._test_rref_as_arg_synchronization(
             _get_device_name(0),
@@ -6065,24 +6110,36 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_forward_synchronization1(self):
         self._test_rref_forward_synchronization(
             _get_device_name(0), _get_device_name(0)
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_forward_synchronization2(self):
         self._test_rref_forward_synchronization(
             _get_device_name(0), _get_device_name(1)
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_forward_synchronization3(self):
         self._test_rref_forward_synchronization(
             _get_device_name(1), _get_device_name(0)
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_rref_forward_synchronization4(self):
         self._test_rref_forward_synchronization(
             _get_device_name(1), _get_device_name(1)
@@ -6146,6 +6203,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         return x.split(100)[0]
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_tensor_view_as_return_value(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
@@ -6237,24 +6297,36 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
             Future(devices=["cpu"])
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_device_tensor(self):
         self._test_device_future_extraction(
             wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_list_with_device_tensor(self):
         self._test_device_future_extraction(
             wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_custom_class_with_device_tensor(self):
         self._test_device_future_extraction(
             wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_callback_changes_devices(self):
         # We check proper CUDA stream synchronization by filling the tensor with
         # the expected value in one stream, and reading it from another stream.
@@ -6285,6 +6357,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_value_on_bad_device(self):
         tensor0 = torch.zeros((100,), device=_get_device_name(0))
         tensor1 = torch.zeros((100,), device=_get_device_name(1))
@@ -6328,6 +6403,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_async_execution_with_device_future(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
@@ -6352,6 +6430,9 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_async_execution_nested_with_device_future(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         nested_dst = worker_name((self.rank + 2) % self.world_size)
@@ -6433,18 +6514,27 @@ class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_device_sparse_tensor(self):
         self._test_device_future_extraction(
             wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_list_with_device_sparse_tensor(self):
         self._test_device_future_extraction(
             wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
+    @skipIfXpu(
+        msg="_sleep currently not supported"
+    )  # https://github.com/intel/torch-xpu-ops/issues/1986
     def test_device_future_can_extract_custom_class_with_device_sparse_tensor(self):
         self._test_device_future_extraction(
             wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=True

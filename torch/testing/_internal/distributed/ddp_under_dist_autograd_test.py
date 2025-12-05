@@ -20,6 +20,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
 )
+from torch.testing._internal.common_utils import TEST_XPU
 from torch.testing._internal.dist_utils import dist_init, INIT_METHOD_TEMPLATE
 from torch.testing._internal.distributed.rpc.common_utils import _get_device_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -686,7 +687,7 @@ class DeviceDdpComparisonTest(CommonDdpComparisonTest):
         # after DDP's all-reduce.
         torch.manual_seed(self.rank)
         dist.init_process_group(
-            backend="gloo",
+            backend=("xccl" if TEST_XPU else "gloo"),
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
