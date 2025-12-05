@@ -1305,8 +1305,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
 
     dist_opts = config.aten_distributed_optimizations
 
-    # by default, insert overlap deps within inductor
-    kwargs: dict[str, object] = {"insert_overlap_deps": True}
+    kwargs: dict[str, object] = {}
 
     config_keys = (
         "collective_bucketing",

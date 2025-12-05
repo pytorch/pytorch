@@ -293,11 +293,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             schedule_overlap_bucketing_from_inductor_configs,
         )
 
-        GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
-            lambda graph: schedule_overlap_bucketing_from_inductor_configs(
-                graph.owning_module
+        overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
+
+        # by default, insert overlap deps within inductor
+        with config.patch(
+            "aten_distributed_optimizations.insert_overlap_deps",
+            True if overlap_deps is None else overlap_deps,
+        ):
+            GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+                lambda graph: schedule_overlap_bucketing_from_inductor_configs(
+                    graph.owning_module
+                )
             )
-        )
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
