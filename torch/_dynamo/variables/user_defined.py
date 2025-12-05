@@ -408,6 +408,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .ctx_manager import GenericContextWrappingVariable
+
         if (
             name == "__subclasses__"
             and len(args) == 0
@@ -454,6 +456,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
+        elif (
+            len(args) == 1
+            and isinstance(args[0], GenericContextWrappingVariable)
+            and name == "__enter__"
+        ):
+            return args[0].enter(tx)
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
@@ -479,6 +487,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
+        from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -574,6 +583,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif (
+            # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
+            self.value is types.MethodType
+            and len(args) == 2
+            and isinstance(args[0], variables.UserFunctionVariable)
+            and isinstance(args[1], GenericContextWrappingVariable)
+            and args[0].get_name() in ("__enter__", "__exit__")
+        ):
+            cm_obj = args[1].cm_obj
+            fn = getattr(cm_obj, args[0].get_name()).__func__
+            return variables.UserMethodVariable(fn, args[1], source=self.source)
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]
@@ -635,7 +655,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
                 contextlib.suppress,
-                contextlib.ExitStack,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
