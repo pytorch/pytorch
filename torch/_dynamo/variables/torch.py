@@ -1866,7 +1866,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # capture the unflatten into the FX graph as well.
 
         # Build VTs representing (flat_output_list, out_spec)
-        proxy_list_vt = wrap_fx_proxy(tx, proxy)
+        try:
+            proxy_list_vt = wrap_fx_proxy(tx, proxy)
+        except (
+            # From `handle_traced_output`.
+            torch._dynamo.exc.Unsupported,
+            # From `flat_apply` assert on output type.
+            torch._dynamo.exc.TorchRuntimeError,
+        ):
+            unimplemented(
+                gb_type="Unsupported output type for nonstrict_trace-ed function",
+                context=f"Function: {fn.__name__}",
+                explanation=(
+                    "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
+                    " are allowed as output. The result of this call contains an unsupported type."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+            # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
+            raise RuntimeError("unreachable")
+
         assert flat_apply.out_spec is not None
         out_spec_vt = VariableTracker.build(tx, flat_apply.out_spec)
 
