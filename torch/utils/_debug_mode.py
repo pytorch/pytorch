@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, Union  # noqa: F401
+from typing import Any, TYPE_CHECKING, Union  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -204,7 +204,11 @@ def hash_tensor_fn(
     else:
         t_clean = t.to(dtype=torch.int64)
 
-    out = torch.hash_tensor(t_clean)
+    if t.numel() > 0:
+        out = torch.hash_tensor(t_clean)
+    else:
+        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
+
     if use_scalar:
         return out.item()  # type: ignore[attribute]
     return out
@@ -595,7 +599,7 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
+        record_output=True,
         record_ids=False,
     ) -> None:
         super().__init__()
@@ -820,12 +824,17 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self, show_stack_trace: bool = False) -> str:
+    def debug_string(self, show_stack_trace: bool | None = None) -> str:
         """
-        show_stack_trace: If True, display one-line stack trace summaries above groups
+        show_stack_trace: option to display one-line stack trace summaries above groups
                         of operations (similar to gm.print_readable() style).
                         Requires record_stack_trace=True.
+                        if None, uses self.record_stack_trace, otherwise overrides it.
         """
+        show_stack_trace = (
+            self.record_stack_trace if show_stack_trace is None else show_stack_trace
+        )
+
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
@@ -924,9 +933,7 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Union[Callable, str, list[str]] = "norm",
-        hash_inputs: bool = False,
-        wait_on_collectives: bool = True,
+        hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False
     ):
         """
         Installs hook for tensor hash logging.
@@ -938,7 +945,6 @@ class DebugMode(TorchDispatchMode):
                 - "hash_tensor": uses torch.hash_tensor (XOR sum reduction)
             - List of strings: returns tuple of hashes from above options
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
-        wait_on_collectives: if True (default), waits on async collective Work handles before hashing.
         NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
 
@@ -968,12 +974,6 @@ class DebugMode(TorchDispatchMode):
         def _dispatch_hash_hook(func, types, args, kwargs, result):
             if "empty" in str(func) or "profiler" in str(func):
                 return None
-
-            # Wait on async collective Work handles before hashing
-            if wait_on_collectives and isinstance(result, (tuple, list)):
-                for item in result:
-                    if isinstance(item, torch.ScriptObject) and hasattr(item, "wait"):
-                        item.wait()
 
             out = {}
             out["hash"] = _tree_hash(result)
@@ -1110,7 +1110,7 @@ class DebugMode(TorchDispatchMode):
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
                     assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
-                    for key in hashes1.keys():
+                    for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
                                 {
