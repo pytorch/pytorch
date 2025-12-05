@@ -695,7 +695,7 @@ _ERR_MSG = _ERR_MSG_PREFIX + "{!r}"
 
 
 class _PathNode:
-    pass
+    __slots__ = []
 
 
 class _PackageNode(_PathNode):
