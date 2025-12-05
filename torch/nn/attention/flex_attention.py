@@ -499,6 +499,11 @@ class BlockMask:
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
+    kv_offsets: Tensor | None
+    kv_limits: Tensor | None
+    q_offsets: Tensor | None
+    q_limits: Tensor | None
+
     # Attribute lists for pytree flatten/unflatten
     _TENSOR_ATTRS = [
         "kv_num_blocks",
@@ -509,6 +514,10 @@ class BlockMask:
         "q_indices",
         "full_q_num_blocks",
         "full_q_indices",
+        "kv_offsets",
+        "kv_limits",
+        "q_offsets",
+        "q_limits",
     ]
 
     _CONTEXT_ATTRS = [
@@ -530,6 +539,10 @@ class BlockMask:
         full_q_indices: Tensor | None,
         BLOCK_SIZE: tuple[int, int],
         mask_mod: _mask_mod_signature,
+        kv_offsets: Tensor | None = None,
+        kv_limits: Tensor | None = None,
+        q_offsets: Tensor | None = None,
+        q_limits: Tensor | None = None,
     ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
@@ -557,6 +570,10 @@ class BlockMask:
         self.full_q_indices = full_q_indices
         self.BLOCK_SIZE = BLOCK_SIZE
         self.mask_mod = mask_mod
+        self.kv_offsets = kv_offsets
+        self.kv_limits = kv_limits
+        self.q_offsets = q_offsets
+        self.q_limits = q_limits
 
     @classmethod
     def from_kv_blocks(
@@ -569,6 +586,10 @@ class BlockMask:
         mask_mod: _mask_mod_signature | None = None,
         seq_lengths: tuple[int, int] | None = None,
         compute_q_blocks: bool = True,
+        kv_offsets: Tensor | None = None,
+        kv_limits: Tensor | None = None,
+        q_offsets: Tensor | None = None,
+        q_limits: Tensor | None = None,
     ):
         """
         Creates a BlockMask instance from key-value block information.
@@ -632,6 +653,10 @@ class BlockMask:
             full_q_indices=full_q_indices,
             BLOCK_SIZE=BLOCK_SIZE,
             mask_mod=mask_mod,
+            kv_offsets=kv_offsets,
+            kv_limits=kv_limits,
+            q_offsets=q_offsets,
+            q_limits=q_limits,
         )
 
     def as_tuple(self, flatten: bool = True):
@@ -659,6 +684,10 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
+            self.kv_offsets,
+            self.kv_limits,
+            self.q_offsets,
+            self.q_limits,
             *block_size,
             self.mask_mod,
         )
@@ -726,8 +755,15 @@ class BlockMask:
             else i
             for i, n in zip(padded, sizes, strict=True)
         )
+        def maybe_index(tensor):
+            if tensor is None: return None
+            return tensor[index]
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
+        new_kv_offsets = maybe_index(self.kv_offsets)
+        new_kv_limits = maybe_index(self.kv_limits)
+        new_q_offsets = maybe_index(self.q_offsets)
+        new_q_limits = maybe_index(self.q_limits)
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
@@ -745,6 +781,10 @@ class BlockMask:
             mask_mod=_sliced_mask_mod_error,
             seq_lengths=self.seq_lengths,
             compute_q_blocks=self.q_indices is not None,
+            kv_offsets=new_kv_offsets,
+            kv_limits=new_kv_limits,
+            q_offsets=new_q_offsets,
+            q_limits=new_q_limits,
         )
 
     def __repr__(self) -> str:
@@ -764,7 +804,11 @@ class BlockMask:
             f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
             f"    shape={self.shape},\n"
             f"    sparsity={self.sparsity():.2f}%,\n"
-            f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
+            f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod},\n"
+            f"    kv_offsets={shape_or_none(self.kv_offsets)},\n"
+            f"    kv_limits={shape_or_none(self.kv_limits)},\n"
+            f"    q_offsets={shape_or_none(self.q_offsets)},\n"
+            f"    q_limits={shape_or_none(self.q_limits)},\n"
             f")"
         )
 
@@ -774,6 +818,8 @@ class BlockMask:
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
             self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
         )
+        if self.kv_offsets is not None or self.kv_limits is not None or self.q_offsets is not None or self.q_limits is not None:
+            raise ValueError("Cannot adjust a BlockMask that has row/columns offsets or limits")
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")

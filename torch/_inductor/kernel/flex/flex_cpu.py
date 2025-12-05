@@ -63,6 +63,7 @@ def lower_cpu(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _, _, _, _,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
