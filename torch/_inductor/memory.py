@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
+from .dependencies import WeakDep
+
 
 torch_log = logging.getLogger(__name__)
 
@@ -94,6 +96,9 @@ def get_freeable_input_buf(
 
     for node in nodes:
         for dep in node.read_writes.reads:
+            # Skip is_fake WeakDeps - they are for ordering only, not memory lifetime
+            if isinstance(dep, WeakDep) and dep.is_fake:
+                continue
             if dep.name in graph_inputs:
                 if not is_nonfreeable_buffers(dep):
                     dep_name_to_succ_nodes[dep.name].add(node)
@@ -217,6 +222,9 @@ def assign_memory_planning_info_for_scheduler_buffers(
     )
     for node in nodes:
         for dep in node.unmet_dependencies:
+            # Skip is_fake WeakDeps - they are for ordering only, not memory lifetime
+            if isinstance(dep, WeakDep) and dep.is_fake:
+                continue
             dep_name_to_succ_nodes[dep.name].add(node)
 
     # iterate in reverse, so dependencies are picked up transitively.
