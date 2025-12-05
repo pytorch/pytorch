@@ -112,9 +112,11 @@ def initialize_lazy_module(
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=str(e)
-                if str(e)
-                else "AttributeError during lazy module initialization",
+                args=[
+                    str(e)
+                    if str(e)
+                    else "AttributeError during lazy module initialization"
+                ],
             )
 
 
@@ -397,7 +399,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
+                    args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
         if name == "forward":
@@ -854,7 +856,7 @@ class NNModuleVariable(VariableTracker):
             # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    args[0].is_python_constant()
+                    isinstance(args[0], variables.ConstantVariable)
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(
@@ -1325,7 +1327,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
             )
         assert out is not None
         return out
