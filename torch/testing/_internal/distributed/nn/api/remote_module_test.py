@@ -13,7 +13,11 @@ from torch.distributed.nn.api.remote_module import (
     _RemoteModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    TEST_WITH_ROCM,
+    TEST_XPU,
+)
 from torch.testing._internal.distributed.rpc.common_utils import _get_device_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -636,6 +640,8 @@ class DeviceRemoteModuleTest(CommonRemoteModuleTest):
                 r"so the stacktrace below might be incorrect.\n"
                 r"For debugging consider passing AMD_SERIALIZE_KERNEL=3"
             )
+        elif TEST_XPU:
+            errorString = r"The device index is out of range"
         else:
             errorString = r"CUDA error: invalid device ordinal"
         with self.assertRaisesRegex(RuntimeError, errorString):

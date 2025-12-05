@@ -11,7 +11,7 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
 )
@@ -22,12 +22,12 @@ from torch.testing._internal.distributed.rpc_utils import (
 )
 
 
-if torch.cuda.is_available():
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+if torch.xpu.is_available() and not IS_WINDOWS:
+    torch._C._accelerator_setAllocatorSettings("expandable_segments:False")
 
 globals().update(
     generate_tests(
-        "CudaTensorPipe",
+        "XpuTensorPipe",
         TensorPipeRpcAgentTestFixture,
         GENERIC_DEVICE_TESTS + TENSORPIPE_DEVICE_TESTS,
         __name__,
