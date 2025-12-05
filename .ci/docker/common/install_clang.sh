@@ -17,7 +17,7 @@ if [ -n "$CLANG_VERSION" ]; then
   if [[ $CLANG_VERSION -ge 18 ]]; then
     apt-get install -y libomp-${CLANG_VERSION}-dev libclang-rt-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
   else
-    apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+    apt-get install -y --no-install-recommends libomp-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
   fi
 
   # Install dev version of LLVM.
