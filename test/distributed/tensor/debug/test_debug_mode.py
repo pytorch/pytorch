@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import os
 import unittest
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as _functional_collectives
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import (
@@ -17,6 +19,11 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -61,9 +68,7 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(
-            record_torchfunction=True, record_ids=True, record_output=True
-        ) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_ids=True) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
@@ -114,7 +119,8 @@ class TestDTensorDebugMode(TestCase):
         )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
         self.assertTrue(
-            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+            "aten::sum(t: f32[1, 32])  ->  t: f32[]  # {'hash': "
+            in debug_mode.debug_string()
         )
 
         # check tuple hash functions
@@ -162,13 +168,13 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
         with DebugMode(
-            record_torchfunction=True, record_stack_trace=True
+            record_torchfunction=True, record_stack_trace=True, record_output=False
         ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
         self.assertExpectedInline(
-            debug_mode.debug_string(),
+            debug_mode.debug_string(show_stack_trace=False),
             """\
   <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
     aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
@@ -190,8 +196,8 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
       redistribute_input(t: f32[8, 8], trace: R->S(0))
         aten::split.Tensor(t: f32[8, 8], 1)
-        aten::clone(t: f32[1, 8])
         aten::detach(t: f32[8, 1])
+        aten::clone(t: f32[1, 8])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
@@ -208,7 +214,7 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1), Shard(1)], run_check=False)
         x_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
         y_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),)
-        with DebugMode(record_torchfunction=False) as debug_mode:
+        with DebugMode(record_torchfunction=False, record_output=False) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
@@ -247,7 +253,7 @@ class TestDTensorDebugMode(TestCase):
         b_dt = DTensor.from_local(b, mesh, [Replicate(), Partial()], run_check=False)
 
         # Capture the operator decomposition
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
         self.assertExpectedInline(
@@ -304,7 +310,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(8, 8, 8)
         linear = torch.nn.Linear(8, 8)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             linear(x).sum()
 
         self.assertExpectedInline(
@@ -324,7 +330,9 @@ class TestDTensorDebugMode(TestCase):
             x = torch.randn(8, 8)
             y = torch.randn(8, 8, 8)
 
-        with DebugMode(record_torchfunction=True, record_faketensor=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_faketensor=True, record_output=False
+        ) as debug_mode:
             torch.matmul(y, x)
 
         self.assertExpectedInline(
@@ -348,6 +356,7 @@ class TestDTensorDebugMode(TestCase):
             record_faketensor=True,
             record_tensor_attributes=["a1", "a2"],
             store_original_args=True,
+            record_output=False,
         ) as debug_mode:
             torch.matmul(y, x)
 
@@ -447,7 +456,7 @@ class TestDTensorDebugMode(TestCase):
 
         mod = Bar()
         inp = torch.randn(4, 4)
-        with DebugMode(record_nn_module=True) as debug_mode:
+        with DebugMode(record_nn_module=True, record_output=False) as debug_mode:
             _ = mod(inp)
 
         self.assertExpectedInline(
@@ -526,6 +535,32 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(
             [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
         )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**26,
+        "Being conservative, test peak memory is 25MB?",
+    )
+    def test_tensor_hash_redistribute(self):
+        # test that hashing collectives gives correct results
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        local_tensor = torch.ones(2**18, device=self.device_type)
+        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+            dt.redistribute(mesh, [Replicate()])
+
+        # Find all_gather hash
+        all_gather_logs = [
+            op
+            for op in debug_mode.logs
+            if isinstance(op, _OpCall)
+            and op.op == torch.ops._c10d_functional.all_gather_into_tensor.default
+        ]
+        self.assertEqual(len(all_gather_logs), 1)
+        actual_hash = all_gather_logs[0].log["hash"]
+        self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
@@ -606,6 +641,136 @@ class TestDTensorDebugMode(TestCase):
         # Colored is nice for actual viewing, not using in this test though
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
+
+
+class TestDebugModeUtils(TestCase):
+    """Test DebugMode with NCCL backend without using DTensor."""
+
+    def test_hash_empty_tenor(self):
+        t = torch.tensor([])
+        # hash tensor fn should not error out with empty tensor
+        out = torch.utils._debug_mode.hash_tensor_fn(t)
+        self.assertTrue(isinstance(out, torch.Tensor))
+        out = torch.utils._debug_mode.hash_tensor_fn(t, use_scalar=True)
+        self.assertTrue(isinstance(out, int))
+
+
+class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2  # Need at least 2 ranks for collectives
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def _init_process_group(self):
+        """Initialize NCCL process group for each spawned process."""
+        torch.cuda.set_device(self.rank)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self.device = f"cuda:{self.rank}"
+
+    def _destroy_process_group(self):
+        """Destroy the process group."""
+        dist.destroy_process_group()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base(self):
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        # Output size must be world_size * input_size
+        output_tensor = torch.zeros(
+            10 * self.world_size, 10, device=torch.device(self.device)
+        )
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            dist.all_gather_into_tensor(output_tensor, tensor)
+
+        self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
+
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(output_tensor[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base_async_op(self):
+        """Test all_gather_into_tensor with async_op=True."""
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        # Output size must be world_size * input_size
+        output_tensor = torch.zeros(
+            10 * self.world_size, 10, device=torch.device(self.device)
+        )
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            # Call with async_op=True returns a work handle
+            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+            # Wait for the async operation to complete
+            work.wait()
+
+        self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(output_tensor[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_functional_with_async_collective_tensor(self):
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+
+        # Use functional collectives which return AsyncCollectiveTensor
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+            result = _functional_collectives.all_gather_tensor(
+                tensor, gather_dim=0, group=dist.group.WORLD
+            )
+
+        result = result.wait()
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(debug_mode.operators[-1].log["hash"], hash_(result))
+
+        self.assertTrue(
+            "_c10d_functional::all_gather_into_tensor" in debug_mode.debug_string()
+        )
+
+        # Verify the result shape - should be world_size times bigger
+        self.assertEqual(result.shape[0], tensor.shape[0] * self.world_size)
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(result[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

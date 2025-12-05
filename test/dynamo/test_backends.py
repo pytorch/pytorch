@@ -232,10 +232,18 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
     def test_register_backend_api(self):
         from torch._dynamo import register_backend
+        from torch._dynamo.backends import registry as backend_registry
 
         backend_run = False
+        backend_name = "my_custom_backend"
 
-        @register_backend
+        def cleanup_backend():
+            backend_registry._COMPILER_FNS.pop(backend_name, None)
+            backend_registry._BACKENDS.pop(backend_name, None)
+
+        self.addCleanup(cleanup_backend)
+
+        @register_backend(name=backend_name)
         def my_custom_backend(gm, example_inputs):
             nonlocal backend_run
             backend_run = True
@@ -316,6 +324,19 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
         with patch("importlib.metadata.entry_points", mock_eps):
             from torch._dynamo.backends import registry
+
+            orig_backends = dict(registry._BACKENDS)
+            orig_compiler_fns = dict(registry._COMPILER_FNS)
+
+            def restore_registry():
+                registry._BACKENDS.clear()
+                registry._BACKENDS.update(orig_backends)
+                registry._COMPILER_FNS.clear()
+                registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._lazy_import.cache_clear()
+                registry._discover_entrypoint_backends.cache_clear()
+
+            self.addCleanup(restore_registry)
 
             registry._lazy_import.cache_clear()
             registry._discover_entrypoint_backends.cache_clear()

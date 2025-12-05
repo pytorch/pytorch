@@ -467,7 +467,7 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 0}
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
 
-        #
+        # Annotation: {'stream': 0}
         copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
         return (add_2, add_3)
 """,
@@ -908,50 +908,6 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
-    def test_control_deps_wrapping(self) -> None:
-        def fn(x) -> None:
-            e = torch.Event()
-            e.record()
-            x.add_(1)
-            return x
-
-        inp = (torch.ones(2, 2, device="cuda"),)
-        (
-            _,
-            _,
-            fw_graphs,
-            _,
-        ) = extract_graph(fn, *inp)
-
-        self.assertExpectedInline(
-            print_graph(fw_graphs[0]),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2, 2]"):
-        #
-        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
-
-        #
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
-        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
-        return (copy_,)
-""",
-        )
-        gm = fw_graphs[0]
-        graph = gm.graph
-        record_node = next(
-            iter(
-                graph.find_nodes(
-                    op="call_function", target=torch.ops.streams.record_event.default
-                )
-            )
-        )
-        arg0_1 = next(iter(n for n in graph.nodes if n.name == "arg0_1"))
-        subgraph_module = _create_subgraph_for_node(graph, record_node, [arg0_1])
-        subgraph_attr_name = get_subgraph_name(gm, record_node.name)
-        print(subgraph_module)
-        setattr(gm, subgraph_attr_name, subgraph_module)
-
     @requires_cuda
     def test_epilogue_copy_streams_external(self):
         @torch.compile
@@ -1018,6 +974,131 @@ class GraphModule(torch.nn.Module):
                 torch._functorch._aot_autograd.runtime_wrappers.side_stream_epilogue_copies
             ),
             """1""",
+        )
+
+    def test_control_deps_wrapping(self) -> None:
+        def fn(x) -> None:
+            e = torch.Event()
+            e.record()
+            x.add_(1)
+            return x
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+        gm = fw_graphs[0]
+        graph = gm.graph
+        record_node = next(
+            iter(
+                graph.find_nodes(
+                    op="call_function", target=torch.ops.streams.record_event.default
+                )
+            )
+        )
+        arg0_1 = next(iter(n for n in graph.nodes if n.name == "arg0_1"))
+        subgraph_module = _create_subgraph_for_node(graph, record_node, [arg0_1])
+        subgraph_attr_name = get_subgraph_name(gm, record_node.name)
+        print(subgraph_module)
+        setattr(gm, subgraph_attr_name, subgraph_module)
+
+    @requires_cuda
+    def test_epilogue_copy_stream_tracking(self):
+        """
+        Test that epilogue copies for mutated inputs use the correct stream.
+        This verifies that ViewAndMutationMeta.mutated_inp_stream_indices is
+        properly populated and used at runtime.
+        Uses a custom autograd.Function where the backward mutates a saved
+        tensor on a specific stream.
+        """
+
+        class BwMutationWithStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                ctx.s1 = torch.Stream(device="cuda:0")
+                ctx.s2 = torch.Stream(device="cuda:0")
+                # Do computation on stream s2
+                with ctx.s2:
+                    result = x * 2 + y
+                return result
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # Mutate saved tensor x on stream s1 in backward
+                with ctx.s1:
+                    x.mul_(2)
+                # Compute gradients on stream s2
+                with ctx.s2:
+                    grad_x = grad_output * 2
+                    grad_y = grad_output.clone()
+                return grad_x, grad_y, None, None
+
+        def fn(x, y):
+            result = BwMutationWithStream.apply(x, y)
+            return result
+
+        x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+        y = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, x.clone(), y.clone())
+        self.assertEqual(len(fw_graphs), 1)
+        # Forward graph should show computation on stream 1 (s2)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  primals_2 = None
+        return (add, primals_1, mul)
+""",
+        )
+        # Run backward and check that the epilogue copy uses stream 0 (s1)
+        actual.sum().backward()
+        # The backward graph should show:
+        # 1. Mutation happening on stream 0 (s1)
+        # 2. Gradient computation on stream 1 (s2)
+        # 3. Epilogue copy for the mutated tensor on stream 0 (s1)
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", mul: "f32[2, 2]", tangents_1: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2)
+
+        # Annotation: {'stream': 1}
+        clone: "f32[2, 2]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
+
+        # Annotation: {'stream': 0} No stacktrace found for following nodes
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
+        return (mul_2, clone)
+""",
         )
 
     @requires_cuda
