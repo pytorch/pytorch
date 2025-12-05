@@ -365,9 +365,7 @@ class RangeVariable(BaseListVariable):
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
             return (
-                ConstantVariable.create(int(x.as_python_constant()))
-                if x.is_python_constant()
-                else x
+                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
             )
 
         # cast each argument to an integer
@@ -905,7 +903,10 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if key_fn_var.is_constant_none():
+            if (
+                key_fn_var.is_python_constant()
+                and key_fn_var.as_python_constant() is None
+            ):
                 keys = self.items.copy()
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
@@ -1259,8 +1260,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if v.is_python_constant():
-                const_result *= v.as_python_constant()
+            if isinstance(v, ConstantVariable):
+                const_result *= v.value
             else:
                 assert isinstance(v, SymNodeVariable), type(v)
                 # Delay proxy calls  until we know it will be necessary
