@@ -620,6 +620,25 @@ class RangeVariable(BaseListVariable):
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        l = self.range_length()
+        start = self.start()
+        step = self.step()
+        return hash((l, start, step))
+
+    def is_python_equal(self, other):
+        if not isinstance(other, variables.RangeVariable):
+            return False
+
+        return (
+            self.start() == other.start()
+            and self.step() == other.step()
+            and self.stop() == other.stop()
+        )
+
 
 class CommonListMethodsVariable(BaseListVariable):
     """
@@ -981,6 +1000,9 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
 
+    def is_python_hashable(self):
+        return False
+
 
 class DequeVariable(CommonListMethodsVariable):
     def __init__(
@@ -1169,6 +1191,18 @@ class TupleVariable(BaseListVariable):
         if self.python_type() is not tuple:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
+
+    def is_python_hashable(self):
+        return all(item.is_python_hashable() for item in self.items)
+
+    def get_python_hash(self):
+        items = tuple(x.get_python_hash() for x in self.items)
+        return hash(items)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.TupleVariable) and all(
+            a.is_python_equal(b) for (a, b) in zip(self.items, other.items)
+        )
 
 
 class SizeVariable(TupleVariable):
