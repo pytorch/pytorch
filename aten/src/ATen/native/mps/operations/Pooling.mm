@@ -570,6 +570,13 @@ static void max_unpool_out_mps_template(const Tensor& input,
               " elements but got ",
               output_size_.size());
 
+  // Check that input and indices have the same shape
+  TORCH_CHECK(input.sizes() == indices.sizes(),
+              "Expected shape of indices to be same as that of the input tensor (",
+              input.sizes(),
+              ") but got indices tensor with shape: ",
+              indices.sizes());
+
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
 
