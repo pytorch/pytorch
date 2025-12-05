@@ -189,6 +189,15 @@ def _fa4_run_forward(
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
     module = _fa4_import_module(_FA4_MODULE_PATH)
+
+    # Pre-allocate output with strides that will be contiguous BHSD after transpose.
+    # Input query is BSHD: (B, S, H, D). We want the output to have the same "weird"
+    # stride pattern as FA2 so that after transpose(1,2) it becomes contiguous BHSD.
+    # Create contiguous BHSD tensor, then view as BSHD.
+    B, S, H, D = query.shape
+    out_bhsd = torch.empty(B, H, S, D, dtype=query.dtype, device=query.device)
+    out_bshd = out_bhsd.transpose(1, 2)
+
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
         "causal": is_causal,
@@ -198,6 +207,7 @@ def _fa4_run_forward(
         "cu_seqlens_q": cu_seq_q,
         "cu_seqlens_k": cu_seq_k,
         "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
+        "out": out_bshd,
     }
     out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
