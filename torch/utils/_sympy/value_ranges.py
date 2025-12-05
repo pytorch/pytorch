@@ -723,11 +723,11 @@ class SymPyValueRangeAnalysis:
         if 0 in b:
             if b.lower >= 0 and a.lower >= 0:
                 return ValueRanges(0, int_oo)
-            if b.lower <= 0 and a.lower <= 0:
+            if b.upper <= 0 and a.upper <= 0:
                 return ValueRanges(0, int_oo)
-            if b.lower <= 0 and a.lower >= 0:
+            if b.upper <= 0 and a.lower >= 0:
                 return ValueRanges(-int_oo, 0)
-            if b.lower >= 0 and a.lower <= 0:
+            if b.lower >= 0 and a.upper <= 0:
                 return ValueRanges(-int_oo, 0)
             return ValueRanges.unknown_int()
         products = []
