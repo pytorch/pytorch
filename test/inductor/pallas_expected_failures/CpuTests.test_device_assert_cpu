@@ -3,4 +3,3 @@ ERROR
     tmp3 = math.trunc(s77 / 6)
            ^^^^
 NameError: name 'math' is not defined
-

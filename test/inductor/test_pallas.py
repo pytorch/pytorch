@@ -19,7 +19,9 @@ from torch.utils._triton import has_triton
 
 
 # Load pallas expected failures from sentinel files
-_pallas_expected_failures_dir = os.path.join(os.path.dirname(__file__), "pallas_expected_failures")
+_pallas_expected_failures_dir = os.path.join(
+    os.path.dirname(__file__), "pallas_expected_failures"
+)
 if os.path.isdir(_pallas_expected_failures_dir):
     PALLAS_EXPECTED_FAILURES = set(os.listdir(_pallas_expected_failures_dir))
 else:

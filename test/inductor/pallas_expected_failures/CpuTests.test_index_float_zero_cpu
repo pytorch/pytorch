@@ -3,4 +3,3 @@ ERROR
     tmp0 = in_ptr0[s2*min(max(0.0, u1), (-1) + s52)::1]
                    ^^
 NameError: name 's2' is not defined
-

@@ -3,4 +3,3 @@ ERROR
     tmp1 = s98
            ^^^
 NameError: name 's98' is not defined
-

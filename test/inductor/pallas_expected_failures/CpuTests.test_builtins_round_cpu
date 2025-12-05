@@ -3,4 +3,3 @@ ERROR
     tmp1 = round(s77 / 2)
                  ^^^
 NameError: name 's77' is not defined
-

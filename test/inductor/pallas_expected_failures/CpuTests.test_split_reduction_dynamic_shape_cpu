@@ -3,4 +3,3 @@ ERROR
     out_ptr0[...] = tmp1.reshape(s27)
                                  ^^^
 NameError: name 's27' is not defined
-

@@ -3,4 +3,3 @@ ERROR
     out = lax.add(x, y)
           ^^^^^^^^^^^^^
 TypeError: add got incompatible shapes for broadcasting: (16, 32), (32, 16).
-

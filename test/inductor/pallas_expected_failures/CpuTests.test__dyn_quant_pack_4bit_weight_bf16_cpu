@@ -3,4 +3,3 @@ ERROR
     out = lax.div(x1, x2)
           ^^^^^^^^^^^^^^^
 TypeError: div got incompatible shapes for broadcasting: (128, 128), (512, 1).
-

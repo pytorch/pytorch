@@ -3,4 +3,3 @@ ERROR
     return _argmax(arr, None if axis is None else operator.index(axis),
                                                   ^^^^^^^^^^^^^^^^^^^^
 TypeError: 'tuple' object cannot be interpreted as an integer
-

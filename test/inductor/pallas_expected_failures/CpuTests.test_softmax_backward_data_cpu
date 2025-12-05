@@ -3,4 +3,3 @@ ERROR
     tmp5 = jnp.fma(tmp4, tmp3, tmp2)
            ^^^^^^^
 AttributeError: module 'jax.numpy' has no attribute 'fma'
-

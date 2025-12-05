@@ -3,4 +3,3 @@ ERROR
     tmp1 = s77
            ^^^
 NameError: name 's77' is not defined
-

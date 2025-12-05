@@ -3,4 +3,3 @@ ERROR
     tmp0 = x0
            ^^
 NameError: name 'x0' is not defined
-

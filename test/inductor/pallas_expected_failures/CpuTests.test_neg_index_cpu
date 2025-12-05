@@ -3,4 +3,3 @@ FAIL
   File "/home/oulgen/dev/pytorch/test/inductor/test_torchinductor.py", line 1882, in test
     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
 AssertionError: False is not true
-

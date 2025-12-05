@@ -1273,9 +1273,10 @@ class PallasKernel(SIMDKernel):
                     break
 
         # Count the number of pointwise and reduction dimensions
-        n_pointwise_dims = len(pointwise_sizes) if pointwise_sizes else 0
         n_reduction_dims = sum(
-            1 for var, entry in self.range_tree_nodes.items() if entry.prefix.startswith("r")
+            1
+            for var, entry in self.range_tree_nodes.items()
+            if entry.prefix.startswith("r")
         )
 
         if reduction_type == "xor_sum":
@@ -1289,7 +1290,9 @@ class PallasKernel(SIMDKernel):
             reduction_op = reduction_ops[reduction_type]
             # Check if this is a true partial reduction (pointwise numel > 1)
             # When pointwise_numel == 1, it's effectively a full reduction to scalar
-            is_partial_reduction = has_pointwise and pointwise_numel and pointwise_numel > 1
+            is_partial_reduction = (
+                has_pointwise and pointwise_numel and pointwise_numel > 1
+            )
             if is_partial_reduction and n_reduction_dims > 0:
                 # Partial reduction: determine the reduction axis from load index
                 # The reduction variable's coefficient in the index expression tells us its stride
@@ -1300,7 +1303,8 @@ class PallasKernel(SIMDKernel):
                     load_index = next(iter(self.load_index_exprs.values()))
                     # Find the reduction variable (starts with 'r')
                     reduction_vars = [
-                        var for var, entry in self.range_tree_nodes.items()
+                        var
+                        for var, entry in self.range_tree_nodes.items()
                         if entry.prefix.startswith("r")
                     ]
                     if reduction_vars:
@@ -1313,7 +1317,8 @@ class PallasKernel(SIMDKernel):
                             r_stride = 1
                         # Get pointwise variable
                         pw_vars = [
-                            var for var, entry in self.range_tree_nodes.items()
+                            var
+                            for var, entry in self.range_tree_nodes.items()
                             if not entry.prefix.startswith("r")
                         ]
                         if pw_vars:

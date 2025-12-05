@@ -3,4 +3,3 @@ ERROR
     tmp1 = s25
            ^^^
 NameError: name 's25' is not defined
-

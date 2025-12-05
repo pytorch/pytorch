@@ -3,4 +3,3 @@ ERROR
     tmp3 = zuf0
            ^^^^
 NameError: name 'zuf0' is not defined
-

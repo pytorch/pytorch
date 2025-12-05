@@ -3,4 +3,3 @@ ERROR
     return lax.atan2(*promote_args_inexact("arctan2", x1, x2))
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 TypeError: atan2 got incompatible shapes for broadcasting: (4, 2), (5, 2).
-
