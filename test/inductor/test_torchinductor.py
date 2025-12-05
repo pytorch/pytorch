@@ -929,6 +929,12 @@ def is_triton_cpu_backend(device):
     return getattr(device, "type", device) == "cpu" and config.cpu_backend == "triton"
 
 
+def is_pallas_backend(device):
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "pallas"
+    return config.cuda_backend == "pallas"
+
+
 def skip_if_triton_cpu(fn):
     import types
 
@@ -2482,7 +2488,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
@@ -2518,7 +2523,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
     def test__dyn_quant_pack_4bit_weight_bf16(self):
@@ -2560,7 +2564,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
@@ -2606,7 +2609,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     @skip_if_halide  # bf16
     def test__dyn_quant_matmul_4bit_bf16_input(self):
@@ -4694,7 +4696,6 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
@@ -4982,29 +4983,32 @@ class CommonTemplate:
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
-    def test_adaptive_avg_pool2d1(self):
-        def fn(x):
-            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                x + 1, (2, 5)
+    @parametrize("combo_kernels", (False, True))
+    def test_adaptive_avg_pool2d1(self, combo_kernels):
+        with config.patch(combo_kernels=combo_kernels):
+
+            def fn(x):
+                return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
+                    x + 1, (2, 5)
+                )
+
+            self.common(
+                fn,
+                (torch.randn(2, 4, 16, 16),),
+                check_lowp=False,
             )
 
-        self.common(
-            fn,
-            (torch.randn(2, 4, 16, 16),),
-            check_lowp=False,
-        )
+            # lowering to avg_pool2d case
+            self.common(
+                fn,
+                (torch.randn(2, 4, 3, 3),),
+            )
 
-        # lowering to avg_pool2d case
-        self.common(
-            fn,
-            (torch.randn(2, 4, 3, 3),),
-        )
-
-        # no-op case
-        self.common(
-            fn,
-            (torch.randn(2, 4, 6, 6),),
-        )
+            # no-op case
+            self.common(
+                fn,
+                (torch.randn(2, 4, 6, 6),),
+            )
 
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
@@ -8588,22 +8592,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 1024), torch.randn(1, 1024, 2)])
 
+    @parametrize("combo_kernels", (False, True))
     @config.patch(fallback_random=True)
-    def test_bernoulli1(self):
-        def fn(a):
-            b = a.clone()
-            # aten.bernoulli_() uses aten.bernoulli.p() behind the scene, so it will be decomposed.
-            return aten.bernoulli_(b).sum() / torch.prod(torch.tensor(a.size()))
+    def test_bernoulli1(self, combo_kernels):
+        with config.patch(combo_kernels=combo_kernels):
 
-        p = 0.3
-        self.common(
-            fn,
-            [
-                torch.ones(200, 200) * p,
-            ],
-            atol=p * 0.06,
-            rtol=0.06,
-        )
+            def fn(a):
+                b = a.clone()
+                # aten.bernoulli_() uses aten.bernoulli.p() behind the scene, so it will be decomposed.
+                return aten.bernoulli_(b).sum() / torch.prod(torch.tensor(a.size()))
+
+            p = 0.3
+            self.common(
+                fn,
+                [
+                    torch.ones(200, 200) * p,
+                ],
+                atol=p * 0.06,
+                rtol=0.06,
+            )
 
     @skip_if_triton_cpu
     def test_bernoulli2(self):
@@ -9208,38 +9215,41 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
 
-    def test_rand_like_deterministic(self):
-        @torch.compile(backend="inductor")
-        def fn(a):
-            return torch.rand_like(a), torch.rand_like(a)
+    @parametrize("combo_kernels", (False, True))
+    def test_rand_like_deterministic(self, combo_kernels):
+        with config.patch(combo_kernels=combo_kernels):
 
-        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+            @torch.compile(backend="inductor")
+            def fn(a):
+                return torch.rand_like(a), torch.rand_like(a)
 
-        torch.manual_seed(1234)
-        a0 = fn(x)[0].clone()
-        a1 = fn(x)[0].clone()
-        a2 = fn(x)[0].clone()
+            x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-        torch.manual_seed(1234)
-        b0 = fn(x)[0].clone()
-        b1 = fn(x)[0].clone()
-        b2 = fn(x)[0].clone()
+            torch.manual_seed(1234)
+            a0 = fn(x)[0].clone()
+            a1 = fn(x)[0].clone()
+            a2 = fn(x)[0].clone()
 
-        # same seed, same values
-        self.assertTrue(torch.allclose(a0, b0))
-        self.assertTrue(torch.allclose(a1, b1))
-        self.assertTrue(torch.allclose(a2, b2))
+            torch.manual_seed(1234)
+            b0 = fn(x)[0].clone()
+            b1 = fn(x)[0].clone()
+            b2 = fn(x)[0].clone()
 
-        # different calls, different values
-        self.assertFalse(torch.allclose(a0, a1))
-        self.assertFalse(torch.allclose(a1, a2))
+            # same seed, same values
+            self.assertTrue(torch.allclose(a0, b0))
+            self.assertTrue(torch.allclose(a1, b1))
+            self.assertTrue(torch.allclose(a2, b2))
 
-        c, d = fn(x)
-        self.assertFalse(torch.allclose(c, d))
-        self.assertTrue((c >= 0).all())
-        self.assertTrue((c < 1).all())
-        self.assertTrue((d >= 0).all())
-        self.assertTrue((d < 1).all())
+            # different calls, different values
+            self.assertFalse(torch.allclose(a0, a1))
+            self.assertFalse(torch.allclose(a1, a2))
+
+            c, d = fn(x)
+            self.assertFalse(torch.allclose(c, d))
+            self.assertTrue((c >= 0).all())
+            self.assertTrue((c < 1).all())
+            self.assertTrue((d >= 0).all())
+            self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
     def test_needs_contiguous_strides(self):
@@ -11610,7 +11620,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
-    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -13259,6 +13268,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]:
             raise unittest.SkipTest(f"Triton CPU does not support {name}")
 
+        if is_pallas_backend(self.device) and name in {
+            "airy_ai",
+            "bessel_y0",
+            "bessel_y1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "ndtri",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+        }:
+            raise unittest.SkipTest(f"Pallas does not support {name}")
+
         if name in {"gammainc", "gammaincc"}:
             args = (
                 torch.randn(8, 8, dtype=dtype, device=self.device),
@@ -14713,6 +14734,61 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_dce(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            # CASE 1: The op should get wrapped with auto_functionalized, and
+            # FX's DCE should not remove it because this op is registered as
+            # effectful
+
+            log1 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger1",
+                mutates_args="unknown",
+            )
+            def my_logger1(s: str, t: torch.Tensor) -> torch.Tensor:
+                log1.append(s)
+                return torch.zeros(1)
+
+            @my_logger1.register_fake
+            def my_logger1(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger1("moo", b)
+                return x + x
+
+            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger1.default)
+            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
+            self.assertTrue(len(log1), 1)
+
+            # CASE 2: The op should not get DCEd by TorchInductor
+
+            log2 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger2",
+                mutates_args=(),
+            )
+            def my_logger2(s: str, t: torch.Tensor) -> torch.Tensor:
+                log2.append(s)
+                return torch.zeros(1)
+
+            @my_logger2.register_fake
+            def my_logger2(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger2("moo", b)
+                return x + x
+
+            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger2.default)
+            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
+            self.assertTrue(len(log2), 1)
+
     @skipIfMPS  # Accuracy issue on MPS
     def test_weight_norm_conv2d(self):
         """
@@ -14732,6 +14808,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         act_grad = torch.autograd.grad(act, list(compiled_conv.parameters()), grad_out)
 
         self.assertTrue(same((ref, ref_grad), (act, act_grad), tol=1e-3))
+
+    @skipIfMPS
+    def test_inner_reduction_detection(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+
+        x = torch.randn(100000, 1, 256, device=self.device)
+
+        @torch.compile
+        def f(x):
+            return x.sum(dim=(0, 1))
+
+        code = run_and_get_triton_code(f, x)
+        self.assertTrue("ReductionHint.OUTER" in code)
+        self.assertFalse("ReductionHint.INNER" in code)
 
     @skip_if_halide
     @requires_cuda_and_triton
@@ -14784,6 +14875,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.tensor(5.0, device=self.device),
             ),
         )
+
+    @config.patch(combo_kernels=True)
+    def test_combo_kernel_filter_cpu(self):
+        def fn(a, b, c, d):
+            a = a * 4
+            b = b + 8
+            return a, b, c.min(-1), d.max(-1)
+
+        inps = [
+            torch.rand(20, 20, device=self.device),
+            torch.rand(30, 30, device=self.device),
+            torch.rand(256, 256, device=self.device),
+            torch.rand(256, 256, device=self.device),
+        ]
+        torch._inductor.metrics.reset()
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(result, expected)
+        # on cuda combo kernel fuses (a, b) into one kernel and (c, d) into another (total 2)
+        # on cpu combo kernel is skipped (a), (b), (c), (d) each run as separate kernels (total 4)
+        if self.device.lower() == "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+        if self.device.lower() == "cuda":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     # end of class CommonTemplate - add new tests here
 

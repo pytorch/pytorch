@@ -304,7 +304,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             + torch.initial_seed()
         )
         torch.distributed.broadcast(seed_local, src=0)
-        # if localtensor, it should automaticall reconcile after the broadcast
+        # if local tensor, it should automatically reconcile after the broadcast
         # since all virtual ranks should have rank 0's initial_seed()
         seed_from_rank_0 = seed_local
 

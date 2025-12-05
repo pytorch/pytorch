@@ -1,8 +1,5 @@
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 
-#include <caffe2/serialize/versions.h>
-#include <torch/csrc/api/include/torch/jit.h>
-
 #include <unordered_map>
 
 namespace torch::jit {

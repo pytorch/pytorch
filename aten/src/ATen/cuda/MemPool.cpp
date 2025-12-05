@@ -1,4 +1,3 @@
-#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/cuda/MemPool.h>
 
 namespace at::cuda {

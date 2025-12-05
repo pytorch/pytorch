@@ -473,6 +473,9 @@ def _unlift_graph(
         pytree.treespec_leaf(),
         None,
     )
+    # After unlifting, the buffer mutation information is lost. Pass the information
+    # so that Inductor can do optimizations correctly.
+    unlifted_gm.meta["mutated_named_buffers"] = OrderedSet(buffer_mutations.values())
     return unlifted_gm
 
 

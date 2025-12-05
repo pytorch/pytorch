@@ -95,7 +95,7 @@ jobs:
       - target-determination
     with:
       timeout-minutes: 360
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
@@ -134,6 +134,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
     secrets: inherit
 
@@ -144,7 +145,7 @@ jobs:
       - macos-py3-arm64-build
       - target-determination
     with:
-      build-environment: macos-py3-arm64
+      build-environment: ${{ needs.macos-py3-arm64-build.outputs.build-environment }}
       # Same as the build job
       python-version: 3.12.7
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
@@ -165,6 +166,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
@@ -175,7 +177,7 @@ jobs:
       - win-vs2022-cpu-py3-build
       - target-determination
     with:
-      build-environment: win-vs2022-cpu-py3
+      build-environment: ${{ needs.win-vs2022-cpu-py3-build.outputs.build-environment }}
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
       disable-monitor: false
@@ -226,7 +228,7 @@ jobs:
       - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
@@ -241,6 +243,16 @@ jobs:
       cuda-arch-list: '8.0'
     secrets: inherit
 
+  inductor-build-cuda13:
+    name: inductor-build-cuda13
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      cuda-arch-list: '8.0'
+    secrets: inherit
+
   # Test cross-compiled models with Windows libs extracted from wheel
   cross-compile-linux-test:
     name: cross-compile-linux-test
@@ -250,7 +262,7 @@ jobs:
       - get-label-type
       - win-vs2022-cuda12_8-py3-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: |
         { include: [
@@ -279,7 +291,7 @@ jobs:
       - verify-cachebench-cpu-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-gcc11
+      build-environment: ${{ needs.verify-cachebench-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit
@@ -304,7 +316,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3-clang12-executorch-build
     with:
-      build-environment: linux-jammy-py3-clang12-executorch
+      build-environment: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
     secrets: inherit

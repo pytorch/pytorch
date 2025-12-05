@@ -390,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
+        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -410,6 +411,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.named_buffers: dict[str, torch.Tensor] = (
             const_module.named_buffers if const_module else {}
+        )
+        self.mutated_named_buffers: OrderedSet[torch.Tensor] = gm.meta.get(
+            "mutated_named_buffers", OrderedSet()
         )
         self.named_parameters: dict[str, torch.Tensor] = (
             const_module.named_parameters if const_module else {}
@@ -1408,6 +1412,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
+            or target in self.mutated_named_buffers
         ):
             return self.add_tensor_constant(value, target)
 
@@ -2369,6 +2374,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code = parent_graph.wrapper_code
             self.device_ops = parent_graph.device_ops
             self.cpp_wrapper = parent_graph.cpp_wrapper
+            self.device_types = parent_graph.device_types
+            self.device_idxs = parent_graph.device_idxs
+            self.device_type = parent_graph.device_type
 
             self._update_scheduler()
             self.scheduler.codegen()

@@ -7,7 +7,6 @@
 // Adapting TunableOp into PyTorch
 // Copyright (c) Advanced Micro Devices, Inc.
 //
-#include <cuda_runtime.h>
 
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
@@ -21,7 +20,6 @@
 #endif
 
 #include <fstream>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>

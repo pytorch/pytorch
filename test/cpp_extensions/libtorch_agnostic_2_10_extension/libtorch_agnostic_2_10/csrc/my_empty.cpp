@@ -10,8 +10,8 @@ using torch::stable::Tensor;
 Tensor my_empty(
     torch::headeronly::HeaderOnlyArrayRef<int64_t> size,
     std::optional<torch::headeronly::ScalarType> dtype,
-    std::optional<torch::headeronly::Layout> layout,
-    std::optional<torch::stable::Device> device,
+    std::optional<torch::headeronly::Layout>& layout,
+    const std::optional<torch::stable::Device>& device,
     std::optional<bool> pin_memory,
     std::optional<torch::headeronly::MemoryFormat> memory_format) {
   return empty(size, dtype, layout, device, pin_memory, memory_format);

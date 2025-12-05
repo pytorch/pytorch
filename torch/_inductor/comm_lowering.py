@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 #
 # For eligible collective ops, we identify communication buffers at lowering
 # time and optionally choose to lower the op to a different kernel
-# (ommunication libraries like NCCL handle both registered and non-registered
+# (communication libraries like NCCL handle both registered and non-registered
 # buffers transparently within the same op, though some may require different
 # ops for different cases). Later, the codegen will perform "persistent
 # allocation" to satisfy the aforementioned constraints, and optionally,
@@ -310,6 +310,18 @@ def register_comm_lowerings():
             group_size,
             group_name,
         )
+
+    @register_comm_lowering(c10d.reduce_scatter_tensor_out)
+    def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            c10d.reduce_scatter_tensor_out.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
     def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):

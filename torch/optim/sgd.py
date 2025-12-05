@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -29,16 +29,16 @@ class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
-        weight_decay: Union[float, Tensor] = 0,
+        weight_decay: float | Tensor = 0,
         nesterov: bool = False,
         *,
         maximize: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
+        fused: bool | None = None,
     ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -118,7 +118,7 @@ class SGD(Optimizer):  # noqa: D101
         for group in self.param_groups:
             params: list[Tensor] = []
             grads: list[Tensor] = []
-            momentum_buffer_list: list[Optional[Tensor]] = []
+            momentum_buffer_list: list[Tensor | None] = []
 
             has_sparse_grad = self._init_group(
                 group, params, grads, momentum_buffer_list
@@ -252,14 +252,14 @@ SGD.__doc__ = (
 def sgd(
     params: list[Tensor],
     d_p_list: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
+    momentum_buffer_list: list[Tensor | None],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = False,
-    foreach: Optional[bool] = None,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    foreach: bool | None = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     *,
     weight_decay: float,
     momentum: float,
@@ -322,9 +322,9 @@ def sgd(
 def _single_tensor_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
@@ -383,9 +383,9 @@ def _single_tensor_sgd(
 def _multi_tensor_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
@@ -480,9 +480,9 @@ def _multi_tensor_sgd(
 def _fused_sgd(
     params: list[Tensor],
     grads: list[Tensor],
-    momentum_buffer_list: list[Optional[Tensor]],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    momentum_buffer_list: list[Tensor | None],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,

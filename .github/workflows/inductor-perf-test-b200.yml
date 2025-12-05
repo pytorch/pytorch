@@ -109,7 +109,7 @@ jobs:
     needs: build
     if: github.event.schedule == '0 7 * * 1-6'
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      build-environment: ${{ needs.build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
@@ -126,7 +126,7 @@ jobs:
     needs: build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      build-environment: ${{ needs.build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
@@ -142,7 +142,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      build-environment: ${{ needs.build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}

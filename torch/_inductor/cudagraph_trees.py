@@ -763,7 +763,7 @@ LevelList = list  # levels (distance from root of tree)
 
 
 class OutputAliasInfo:
-    pass
+    __slots__ = []
 
 
 class _UnaliasedStorage(OutputAliasInfo):

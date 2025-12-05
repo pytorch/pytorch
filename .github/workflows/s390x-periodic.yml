@@ -69,7 +69,7 @@ jobs:
       - linux-manylinux-2_28-py3-cpu-s390x-build
       - target-determination
     with:
-      build-environment: linux-s390x-binary-manywheel
+      build-environment: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.build-environment }}
       docker-image: pytorch/manylinuxs390x-builder:cpu-s390x
       test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
       timeout-minutes: 600

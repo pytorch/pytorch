@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
-import optree
+try:
+    import optree
+except ImportError:  # pragma: no cover
+    optree = None
 
 import torch
 import torch._dynamo
@@ -46,10 +49,15 @@ def _tuple_is_leaf(node):
     return isinstance(node, tuple)
 
 
-TREE_MAP_IMPLEMENTATIONS = [
-    ("optree", optree.tree_map),
-    ("pytree_python", pytree.tree_map),
-]
+def _require_optree(test_case):
+    if optree is None:
+        test_case.skipTest("optree is unavailable")
+
+
+TREE_MAP_IMPLEMENTATIONS = []
+if optree is not None:
+    TREE_MAP_IMPLEMENTATIONS.append(("optree", optree.tree_map))
+TREE_MAP_IMPLEMENTATIONS.append(("pytree_python", pytree.tree_map))
 if cxx_pytree is not None:
     TREE_MAP_IMPLEMENTATIONS.append(("pytree_cxx", cxx_pytree.tree_map))
 
@@ -257,6 +265,8 @@ class TreeMapCompileTests(TestCase):
         _assert_trees_allclose(self, expected, result)
 
     def test_tree_map_none_nodes_reject_mismatched_siblings(self) -> None:
+        _require_optree(self)
+
         def fn(a, b):
             return optree.tree_map(lambda u, v: (u, v), a, b)
 
@@ -292,6 +302,8 @@ class TreeMapCompileTests(TestCase):
         self.assertEqual(result, expected)
 
     def test_constantvariable_handles_none_is_leaf_kwarg(self) -> None:
+        _require_optree(self)
+
         tree = {"none": None}
 
         def run_case(none_is_leaf_flag):
@@ -317,6 +329,8 @@ class TreeMapCompileTests(TestCase):
         self.assertEqual(run_case(True), "visited")
 
     def test_constantvariable_handles_python_and_dtype_leaves(self) -> None:
+        _require_optree(self)
+
         tree = {
             "int": 7,
             "nested": {"string": "foo", "dtype": torch.float32},

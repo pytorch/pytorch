@@ -2381,6 +2381,16 @@ class TestFX(JitTestCase):
 
         self.assertTrue("typing.List[float]" in str(graph))
 
+    def test_typename_print_union(self):
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=float|torch.Tensor|None
+        )
+        output: torch.fx.Node = graph.output(b)
+
+        self.assertTrue('float | torch.Tensor | None' in str(graph))
+
     def test_layout(self):
         class M(torch.nn.Module):
             def forward(self, x):

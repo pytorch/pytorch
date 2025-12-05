@@ -192,7 +192,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "scatter_reduce",
         # ONNX has not include_self parameter and default is include_self=True mode
         matcher=lambda sample: sample.kwargs.get("include_self") is False,
-        reason="ONNX does't support include_self=False option",
+        reason="ONNX doesn't support include_self=False option",
     ),
     skip(
         "stft",

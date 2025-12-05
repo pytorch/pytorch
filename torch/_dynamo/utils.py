@@ -285,6 +285,12 @@ def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
     return _recompile_user_contexts
 
 
+def reset_recompile_user_contexts() -> None:
+    """Clear any registered recompile user-context hooks (test helper)."""
+    global _recompile_user_contexts
+    _recompile_user_contexts = None
+
+
 op_count = 0
 
 
@@ -1063,6 +1069,10 @@ if sys.version_info >= (3, 12):
         typing.TypeVarTuple,
         typing.TypeAliasType,
     )
+
+
+if sys.version_info >= (3, 14):
+    _builtin_final_typing_classes += (typing.Union,)
 
 
 def is_typing(value: Any) -> bool:
@@ -2538,20 +2548,20 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
         # Assume integers from global variables want to be specialized
-        not source.guard_source().is_local()
+        not source.guard_source.is_local()
         # Assume that integers that came from NN modules want to be
         # specialized (as we don't expect users to be changing the
         # NN modules on the fly), unless explicitly disabled
         or (
-            source.guard_source().is_specialized_nn_module()
+            source.guard_source.is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_builtin_nn_module()
+            source.guard_source.is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_nn_module()
+            source.guard_source.is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -3846,8 +3856,8 @@ def tensor_always_has_static_shape(
     from .source import is_from_unspecialized_param_buffer_source
 
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        tensor_source.guard_source.is_specialized_nn_module()
+        or tensor_source.guard_source.is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -4952,3 +4962,21 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
+    from . import graph_break_hints
+    from .exc import unimplemented
+
+    is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden:
+        unimplemented(
+            gb_type="User-defined object with overridden __hash__",
+            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
+            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
+            hints=[
+                "Dynamo does not support hashing user-defined objects with overridden __hash__",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )

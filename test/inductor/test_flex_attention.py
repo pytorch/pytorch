@@ -2290,8 +2290,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             def _opaque_mask(b, h, q_idx, kv_idx):
                 ref = ql // frame
-                mot = kl // frame
-                limit = (ref + mot) * frame
+                mot = kl // frame  # codespell:ignore
+                limit = (ref + mot) * frame  # codespell:ignore
                 return q_idx < limit
 
             block_mask = create_block_mask(

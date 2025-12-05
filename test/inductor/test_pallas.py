@@ -747,6 +747,51 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_arange_multi_output(self):
+        """Test arange with view and multiple outputs."""
+
+        def fn(x):
+            rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
+            rng2 = torch.arange(10, 18, device=x.device)
+            tmp = x * rng1
+            return tmp, tmp + rng2
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 8, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(len(result), len(expected))
+        for r, e in zip(result, expected):
+            self.assertEqual(r, e)
+
+    def test_dtype_bitcast(self):
+        """Test dtype bitcast (view tensor as different dtype)."""
+
+        def fn(x):
+            # View float32 tensor as int32 (same byte size)
+            return x.view(torch.int32)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float32)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_dtype_bitcast_float16_to_int16(self):
+        """Test dtype bitcast from float16 to int16."""
+
+        def fn(x):
+            return x.view(torch.int16)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float16)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
 
 @unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
