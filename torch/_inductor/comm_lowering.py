@@ -174,6 +174,9 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 
 def register_comm_lowerings():
+    """
+    Register lowerings for the comm subsystem.
+    """
     try:
         torch.ops._c10d_functional.all_reduce
     except AttributeError:

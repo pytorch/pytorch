@@ -2681,6 +2681,10 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def_property_readonly(
+              "_group_name_alias",
+              &::c10d::ProcessGroup::getGroupNameAlias,
+              "(Gets this process group name alias. It's cluster unique)")
           .def(
               "_set_group_desc",
               &::c10d::ProcessGroup::setGroupDesc,
