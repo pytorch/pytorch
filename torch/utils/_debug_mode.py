@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, Union  # noqa: F401
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -157,9 +157,7 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
     return str(arg)
 
 
-def norm_hash_fn(
-    t: torch.Tensor, use_scalar: bool = False
-) -> Union[torch.Tensor, float]:
+def norm_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | float:
     """
     from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
@@ -188,9 +186,7 @@ def _compute_rel_diff(hash1, hash2):
     return numerator / denominator
 
 
-def hash_tensor_fn(
-    t: torch.Tensor, use_scalar: bool = False
-) -> Union[torch.Tensor, int]:
+def hash_tensor_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | int:
     """
     wrapper over torch.hash_tensor
     """
@@ -204,7 +200,11 @@ def hash_tensor_fn(
     else:
         t_clean = t.to(dtype=torch.int64)
 
-    out = torch.hash_tensor(t_clean)
+    if t.numel() > 0:
+        out = torch.hash_tensor(t_clean)
+    else:
+        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
+
     if use_scalar:
         return out.item()  # type: ignore[attribute]
     return out
@@ -595,7 +595,7 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
+        record_output=True,
         record_ids=False,
     ) -> None:
         super().__init__()
@@ -820,12 +820,17 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self, show_stack_trace: bool = False) -> str:
+    def debug_string(self, show_stack_trace: bool | None = None) -> str:
         """
-        show_stack_trace: If True, display one-line stack trace summaries above groups
+        show_stack_trace: option to display one-line stack trace summaries above groups
                         of operations (similar to gm.print_readable() style).
                         Requires record_stack_trace=True.
+                        if None, uses self.record_stack_trace, otherwise overrides it.
         """
+        show_stack_trace = (
+            self.record_stack_trace if show_stack_trace is None else show_stack_trace
+        )
+
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
@@ -924,7 +929,7 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False
+        hash_fn: Callable | str | list[str] = "norm", hash_inputs: bool = False
     ):
         """
         Installs hook for tensor hash logging.
