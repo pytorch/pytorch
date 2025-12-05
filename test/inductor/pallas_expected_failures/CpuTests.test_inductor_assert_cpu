@@ -1,0 +1,6 @@
+ERROR
+  File "/tmp/tmpu305tn6c/sf/csf547ib4fa5a6p2yaq3zohsprgrvqawjo4y64evhtezfspusm4p.py", line 12, in pallas_fused_cos_446254b1_kernel
+    out_ptr0[...] = tmp1.reshape(s97, s98, s69)
+                                 ^^^
+NameError: name 's97' is not defined
+

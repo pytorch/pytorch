@@ -1,0 +1,6 @@
+ERROR
+  File "/tmp/tmpeiu277q6/f7/cf7rskgwtqiqnzuuxf4k5m6opmtrfjriowm3qfl6vzcgg5xildh2.py", line 14, in pallas_fused_add_cos_sin_6af800ba_kernel
+    out_ptr0[...] = tmp3.reshape(s77, s27)
+                                 ^^^
+NameError: name 's77' is not defined
+

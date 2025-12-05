@@ -1,0 +1,6 @@
+ERROR
+  File "/tmp/tmp317vp9wk/y3/cy3dghwdyxtjri63m3yn3avwbw3r5zgfsc7c7f2ku3nad7onrh2x.py", line 14, in pallas_fused_add_slice_f91cfd6e_kernel
+    out_ptr0[...] = tmp3.reshape(s77, s27, 1)
+                                 ^^^
+NameError: name 's77' is not defined
+
