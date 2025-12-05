@@ -410,6 +410,70 @@ inline torch::stable::Tensor from_blob(
   return torch::stable::Tensor(ath);
 }
 
+// We expect this to be the stable version of the to.dtype_layout op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for torch::stable::Device, which is only available in 2.10.
+inline torch::stable::Tensor to(
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt,
+    bool non_blocking = false,
+    bool copy = false,
+    std::optional<torch::headeronly::MemoryFormat> memory_format =
+        std::nullopt) {
+  const auto num_args = 8;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory),
+      torch::stable::detail::from(non_blocking),
+      torch::stable::detail::from(copy),
+      torch::stable::detail::from(memory_format)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::to", "dtype_layout", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// Convenience overload for to(device)
+// We add this for convenience since stable does not support .to(TensorOptions)
+inline torch::stable::Tensor to(
+    const torch::stable::Tensor& self,
+    torch::stable::Device device,
+    bool non_blocking = false,
+    bool copy = false) {
+  return to(
+      self,
+      std::nullopt,
+      std::nullopt,
+      device,
+      std::nullopt,
+      non_blocking,
+      copy,
+      std::nullopt);
+}
+
+// We expect this to be the stable version of the contiguous op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for MemoryFormat, which is only available in 2.10.
+// Contiguous is also a method on (non-stable Tensor), for now we only
+// support the function version.
+inline torch::stable::Tensor contiguous(
+    const torch::stable::Tensor& self,
+    torch::headeronly::MemoryFormat memory_format =
+        torch::headeronly::MemoryFormat::Contiguous) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(memory_format)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::contiguous", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)
