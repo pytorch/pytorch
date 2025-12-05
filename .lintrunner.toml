@@ -231,6 +231,7 @@ exclude_patterns = [
     'c10/util/SmallVector.h',
     'c10/util/win32-headers.h',
     'c10/test/**/*.h',
+    'c10/test/**/*.cpp',
     'third_party/**/*',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
