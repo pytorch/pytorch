@@ -354,6 +354,24 @@ class OverlapScheduler:
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
 
+        # Build fusion regions early for overlap calculation
+        # This allows us to use fused kernel costs when computing overlap
+        self.region_of: dict[fx.Node, Any] = {}
+        self.counted_region_ids: set[int] = set()  # Track regions already counted for overlap
+        if torch._inductor.config.test_configs.enable_fusion_regions:
+            from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
+
+            self.region_of = build_fusion_regions(self.gm)
+            if self.region_of:
+                unique_regions: set[int] = set()
+                for region in self.region_of.values():
+                    unique_regions.add(id(region))
+                log.info(
+                    "Fusion regions for overlap: detected %d regions containing %d nodes",
+                    len(unique_regions),
+                    len(self.region_of),
+                )
+
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
         ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -710,14 +728,65 @@ class OverlapScheduler:
                 # Wait depends on compute (wait must wait for compute to finish)
                 additional_deps[info.wait_node].add(hn)
 
+        # Redirect dependencies to fusion region outputs instead of internal nodes
+        # This avoids creating dependencies on nodes that will fuse together
+        if self.region_of and additional_deps:
+            additional_deps = self._redirect_deps_to_fusion_outputs(additional_deps)
+
         # Apply effect tokens to preserve these dependencies
         if additional_deps:
             preserve_node_ordering(self.graph, additional_deps)
 
+    def _redirect_deps_to_fusion_outputs(
+        self, deps_map: dict[fx.Node, OrderedSet[fx.Node]]
+    ) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Redirect dependencies to target fusion group outputs instead of internal nodes."""
+        if not self.region_of:
+            return deps_map
+
+        def get_fusion_rep(node: fx.Node) -> fx.Node:
+            """Get the fusion region's output node (representative) for a node."""
+            region = self.region_of.get(node)
+            if region is not None:
+                return region.end  # Last node (output) of the fusion region
+            return node
+
+        redirected_deps: dict[fx.Node, OrderedSet[fx.Node]] = {}
+
+        for node, deps in deps_map.items():
+            rep_node = get_fusion_rep(node)
+            rep_deps = OrderedSet()
+            for dep in deps:
+                rep_dep = get_fusion_rep(dep)
+                # Only add if not self-dependency after redirection
+                if rep_dep != rep_node:
+                    rep_deps.add(rep_dep)
+
+            if rep_deps:
+                if rep_node in redirected_deps:
+                    redirected_deps[rep_node].update(rep_deps)
+                else:
+                    redirected_deps[rep_node] = rep_deps
+
+        return redirected_deps
+
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
 
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
+        # If node is in a fusion region, use region cost (memory bandwidth-based)
+        # This gives a more accurate estimate since these ops will fuse together
+        # Only count each region's cost once (when we see the first node from it)
+        if node in self.region_of:
+            region = self.region_of[node]
+            region_id = id(region)
+            if region_id in self.counted_region_ids:
+                # Already used this region's cost for overlap, return 0 to avoid double-counting
+                return 0.0
+            # Mark as counted and return region cost
+            self.counted_region_ids.add(region_id)
+            return region.cost_ms
+
+        # For nodes not in fusion regions, use existing logic
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
@@ -1190,17 +1259,26 @@ class OverlapScheduler:
         self.reorder_graph()
 
     def _bucket_collectives(self) -> None:
+        from torch._inductor.fx_passes.fusion_regions import collapse_fusion_regions
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
 
+        # Collapse fusion regions into call_module nodes before bucketing
+        region_of = self.region_of
+        replaced: dict[fx.Node, fx.Node] = {}
+        if region_of:
+            region_of, replaced = collapse_fusion_regions(self.gm, region_of)
+
         bucketer = OverlapPreservingBucketer(
-            graph=self.graph,
+            gm=self.gm,
             collective_info=self.collective_info,
             scheduled=self.scheduled,
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            region_of=region_of,
+            replaced=replaced,
         )
         bucketer.bucket_collectives()
 
