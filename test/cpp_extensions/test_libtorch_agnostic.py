@@ -825,6 +825,40 @@ if not IS_WINDOWS:
                                     t, rdtype, mutable
                                 )
 
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_curr_cuda_blas_handle(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
+            expected = torch.cuda.current_blas_handle()
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op(t, "dim", "ice")
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "ice"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op(
+                t, "size", "cream"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "cream"])
+            self.assertEqual(result_size, t.size(0))
+
+            stride_vec, result_stride = libtorch_agnostic.ops.my_string_op(
+                t, "stride", "cake"
+            )
+            self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "cake"])
+            self.assertEqual(result_stride, t.stride(0))
+
+            with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
+                libtorch_agnostic.ops.my_string_op(t, "invalid", "")
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

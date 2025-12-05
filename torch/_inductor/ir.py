@@ -530,6 +530,16 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     return list(sym_vars)
 
 
+def try_get_name(x):
+    if isinstance(x, TensorBox):
+        x = x.data
+    if isinstance(x, BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, StorageBox):
+        x = x.data
+    return x.get_name() if isinstance(x, Buffer) else None
+
+
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -947,9 +957,6 @@ class Loops(IRNode):
             + [f"{name}={getattr(self, name)}" for name in names]
             + [f"origin_node={self.origin_node!r}"]
         )
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
 
     def __str__(self) -> str:
         return self._to_str(("ranges",))
@@ -1435,7 +1442,9 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            outer = all(s > 1 for s in strides)
+            # A 0 stride does not make a reduction contiguous.
+            # This can happen when the reduction ranges contains a 1.
+            outer = all(s == 0 or s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -7429,6 +7438,8 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         if (
             not x.is_extern()
+            # Can not apply this optimization if x has been mutated
+            and try_get_name(x) not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
@@ -8218,9 +8229,6 @@ class FallbackKernel(ExternKernelAlloc):
         # pyrefly: ignore [bad-return]
         return outputs
 
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
-
 
 @ir_dataclass(frozen=False)
 class ComplexView(FallbackKernel):
@@ -8827,9 +8835,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(

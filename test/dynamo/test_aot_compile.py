@@ -3,8 +3,10 @@
 import copy
 import functools
 import inspect
+import multiprocessing as mp
 import os
 import pickle
+import tempfile
 import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -104,6 +106,162 @@ class TextModel(torch.nn.Module):
 class TestVLLMModel(MultiModalMixin, TextModel):
     def forward(self, x):
         return super().forward(x)
+
+
+def _subprocess_entry(fn, queue):
+    try:
+        fn()
+    except BaseException as exc:  # noqa: BLE001
+        import traceback
+
+        queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
+        raise
+    else:
+        queue.put(None)
+
+
+def _run_in_subprocess(fn):
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    proc = ctx.Process(target=_subprocess_entry, args=(fn, queue))
+    proc.start()
+    proc.join()
+    result = queue.get()
+    if result is not None:
+        name, msg, tb = result
+        raise AssertionError(f"Subprocess failure ({name}: {msg})\n{tb}")
+
+
+def _subprocess_disable_guard_check():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        prev_grad = torch.is_grad_enabled()
+        try:
+            torch.set_grad_enabled(not prev_grad)
+            try:
+                compiled_fn(*inputs)
+            except RuntimeError as exc:  # pragma: no cover
+                if "GuardManager check failed" not in str(exc):
+                    raise
+            else:  # pragma: no cover
+                raise AssertionError("Guard check should have failed")
+            compiled_fn.disable_guard_check()
+            actual = compiled_fn(*inputs)
+            assert torch.allclose(actual, expected)
+        finally:
+            torch.set_grad_enabled(prev_grad)
+
+
+def _subprocess_grad_mode_after_prior_compile():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+
+        def warmup_fn(x, y):
+            return x + y
+
+        def target_fn(x, y):
+            return x - y
+
+        torch.compile(warmup_fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        torch._dynamo.reset()
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(
+                ((torch.randn(3, 4), torch.randn(3, 4)), {})
+            )
+
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        with torch.no_grad():
+            actual = compiled_fn(*inputs)
+            expected = target_fn(*inputs)
+            assert torch.allclose(actual, expected)
+
+
+def _subprocess_aot_compile_module():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = SimpleLinearModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
+            },
+        )
+
+        @contextmanager
+        def train_mode(mdl):
+            mdl.train()
+            yield
+
+        @contextmanager
+        def eval_mode(mdl):
+            mdl.eval()
+            yield
+
+        inputs = [
+            ModelInput(
+                args=(torch.randn(3, 3),),
+                kwargs={},
+                contexts=[torch.no_grad(), eval_mode(model)],
+            ),
+            ModelInput(
+                args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
+            ),
+        ]
+        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+        model._aot_compile(inputs)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            model.eval()
+            eager_inputs = (torch.randn(3, 3),)
+            expected = mod(*eager_inputs)
+            actual = model(*eager_inputs)
+            assert torch.allclose(expected, actual)
+            model.train()
+            expected.sum().backward()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "model.pt")
+            model._save_aot_compiled_module(path)
+            torch._dynamo.reset()
+            model = torch.compile(
+                mod,
+                fullgraph=True,
+                backend="inductor",
+                options={
+                    "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
+                },
+            )
+            assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+            with open(path, "rb") as f:
+                data = f.read()
+                model._load_aot_compiled_module(data)
+
+            with torch.compiler.set_stance("fail_on_recompile"):
+                model.eval()
+                eager_inputs = (torch.randn(3, 3),)
+                expected = mod(*eager_inputs)
+                actual = model(*eager_inputs)
+                assert torch.allclose(expected, actual)
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
@@ -260,20 +418,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, actual)
 
     def test_aot_compile_disable_guard_check(self):
-        def fn(x, y):
-            return x + y
+        _run_in_subprocess(_subprocess_disable_guard_check)
 
-        with torch.no_grad():
-            compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
-                ((torch.randn(3, 4), torch.randn(3, 4)), {})
-            )
-        inputs = (torch.randn(3, 4), torch.randn(3, 4))
-        expected = fn(*inputs)
-        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
-            compiled_fn(*inputs)
-        compiled_fn.disable_guard_check()
-        actual = compiled_fn(*inputs)
-        self.assertEqual(expected, actual)
+    def test_aot_compile_grad_mode_after_prior_compile(self):
+        _run_in_subprocess(_subprocess_grad_mode_after_prior_compile)
 
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
@@ -383,83 +531,7 @@ from user code:
             self.assertEqual(expected, actual)
 
     def test_aot_compile_module(self):
-        mod = SimpleLinearModule()
-
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="inductor",
-            options={
-                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
-            },
-        )
-
-        @contextmanager
-        def train_mode(model):
-            """
-            Context manager that sets the model to training mode before entering the context.
-            """
-            model.train()
-            yield
-
-        @contextmanager
-        def eval_mode(model):
-            """
-            Context manager that sets the model to evaluation mode before entering the context.
-            """
-            model.eval()
-            yield
-
-        inputs = [
-            ModelInput(
-                args=(torch.randn(3, 3),),
-                kwargs={},
-                contexts=[torch.no_grad(), eval_mode(model)],
-            ),
-            ModelInput(
-                args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
-            ),
-        ]
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
-        model._aot_compile(
-            inputs,
-        )
-        with torch.compiler.set_stance("fail_on_recompile"):
-            model.eval()
-            inputs = (torch.randn(3, 3),)
-            expected = mod(*inputs)
-            actual = model(*inputs)
-            self.assertEqual(expected, actual)
-
-            # Shouldn't recompile
-            model.train()
-            expected.sum().backward()
-
-        model._save_aot_compiled_module(self.path())
-        torch._dynamo.reset()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="inductor",
-            options={
-                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
-            },
-        )
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
-        with open(self.path(), "rb") as f:
-            data = f.read()
-            model._load_aot_compiled_module(data)
-
-        with torch.compiler.set_stance("fail_on_recompile"):
-            model.eval()
-            inputs = (torch.randn(3, 3),)
-            expected = mod(*inputs)
-            actual = model(*inputs)
-            self.assertEqual(expected, actual)
-
-            # Shouldn't recompile
-            model.train()
-            expected.sum().backward()
+        _run_in_subprocess(_subprocess_aot_compile_module)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -702,6 +774,30 @@ from user code:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*test_inputs)
             self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
+            self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_checkpoint(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(x, y):
+            def compute(x, y):
+                return x * 2 + y * 3
+
+            return checkpoint(compute, x, y, use_reentrant=False)
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
 
