@@ -176,6 +176,12 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         it = p.__iter__().__iter__()
         self.assertEqual(next(it), 1)
 
+    @make_dynamo_test
+    def test_list_mul_constant_tuple(self):
+        tree = (1, 2)
+        result = [tree] * 2
+        self.assertEqual(result, [tree, tree])
+
 
 class ListTests(TupleTests):
     # List methods
