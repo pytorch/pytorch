@@ -271,9 +271,7 @@ class LazyConstantVariableTests(TestCase):
         result3 = opt_fn3(tensor_input)
         self.assertEqual(result3[1], GLOBAL_INT_1)
 
-    def test_type_change_triggers_recompile(self):
-        """Test that changing the type of a constant triggers recompilation,
-        but changing the value within the same type does not."""
+    def test_type_change_does_not_recompile(self):
         tensor_input = torch.randn(3)
 
         def fn(t, val):
@@ -297,19 +295,19 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager2[1], compiled2[1])
         self.assertEqual(counter.frame_count, 1)  # Still 1, no recompile
 
-        # Third call with string - SHOULD recompile due to type change
+        # Third call with string
         eager3 = fn(tensor_input, "hello")
         compiled3 = opt_fn(tensor_input, "hello")
         self.assertTrue(same(eager3[0], compiled3[0]))
         self.assertEqual(eager3[1], compiled3[1])
-        self.assertEqual(counter.frame_count, 2)  # Now 2, recompiled
+        self.assertEqual(counter.frame_count, 1)
 
-        # Fourth call with different string - should NOT recompile
+        # Fourth call with different string
         eager4 = fn(tensor_input, "world")
         compiled4 = opt_fn(tensor_input, "world")
         self.assertTrue(same(eager4[0], compiled4[0]))
         self.assertEqual(eager4[1], compiled4[1])
-        self.assertEqual(counter.frame_count, 2)  # Still 2
+        self.assertEqual(counter.frame_count, 1)
 
     def test_python_type_does_not_realize(self):
         """Test that python_type() on a lazy constant does not trigger realization.
@@ -318,27 +316,31 @@ class LazyConstantVariableTests(TestCase):
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.lazy import LazyCache, LazyConstantVariable
         from torch._dynamo.variables.tensor import TensorVariable
+        from torch._guards import tracing, TracingContext
 
-        # Create a LazyConstantVariable directly (outside of tracing)
-        # to test that python_type() doesn't trigger realization
-        source = LocalSource("test")
-        cache = LazyCache(42, source)
-        lc = LazyConstantVariable(cache, source=source)
+        # Create a dummy tracing context so guards can be installed
+        ctx = TracingContext(fake_mode=None)
+        with tracing(ctx):
+            # Create a LazyConstantVariable directly
+            # to test that python_type() doesn't trigger realization
+            source = LocalSource("test")
+            cache = LazyCache(42, source)
+            lc = LazyConstantVariable(cache, source=source)
 
-        # python_type() should not trigger realization
-        self.assertFalse(lc.is_realized())
-        self.assertEqual(lc.python_type(), int)
-        self.assertFalse(lc.is_realized())  # Still not realized
+            # python_type() should not trigger realization
+            self.assertFalse(lc.is_realized())
+            self.assertEqual(lc.python_type(), int)
+            self.assertFalse(lc.is_realized())  # Still not realized
 
-        # is_tensor() should not trigger realization
-        self.assertEqual(lc.is_tensor(), False)
-        self.assertFalse(lc.is_realized())
+            # is_tensor() should not trigger realization
+            self.assertEqual(lc.is_tensor(), False)
+            self.assertFalse(lc.is_realized())
 
-        # lazy_isinstance() checks if cls is a subclass of ConstantVariable
-        # (i.e., whether this would realize to a ConstantVariable-like type)
-        self.assertTrue(lc.lazy_isinstance(ConstantVariable))
-        self.assertFalse(lc.lazy_isinstance(TensorVariable))
-        self.assertFalse(lc.is_realized())
+            # lazy_isinstance() checks if cls is a subclass of ConstantVariable
+            # (i.e., whether this would realize to a ConstantVariable-like type)
+            self.assertTrue(lc.lazy_isinstance(ConstantVariable))
+            self.assertFalse(lc.lazy_isinstance(TensorVariable))
+            self.assertFalse(lc.is_realized())
 
     def test_isinstance_recompiles_on_value_change(self):
         """Test that isinstance checks currently trigger recompilation on value change.

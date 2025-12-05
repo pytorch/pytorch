@@ -599,7 +599,7 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
+        record_output=True,
         record_ids=False,
     ) -> None:
         super().__init__()
@@ -824,12 +824,17 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self, show_stack_trace: bool = False) -> str:
+    def debug_string(self, show_stack_trace: bool | None = None) -> str:
         """
-        show_stack_trace: If True, display one-line stack trace summaries above groups
+        show_stack_trace: option to display one-line stack trace summaries above groups
                         of operations (similar to gm.print_readable() style).
                         Requires record_stack_trace=True.
+                        if None, uses self.record_stack_trace, otherwise overrides it.
         """
+        show_stack_trace = (
+            self.record_stack_trace if show_stack_trace is None else show_stack_trace
+        )
+
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
