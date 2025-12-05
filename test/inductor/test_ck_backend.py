@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import logging
 import os
 import unittest
@@ -13,6 +12,7 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import try_import_ck_lib
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -32,20 +32,8 @@ if HAS_CUDA_AND_TRITON:
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
-
-
-_test_env = {
-    "PATH": _get_path_without_sccache(),
-    "DISABLE_SCCACHE": "1",
-}
+# patch env for tests if needed
+_test_env = {}
 
 
 @instantiate_parametrized_tests
@@ -61,13 +49,10 @@ class TestCKBackend(TestCase):
         )
 
         torch.random.manual_seed(1234)
-        try:
-            import ck4inductor  # @manual
 
-            self.ck_dir = os.path.dirname(ck4inductor.__file__)
-            os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
-        except ImportError as e:
-            raise unittest.SkipTest("Composable Kernel library not installed") from e
+        self.ck_dir, _, _, _ = try_import_ck_lib()
+        if not self.ck_dir:
+            raise unittest.SkipTest("Composable Kernel library is not installed")
 
         try:
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
@@ -288,6 +273,9 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager)
 
+    @unittest.skip(
+        "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
+    )
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))

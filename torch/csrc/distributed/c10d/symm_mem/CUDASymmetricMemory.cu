@@ -134,10 +134,6 @@ size_t CUDASymmetricMemory::get_buffer_size() {
   return buffer_size_;
 }
 
-size_t CUDASymmetricMemory::get_signal_pad_size() {
-  return signal_pad_size;
-}
-
 bool CUDASymmetricMemory::has_multicast_support() {
   return mc_addr_ != nullptr;
 }
@@ -153,7 +149,8 @@ void check_channel(int channel, int world_size) {
       "must be greater than 0 (got ",
       channel,
       ")");
-  const size_t num_channels = signal_pad_size / sizeof(uint32_t) * world_size;
+  const size_t num_channels = c10d::symmetric_memory::get_signal_pad_size() /
+      sizeof(uint32_t) * world_size;
   TORCH_CHECK(
       static_cast<size_t>(channel) < num_channels,
       "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
@@ -320,6 +317,10 @@ c10::Device CUDASymmetricMemory::get_device() {
   return c10::Device(c10::DeviceType::CUDA, local_device_idx_);
 }
 
+bool CUDASymmetricMemory::world_within_direct_access() {
+  return true;
+}
+
 Block::Block(
     c10::intrusive_ptr<AllocationRef> alloc_ref,
     int device_idx,
@@ -344,7 +345,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
     int device_idx,
     const std::optional<std::string>& group_name) {
   size_t signal_pad_offset = at::round_up(size, 16UL);
-  size_t block_size = signal_pad_offset + signal_pad_size;
+  size_t block_size = signal_pad_offset + get_signal_pad_size();
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -374,6 +375,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
 
 #elif defined(USE_ROCM)
+  handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
@@ -439,6 +441,7 @@ struct RendezvousRequest {
   size_t buffer_size;
   size_t signal_pad_offset;
   bool has_multicast_support;
+  char hostname[HOST_NAME_MAX + 1];
 };
 
 void validate_rendezvous_requests(
@@ -446,13 +449,15 @@ void validate_rendezvous_requests(
     int world_size) {
   TORCH_CHECK(reqs.size() == (size_t)world_size);
 
-  std::unordered_set<int> device_indices;
-  device_indices.reserve(world_size);
+  // For NVL72 systems, multiple hosts can be within a single nvlink domain.
+  // Multiple blocks will have same device_idx but they are on different hosts.
+  // Use (hostname, device_idx) pair to uniquely identify each allocation.
+  std::set<std::pair<std::string, int>> device_host_pairs;
   for (auto req : reqs) {
-    device_indices.insert(req.device_idx);
+    device_host_pairs.insert(std::make_pair(std::string(req.hostname), req.device_idx));
   }
   if (!allow_overlapping_devices() &&
-      device_indices.size() < (size_t)world_size) {
+      device_host_pairs.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -642,6 +647,9 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx)};
+
+  // Populate hostname field for host identification
+  gethostname(local_req.hostname, sizeof(local_req.hostname));
   auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
@@ -688,7 +696,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 #elif defined(USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
+#if ROCM_VERSION >= 70100
+        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+#else
         (void*)(uintptr_t) & (imported_handles[r]),
+#endif
         hipMemHandleTypePosixFileDescriptor));
 #else
     TORCH_CHECK(
@@ -716,11 +728,16 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      alloc_refs.emplace_back(block->alloc_ref);
       if (mc_addr != nullptr) {
         alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
             mc_addr, mc_handle, block->block_size, block->device_idx, true));
       }
+      // Note that in B200, cuMulticastUnbind can error if the mapped buffers
+      // are free'd before the multicast object is free'd. That's why the
+      // alloc_ref for the multicast object is added first into the vector,
+      // such that ~AllocationRef can release it first. For more context,
+      // see: https://github.com/pytorch/pytorch/issues/162429
+      alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(

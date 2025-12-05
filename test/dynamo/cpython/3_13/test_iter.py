@@ -314,7 +314,7 @@ class TestCase(__TestCase):
         def run(builtin_name, item, sentinel=None):
             it = iter(item) if sentinel is None else iter(item, sentinel)
 
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class CustomStr:
                     def __init__(self, name, iterator):
                         self.name = name
@@ -377,7 +377,7 @@ class TestCase(__TestCase):
 
     # Test a new_style class with __iter__ but no next() method
     def test_new_style_iter_class(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class IterClass(object):
                 def __iter__(self):
                     return self
@@ -449,7 +449,7 @@ class TestCase(__TestCase):
 
     # Test exception propagation through sequence iterator
     def test_exception_sequence(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySequenceClass(SequenceClass):
                 def __getitem__(self, i):
                     if i == 10:
@@ -466,7 +466,7 @@ class TestCase(__TestCase):
 
     # Test for StopIteration from __getitem__
     def test_stop_sequence(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySequenceClass(SequenceClass):
                 def __getitem__(self, i):
                     if i == 10:
@@ -598,7 +598,7 @@ class TestCase(__TestCase):
         self.assertRaises(TypeError, filter, None, list)
         self.assertRaises(TypeError, filter, None, 42)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Boolean:
                 def __init__(self, truth):
                     self.truth = truth
@@ -607,7 +607,7 @@ class TestCase(__TestCase):
         bTrue = Boolean(True)
         bFalse = Boolean(False)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Seq:
                 def __init__(self, *args):
                     self.vals = args
@@ -713,7 +713,7 @@ class TestCase(__TestCase):
         self.assertEqual(list(d.items()), list(zip(d, d.values())))
 
         # Generate all ints starting at constructor arg.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class IntsFrom:
                 def __init__(self, start):
                     self.i = start
@@ -747,7 +747,7 @@ class TestCase(__TestCase):
         self.assertEqual(list(zip(range(5))), [(i,) for i in range(5)])
 
         # Classes that lie about their lengths.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class NoGuessLen5:
                 def __getitem__(self, i):
                     if i >= 5:
@@ -780,7 +780,7 @@ class TestCase(__TestCase):
 
         # This class inserts a Unicode object into its argument's natural
         # iteration, in the 3rd position.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class OhPhooey:
                 def __init__(self, seq):
                     self.it = iter(seq)
@@ -958,7 +958,7 @@ class TestCase(__TestCase):
             f.writelines({})
 
             # Try a big chunk too.
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class Iterator:
                     def __init__(self, start, finish):
                         self.start = start
@@ -1054,7 +1054,7 @@ class TestCase(__TestCase):
 
     @cpython_only
     def test_ref_counting_behavior(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 count = 0
                 def __new__(cls):
@@ -1154,7 +1154,7 @@ class TestCase(__TestCase):
 
     def test_3720(self):
         # Avoid a crash, when an iterator deletes its next() method.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadIterator(object):
                 def __iter__(self):
                     return self

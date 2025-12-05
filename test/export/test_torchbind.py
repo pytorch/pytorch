@@ -138,7 +138,7 @@ class TestExportTorchbind(TestCase):
         def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = torch.export.export_for_training(
+                    exported_program = torch.export.export(
                         f, args, kwargs, strict=strict
                     ).run_decompositions({})
                 else:
@@ -185,6 +185,7 @@ class TestExportTorchbind(TestCase):
 def forward(self, x, n):
     x, n, = fx_pytree.tree_flatten_spec(([x, n], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x, n);  n = _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -232,6 +233,7 @@ def forward(self, token, obj_attr, x, n):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -266,6 +268,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -300,6 +303,7 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x, cc):
     x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x, cc);  _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(cc, 'add_tensor', x);  cc = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -362,6 +366,7 @@ def forward(self, token, x, cc):
             """\
 def forward(self, x, cc):
     x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x, cc);  _guards_fn = None
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(cc, x);  cc = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -406,7 +411,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    def test_torchbind_register_attr_at_runtime_error(self):
+    def test_torchbind_register_attr_at_runtime_get_restored(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -414,10 +419,8 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        with self.assertRaisesRegex(
-            ValueError, "following attrs were created in the model"
-        ):
-            torch.export.export(F3(), (torch.ones(2, 3), foo))
+        torch.export.export(F3(), (torch.ones(2, 3), foo), strict=False)
+        self.assertFalse(hasattr(foo, "foo"))
 
     @parametrize("pre_dispatch", [True, False])
     def test_torchbind_input_and_alias(self, pre_dispatch):
@@ -457,9 +460,10 @@ def forward(self, token, x, cc):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
-    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
+    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default);  attr = takes_foo_default = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default_1);  x = takes_foo_default_1 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -499,6 +503,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_list_return_default = torch.ops._TorchScriptTesting.takes_foo_list_return.default(attr, x)
     getitem_2 = takes_foo_list_return_default[0]
     getitem_3 = takes_foo_list_return_default[1]
@@ -551,6 +556,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(attr, x)
     getitem_1 = takes_foo_tuple_return_default[0]
     getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
@@ -747,7 +753,7 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             mod, (tq, torch.randn(2, 2)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
@@ -801,9 +807,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = torch.export.export_for_training(
-                mod, (safe_obj,), strict=False
-            ).run_decompositions({})
+            ep = torch.export.export(mod, (safe_obj,), strict=False).run_decompositions(
+                {}
+            )
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -1065,6 +1071,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, tq, x):
     tq, x, = fx_pytree.tree_flatten_spec(([tq, x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(tq, x);  _guards_fn = None
     queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = queue_push_default = None
     return pytree.tree_unflatten((tq,), self._out_spec)""",
         )
@@ -1080,10 +1087,12 @@ def forward(self, token, tq, x):
             str(ep.graph_module.graph).strip(),
             """\
 graph():
+    %token : [num_users=1] = placeholder[target=token]
     %tq : [num_users=2] = placeholder[target=tq]
     %x : [num_users=1] = placeholder[target=x]
-    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
-    return (tq,)""",  # noqa: B950
+    %with_effects : [num_users=1] = call_function[target=torch.ops.higher_order.with_effects](args = (%token, _TorchScriptTesting.queue_push.default, %tq, %x), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%with_effects, 0), kwargs = {})
+    return (getitem, tq)""",  # noqa: B950
         )
 
     def test_deepcopy(self):
@@ -1398,9 +1407,9 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         x = torch.randn(3, 1)
         eager_out = mod(test_obj, x)
         compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(test_obj, x)
-        ep = torch.export.export_for_training(
-            mod, (test_obj, x), strict=False
-        ).run_decompositions({})
+        ep = torch.export.export(mod, (test_obj, x), strict=False).run_decompositions(
+            {}
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\

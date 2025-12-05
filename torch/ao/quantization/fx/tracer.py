@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule

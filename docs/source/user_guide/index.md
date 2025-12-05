@@ -27,6 +27,14 @@ pytorch_main_components
 
 ```{toctree}
 :maxdepth: 1
+:caption: Torch Compile
+
+Torch.compile <torch_compiler/torch.compiler.md>
+Torch.export <torch_compiler/export.md>
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Beyond the Basics
 
 ```
@@ -36,4 +44,11 @@ pytorch_main_components
 :caption: Developer Notes
 
 ../notes
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Accelerator Integration
+
+../accelerator/index
 ```

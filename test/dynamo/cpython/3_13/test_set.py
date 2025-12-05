@@ -315,7 +315,7 @@ class _TestJointOps:
             self.assertEqual(self.thetype(it), data - self.thetype((drop,)))
 
     def test_deepcopy(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Tracer:
                 def __init__(self, value):
                     self.value = value
@@ -334,7 +334,7 @@ class _TestJointOps:
 
     def test_gc(self):
         # Create a nest of cycles to exercise overall ref count check
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A:
                 pass
         s = set(A() for i in range(1000))
@@ -345,7 +345,7 @@ class _TestJointOps:
 
     def test_subclass_with_custom_hash(self):
         # Bug #1257731
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class H(self.thetype):
                 def __hash__(self):
                     return int(id(self) & 0x7fffffff)
@@ -399,7 +399,7 @@ class _TestJointOps:
 
     def test_container_iterator(self):
         # Bug #3680: tp_traverse was not implemented for set iterator object
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C(object):
                 pass
         obj = C()
@@ -658,7 +658,7 @@ class TestSet(_TestJointOps, __TestCase):
         self.assertRaises(ReferenceError, str, p)
 
     def test_rich_compare(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class TestRichSetCompare:
                 def __gt__(self, some_set):
                     self.gt_called = True
@@ -703,7 +703,7 @@ class TestSetSubclass(TestSet):
     basetype = set
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass(set):
                 pass
         u = subclass([1, 2])
@@ -712,7 +712,7 @@ class TestSetSubclass(TestSet):
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_init(set):
                 def __init__(self, arg, newarg=None):
                     super().__init__(arg)
@@ -722,7 +722,7 @@ class TestSetSubclass(TestSet):
         self.assertEqual(set(u), {1, 2})
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_new(set):
                 def __new__(cls, arg, newarg=None):
                     self = super().__new__(cls, arg)
@@ -818,7 +818,7 @@ class TestFrozenSetSubclass(TestFrozenSet):
     basetype = frozenset
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass(frozenset):
                 pass
         u = subclass([1, 2])
@@ -827,7 +827,7 @@ class TestFrozenSetSubclass(TestFrozenSet):
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_init(frozenset):
                 def __init__(self, arg, newarg=None):
                     self.newarg = newarg
@@ -836,7 +836,7 @@ class TestFrozenSetSubclass(TestFrozenSet):
         self.assertEqual(set(u), {1, 2})
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_new(frozenset):
                 def __new__(cls, arg, newarg=None):
                     self = super().__new__(cls, arg)
@@ -1907,7 +1907,7 @@ class TestWeirdBugs(__TestCase):
         list(si)
 
     def test_merge_and_mutate(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X:
                 def __hash__(self):
                     return hash(0)
@@ -1928,7 +1928,7 @@ class _TestOperationsMutating:
     constructor2 = None
 
     def make_sets_of_bad_objects(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Bad:
                 def __eq__(self, other):
                     if not enabled:

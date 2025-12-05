@@ -14,7 +14,6 @@ if dist.is_available():
         wait_tensor,
     )
     from torch.distributed.device_mesh import init_device_mesh
-    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def normalize_graph(gm):
@@ -25,8 +24,7 @@ def normalize_graph(gm):
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
         # Use FakeProcessGroup to run tests on a single process
-        self.store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=self.store)
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
         self.world_size = 2
 
@@ -129,11 +127,33 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             local_rank = device_mesh.get_local_rank()
             global_rank = device_mesh.get_rank()
+            if "dp" not in device_mesh.mesh_dim_names:
+                x = x * 2
             return x + local_rank + global_rank
 
         x = torch.ones(10)
         res = fn(x)
         self.assertEqual(res, x)
+
+    def test_device_mesh_flatten(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(
+                1,
+                self.world_size,
+            ),
+            mesh_dim_names=("dp", "tp"),
+        )
+        self.assertEqual(device_mesh.get_coordinate(), [0, 0])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dm = device_mesh._flatten()
+            return x + 1, dm.get_coordinate()
+
+        x = torch.ones(10)
+        res = fn(x)
+        self.assertEqual(res, (x + 1, [0]))
 
 
 instantiate_parametrized_tests(TestFakeDistributed)

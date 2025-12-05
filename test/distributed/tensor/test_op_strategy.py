@@ -30,13 +30,16 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.utils import (
-    register_op_strategy,
-    replicate_op_strategy,
+from torch.distributed.tensor._ops.registration import register_op_strategy
+from torch.distributed.tensor._ops.utils import replicate_op_strategy
+from torch.distributed.tensor.debug import (
+    _clear_fast_path_sharding_prop_cache,
+    _clear_python_sharding_prop_cache,
+    CommDebugMode,
 )
-from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
     with_comms,
@@ -478,7 +481,8 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        propagator.propagate_op_sharding.cache.cache_clear()
+        _clear_fast_path_sharding_prop_cache()
+        _clear_python_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
@@ -536,7 +540,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 
-        def mock_select_func(strategy):
+        def mock_select_func(strategy, op_schema=None):
             """function copied from _select_strategy but with cost capturing"""
             nonlocal costs_from__select_strategy
             if len(strategy.strategies) == 1:
@@ -576,7 +580,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
                 self.assertEqual(
                     comm_mode.get_comm_counts(),
                     {
-                        torch.ops.c10d_functional.all_gather_into_tensor: 4,
+                        torch.ops.c10d_functional.all_gather_into_tensor: self.world_size,
                     },
                 )
                 expected_cost = [
@@ -643,6 +647,38 @@ class TestStrategyHashing(DTensorTestBase):
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
 
+
+class TestStrategyOperation(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    def test_cache_clean(self):
+        mesh = self.build_device_mesh()
+        test_op = torch.ops.mylib.numpy_sin
+        x = torch.randn(2, device=self.device_type)
+        y = torch.randn(2, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+        with op_strategy_context(test_op.default, replicate_op_strategy):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            f"Operator {test_op.default} does not have a sharding strategy registered",
+        ):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
+
+
+DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
+    create_local_tensor_test_class(
+        DistTensorReplicateStrategyRegistrationTest,
+    )
+)
+
+TestStrategyHashingWithLocalTensor = create_local_tensor_test_class(
+    TestStrategyHashing,
+)
 
 if __name__ == "__main__":
     run_tests()

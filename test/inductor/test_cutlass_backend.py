@@ -8,9 +8,10 @@ import sysconfig
 import time
 import unittest
 import unittest.mock as mock
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
@@ -84,10 +85,10 @@ def _check_if_instances_equal(op1, op2) -> bool:
     Utility function to check if two instances of a class are equal.
     """
     # cutlass uses list and tuple inconsistently
-    if isinstance(op1, (list, tuple)):
+    if isinstance(op1, (list | tuple)):
         return tuple(op1) == tuple(op2)
 
-    if type(op1) != type(op2):
+    if type(op1) is not type(op2):
         return False
 
     # some classes have __eq__ defined but they may be insufficient
@@ -107,12 +108,14 @@ def _check_if_instances_equal(op1, op2) -> bool:
     return True
 
 
-un_ops_under_test = [torch.relu]
+un_ops_under_test = [torch.relu, torch.tanh, torch.exp, torch.sigmoid]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
 evt_all_ops = parametrize(
     "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
 )
+
+evt_un_ops = parametrize("op", un_ops_under_test, name_fn=lambda f: f.__name__)
 
 evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
@@ -130,10 +133,10 @@ use_evt_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
+        "cutlass.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cuda.cutlass_tma_only": True,
-        "cuda.cutlass_epilogue_fusion_enabled": True,
+        "cutlass.cutlass_tma_only": True,
+        "cutlass.cutlass_epilogue_fusion_enabled": True,
     }
 )
 
@@ -141,9 +144,9 @@ fp8_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
+        "cutlass.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cuda.cutlass_tma_only": True,
+        "cutlass.cutlass_tma_only": True,
     }
 )
 
@@ -231,8 +234,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_backend_min_gemm_size": 100000,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_backend_min_gemm_size": 100000,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             with mock.patch(
@@ -252,10 +255,7 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        if config.is_fbcode():
-            import python_cutlass
-        else:
-            import cutlass as python_cutlass  # noqa: F401
+        import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
@@ -287,7 +287,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -324,7 +324,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             for x_shape in x_shapes:
@@ -354,7 +354,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -386,7 +386,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -428,8 +428,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 1,
-                "cuda.cutlass_max_profiling_swizzle_options": [
+                "cutlass.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
                     4,
@@ -505,7 +505,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -595,9 +595,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                    "cuda.cutlass_tma_only": True,
+                    "cutlass.cutlass_tma_only": True,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -677,7 +677,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                        "cuda.cutlass_max_profiling_configs": 2,
+                        "cutlass.cutlass_max_profiling_configs": 2,
                     }
                 ),
                 dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -746,7 +746,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -775,8 +775,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cutlass.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             for M, K, N in (
@@ -819,7 +819,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
@@ -849,8 +849,8 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 1,
-                    "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                    "cutlass.cutlass_max_profiling_configs": 1,
+                    "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
                 }
             ):
                 _ = compiled_model(a, b)
@@ -884,7 +884,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
@@ -983,7 +983,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -1002,7 +1002,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1040,7 +1040,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1073,8 +1073,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             model = MyModel()
@@ -1117,7 +1117,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
             }
         ):
@@ -1157,9 +1157,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_op_allowlist_regex": "",
-                    "cuda.cutlass_op_denylist_regex": "pingpong",
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_op_allowlist_regex": "",
+                    "cutlass.cutlass_op_denylist_regex": "pingpong",
                 }
             ):
                 with mock.patch(
@@ -1202,9 +1202,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_op_allowlist_regex": "pingpong",
-                    "cuda.cutlass_op_denylist_regex": None,
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_op_allowlist_regex": "pingpong",
+                    "cutlass.cutlass_op_denylist_regex": None,
                 }
             ):
                 with mock.patch(
@@ -1273,7 +1273,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "CUTLASS",
-                        "cuda.cutlass_max_profiling_configs": 2,
+                        "cutlass.cutlass_max_profiling_configs": 2,
                     }
                 ):
                     with mock.patch(
@@ -1350,7 +1350,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ),
             mock.patch(
@@ -1387,61 +1387,6 @@ class TestCutlassBackend(TestCase):
                     "No CUDATemplateCaller choices found for matmul with shape "
                     f"M={M}, N={N}, K={K}",
                 )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("presets", ("", "0", "0,999"))
-    def test_cutlass_presets(
-        self,
-        presets: str,
-    ):
-        """
-        Test if some configs can be generated with presets.
-        """
-
-        M, N, K = (128, 128, 16)
-        A = torch.randn(M, K).cuda().half()
-        B = torch.randn(N, K).cuda().half().t()
-
-        with (
-            fresh_cache(),
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_presets": presets,
-                }
-            ),
-            mock.patch(
-                "torch._inductor.kernel.mm.autotune_select_algorithm",
-                wraps=select_no_algorithm,
-            ) as sa,
-        ):
-            with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
-                torch.compile(torch.mm)(A, B)
-
-            self.assertTrue(
-                sa.called,
-                f"autotune_select_algorithm was not called with shape M={M}, N={N}, K={K}",
-            )
-            args, _ = sa.call_args
-            op_name, choices, _, __ = args
-            assert op_name == "mm"
-            cuda_template_count = 0
-            for choice in choices:
-                if isinstance(choice, CUDATemplateCaller):
-                    choice_info = choice.info_dict()
-                    op_conf_name = choice_info.get("op_conf_name", "")
-                    assert isinstance(op_conf_name, str)
-                    cuda_template_count += 1
-
-            self.assertGreater(
-                cuda_template_count,
-                0,
-                "No CUDATemplateCaller choices found for matmul with shape "
-                f"M={M}, N={N}, K={K}",
-            )
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1516,8 +1461,8 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.generate_test_runner": True,  # put standalone runner in the generated code
+                "cutlass.cutlass_max_profiling_configs": 2,
+                "cutlass.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
             from tempfile import NamedTemporaryFile
@@ -1542,9 +1487,9 @@ class TestCutlassBackend(TestCase):
             assert len(sources) >= 1
 
             # Get names for temporary source and executable files.
-            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)
+            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)  # noqa: SIM115
             cu_file.close()
-            exe_file = NamedTemporaryFile("w", suffix="", delete=False)
+            exe_file = NamedTemporaryFile("w", suffix="", delete=False)  # noqa: SIM115
             exe_file.close()
 
             # Save the generated code into the .cu file.
@@ -1599,7 +1544,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
                 # needed for log searching
                 "fx_graph_cache": False,
                 "fx_graph_remote_cache": False,
@@ -1663,8 +1608,8 @@ class TestCutlassBackend(TestCase):
                     "max_autotune_gemm_backends": "CUTLASS",
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.enable_caching_codegen": True,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ):
                 compiled_model = torch.compile(model, fullgraph=True)
@@ -1715,10 +1660,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
+                    "cutlass.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1776,10 +1721,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
+                    "cutlass.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1807,7 +1752,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1826,7 +1771,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1850,7 +1795,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1872,7 +1817,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1900,7 +1845,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1926,7 +1871,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             if use_aoti:
@@ -1978,6 +1923,30 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
+    @evt_un_ops
+    def test_evt_activations(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc, *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
         M = 1024
@@ -1999,7 +1968,7 @@ class TestCutlassBackend(TestCase):
 
         # baseline is cutlass kernel + triton
         # matches expected casting behavior
-        with config.patch({"cuda.cutlass_epilogue_fusion_enabled": False}):
+        with config.patch({"cutlass.cutlass_epilogue_fusion_enabled": False}):
             ref_result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
@@ -2124,10 +2093,13 @@ class TestCutlassBackend(TestCase):
         deserialized_ops = [
             serializer.deserialize(serialized_op) for serialized_op in serialized_ops
         ]
-        for op, deserialized_op in zip(ops, deserialized_ops):
+        for op, deserialized_op in zip(ops, deserialized_ops, strict=False):
             self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2201,7 +2173,107 @@ class TestCutlassBackend(TestCase):
         self.assertEqual(y_compiled.dtype, output_dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @fp8_config
+    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
+    @parametrize(
+        "shape",
+        (
+            (
+                512,
+                1024,
+            ),
+        ),
+    )
+    @parametrize("use_fast_accum", (True,))
+    @parametrize("use_aoti", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_fp8_rowwise_scaling_multiple_linear(
+        self,
+        float8_dtype: torch.dtype,
+        shape: tuple[int, int],
+        use_fast_accum: bool,
+        use_aoti: bool = False,
+        dynamic: bool = False,
+    ):
+        """
+        This test is meant to simulate a more realistic scenario.
+        """
+        if dynamic and use_aoti:
+            self.skipTest("Accuracy issues when both AOTI and dynamic are enabled")
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        M, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, N, dtype=output_dtype, device=device)
+        w1 = torch.randn(N, N, dtype=output_dtype, device=device)
+        w2 = torch.randn(N, N, dtype=output_dtype, device=device)
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, w1, w2, float8_dtype):
+                super().__init__()
+                w1_fp8, self.w1_inverse_scale = _quantize_rowwise(w1, float8_dtype)
+                w2_fp8, self.w2_inverse_scale = _quantize_rowwise(w2, float8_dtype)
+
+                self.w1_t_fp8 = w1_fp8.t()
+                self.w2_t_fp8 = w2_fp8.t()
+
+                self.float8_dtype = float8_dtype
+
+            def forward(self, x):
+                x_fp8, x_inverse_scale = _quantize_rowwise(x, self.float8_dtype)
+                y1 = torch._scaled_mm(
+                    x_fp8,
+                    self.w1_t_fp8,
+                    x_inverse_scale.view(-1, 1),
+                    self.w1_inverse_scale.view(1, -1),
+                    out_dtype=output_dtype,
+                    use_fast_accum=use_fast_accum,
+                )
+
+                y1_fp8, y1_inverse_scale = _quantize_rowwise(y1, self.float8_dtype)
+                y2 = torch._scaled_mm(
+                    y1_fp8,
+                    self.w2_t_fp8,
+                    y1_inverse_scale.view(-1, 1),
+                    self.w2_inverse_scale.view(1, -1),
+                    out_dtype=output_dtype,
+                    use_fast_accum=use_fast_accum,
+                )
+                return y2
+
+        model = TestModule(w1, w2, float8_dtype).cuda()
+
+        dynamic_shapes = (
+            {
+                "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
+
+        expected = model(x)
+
+        if use_aoti:
+            actual = AOTIRunnerUtil.run(
+                model,
+                (x,),
+                dynamic_shapes=dynamic_shapes,
+            )
+        else:
+            compiled_model = torch.compile(model, fullgraph=True, dynamic=dynamic)
+            actual = compiled_model(x)
+
+        torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2305,7 +2377,7 @@ class TestCutlassBackend(TestCase):
                         "max_autotune_gemm_backends": "CUTLASS",
                         # needed for log searching
                         "force_disable_caches": True,
-                        "cuda.cutlass_max_profiling_swizzle_options": [2],
+                        "cutlass.cutlass_max_profiling_swizzle_options": [2],
                     }
                 ):
                     with mock.patch(
