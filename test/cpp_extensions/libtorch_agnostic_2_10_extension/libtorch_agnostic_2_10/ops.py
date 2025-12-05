@@ -495,8 +495,8 @@ def my_contiguous_memory_format(t, memory_format) -> Tensor:
 
     Returns: Tensor - contiguous tensor with specified memory format
     """
-    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format.default(
-        t, memory_format
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format(
+        t, memory_format=memory_format
     )
 
 
@@ -525,6 +525,65 @@ def my_to_dtype_layout(
 
     Returns: Tensor - converted tensor
     """
-    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout.default(
-        t, dtype, layout, device, pin_memory, non_blocking, copy, memory_format
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout(
+        t,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        non_blocking=non_blocking,
+        copy=copy,
+        memory_format=memory_format,
+    )
+
+
+def my_new_empty(
+    self,
+    size,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+) -> Tensor:
+    """
+    Creates a new uninitialized tensor with the specified size and properties.
+
+    Args:
+        self: Tensor - input tensor (used to infer default properties)
+        size: list[int] - size of the new tensor
+        dtype: ScalarType or None - data type of the new tensor
+        layout: Layout or None - layout of the new tensor
+        device: Device or None - device for the new tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - new uninitialized tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_new_empty(
+        self, size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+def my_new_zeros(
+    self,
+    size,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+) -> Tensor:
+    """
+    Creates a new tensor filled with zeros with the specified size and properties.
+
+    Args:
+        self: Tensor - input tensor (used to infer default properties)
+        size: list[int] - size of the new tensor
+        dtype: ScalarType or None - data type of the new tensor
+        layout: Layout or None - layout of the new tensor
+        device: Device or None - device for the new tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - new tensor filled with zeros
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_new_zeros(
+        self, size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )

@@ -40,7 +40,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def("my_to_device(Tensor self, Device device) -> Tensor");
   m.def("my_to_dtype(Tensor self, ScalarType dtype) -> Tensor");
   m.def(
-      "my_to_dtype_layout(Tensor self, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory, bool non_blocking, bool copy, MemoryFormat? memory_format) -> Tensor");
+      "my_to_dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
