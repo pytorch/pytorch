@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
-    skipIfRocm,
     skipIfXpu,
     TEST_ACL,
     TEST_MKL,
