@@ -5504,7 +5504,7 @@ class CommonTemplate:
         )
 
     def test_avg_pool2d7(self):
-        # Large kernel size, use fallback
+        # Large kernel size with stride != size
         def fn(x):
             return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
 
