@@ -752,6 +752,10 @@ class PallasKernel(SIMDKernel):
         self.is_gpu = device.type == "cuda"
         self.use_masked_ops: bool | None = None
         self.tensor_masks = {}  # Map tensor name to mask variable name
+        # Track which output param each store uses: list of (out_ptr_name, store_line)
+        self.store_with_output: list[tuple[str, str]] = []
+        # Track load index expressions for argmax/argmin axis detection
+        self.load_index_exprs: dict[str, sympy.Expr] = {}
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -996,6 +1000,9 @@ class PallasKernel(SIMDKernel):
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
+        # Track the load index expression for argmax/argmin axis detection
+        self.load_index_exprs[name] = index
+
         # Determine masked ops strategy on first load/store if not yet determined
         if self.use_masked_ops is None:
             self.use_masked_ops = self._determine_masked_ops_for_kernel()
@@ -1030,33 +1037,106 @@ class PallasKernel(SIMDKernel):
         where tmp0 is loaded from indices and i0 is the iteration variable.
 
         We need to convert this to JAX advanced indexing with proper broadcasting.
+        When there are multiple iteration variables, they need different shapes
+        to form an outer product (grid) rather than broadcasting together.
         """
         # Get iteration variables
         iter_vars = OrderedSet(self.range_tree_nodes.keys())
         free_symbols = index.free_symbols
-        used_iter_vars = sorted(free_symbols & iter_vars, key=str)
+        used_iter_vars_set = free_symbols & iter_vars
 
-        if len(used_iter_vars) == 0:
+        if len(used_iter_vars_set) == 0:
             return self.kexpr(index)
 
-        index_str = self.kexpr(index)
-        indirect_vars = [str(sym) for sym in free_symbols if str(sym).startswith("tmp")]
+        # Sort iteration variables by their coefficient (stride) in the index expression.
+        # Variables with larger strides correspond to earlier output dimensions.
+        def get_coefficient(var):
+            """Extract the coefficient of a variable in the index expression."""
+            coeff = index.coeff(var)
+            if coeff == 0:
+                # Variable appears in a more complex form, try differentiation
+                coeff = sympy.diff(index, var)
+            # Convert to int if possible for sorting
+            try:
+                return int(coeff)
+            except (TypeError, ValueError):
+                return 0
 
+        used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
+        iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
+
+        index_str = self.kexpr(index)
+        indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
+        indirect_vars = [str(sym) for sym in indirect_var_syms]
+
+        # Get coefficients for indirect vars to determine output ordering
+        indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
+
+        # Build a sorted list of all components by coefficient (descending)
+        # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
+        all_components = []
+        for var in used_iter_vars:
+            all_components.append((get_coefficient(var), "iter", var))
+        for sym in indirect_var_syms:
+            all_components.append((get_coefficient(sym), "indirect", sym))
+        all_components.sort(key=lambda x: x[0], reverse=True)
+
+        # Calculate trailing dims needed for each component
+        # Each component needs trailing dims for all subsequent iter vars
+        # plus trailing dims for all dimensions of subsequent indirect vars
+        # For simplicity, assume each indirect var contributes some dimensions
+        # that will be handled by the reshape at store time
+
+        # For iter vars, we need to count how many dimensions come after in the output
         for i, var in enumerate(used_iter_vars):
             var_name = str(var)
             if var in self.range_tree_nodes:
                 range_entry = self.range_tree_nodes[var]
                 range_size = range_entry.length
+                var_coeff = get_coefficient(var)
 
                 arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                if indirect_vars:
-                    arange_expr = f"{arange_expr}[None, :]"
+
+                # Count trailing dims needed:
+                # - One for each subsequent iter var (with smaller coeff)
+                # - One for each dimension of indirect vars with smaller coeff
+                # For indirect vars, assume each contributes 2 dims (common case)
+                # The actual reshape at store time will fix any shape mismatches
+                n_trailing_iter = sum(1 for c in iter_coeffs if c < var_coeff)
+                n_trailing_indirect = sum(
+                    2 for c in indirect_coeffs.values() if c < var_coeff
+                )
+                n_trailing = n_trailing_iter + n_trailing_indirect
+
+                if n_trailing > 0:
+                    trailing_dims = ", None" * n_trailing
+                    arange_expr = f"{arange_expr}[:{trailing_dims}]"
 
                 index_str = index_str.replace(var_name, arange_expr)
 
-        # Reshape indirect variables for proper broadcasting
+        # Reshape indirect variables for proper broadcasting.
         for indirect_var in indirect_vars:
-            index_str = index_str.replace(indirect_var, f"{indirect_var}[:, None]")
+            indirect_coeff = indirect_coeffs[indirect_var]
+
+            # Count dims needed before and after this indirect var
+            n_leading = sum(1 for c in iter_coeffs if c > indirect_coeff)
+            n_trailing = sum(1 for c in iter_coeffs if c < indirect_coeff)
+
+            # Build the indexing expression with leading Nones, ellipsis, trailing Nones
+            if n_leading > 0 and n_trailing > 0:
+                leading_nones = "None, " * n_leading
+                trailing_nones = ", None" * n_trailing
+                reshape_expr = f"{indirect_var}[{leading_nones}...{trailing_nones}]"
+            elif n_leading > 0:
+                leading_nones = "None, " * n_leading
+                reshape_expr = f"{indirect_var}[{leading_nones}...]"
+            elif n_trailing > 0:
+                trailing_nones = ", None" * n_trailing
+                reshape_expr = f"{indirect_var}[...{trailing_nones}]"
+            else:
+                reshape_expr = indirect_var
+
+            index_str = index_str.replace(indirect_var, reshape_expr)
 
         return index_str
 
@@ -1079,6 +1159,7 @@ class PallasKernel(SIMDKernel):
             output_shape = buf.get_size()
             is_scalar = len(output_shape) == 0
         except Exception:
+            output_shape = ()
             is_scalar = False
 
         if is_scalar:
@@ -1096,11 +1177,22 @@ class PallasKernel(SIMDKernel):
                 # GPU masked store: flatten tensor and apply per-tensor mask
                 mask_var = self._get_or_create_mask(name)
                 store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            elif index_str == "...":
+                # When storing the full array, reshape to match the output shape.
+                # This handles:
+                # - Mixed indexing producing flat results needing reshape
+                # - Squeeze operations where value has more dims than output
+                # - If shapes already match, reshape is a no-op.
+                # Use the output array's shape at runtime to avoid issues with
+                # symbolic sizes not being defined in the kernel.
+                store_expr = f"{out}[...] = {value}.reshape({out}.shape)"
             else:
                 # Direct indexed assignment
                 store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
+        # Track which output param this store uses for filtering in codegen_kernel
+        self.store_with_output.append((out, store_expr))
 
     def reduction(
         self,
@@ -1138,13 +1230,151 @@ class PallasKernel(SIMDKernel):
             "max": "jnp.max",
             "min": "jnp.min",
             "any": "jnp.any",
+            "argmax": "jnp.argmax",
+            "argmin": "jnp.argmin",
         }
 
+        # Determine if this is a partial reduction (has pointwise dimensions)
+        # or a full reduction to scalar
+        pointwise_prefixes = OrderedSet(["x", "y", "z"])
+        has_pointwise = any(p in self.numels for p in pointwise_prefixes)
+
+        # Get the individual pointwise dimension sizes from range_tree_nodes
+        pointwise_sizes = []
+        for var, entry in sorted(
+            self.range_tree_nodes.items(), key=lambda x: str(x[0])
+        ):
+            if not entry.prefix.startswith("r"):
+                try:
+                    pointwise_sizes.append(int(entry.length))
+                except (TypeError, ValueError):
+                    pointwise_sizes = None
+                    break
+
+        # Get the pointwise and reduction numels
+        pointwise_numel = 1
+        for p in pointwise_prefixes:
+            if p in self.numels:
+                numel = self.numels[p]
+                try:
+                    pointwise_numel *= int(numel)
+                except (TypeError, ValueError):
+                    pointwise_numel = None
+                    break
+
+        reduction_numel = 1
+        for p in self.numels:
+            if p.startswith("r"):
+                numel = self.numels[p]
+                try:
+                    reduction_numel *= int(numel)
+                except (TypeError, ValueError):
+                    reduction_numel = None
+                    break
+
+        # Count the number of pointwise and reduction dimensions
+        n_reduction_dims = sum(
+            1
+            for var, entry in self.range_tree_nodes.items()
+            if entry.prefix.startswith("r")
+        )
+
         if reduction_type == "xor_sum":
-            reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+            if has_pointwise and pointwise_numel and reduction_numel:
+                reduction_expr = f"jnp.bitwise_xor.reduce({value}.reshape({pointwise_numel}, -1), axis=-1)"
+            else:
+                reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+        elif reduction_type in ("argmax", "argmin"):
+            # For argmax/argmin, we need to preserve the axis information
+            # because the result is indices, not values.
+            reduction_op = reduction_ops[reduction_type]
+            # Check if this is a true partial reduction (pointwise numel > 1)
+            # When pointwise_numel == 1, it's effectively a full reduction to scalar
+            is_partial_reduction = (
+                has_pointwise and pointwise_numel and pointwise_numel > 1
+            )
+            if is_partial_reduction and n_reduction_dims > 0:
+                # Partial reduction: determine the reduction axis from load index
+                # The reduction variable's coefficient in the index expression tells us its stride
+                # Higher stride = outer axis (lower axis number in row-major order)
+                reduction_axis = 0  # Default to axis 0
+                if self.load_index_exprs:
+                    # Get the first load index expression
+                    load_index = next(iter(self.load_index_exprs.values()))
+                    # Find the reduction variable (starts with 'r')
+                    reduction_vars = [
+                        var
+                        for var, entry in self.range_tree_nodes.items()
+                        if entry.prefix.startswith("r")
+                    ]
+                    if reduction_vars:
+                        r_var = reduction_vars[0]
+                        # Get the coefficient (stride) of the reduction variable
+                        r_coeff = load_index.coeff(r_var)
+                        try:
+                            r_stride = int(r_coeff) if r_coeff != 0 else 1
+                        except (TypeError, ValueError):
+                            r_stride = 1
+                        # Get pointwise variable
+                        pw_vars = [
+                            var
+                            for var, entry in self.range_tree_nodes.items()
+                            if not entry.prefix.startswith("r")
+                        ]
+                        if pw_vars:
+                            pw_var = pw_vars[0]
+                            pw_coeff = load_index.coeff(pw_var)
+                            try:
+                                pw_stride = int(pw_coeff) if pw_coeff != 0 else 1
+                            except (TypeError, ValueError):
+                                pw_stride = 1
+                            # Higher stride = earlier (outer) axis
+                            # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
+                            reduction_axis = 0 if r_stride > pw_stride else 1
+                if n_reduction_dims == 1:
+                    reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
+                else:
+                    # Multiple reduction dims - reduce over all of them
+                    axes = tuple(range(n_reduction_dims))
+                    reduction_expr = f"{reduction_op}({value}, axis={axes})"
+            else:
+                # Full reduction to scalar
+                reduction_expr = f"{reduction_op}({value})"
         elif reduction_type in reduction_ops:
-            # Apply reduction over all axes to get scalar result
-            reduction_expr = f"{reduction_ops[reduction_type]}({value})"
+            if (
+                has_pointwise
+                and pointwise_numel
+                and reduction_numel
+                and pointwise_sizes
+            ):
+                # For partial reductions, we need to:
+                # 1. Move pointwise axes to the front and reduction axes to the back
+                # 2. Reshape to (pointwise_numel, reduction_numel)
+                # 3. Reduce over the last axis
+                #
+                # We use moveaxis to reorder: first move axes matching pointwise sizes
+                # to the front, then the remaining (reduction) axes go to the back.
+                # Finally reshape and reduce.
+                #
+                # Generate code to dynamically determine and reorder axes:
+                pw_sizes_str = str(pointwise_sizes)
+                reduction_op = reduction_ops[reduction_type]
+                reduction_expr = (
+                    f"(lambda v: (lambda pw_sizes: "
+                    f"{reduction_op}(v.reshape(-1, {reduction_numel}), axis=-1) "
+                    f"if v.ndim == 2 else "
+                    f"(lambda input_shape, pw_axes: "
+                    f"{reduction_op}("
+                    f"jnp.moveaxis(v, pw_axes, list(range(len(pw_axes)))).reshape({pointwise_numel}, -1), axis=-1)"
+                    f")("
+                    f"v.shape, "
+                    f"[i for i, s in enumerate(v.shape) if s in pw_sizes][:len(pw_sizes)]"
+                    f")"
+                    f")({pw_sizes_str}))({value})"
+                )
+            else:
+                # Full reduction to scalar
+                reduction_expr = f"{reduction_ops[reduction_type]}({value})"
         else:
             raise Unsupported(
                 f"Reduction type '{reduction_type}' not yet supported in Pallas backend. "
@@ -1357,8 +1587,12 @@ class PallasKernel(SIMDKernel):
             # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
             for line in self.compute._lines:
                 code.writeline(str(line))
-            for line in self.stores._lines:
-                code.writeline(str(line))
+            # Filter stores to only emit those for outputs that are in kernel params.
+            # This handles cases where an intermediate value was stored but the buffer
+            # was later optimized away (not passed to the kernel).
+            for out_ptr, store_line in self.store_with_output:
+                if out_ptr in full_kernel_params:
+                    code.writeline(store_line)
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
