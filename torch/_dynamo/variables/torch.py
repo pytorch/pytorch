@@ -42,6 +42,7 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._guards import TracingContext
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -87,6 +88,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -956,12 +958,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
-                args_as_value = [x.as_python_constant() for x in args[1:]]
+                placements_vt = kwargs.get("placements")
+
+                if placements_vt is None and len(args) >= 3:
+                    placements_vt = args[2]
+
+                if placements_vt is None:
+                    placements_vt = ConstantVariable.create(None)
+                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
+                    placements_vt = variables.BuiltinVariable(tuple).call_function(
+                        tx, [placements_vt], {}
+                    )
+
+                new_args = list(args)
+                if len(new_args) >= 3:
+                    new_args[2] = placements_vt
+                elif kwargs.get("placements") is not None:
+                    kwargs["placements"] = placements_vt
+
+                args_as_value = [x.as_python_constant() for x in new_args[1:]]
                 kwargs_as_value = {
                     k: v.as_python_constant()
                     for k, v in kwargs.items()
                     if k not in ["shape", "stride"]
                 }
+
                 kwargs_to_be_proxied = {
                     k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
                 }
@@ -1489,6 +1510,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         )
             return self.call_tensor_method(tx, args, kwargs)
 
+        intermediate_opaques = [
+            type(x.value)
+            for x in args
+            if x.source is None
+            and isinstance(x, UserDefinedObjectVariable)
+            and is_opaque_type(type(x.value))
+        ]
+        if len(intermediate_opaques) > 0:
+            unimplemented(
+                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
+                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
+                explanation=(
+                    "Opaque objects cannot be created inside the torch.compile region. "
+                    "They must be created before entering the compiled function."
+                ),
+                hints=[
+                    "Please create the opaque object before calling torch.compile "
+                    "and pass it in as an argument or as a global variable."
+                ],
+            )
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1661,7 +1703,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous(fake_out):
+                if not torch._prims_common.is_contiguous_or_false(fake_out):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
@@ -1828,13 +1870,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         assert flat_apply.out_spec is not None
         out_spec_vt = VariableTracker.build(tx, flat_apply.out_spec)
 
-        # Construct the (args, kwargs) packing used by tree_unflatten
-        unflatten_kwargs_vt = ConstDictVariable.build(tx, {})
-
         # Reuse the same pattern used above for tree_flatten: call the python
         # function through Dynamo so it symbolically interprets it.
         out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
-            tx, [proxy_list_vt, out_spec_vt], unflatten_kwargs_vt
+            tx, [proxy_list_vt, out_spec_vt], {}
         )
 
         return out_vt
@@ -2075,6 +2114,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 class DispatchKeySetVariable(BaseTorchVariable):
