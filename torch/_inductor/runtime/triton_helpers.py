@@ -30,7 +30,8 @@ def set_driver_to_cpu():
         return
     # This can be a hard error once triton-cpu is merged into fbcode
     warnings.warn(
-        "Could not find an active CPU backend. Generated kernels will not be executable!"
+        "Could not find an active CPU backend. Generated kernels will not be executable!",
+        stacklevel=2,
     )
 
 

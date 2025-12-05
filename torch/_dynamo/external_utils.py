@@ -119,6 +119,7 @@ class FakeBackwardCFunction:
             warnings.warn(
                 "'saved_variables' is deprecated; use 'saved_tensors'",
                 DeprecationWarning,
+                stacklevel=2,
             )
             return self.saved_tensors
 
