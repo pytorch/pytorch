@@ -216,7 +216,7 @@ Unsupported context manager
   Hint: If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then it may be the case that it was created outside the compiled region, which Dynamo does not support. Supported context managers can cross graph break boundaries only if they are local non-closure variables, or are intermediate values.
   Hint: File an issue to PyTorch. Simple context managers can potentially be supported, but note that context managers can't be supported in general
 
-  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on LazyVariableTracker(realized: ConstantVariable(int: 3))
+  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on LazyVariableTracker(unrealized: <class 'int'>)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0142.html
 
