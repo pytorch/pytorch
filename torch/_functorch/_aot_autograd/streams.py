@@ -341,3 +341,10 @@ def populate_fw_metadata_with_stream_indices(
             stream_indices.append(None)
 
     fw_metadata.mutated_inp_stream_indices = stream_indices
+
+
+def wrap_sync_control_deps(gm: torch.fx.GraphModule, node: Node) -> None:
+    stream = get_stream_or_current_stream(node)
+
+    for node in gm.graph.nodes:
+        pass
