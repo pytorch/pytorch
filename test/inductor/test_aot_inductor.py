@@ -21,6 +21,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -2229,6 +2230,39 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @requires_gpu
+    def test_cond_with_replace_view_ops(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class CondModelWithViewAndLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, cache, x):
+                def true_fn(cache, x):
+                    return cache + 1.0
+
+                def false_fn(cache, x):
+                    return self.linear(x).view(1, 2, 4, 4)
+
+                cache_is_initialized = (cache != 0).any()
+                return torch.cond(cache_is_initialized, false_fn, false_fn, [cache, x])
+
+        example_input = (
+            torch.zeros(1, 2, 4, 4, dtype=torch.float32, device=self.device),
+            torch.randn(8, 4, dtype=torch.float32, device=self.device),
+        )
+        model = CondModelWithViewAndLinear().to(device=self.device)
+        exported_program = torch.export.export(model, example_input)
+        program = exported_program.run_decompositions()
+        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
+        ):
+            _ = torch._inductor.aot_compile(gm, example_input)
+
     def test_cond_with_multiple_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -2425,6 +2459,45 @@ class AOTInductorTestsTemplate:
                 M(),
                 inputs,
                 dynamic_shapes=dynamic_shapes,
+            )
+
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_cond_cpu_predicate_cuda_operands(self, max_autotune):
+        """
+        Test torch.cond with CPU predicate and CUDA operands.
+        This is a regression test for the bug where inductor incorrectly
+        determined device from [predicate] + operands, causing CPU predicates
+        to force CUDA outputs onto CPU during autotuning.
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, input_dim=4, hidden_dim=8):
+                super().__init__()
+                self.true_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.false_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.another_linear = torch.nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+            def forward(self, predicate: torch.Tensor, x: torch.Tensor):
+                def true_fn(x):
+                    return self.true_linear(x) * 2.0
+
+                def false_fn(x):
+                    return self.false_linear(x) + 1.0
+
+                res = torch.cond(predicate, true_fn, false_fn, (x,))
+                return self.another_linear(res)
+
+        # Predicate on CPU, data on CUDA
+        predicate = torch.tensor(True, dtype=torch.bool, device="cpu")
+        x = torch.randn(4, 4, device=self.device)
+        example_inputs = (predicate, x)
+
+        with config.patch({"max_autotune": max_autotune}):
+            self.check_model(
+                Model().to(self.device),
+                example_inputs=example_inputs,
             )
 
     def test_while_loop_simple(self):
@@ -6546,7 +6619,7 @@ class AOTInductorTestsTemplate:
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
-    def test_cond_share_predicte(self):
+    def test_cond_share_predicate(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
                 y = torch.cond(
@@ -6567,6 +6640,33 @@ class AOTInductorTestsTemplate:
             torch.tensor([1, 2, 3]).to(self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_cond_predicate_on_cpu(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "is_cache_initialized",
+                    torch.tensor([False], dtype=torch.bool, device="cpu"),
+                    persistent=False,
+                )
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x + 1.0
+
+                def false_fn(x):
+                    return x + 0.0
+
+                out = torch.cond(
+                    self.is_cache_initialized, true_fn, false_fn, operands=(x,)
+                )
+                self.is_cache_initialized.fill_(True)
+                return out
+
+        model = Model()
+        example_inputs = (torch.tensor([1.0], device=self.device),)
+        self.check_model(model, example_inputs)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -7472,6 +7572,54 @@ class AOTInductorTestsTemplate:
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "different behavior in fbcode",
+    )
+    def test_codegen_int_array_var_fix_memory_leak(self):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/167630
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("test is only for cuda")
+
+        def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
+            layers = []
+            d = in_dim
+            for _ in range(depth):
+                layers += [nn.Linear(d, hidden), nn.ReLU()]
+                d = hidden
+            layers += [nn.Linear(d, out_dim)]
+            return nn.Sequential(*layers)
+
+        batch = 32
+        in_dim = 2048
+        hidden = 512
+        out_dim = 10
+        depth = 6
+
+        import gc
+
+        allocated_memory = []
+        for _ in range(3):
+            torch.cuda.reset_peak_memory_stats()
+
+            model = make_mlp(in_dim, hidden, out_dim, depth).to(self.device)
+            example_inputs = (torch.randn(batch, in_dim, device=self.device),)
+            ep = torch.export.export(
+                model,
+                example_inputs,
+            )
+            torch._inductor.aoti_compile_and_package(ep)
+
+            del model, example_inputs, ep
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            gc.collect()
+            allocated_memory.append(torch.cuda.memory_allocated())
+
+        self.assertTrue(allocated_memory[1] == allocated_memory[2])
+
     @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
     def test_libtorch_free_so(self):
         class Model(torch.nn.Module):
@@ -7849,6 +7997,52 @@ copy_tests(
     "mps",
     MPS_TEST_FAILURES,
 )
+
+
+class TestCheckLowerboundConfig(TestCase):
+    def test_aoti_check_lowerbound_codegen(self):
+        """
+        Test that check_lowerbound config controls lowerbound check codegen.
+        When check_lowerbound=False, no lowerbound checks should be generated.
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model()
+        batch = Dim("batch", min=2, max=10)
+        example_inputs = (torch.randn(4, 3),)
+
+        # Test with check_lowerbound=True (default)
+        with config.patch({"aot_inductor.check_lowerbound": True}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                1,
+                exactly=True,
+            ).run(code)
+
+        # Test with check_lowerbound=False
+        with config.patch({"aot_inductor.check_lowerbound": False}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should NOT have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                0,
+                exactly=True,
+            ).run(code)
 
 
 if __name__ == "__main__":
