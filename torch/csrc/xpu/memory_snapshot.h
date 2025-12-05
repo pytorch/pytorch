@@ -14,6 +14,4 @@ TORCH_PYTHON_API void _record_memory_history(
     size_t max_entries = SIZE_MAX,
     bool clearHistory = false);
 
-TORCH_PYTHON_API std::string _memory_snapshot_pickled();
-
 } // namespace torch::xpu
