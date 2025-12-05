@@ -73,4 +73,40 @@ inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
   return CaptureStatus(is_capturing);
 }
 
+// this is a wrapper around cudaStreamGetCaptureInfo(). It returns
+// std::nullopt if the stream is not capturing. Otherwise, it returns
+// an array of pointers to the current terminal nodes in stream
+// capture and the size of that array. Be forewarned that "The array
+// pointer is valid until the next API call which operates on the
+// stream or until the capture is terminated."
+// https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g8d9312f1098c45e2ed43c949cfccf1f7
+inline std::optional<std::tuple<const cudaGraphNode_t*, size_t>>
+streamGetTerminalNodes(CUDAStream stream) {
+  cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+  unsigned long long capture_id{0};
+  cudaGraph_t graph{};
+  const cudaGraphNode_t* terminals{nullptr};
+  size_t num_terminals{0};
+
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      stream,
+      &status,
+      &capture_id,
+      &graph,
+      &terminals,
+      nullptr,
+      &num_terminals));
+#else
+  C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+      stream, &status, &capture_id, &graph, &terminals, &num_terminals));
+#endif
+
+  if (status == cudaStreamCaptureStatusNone) {
+    return std::nullopt;
+  } else {
+    return std::make_tuple(terminals, num_terminals);
+  }
+}
+
 } // namespace c10::cuda
