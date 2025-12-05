@@ -260,7 +260,6 @@ _annotate_decorated = False
 def _ensure_annotate_decorated():
     """
     Lazily apply dont_skip_tracing decorator to DebugMode.annotate, to avoid circular import/initialization issues.
-    DebugMode.annotate is a no-op in compiled regions.
     """
     global _annotate_decorated
     if not _annotate_decorated:
