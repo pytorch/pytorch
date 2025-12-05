@@ -419,7 +419,7 @@ if "__compile_source__" in globals():
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
