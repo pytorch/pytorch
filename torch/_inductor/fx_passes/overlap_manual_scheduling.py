@@ -180,7 +180,7 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         self.node_users: dict[fx.Node, OrderedSet[fx.Node]] = self._collect_node_users()
         self.bucketer = ManualOverlapPreservingBucketer(
-            graph=self.graph,
+            gm=self.gm,
             collective_info=self.collective_info,
             node_users=self.node_users,
             scheduled=OrderedSet(self.graph.nodes),
