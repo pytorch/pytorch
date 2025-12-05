@@ -1781,7 +1781,7 @@ class TestQuantizeFx(QuantizationTestCase):
                  None),
             ]
             for (ModuleClass, module_constructor_inputs,
-                 inputs, quantized_node, weight_prepack_node) in tests:
+                 inputs, _quantized_node, weight_prepack_node) in tests:
                 for is_reference in [True, False]:
                     node_occurrence = {}
                     if weight_prepack_node:
@@ -5571,9 +5571,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = x.reshape()
                 return x
 
-        options = itertools.product([M1, M2], [True, False])
-        for M, is_qat in options:
-            m = M1().eval()
+        for M in [M1, M2]:
+            m = M().eval()
             example_inputs = (torch.randn(1, 3, 3, 3),)
             m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
@@ -5587,7 +5586,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m,
                 expected_node_list=node_list)
 
-            m = M2().eval()
+            m = M().eval()
             m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
             node_occurrence = {
@@ -9703,8 +9702,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
                             "object_type": [(torch.nn.Embedding, default_embedding_qat_qconfig)]}
 
 
-            train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
-            eval_output = [[torch.randint(0, 10, (12, 1))]]
+            train_indices = [[torch.randint(0, 10, (12, 12), device=device), torch.randn((12, 1), device=device)] for _ in range(2)]
+            eval_output = [[torch.randint(0, 10, (12, 1), device=device)]]
 
             model = EmbeddingLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
