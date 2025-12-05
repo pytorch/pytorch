@@ -1169,6 +1169,11 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # On aarch64 platform - embed atomics
+    if(CMAKE_SYSTEM_PROCESSOR EQUAL aarch64)
+      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
+    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
