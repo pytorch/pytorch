@@ -399,9 +399,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -444,9 +441,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
             res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_cat(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -511,6 +505,74 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(cnt.frame_count, 1)
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
+    def test_dtensor_unbacked_matmuls(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        # use 2x2 mesh for testing
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        def test_placements(x_placements, y_placements, out_placements):
+            # create DTensors with unbacked outer/inner sizes
+            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=x_placements)
+            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=y_placements)
+            for i in range(2):
+                torch._dynamo.decorators.mark_unbacked(x_dt, i)
+                torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+            # full-graph capture
+            torch._dynamo.reset()
+            fn = torch.compile(torch.mm, backend="aot_eager", fullgraph=True)
+            out = fn(x_dt, y_dt)
+
+            # check output placements
+            self.assertEqual(out.placements, out_placements)
+
+        test_placements(
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+        )
+        test_placements(
+            (Replicate(), Shard(1)), (Replicate(), Shard(0)), (Replicate(), Partial())
+        )
+        test_placements(
+            (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
+        )
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
+    def test_dtensor_matmul_zero_size_shards(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # create DTensors with unbacked outer/inner sizes
+        px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
+        x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
+        y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
+        for i in range(2):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+        # full-graph capture
+        fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
+        fn(x_dt, y_dt)
+
+        # check zero-size shards
+        for m in [3, 0]:  # n, k = 0 cause recompiles on strides
+            dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
+            dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+            c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+            self.assertEqual(tuple(c_out.shape), (m, 1))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(c_out.shape, eager_out.shape)
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")

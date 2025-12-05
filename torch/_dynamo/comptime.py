@@ -49,6 +49,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
 from .variables import CellVariable
+from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -142,7 +143,7 @@ class ComptimeVar:
         """
         if isinstance(self.__variable, SymNodeVariable):
             self.__variable.evaluate_expr()
-        elif self.__variable.is_python_constant():
+        elif isinstance(self.__variable, ConstantVariable):
             # TODO: Maybe complain if this isn't a int/bool/float variable
             pass
         else:
