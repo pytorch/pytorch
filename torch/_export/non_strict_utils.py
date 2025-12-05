@@ -280,7 +280,7 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name] = constraint.name  # type: ignore[assignment]
 
     return symbolic_context
 
@@ -587,7 +587,12 @@ def produce_guards_and_solve_constraints(
     )
 
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:
