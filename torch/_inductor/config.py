@@ -444,6 +444,10 @@ intra_node_bw = 300
 # default value is InfiniBand
 inter_node_bw = 25
 
+# unit: GB/s, uni-directional CPU<>GPU bandwidth
+# default value is PCIe; modify for your hardware or measured bandwidth
+cpu_gpu_bw = 50.0
+
 # use Inductor's experimental benchmarker (runtime/benchmarking.py)
 # to benchmark kernels during autotuning, otherwise fall back to
 # Triton's `do_bench`. the experimental benchmarker may produce
@@ -1738,6 +1742,12 @@ class aot_inductor:
     raise_error_on_ignored_optimization: bool = (
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
+
+    # Whether to check lowerbound constraints on dynamic shapes during runtime.
+    # When disabled, allows models with dynamic sizes of 0 or 1 to work with
+    # AOTI_RUNTIME_CHECK_INPUTS=1, avoiding errors from the [2+, ...] lowerbound
+    # restriction when backed_size_oblivious is off.
+    check_lowerbound: bool = True
 
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"

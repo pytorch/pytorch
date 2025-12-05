@@ -47,6 +47,7 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupName,
         init_process_group,
         is_initialized,
         new_group,
@@ -378,7 +379,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> str | None:
+        ) -> GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -473,22 +474,24 @@ else:
             rank_map: torch.Tensor,
             mesh_dim_names: tuple[str, ...] | None,
             backend_override: tuple[BackendConfig, ...],
-        ) -> list[str]:
+        ) -> list[GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            dim_group_names: list[str] = []
+            dim_group_names: list[GroupName | None] = []
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
-                    DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
+                    DeviceMesh._init_one_process_group(
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
-            if any(n is None for n in dim_group_names):
-                assert all(n is None for n in dim_group_names)
-                return []
-            return dim_group_names
+            # Filter out None values. If any are None then they should all be None.
+            dim_non_none_group_names = [n for n in dim_group_names if n is not None]
+            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+                dim_group_names
+            )
+            return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self
@@ -1204,7 +1207,7 @@ else:
             concat_dim_names: list[str] = []
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
-            concat_dim_group_name: list[str] = []
+            concat_dim_group_name: list[GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
