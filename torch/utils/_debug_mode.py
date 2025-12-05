@@ -35,6 +35,7 @@ Usage::
 import contextlib
 import functools
 import inspect
+import logging
 import os
 import traceback
 import weakref
@@ -59,6 +60,8 @@ if TYPE_CHECKING:
     from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
@@ -265,6 +268,21 @@ def _ensure_annotate_decorated():
     global _annotate_decorated
     if not _annotate_decorated:
         DebugMode.annotate = torch._dynamo.dont_skip_tracing(DebugMode.annotate)  # type: ignore[has-type]
+
+        # Mark annotate as side-effectful so aot_eager doesn't DCE it.
+        from torch.fx.node import _side_effectful_functions
+
+        _side_effectful_functions.add(torch.ops.debug_mode_ops.annotate.default)
+
+        # Register no-op lowering for inductor backend
+        from torch._inductor.lowering import register_lowering
+        from torch._logging import warning_once
+
+        @register_lowering(torch.ops.debug_mode_ops.annotate)
+        def _annotate_lowering(tag: str) -> None:
+            warning_once(log, 'DebugMode.annotate() is a no-op for backend="inductor"')
+            return None
+
         _annotate_decorated = True
 
 
@@ -623,7 +641,7 @@ def _get_call_name(call: _DebugCall) -> str:
 
 @torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
 def _annotate(tag: str) -> None:
-    # This is special-cased in __torch_dispatch__
+    # This is special-cased in DebugMode.__torch_dispatch__
     return
 
 

@@ -463,16 +463,23 @@ class TestDTensorDebugMode(TestCase):
         aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
         )
 
-        with DebugMode() as debug_mode:
-            torch.compile(mod, backend="eager", fullgraph=True)(x)
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with DebugMode() as debug_mode:
+                torch.compile(mod, backend=backend, fullgraph=True)(x)
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
+            if backend == "inductor":
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """    aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+            else:
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """\
   [annotate] Foo
     aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
     aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
-        )
+                )
 
     def test_nn_module(self):
         class Foo(torch.nn.Module):
