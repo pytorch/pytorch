@@ -71,15 +71,24 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
 
+        # Cache compiled module to avoid recompiling on every benchmark call
+        self._compiled_module: Any = None
+        self._compiled_sym_inputs: list[Any] | None = None
+
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        # Codegen Subgraph for benchmarking
-        # Need GraphLowering instead of SubgraphLowering to generate
-        # fully callable module
+    def _compile_for_benchmarking(self, *args: list[Any]) -> tuple[Any, list[Any]]:
+        """
+        Compile the subgraph for benchmarking and return (module, sym_inputs).
+
+        TODO: Add precompile() method to enable parallel compilation of all choices
+        before benchmarking.
+        """
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
+
+        safe_name = self.name.replace("::", "_").replace(".", "_")
 
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
@@ -90,7 +99,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=f"benchmark_{safe_name}",
         )
 
         for sym_inp in self.sym_inputs:
@@ -123,9 +132,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
-                bm_func = mod.call
 
-                bm_func([*sym_inputs, *args])
+        return mod, sym_inputs
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """
+        Regular benchmarking: compile and use benchmarker with warmup/rep.
+        """
+        if self._compiled_module is None:
+            mod, sym_inputs = self._compile_for_benchmarking(*args)
+            self._compiled_module = mod
+            self._compiled_sym_inputs = sym_inputs
+        else:
+            mod = self._compiled_module
+            sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
+
+        bm_func = mod.call
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
         return benchmarker.benchmark(
@@ -133,6 +156,24 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             lambda: bm_func([*sym_inputs, *args]),
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
+
+    def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
+        """
+        Only run once with cached compiled module.
+        Called by benchmark_collective_choice which handles warmup
+        and timing with barrier synchronization across all ranks.
+        """
+        if self._compiled_module is None:
+            mod, sym_inputs = self._compile_for_benchmarking(*args)
+            self._compiled_module = mod
+            self._compiled_sym_inputs = sym_inputs
+        else:
+            mod = self._compiled_module
+            sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
+
+        bm_func = mod.call
+        bm_func([*sym_inputs, *args])
 
     def hash_key(self) -> str:
         return "-".join(
