@@ -50,23 +50,9 @@ def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
     return dist.tensor.DTensor.from_local(_as_complex_tensor(arg))
 
 
-def _as_gradcheck_tensor(
-    arg: torch.Tensor | Any, input_list: list[torch.Tensor]
-) -> torch.Tensor | Any:
-    if not isinstance(arg, torch.Tensor):
-        return arg
-    arg = _as_complex_tensor(arg)
-    if arg.dtype.is_floating_point or arg.dtype.is_complex:
-        arg = arg.requires_grad_()
-
-    input_list.append(arg)
-    return arg
-
-
 TRANSFORM_FUNCS = {
     Variant.Op: _as_complex_tensor,
     Variant.Distributed: _as_complex_dtensor,
-    Variant.GradCheck: _as_gradcheck_tensor,
 }
 
 
