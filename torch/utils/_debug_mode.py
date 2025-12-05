@@ -279,7 +279,7 @@ def _ensure_annotate_decorated():
 
         @register_lowering(torch.ops.debug_mode_ops.annotate)
         def _annotate_lowering(tag: str) -> None:
-            warning_once(log, 'DebugMode.annotate() is a no-op for backend="inductor"')
+            warning_once(log, 'DebugMode._annotate() is a no-op for backend="inductor"')
             return None
 
         _annotate_decorated = True
@@ -1084,12 +1084,12 @@ class DebugMode(TorchDispatchMode):
         return list(self.operators)
 
     def _handle_annotate(self, tag):
-        """Handles DebugMode.annotate()"""
+        """Handles DebugMode._annotate()"""
         call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
         self.operators.append(call)
 
     @staticmethod
-    def annotate(tag: Any) -> None:
+    def _annotate(tag: Any) -> None:
         """
         If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
         Implemented with a custom op.
