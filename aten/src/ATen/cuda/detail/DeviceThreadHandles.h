@@ -83,7 +83,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     class PoolWindow
     {
     public:
-    PoolWindow(std::shared_ptr<DeviceThreadHandlePool> parent): weak_parent(std::move(parent)) {}
+    PoolWindow(std::weak_ptr<DeviceThreadHandlePool> parent): weak_parent(std::move(parent)) {}
     ~PoolWindow(){ release(); }
 
     Handle_t reserve(int device)
@@ -144,7 +144,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     PoolWindow *newPoolWindow() {
         // The returned pointer will be owned by a thread local variable
         // so that different threads does not share the same PoolWindow.
-        return new PoolWindow(this->shared_from_this());
+        return new PoolWindow(this->weak_from_this());
     }
 };
 
