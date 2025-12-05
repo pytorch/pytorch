@@ -1770,7 +1770,7 @@ class DeviceCachingAllocator {
         C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
       } else {
         SmallVector<cudaGraphEdgeData> edgeData;
-        edgeData.resize(count);
+        edgeData.resize(*count);
         C10_CUDA_CHECK(
             cudaGraphNodeGetDependencies(n, deps, edgeData.data(), count));
       }
