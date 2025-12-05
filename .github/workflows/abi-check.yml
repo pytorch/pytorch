@@ -1,0 +1,173 @@
+name: ABI Compatibility Check
+
+# NOTE: This workflow is currently in opt-in mode.
+# It only runs when the 'ci/abi-check' label is added to a PR.
+# To enable enforcement for all PRs, set ENFORCE_BY_DEFAULT to true below.
+
+on:
+  workflow_run:
+    workflows: [pull]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      workflow_run_id:
+        description: 'Workflow run ID to download artifacts from'
+        required: true
+        type: string
+
+env:
+  # Set to 'true' to run ABI check on all PRs with C++ changes by default.
+  # Set to 'false' to only run when 'ci/abi-check' label is present (opt-in mode).
+  ENFORCE_BY_DEFAULT: 'false'
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  should-run:
+    if: >
+      github.repository_owner == 'pytorch' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'))
+    runs-on: ubuntu-latest
+    outputs:
+      run-abi-check: ${{ steps.check.outputs.run }}
+      pr-number: ${{ steps.check.outputs.pr-number }}
+      suppressed: ${{ steps.check.outputs.suppressed }}
+    steps:
+      - name: Check changed files and labels
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENFORCE_BY_DEFAULT: ${{ env.ENFORCE_BY_DEFAULT }}
+        run: |
+          set -euxo pipefail
+
+          # For workflow_dispatch, always run
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+            echo "suppressed=false" >> $GITHUB_OUTPUT
+            echo "pr-number=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get PR number from workflow run
+          PR_NUMBER=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }} \
+            --jq '.pull_requests[0].number // empty')
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR associated with this workflow run, skipping"
+            echo "run=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+          # Get all labels on the PR
+          LABELS=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER --jq '[.labels[].name]')
+
+          # Check for opt-in label (ci/abi-check)
+          OPT_IN=$(echo "$LABELS" | jq 'any(. == "ci/abi-check")')
+
+          # Check for suppression label (suppress-abi-check)
+          SUPPRESSED=$(echo "$LABELS" | jq 'any(. == "suppress-abi-check")')
+          echo "suppressed=$SUPPRESSED" >> $GITHUB_OUTPUT
+
+          # Determine if we should run based on enforcement mode
+          if [ "$ENFORCE_BY_DEFAULT" = "true" ]; then
+            # Enforcement mode: run unless suppressed, if C++ files changed
+            SHOULD_CHECK=true
+            echo "Enforcement mode: checking all PRs with C++ changes"
+          else
+            # Opt-in mode: only run if ci/abi-check label is present
+            if [ "$OPT_IN" = "true" ]; then
+              SHOULD_CHECK=true
+              echo "Opt-in mode: 'ci/abi-check' label found, will run ABI check"
+            else
+              SHOULD_CHECK=false
+              echo "Opt-in mode: 'ci/abi-check' label not found, skipping"
+              echo "To run ABI check, add the 'ci/abi-check' label to your PR"
+              echo "run=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          # Check if C++ files were modified
+          CHANGED=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER/files --paginate \
+            --jq '[.[].filename | select(test("\\.(h|hpp|hxx|cpp|cc|cxx|cu|cuh)$") or test("CMakeLists\\.txt$") or test("\\.cmake$"))] | length')
+
+          if [ "$CHANGED" -gt 0 ]; then
+            echo "Found $CHANGED C++ related file(s) changed"
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "No C++ files changed, skipping ABI check"
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
+  abi-check-cpu:
+    needs: should-run
+    if: needs.should-run.outputs.run-abi-check == 'true'
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: abi-check-cpu
+      runner: linux.2xlarge
+      docker-image: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      docker-build-dir: "skip-docker-build"
+      timeout: 60
+      fetch-depth: 0
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      script: |
+        set -euxo pipefail
+
+        WORKFLOW_RUN_ID="${{ github.event.workflow_run.id || inputs.workflow_run_id }}"
+        SUPPRESSED="${{ needs.should-run.outputs.suppressed }}"
+
+        # Download build artifacts from the triggering workflow
+        echo "Downloading CPU build artifacts from workflow run $WORKFLOW_RUN_ID..."
+        gh run download "$WORKFLOW_RUN_ID" \
+          --name linux-jammy-py3.10-gcc11 \
+          --dir pr-build || {
+          echo "ERROR: Could not download CPU build artifacts"
+          echo "This may happen if the build job failed or artifacts expired"
+          exit 1
+        }
+
+        # Run ABI check
+        .ci/pytorch/abi_check.sh cpu "$SUPPRESSED" "pr-build"
+    secrets: inherit
+
+  abi-check-cuda:
+    needs: should-run
+    if: needs.should-run.outputs.run-abi-check == 'true'
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: abi-check-cuda
+      runner: linux.2xlarge
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-gcc11
+      docker-build-dir: "skip-docker-build"
+      timeout: 60
+      fetch-depth: 0
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      script: |
+        set -euxo pipefail
+
+        WORKFLOW_RUN_ID="${{ github.event.workflow_run.id || inputs.workflow_run_id }}"
+        SUPPRESSED="${{ needs.should-run.outputs.suppressed }}"
+
+        # Download CUDA build artifacts from the triggering workflow
+        echo "Downloading CUDA build artifacts from workflow run $WORKFLOW_RUN_ID..."
+        gh run download "$WORKFLOW_RUN_ID" \
+          --name linux-jammy-cuda12.8-cudnn9-py3.10-clang12 \
+          --dir pr-build || {
+          echo "ERROR: Could not download CUDA build artifacts"
+          echo "This may happen if the build job failed or artifacts expired"
+          exit 1
+        }
+
+        # Run ABI check
+        .ci/pytorch/abi_check.sh cuda "$SUPPRESSED" "pr-build"
+    secrets: inherit
