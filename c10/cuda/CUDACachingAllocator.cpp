@@ -419,14 +419,28 @@ struct ExpandableSegment {
       CUmemGenericAllocationHandle handle = 0;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-#ifndef FBCODE_CAFFE2
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
-        prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-      } else {
-        prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
-      }
+      // In fbcode, IPC handle types for expandable segments are disabled by
+      // default because some jobs were failing (see
+      // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
+      // enabled via environment variable when IPC functionality is required
+      // (e.g., for multi-process communication with CTran). In non-fbcode
+      // builds, IPC handle types are enabled by default.
+#ifdef FBCODE_CAFFE2
+      static const bool default_enable_ipc = false;
+#else
+      static const bool default_enable_ipc = true;
 #endif
+      static const bool enable_ipc_handles =
+          c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
+              .value_or(default_enable_ipc);
+      if (enable_ipc_handles) {
+        if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
+            Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+          prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+        } else {
+          prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+        }
+      }
       int flag = 0;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuDeviceGetAttribute_(
           &flag,
@@ -863,8 +877,12 @@ struct AllocParams {
       size_t size,
       cudaStream_t stream,
       BlockPool* pool,
-      size_t alloc_size)
-      : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
+      size_t alloc_size,
+      bool is_expandable_segments_active)
+      : search_key(device, stream, size),
+        pool(pool),
+        alloc_size(alloc_size),
+        is_expandable_segments_active(is_expandable_segments_active) {}
 
   c10::DeviceIndex device() const {
     return search_key.device;
@@ -879,6 +897,7 @@ struct AllocParams {
   Block search_key;
   BlockPool* pool;
   size_t alloc_size;
+  bool is_expandable_segments_active;
   Block* block{nullptr};
   StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
@@ -1381,7 +1400,18 @@ class DeviceCachingAllocator {
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device_id, size, stream, &pool, alloc_size);
+    bool active_user_pool =
+        pool.owner_PrivatePool && pool.owner_PrivatePool->allocator();
+    // The expandable segments are only active on the default pool.
+    bool is_expandable_segments_active =
+        CUDAAllocatorConfig::expandable_segments() && !active_user_pool;
+    AllocParams params(
+        device_id,
+        size,
+        stream,
+        &pool,
+        alloc_size,
+        is_expandable_segments_active);
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
@@ -1429,7 +1459,7 @@ class DeviceCachingAllocator {
           beginAllocateToPool(mempool_id, filter);
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
-              device_id, size, stream, &mempool, alloc_size);
+              device_id, size, stream, &mempool, alloc_size, false);
           mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
@@ -1565,7 +1595,8 @@ class DeviceCachingAllocator {
           " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
 
-    bool split_remainder = should_split(params.block, params.size());
+    bool split_remainder = should_split(
+        params.block, params.size(), params.is_expandable_segments_active);
     return alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
   }
@@ -2222,7 +2253,8 @@ class DeviceCachingAllocator {
           block_state.size,
           block_state.stream,
           &pool,
-          block_state.size);
+          block_state.size,
+          curr_block->expandable_segment_ != nullptr);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
       params.stat_types = get_stat_types_for_pool(pool);
@@ -2993,9 +3025,12 @@ class DeviceCachingAllocator {
     return stat_types;
   }
 
-  bool should_split(const Block* block, size_t size) {
+  bool should_split(
+      const Block* block,
+      size_t size,
+      bool is_expandable_segments_active) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
+    if (block->pool->is_small || is_expandable_segments_active) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < AcceleratorAllocatorConfig::max_split_size()) &&
@@ -3027,7 +3062,7 @@ class DeviceCachingAllocator {
       return false;
 
     if ((*it)->expandable_segment_) {
-      if (CUDAAllocatorConfig::expandable_segments()) {
+      if (p.is_expandable_segments_active) {
         // if we are allocated to the part of the block that is expandable
         // for the purposes of "best fit" we consider its size to be the size it
         // can expand to, not the size it currently is. This means that we
@@ -3166,19 +3201,14 @@ class DeviceCachingAllocator {
     bool in_fbcode = false;
 #endif
 
-    bool active_pool =
-        p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
     if (allowed_memory_maximum.has_value() &&
         total_allocated_memory + size > allowed_memory_maximum.value()) {
       p.err = cudaErrorMemoryAllocation;
       return false;
       // Temporarily disable checkpointing & cudagraphs internally
     } else if (
-        CUDAAllocatorConfig::expandable_segments() &&
+        p.is_expandable_segments_active &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
-      TORCH_CHECK(
-          !active_pool,
-          "torch.cuda.MemPool doesn't currently support expandable_segments.");
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {

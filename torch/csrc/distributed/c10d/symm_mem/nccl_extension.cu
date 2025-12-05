@@ -116,6 +116,8 @@ __global__ void lsa_put_signal_kernel(
     copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
 
     __syncthreads();
+    // Ensure all global writes from all SMs are visible system-wide
+    __threadfence_system();
 
     // 2) system fence + signal set
     if (threadIdx.x == 0) {
@@ -124,8 +126,6 @@ __global__ void lsa_put_signal_kernel(
 
         // If this was the last block to finish:
         if (prev == gridDim.x - 1) {
-            // Ensure all global writes from all SMs are visible system-wide
-            __threadfence_system();
             uint64_t* signal_pad_peer =
             reinterpret_cast<uint64_t*>(signal_pad[dst_peer]);
 
