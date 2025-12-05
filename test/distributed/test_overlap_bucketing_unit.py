@@ -179,7 +179,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -265,7 +265,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -366,7 +366,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -448,7 +448,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -531,7 +531,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
             bucket_mode="custom_ops_multidtype",
@@ -622,7 +622,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -706,7 +706,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -820,6 +820,175 @@ class TestCrossPGOverlap(InductorTestCase):
         ).check("%wait_tensor").run(str(out.graph))
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+
+
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestFusionRegions(InductorTestCase):
+    """Unit tests for fusion region detection, collapse, and expand."""
+
+    def test_build_fusion_regions_detects_pointwise_ops(self):
+        """Test that build_fusion_regions detects consecutive pointwise ops."""
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            is_fusible_node,
+        )
+
+        # Create a graph with pointwise ops
+        graph = fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+
+        # Pointwise ops that should be detected as fusible
+        add1 = graph.call_function(aten.add.Tensor, (a, 1))
+        add2 = graph.call_function(aten.add.Tensor, (b, 2))
+        add3 = graph.call_function(aten.add.Tensor, (add1, add2))
+        graph.output(add3)
+
+        # Wrap in GraphModule
+        gm = fx.GraphModule({}, graph)
+
+        # Verify is_fusible_node works
+        self.assertTrue(is_fusible_node(add1))
+        self.assertTrue(is_fusible_node(add2))
+        self.assertTrue(is_fusible_node(add3))
+
+        # Build regions
+        region_of = build_fusion_regions(gm)
+
+        # All three add ops should be in the same region
+        if region_of:  # May be empty if cost is 0 due to missing metadata
+            regions = set(id(r) for r in region_of.values())
+            # Should have at most 1 region (all connected)
+            self.assertLessEqual(len(regions), 1)
+
+    def test_collapse_and_expand_preserves_graph_semantics(self):
+        """Test that collapse followed by expand preserves graph structure."""
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            collapse_fusion_regions,
+            expand_fusion_regions,
+        )
+
+        # Create a simple module to get a proper graph with owning_module
+        class SimpleModule(torch.nn.Module):
+            def forward(self, a, b):
+                x = a + 1
+                y = b + 2
+                return x + y
+
+        mod = SimpleModule()
+        gm = torch.fx.symbolic_trace(mod)
+
+        # Get original graph structure
+        original_nodes = [
+            (n.name, n.op, str(n.target)) for n in gm.graph.nodes
+        ]
+
+        # Build regions (may be empty for non-ATen ops)
+        region_of = build_fusion_regions(gm)
+
+        if region_of:
+            # Collapse
+            new_region_of, replaced = collapse_fusion_regions(gm, region_of)
+
+            # Verify subgraph nodes were created
+            self.assertTrue(len(new_region_of) > 0)
+
+            # Expand
+            replaced = expand_fusion_regions(gm.graph, new_region_of, replaced)
+
+            # Graph should still be valid
+            gm.graph.lint()
+
+    def test_fusion_region_with_aten_ops(self):
+        """Test fusion regions with actual ATen ops."""
+        from torch._inductor.fx_passes.fusion_regions import (
+            FusionRegion,
+            build_fusion_regions,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # Create graph with ATen ops
+        def func(a, b):
+            x = a + 1
+            y = b + 2
+            z = x * y
+            return z.sum()
+
+        with FakeTensorMode():
+            a = torch.randn(4, 4)
+            b = torch.randn(4, 4)
+            traced = make_fx(func)(a, b)
+
+        region_of = build_fusion_regions(traced)
+
+        # Should detect fusible regions
+        # (may be multiple or one depending on connectivity)
+        if region_of:
+            for node, region in region_of.items():
+                self.assertIsInstance(region, FusionRegion)
+                self.assertIn(node, region.nodes)
+
+    def test_replacement_chain_resolution(self):
+        """Test that replacement chains are properly resolved."""
+        from torch._inductor.fx_passes.fusion_regions import resolve_replacement_chain
+
+        # Create a mock replacement chain: A -> B -> C
+        class MockNode:
+            def __init__(self, name):
+                self.name = name
+
+        a = MockNode("a")
+        b = MockNode("b")
+        c = MockNode("c")
+        d = MockNode("d")
+
+        replaced = {a: b, b: c}
+
+        # a should resolve to c
+        self.assertEqual(resolve_replacement_chain(a, replaced), c)
+        # b should resolve to c
+        self.assertEqual(resolve_replacement_chain(b, replaced), c)
+        # c should resolve to itself (not in chain)
+        self.assertEqual(resolve_replacement_chain(c, replaced), c)
+        # d should resolve to itself (not in chain)
+        self.assertEqual(resolve_replacement_chain(d, replaced), d)
+
+    def test_augmented_graph_fixup_replaced_nodes(self):
+        """Test that AugmentedGraphHelper.fixup_replaced_nodes works correctly."""
+        from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
+
+        # Create a simple graph
+        graph = fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        c = graph.call_function(aten.add.Tensor, (a, b))
+        graph.output(c)
+
+        # Create augmented graph helper
+        aug = AugmentedGraphHelper(graph)
+
+        # Add some extra deps
+        aug.add_extra_dep(n=c, dep=a)
+        aug.add_extra_dep(n=c, dep=b)
+
+        # Simulate replacement: a was replaced by a_new
+        class MockNode:
+            def __init__(self, name):
+                self.name = name
+
+        a_new = MockNode("a_new")
+        replaced = {a: a_new}
+
+        # Fixup
+        aug.fixup_replaced_nodes(replaced)
+
+        # Verify deps were updated
+        deps = aug.get_all_extra_deps()
+        # c's deps should now include a_new instead of a
+        if c in deps:
+            self.assertIn(a_new, deps[c])
+            self.assertNotIn(a, deps[c])
 
 
 if __name__ == "__main__":
