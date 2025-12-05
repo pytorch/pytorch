@@ -43,6 +43,13 @@ ARG CLANG_VERSION
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
+# (optional) Install vision packages like OpenCV
+ARG VISION
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
+RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
+ENV INSTALLED_VISION ${VISION}
+
 # Install rocm
 ARG ROCM_VERSION
 RUN mkdir ci_commit_pins
