@@ -344,4 +344,61 @@ Tensor _padded_dense_to_jagged_forward_cpu(
   return values;
 }
 
+
+// Backward operation for _jagged_to_padded_dense_forward
+Tensor _jagged_to_padded_dense_backward_cpu(
+    const Tensor& grad_output,
+    TensorList offsets,
+    int64_t total_L) {
+  // CPU implementation: extract values from padded tensor back to jagged format
+  TORCH_INTERNAL_ASSERT(
+      offsets.size() == 1,
+      "_jagged_to_padded_dense_backward_cpu(): only a single jagged dim is supported for now");
+
+  const auto& offset_tensor = offsets[0];
+  TORCH_CHECK(
+      offset_tensor.dim() == 1,
+      "_jagged_to_padded_dense_backward_cpu(): expected 1D offsets, but got offsets.dim() == ",
+      offset_tensor.dim());
+
+  auto batch_size = offset_tensor.size(0) - 1;
+
+  // Create output tensor with the jagged shape [total_L, ...features]
+  std::vector<int64_t> output_shape;
+  output_shape.push_back(total_L);
+  // Copy feature dimensions (skip batch and max_len dimensions)
+  if (grad_output.dim() > 2) {
+    for (int64_t i = 2; i < grad_output.dim(); ++i) {
+      output_shape.push_back(grad_output.size(i));
+    }
+  }
+
+  auto output = at::zeros(output_shape, grad_output.options());
+  auto offset_accessor = offset_tensor.accessor<int64_t, 1>();
+
+  // Extract values from padded tensor
+  for (int64_t batch_idx = 0; batch_idx < batch_size; ++batch_idx) {
+    int64_t start_idx = offset_accessor[batch_idx];
+    int64_t end_idx = offset_accessor[batch_idx + 1];
+    int64_t length = end_idx - start_idx;
+
+    if (length > 0) {
+      // Copy the non-padded portion for this batch
+      auto grad_batch = grad_output.select(0, batch_idx).narrow(0, 0, length);
+      output.narrow(0, start_idx, length).copy_(grad_batch);
+    }
+  }
+
+  return output;
+}
+
+// Backward operation for _padded_dense_to_jagged_forward
+Tensor _padded_dense_to_jagged_backward_cpu(
+    const Tensor& grad_output,
+    TensorList offsets,
+    c10::IntArrayRef max_lengths,
+    double padding_value) {
+  // Mathematical identity: backward(padded_dense_to_jagged) = jagged_to_padded_dense_forward
+  return _jagged_to_padded_dense_forward_cpu(grad_output, offsets, max_lengths, padding_value);
+}
 } // namespace at::native
