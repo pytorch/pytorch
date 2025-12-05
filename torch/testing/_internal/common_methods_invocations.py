@@ -31,8 +31,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol, skipXPU)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
-    _get_torch_rocm_version,
+    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -13822,9 +13821,6 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
-                               or (_get_torch_rocm_version() >= (5, 2))),
-                          "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse,
                skipXPU],
            skips=(
@@ -16628,7 +16624,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+                         device_type='cuda'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
                          dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
