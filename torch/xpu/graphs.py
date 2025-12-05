@@ -21,18 +21,18 @@ __all__ = [
 if not hasattr(torch._C, "_XpuStreamBase"):
     # Define dummy base classes
     torch._C.__dict__["_XPUGraph"] = _dummy_type("_XPUGraph")
-    torch._C.__dict__["_graph_pool_handle"] = _dummy_type("_graph_pool_handle")
+    torch._C.__dict__["_xpu_graph_pool_handle"] = _dummy_type("_xpu_graph_pool_handle")
 
 from torch._C import (  # noqa: F401
     _XPUGraph,
-    _graph_pool_handle,
+    _xpu_graph_pool_handle,
 )
 
 def graph_pool_handle() -> _POOL_HANDLE:
     r"""Return an opaque token representing the id of a graph memory pool.
 
     """
-    return torch.xpu._POOL_HANDLE(_graph_pool_handle())
+    return torch.xpu._POOL_HANDLE(_xpu_graph_pool_handle())
 
 class XPUGraph(torch._C._XPUGraph):
     r"""Wrapper around a XPU graph.

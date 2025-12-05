@@ -61,6 +61,7 @@ struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
 
   void register_graph(xpu::XPUGraph* graph);
   void unregister_graph(xpu::XPUGraph* graph);
+  PhiloxXpuState philox_xpu_state(uint64_t increment);
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static c10::DeviceType device_type();
 
