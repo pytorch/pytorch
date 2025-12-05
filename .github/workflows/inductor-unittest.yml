@@ -55,7 +55,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
     secrets: inherit
@@ -79,7 +79,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-halide-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: ${{ needs.inductor-halide-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
     secrets: inherit
@@ -105,7 +105,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-pallas-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+      build-environment: ${{ needs.inductor-pallas-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-pallas-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-pallas-build.outputs.test-matrix }}
     secrets: inherit
@@ -129,7 +129,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-triton-cpu-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: ${{ needs.inductor-triton-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix }}
     secrets: inherit
@@ -156,7 +156,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-cpu-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
     secrets: inherit
