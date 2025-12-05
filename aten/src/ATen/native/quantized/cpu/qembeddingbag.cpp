@@ -191,7 +191,8 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-inline void embedding_neon_kernel(
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -219,7 +220,8 @@ inline void embedding_neon_kernel(
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-inline void embedding_neon_kernel(
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
