@@ -107,7 +107,7 @@ class Shard(torch._C._distributed.Shard):
         self,
         tensor: torch.Tensor,
         num_chunks: int,
-        index: int,
+        index: RankType,
         *,
         with_padding: bool = True,
         contiguous: bool = True,
@@ -115,10 +115,33 @@ class Shard(torch._C._distributed.Shard):
         """
         Like _split_tensor() but only returns a single Tensor
         """
-        shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+        # We don't handle SymInt with_padding yet (because that requires extra
+        # work based on the shard)
+        if isinstance(index, int) or with_padding:
+            shards, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+            )
+            return shards[index]
+
+        # For the SymInt implementation just compute the value for the tensor we
+        # want rather than computing all of them.
+
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
-        return shards[index]
+
+        # chunk tensor over dimension `dim` into n slices
+        dim_size = tensor.size(self.dim)
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        # each split is split_size except (maybe) the last one...
+        last_split = dim_size - split_size * (num_chunks - 1)
+
+        start = split_size * index
+        length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
+        result = torch.narrow(tensor, self.dim, start, length)
+        if contiguous:
+            result = result.contiguous()
+        return result
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -126,7 +149,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: RankType,
-    ) -> tuple[int, RankType]:
+    ) -> tuple[RankType, RankType]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
