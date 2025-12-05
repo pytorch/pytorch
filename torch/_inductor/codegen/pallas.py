@@ -1061,7 +1061,6 @@ class PallasKernel(SIMDKernel):
         index_str = self.kexpr(index)
         indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
         indirect_vars = [str(sym) for sym in indirect_var_syms]
-        n_iter_vars = len(used_iter_vars)
 
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
@@ -1148,12 +1147,9 @@ class PallasKernel(SIMDKernel):
 
         # Check if this is a scalar output (reduction to scalar)
         # Only shape () is a true scalar, not (1,) which is a 1-element tensor
-        try:
-            buf = V.graph.get_buffer(name)
-            output_shape = buf.get_size()
-            is_scalar = len(output_shape) == 0
-        except Exception:
-            is_scalar = False
+        buf = V.graph.get_buffer(name)
+        output_shape = buf.get_size()
+        is_scalar = len(output_shape) == 0
 
         if is_scalar:
             # For scalar outputs, use [...] to assign the entire scalar
