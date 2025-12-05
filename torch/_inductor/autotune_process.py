@@ -32,6 +32,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
 )
 from torch._inductor.utils import (
+    do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
     is_gpu,
@@ -436,7 +437,7 @@ class BenchmarkRequest:
             input_tensor_meta = [input_tensor_meta]
         self.input_tensor_meta = input_tensor_meta
 
-        if isinstance(output_tensor_meta, (tuple, list)):
+        if output_tensor_meta and isinstance(output_tensor_meta, (tuple, list)):
             if len(output_tensor_meta) > 1:
                 # Each output with same meta for Grouped GEMM
                 assert all(
@@ -476,6 +477,9 @@ class BenchmarkRequest:
 
         # create args and out tensor
         if out is None:
+            assert self.input_tensor_meta and self.output_tensor_meta, (
+                "Input and output tensor meta must be populated when input_tensors is empty"
+            )
             assert len(input_tensors) == 0
             input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
             out = self.output_tensor_meta.to_tensor()
@@ -685,6 +689,90 @@ class TritonGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, TritonBenchmarkRequest)
 
 
 class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
+    pass
+
+
+class ExternKernelBenchmarkRequest(BenchmarkRequest):
+    """
+    A class to handle extern kernel benchmark requests. This allows extern kernels
+    (like aten::mm) to be benchmarked in a subprocess, similar to Triton kernels.
+
+    Important: Instances of this class have to be serializable across
+    process boundaries. Do not put CUDA Tensors in here!
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        extra_args: Iterable[Any],
+        callable_path: str,  # Module path to the callable (e.g., "extern_kernels.mm")
+        kwargs: Optional[dict[str, Any]] = None,
+        has_out_variant: bool = True,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.callable_path = callable_path
+        self.kwargs = kwargs or {}
+        self.has_out_variant = has_out_variant
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        fn = self.to_callable()
+        if self.has_out_variant:
+            # For out=variant, pass output as keyword arg
+            return functools.partial(fn, *input_tensors, out=out)
+        else:
+            # For non-out variant, just call with inputs
+            return functools.partial(fn, *input_tensors)
+
+    def benchmark(self, *args, out):
+        if out is not None and out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
+        if self.has_out_variant or len(args) == 0:
+            return super().benchmark(*args, out=out)
+        else:
+            algo = self.to_callable()
+            out_new = algo(*args)
+            torch._C._dynamo.guards.assert_size_stride(
+                out_new, tuple(out.size()), tuple(out.stride())
+            )
+            out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*args))
+            return benchmarker.benchmark(algo, args, {})
+
+    def precompile(self) -> None:
+        # Extern kernels don't need precompilation - they're already compiled
+        pass
+
+    def to_callable(self):
+        # While ExternKernelChoice also has a to_callable method,
+        # we avoid calling the ExternKernelChoice version here to make sure
+        # this is picklable
+        from torch._inductor.select_algorithm import extern_kernels
+
+        fn = getattr(extern_kernels, self.kernel_name)
+        if self.kwargs:
+            return functools.partial(fn, **self.kwargs)
+
+        return fn
+
+    def __str__(self) -> str:
+        return f"ExternKernelBenchmarkRequest({self.callable_path})"
+
+
+class ExternKernelGPUBenchmarkRequest(
+    GPUDeviceBenchmarkMixin, ExternKernelBenchmarkRequest
+):
+    pass
+
+
+class ExternKernelCPUBenchmarkRequest(
+    CPUDeviceBenchmarkMixin, ExternKernelBenchmarkRequest
+):
     pass
 
 

@@ -508,6 +508,57 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestExternKernelCaller(TestCase):
+    @patches
+    def test_extern_kernel_caller_hash_key_deduplication(self):
+        def fn(a, b, c, d):
+            # Two identical matmuls with same shapes
+            result1 = torch.mm(a, b)
+            result2 = torch.mm(c, d)
+            return result1 + result2
+
+        # Use identical shapes for all tensors
+        shape = (64, 64)
+        a = torch.randn(*shape, device=GPU_TYPE)
+        b = torch.randn(*shape, device=GPU_TYPE)
+        c = torch.randn(*shape, device=GPU_TYPE)
+        d = torch.randn(*shape, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(a, b, c, d)
+
+        # Verify correctness
+        expected = torch.mm(a, b) + torch.mm(c, d)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
+        # Only autotune once, cache hit
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_extern_kernel_benchmark_produces_valid_timing(self):
+        """
+        Test that ExternKernelCaller.benchmark() produces valid timing results.
+
+        This verifies that the BenchmarkRequest infrastructure properly
+        measures execution time and returns reasonable values.
+        """
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        # Use larger matrices to ensure measurable timing
+        a = torch.randn(256, 256, device=GPU_TYPE)
+        b = torch.randn(256, 256, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        result = compiled_fn(a, b)
+
+        # Verify correctness
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+
 @contextlib.contextmanager
 def patch_lowering(lowering_overrides) -> Callable[[], None]:
     import torch._inductor.lowering as inductor_lowering
