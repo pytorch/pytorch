@@ -23,7 +23,7 @@ import torch
 import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import identity, preserve_rng_state
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
@@ -2714,7 +2714,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     if symbol_is_type(var, symt)
                 ]
                 if len(prefix_matches) == 0:
-                    pass
+                    # Track occurrence for diagnostics
+                    counters["inductor"]["unexpected_symbol_in_indexing"] += 1
+                    # Warn once to avoid log spam in tight loops
+                    if counters["inductor"]["unexpected_symbol_in_indexing"] == 1:
+                        log.warning(
+                            "Unexpected symbol type in indexing: %s (assumptions: %s). "
+                            "This may indicate an issue with graph generation. "
+                            "Skipping mask generation for this variable. "
+                            "If you see this frequently, please report it.",
+                            var.name,
+                            getattr(var, "assumptions0", "unknown"),
+                        )
+                    continue
                 assert len(prefix_matches) == 1, f"Ambiguous type: {var.name}"
                 mask_vars.add(f"{prefix_matches[0]}mask")
 
