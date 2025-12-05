@@ -543,6 +543,30 @@ class _TritonKernelCall(_DebugCall):
         yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
 
 
+class _ProfilerRecordFunctionCall(_DebugCall):
+    """Designates an entry to profiler.record_function()"""
+
+    def __init__(self, tag: str, call_depth: int, stack: bool = False) -> None:
+        super().__init__(call_depth, stack=stack)
+        self.tag = tag
+
+    def stringify_args(
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
+    ) -> None:
+        pass  # nothing to stringify
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[record function] {self.tag}"
+
+    def __iter__(self):
+        yield from [
+            f"[record function] {self.tag}",
+            (),
+            {},
+            self.call_depth,
+        ]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -647,6 +671,7 @@ class DebugMode(TorchDispatchMode):
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
+        self.ignored_record_functions = 0
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
@@ -701,9 +726,44 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def _maybe_record_function(self, tag):
+        # filter out tags that appear noisy, or aren't runtime-related
+        if any(
+            tag.startswith(prefix)
+            for prefix in [
+                # assuming these are from benchmarking, not the actual runtime call
+                "CachingAutotuner.",
+                "InductorBenchmarker.",
+                # inductor compilation
+                "compile_fx.<locals>.",
+            ]
+        ):
+            self.ignored_record_functions += 1
+            return
+
+        call = _ProfilerRecordFunctionCall(
+            tag, self.call_depth, stack=self.record_stack_trace
+        )
+        self.operators.append(call)
+        self.call_depth += 1
+
+    def _maybe_exit_record_function(self):
+        assert self.ignored_record_functions >= 0
+        if self.ignored_record_functions > 0:
+            self.ignored_record_functions -= 1
+        else:
+            self.call_depth -= 1
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        # Handle record_function entries
+        if func == torch.ops.profiler._record_function_enter_new.default:
+            assert len(args) == 1
+            self._maybe_record_function(args[0])
+        elif func == torch.ops.profiler._record_function_exit._RecordFunction:
+            self._maybe_exit_record_function()
 
         # Record the operation with its call depth
         call = None
