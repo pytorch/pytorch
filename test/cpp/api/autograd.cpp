@@ -584,7 +584,7 @@ TEST(CustomAutogradTest, MarkDirty) {
     }
   };
 
-  // Clone here because modifying leafs inplace is not allowed
+  // Clone here because modifying leaves inplace is not allowed
   auto x = torch::randn({5, 5}, torch::requires_grad()).clone();
   auto version_before = x._version();
   auto out = MyFunction::apply(x);
@@ -1292,12 +1292,6 @@ torch::Tensor view_op(const torch::Tensor& self) {
   return self.alias();
 }
 
-torch::Tensor view_op_with_extra_arg(
-    const torch::Tensor& self,
-    const torch::Tensor& other) {
-  return self.alias();
-}
-
 std::vector<torch::Tensor> ret_tensor_vector_view(
     const torch::Tensor& self,
     const torch::Tensor& other) {
@@ -1534,35 +1528,9 @@ TEST(TestAutogradNotImplementedFallback, ViewOp) {
   // Test inplace on view
   auto t = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
 
-  // raise on rebase_history when it refreshes grad_fn
-  ASSERT_THROWS_WITH(
-      v1.add_(t), "which does not have a derivative implemented is forbidden");
-  // base should not be aware of the views, so this is still okay
+  // this works as we can properly replay the view given by the user
+  v1.add_(t);
   b1.add_(t);
-  ASSERT_THROWS_WITH(
-      v1.grad_fn(),
-      "which does not have a derivative implemented is forbidden");
-}
-
-TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
-  REGISTER_TEST_OP(
-      "view_op_with_extra_arg",
-      "_test::view_op_with_extra_arg(Tensor(a) self, Tensor other) -> Tensor(a)",
-      view_op_with_extra_arg);
-  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
-      "_test::view_op_with_extra_arg", "");
-  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    return callOpUnboxed<
-        torch::Tensor,
-        const torch::Tensor&,
-        const torch::Tensor&>(opHandle, _1, _2);
-  };
-  assertBasicChecks(op);
-  auto a = torch::tensor({1.}, {torch::kFloat32});
-  auto b = torch::tensor({2.}, {torch::kFloat32});
-  auto out1 = op(a, b);
-  ASSERT_TRUE(out1.is_view());
-  ASSERT_EQ(out1._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
 }
 
 TEST(TestAutogradNotImplementedFallback, RetTensorVectorView) {

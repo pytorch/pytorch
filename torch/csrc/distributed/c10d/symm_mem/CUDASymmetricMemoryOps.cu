@@ -1088,6 +1088,17 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
   return output;
 }
+
+at::Tensor multimem_one_shot_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t root,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
 } // namespace
 #endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 

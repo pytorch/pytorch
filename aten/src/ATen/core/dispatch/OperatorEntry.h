@@ -105,7 +105,7 @@ class TORCH_API OperatorEntry final {
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
   void registerSchema(
-      FunctionSchema&&,
+      FunctionSchema&& /*schema*/,
       std::string&& debug,
       std::vector<at::Tag> tags = {});
   void deregisterSchema();

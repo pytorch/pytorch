@@ -46,7 +46,7 @@ namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr int64_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) << 40;
+  return static_cast<size_t>(n) << 40;
 }
 
 uint8_t getAlignment(const Tensor& t) {
@@ -93,7 +93,10 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
 
   std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
+      sizes.size(),
+      &sizes[0],
+      static_cast<int64_t*>(&strides_copy[0]),
+      channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
                .setStrides(strides_copy.size(), strides_copy.data())
@@ -252,7 +255,7 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   }
 };
 
-static int getLRUCacheLimit() {
+int getLRUCacheLimit() {
   constexpr int DEFAULT_LIMIT =
       10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
   // 0 is used to indicate no limit
@@ -337,8 +340,7 @@ struct BenchmarkCache {
             engine_cache_order.begin(), engine_cache_order, it->second.second);
       }
     } else {
-      engine_cache.erase(key);
-      engine_cache.emplace(
+      engine_cache.insert_or_assign(
           key,
           std::make_pair(results, engine_cache_order.end())); // dummy iterator
     }
@@ -348,11 +350,26 @@ struct BenchmarkCache {
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
-    benchmark_cache;
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
-    benchmark_cache_fused;
+//
+// We also leak them due to apparent teardown segfaults observed since cuDNN
+// version 9.10+
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>*
+_get_benchmark_cache() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyWrapper>* benchmark_cache =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
+  return benchmark_cache;
+}
 
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>*
+_get_benchmark_cache_fused() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyFusedWrapper>* benchmark_cache_fused =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
+  return benchmark_cache_fused;
+}
 } // namespace
 
 void run_conv_plan(
@@ -874,7 +891,7 @@ void try_plans(
   for (auto& plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -898,7 +915,7 @@ void try_plans_fused(
   for (auto& plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -929,7 +946,7 @@ bool try_configs(
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -960,7 +977,7 @@ bool try_configs_fused(
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -996,7 +1013,7 @@ void run_single_conv(
       deterministic,
       allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
-  auto search = benchmark_cache.find(key);
+  auto search = _get_benchmark_cache()->find(key);
   if (search) {
     try {
       run_conv_plan(handle, x, y, w, *search, operation);
@@ -1096,7 +1113,7 @@ void run_fused_conv(
       groups,
       deterministic,
       allow_tf32);
-  auto search = benchmark_cache_fused.find(key);
+  auto search = _get_benchmark_cache_fused()->find(key);
   if (search) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, *search);

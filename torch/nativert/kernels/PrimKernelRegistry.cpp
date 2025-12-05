@@ -77,7 +77,7 @@ class OpKernel_variadic_concat : public OpKernel {
  public:
   explicit OpKernel_variadic_concat(const Node* node)
       : OpKernel(node, OpKernelKind::kPrimKernel) {
-    dim_ = node_->attributes().size() > 0
+    dim_ = !node_->attributes().empty()
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
@@ -122,7 +122,7 @@ class OpKernel_variadic_stack : public OpKernel {
  public:
   explicit OpKernel_variadic_stack(const Node* node)
       : OpKernel(node, OpKernelKind::kPrimKernel) {
-    dim_ = node_->attributes().size() > 0
+    dim_ = !node_->attributes().empty()
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
