@@ -287,6 +287,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
+
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
         from torch._inductor.config import aten_distributed_optimizations as dist_opts
@@ -305,14 +306,38 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "collective_estimator",
             "max_memory_increase_gb",
             "max_memory_increase_ratio",
+            "compute_overlap_multipler",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
                 kwargs[key] = val
 
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "pre_reordering_pass",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+
         GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
             lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)  # type: ignore[arg-type]
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "post_reordering_pass",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+        assert False
+
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.

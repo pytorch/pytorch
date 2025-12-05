@@ -354,6 +354,10 @@ class OverlapScheduler:
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
 
+        # Track deferred memory freeing from waits
+        # When we defer a wait, we also defer the memory freeing from its downstream nodes
+        self.wait_freeing_potential: dict[fx.Node, int] = self._compute_wait_freeing_potential()
+
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
         ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -363,6 +367,48 @@ class OverlapScheduler:
                 ancestors[node] |= ancestors[input_node]
 
         return ancestors
+
+    def _compute_wait_freeing_potential(self) -> dict[fx.Node, int]:
+        """
+        Compute how much memory would be freed by scheduling each wait node.
+
+        When a wait is scheduled, its direct dependents can become ready.
+        If those dependents are the last users of some storages, they free memory.
+        This estimates that freeing potential.
+        """
+        wait_freeing: dict[fx.Node, int] = {}
+        alias_tracker = self.memory_tracker.alias_tracker
+
+        for wait_node in self.wait_to_start:
+            freeing = 0
+
+            # Look at immediate dependents of the wait
+            for user in wait_node.users:
+                # Check if this user would free any storages when scheduled
+                input_storages = alias_tracker.get_storage_uses(user)
+                for storage_key in input_storages:
+                    if not self.memory_tracker.device_filter(storage_key.device):
+                        continue
+
+                    allocator = alias_tracker.storage_to_allocator[storage_key]
+                    if not self.memory_tracker.is_releasable(allocator):
+                        continue
+
+                    # Check if user is the last user of this storage
+                    last_user = alias_tracker.storage_to_last_user.get(storage_key)
+                    if last_user == user:
+                        freeing += self.memory_tracker._get_storage_size(storage_key)
+
+            wait_freeing[wait_node] = freeing
+
+        total_freeing = sum(wait_freeing.values())
+        log.debug(
+            "Computed wait freeing potential: %d waits, total %d MB",
+            len(wait_freeing),
+            total_freeing // (1024 * 1024),
+        )
+
+        return wait_freeing
 
     def _compute_baseline_memory(self) -> int:
         """
@@ -374,9 +420,19 @@ class OverlapScheduler:
         last_compute_max_memory = 0
         peak_memory = 0
 
-        for node in self.nodes:
+        # Track where original peak occurs
+        self._original_peak_index = 0
+        self._original_peak_node = None
+
+        for idx, node in enumerate(self.nodes):
             baseline_tracker.schedule_node(node)
             current_mem = baseline_tracker.current_memory_bytes
+
+            # Track peak
+            if current_mem > peak_memory:
+                peak_memory = current_mem
+                self._original_peak_index = idx
+                self._original_peak_node = node.name
 
             # Record the max memory between this and previous compute node
             last_compute_max_memory = max(last_compute_max_memory, current_mem)
@@ -384,8 +440,6 @@ class OverlapScheduler:
             if is_compute_node(node):
                 self.original_mem_before_compute_index.append(last_compute_max_memory)
                 last_compute_max_memory = current_mem
-
-            peak_memory = max(peak_memory, current_mem)
 
         return peak_memory
 
@@ -399,15 +453,38 @@ class OverlapScheduler:
 
         domination_index = self.compute_index_domination[start_node]
 
-        # If off-path, assume it doesn't increase memory
+        # For off-path collectives (don't block compute), check current memory budget.
+        # reduce_scatter is memory-beneficial (consumes large input, produces small output)
+        # so we allow it even when tight on memory. Other off-path collectives are blocked
+        # if they would exceed the budget.
         if domination_index == sys.maxsize:
+            if not hasattr(self, '_off_path_count'):
+                self._off_path_count = 0
+                self._off_path_rs_count = 0
+
+            if is_reduce_scatter(start_node):
+                self._off_path_rs_count += 1
+                # reduce_scatter helps memory - always allow
+                return False
+
+            # Other off-path collectives (like all_gather) use memory
+            self._off_path_count += 1
+            current_mem = self.memory_tracker.current_memory_bytes
+            # Check against budget
+            if current_mem + size > self.allowed_peak_memory_bytes:
+                return True
             return False
 
+        # Track on-path prefetch attempts
+        if not hasattr(self, '_on_path_prefetch_count'):
+            self._on_path_prefetch_count = 0
+            self._on_path_prefetch_blocked = 0
+        self._on_path_prefetch_count += 1
+
         # check current mem
-        if (
-            self.memory_tracker.current_memory_bytes + size
-            > self.allowed_peak_memory_bytes
-        ):
+        current_mem = self.memory_tracker.current_memory_bytes
+        if current_mem + size > self.allowed_peak_memory_bytes:
+            self._on_path_prefetch_blocked += 1
             return True
 
         start_index = self.current_compute_index
@@ -420,6 +497,7 @@ class OverlapScheduler:
 
             # Check 1: Would cumulative prefetch exceed in-flight limit?
             if (cumulative_prefetch + size) > self.max_in_flight_bytes:
+                self._on_path_prefetch_blocked += 1
                 return True
 
             # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
@@ -427,23 +505,32 @@ class OverlapScheduler:
             projected = baseline_mem + cumulative_prefetch + size
 
             if projected > self.allowed_peak_memory_bytes:
+                self._on_path_prefetch_blocked += 1
                 return True
 
         return False
 
     def _update_cumulative_prefetch_memory(
-        self, collective: fx.Node, info: CollectiveInfo
+        self, collective: fx.Node, info: CollectiveInfo, path_memory_cost: int = 0
     ) -> None:
         """
         Update cumulative prefetch memory for all compute indices this collective will be live.
+
+        Args:
+            collective: The collective node being prefetched
+            info: CollectiveInfo for the collective
+            path_memory_cost: Memory cost from scheduling path nodes to reach the collective
         """
         domination_index = self.compute_index_domination[collective]
         if domination_index == sys.maxsize:
             return
 
+        # Track both collective size and path memory cost
+        total_memory_cost = info.size_bytes + path_memory_cost
+
         for compute_idx in range(self.current_compute_index, domination_index):
             self.cumulative_prefetch_mem_by_compute_index[compute_idx] += (
-                info.size_bytes
+                total_memory_cost
             )
 
     def off_compute_path(self, n: fx.Node) -> bool:
@@ -662,10 +749,24 @@ class OverlapScheduler:
                 self._force_oldest_wait()
                 continue
 
+            # Proactive memory management: force high-freeing-potential waits
+            # before memory builds up too much
+            if self._should_force_wait_proactively():
+                self._force_highest_freeing_wait()
+                continue
+
             _, node = heapq.heappop(self.ready)
 
             # we don't always remove nodes from the heap when we schedule them
             if node in self.scheduled:
+                continue
+
+            # Check if we should schedule a wait instead of this node to free memory
+            # This is a dynamic check that happens AFTER popping, not at push time
+            if not _schedulable_wait_node(node) and self._should_schedule_wait_instead(node):
+                # Push the current node back and schedule a wait instead
+                heapq.heappush(self.ready, (self._compute_score(node), node))
+                self._force_highest_freeing_wait()
                 continue
 
             if node.op == "placeholder":
@@ -791,7 +892,30 @@ class OverlapScheduler:
         assert node not in self.scheduled
         assert all(n in self.scheduled for n in node.all_input_nodes)
         self.scheduled.add(node)
+
+        mem_before = self.memory_tracker.current_memory_bytes
         self.memory_tracker.schedule_node(node)
+        mem_after = self.memory_tracker.current_memory_bytes
+
+        # Track when we hit peak memory
+        if mem_after == self.memory_tracker.peak_memory and mem_after > mem_before:
+            self._peak_memory_node = node.name
+            self._peak_memory_index = len(self.scheduled)
+            self._peak_memory_bytes = mem_after
+
+        # Track memory freed by nodes that depend on waits
+        if not hasattr(self, '_wait_user_mem_freed'):
+            self._wait_user_mem_freed = 0
+            self._wait_user_count = 0
+
+        # Check if this node depends on a wait (has a wait in its inputs)
+        for inp in node.all_input_nodes:
+            if _schedulable_wait_node(inp):
+                mem_freed = mem_before - mem_after
+                if mem_freed > 0:
+                    self._wait_user_mem_freed += mem_freed
+                    self._wait_user_count += 1
+                break
 
         log.debug(
             "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
@@ -810,8 +934,44 @@ class OverlapScheduler:
 
         if _schedulable_wait_node(node):
             info = self.collective_info[self.wait_to_start[node]]
-            # defer waits locally if they are exposed.
-            compute_local_priority = int(info.is_exposed)
+            # Defer waits locally if they are exposed, BUT only if:
+            # 1. Memory is not under pressure
+            # 2. Deferring this wait won't cause us to exceed budget (considering its freeing potential)
+            current_mem = self.memory_tracker.current_memory_bytes
+            memory_under_pressure = current_mem > self.allowed_peak_memory_bytes
+
+            # Get the freeing potential of this wait
+            freeing_potential = self.wait_freeing_potential.get(node, 0)
+
+            # Check if deferring this wait would risk exceeding memory budget
+            # Use original profile as reference - allow only small increase above original
+            if self.current_compute_index < len(self.original_mem_before_compute_index):
+                original_target = self.original_mem_before_compute_index[
+                    self.current_compute_index
+                ]
+            else:
+                original_target = self.original_peak_memory
+
+            # Allow 1GB headroom above original profile
+            headroom = original_target + gb_to_bytes(1.0) - current_mem
+            defer_would_risk_budget = headroom < freeing_potential
+
+            if not hasattr(self, '_wait_score_count'):
+                self._wait_score_count = 0
+                self._wait_score_under_pressure = 0
+                self._wait_score_risk_budget = 0
+            self._wait_score_count += 1
+            if memory_under_pressure:
+                self._wait_score_under_pressure += 1
+                # Don't defer waits when memory is high
+                compute_local_priority = 0
+            elif defer_would_risk_budget and freeing_potential > 0:
+                self._wait_score_risk_budget += 1
+                # Don't defer waits that have high freeing potential and little headroom
+                compute_local_priority = 0
+            else:
+                # Normal behavior: defer exposed waits
+                compute_local_priority = int(info.is_exposed)
         else:
             # if we're scheduling this collective via its queue, then it was not
             # pre-fetched. we might as well maximize overlap for the
@@ -820,6 +980,29 @@ class OverlapScheduler:
                 compute_local_priority = -1
             else:
                 compute_local_priority = 0
+
+        # Compute a memory-aware score that limits deviation from original order
+        # when current memory is high relative to original profile
+        current_mem = self.memory_tracker.current_memory_bytes
+        if self.current_compute_index < len(self.original_mem_before_compute_index):
+            original_target = self.original_mem_before_compute_index[
+                self.current_compute_index
+            ]
+        else:
+            original_target = self.original_peak_memory
+
+        # If we're over budget relative to original profile, prioritize original order
+        # This limits reordering when it would cause memory increases
+        memory_tight = current_mem > original_target + gb_to_bytes(1.0)
+
+        if memory_tight:
+            # When memory is tight, use original order as primary sort key
+            # This prevents further reordering that could increase memory
+            return (
+                0,  # Don't deprioritize based on domination
+                0,  # Don't deprioritize based on wait/collective
+                self.node_idx[node],  # Stick to original order
+            )
 
         return (
             self.compute_index_domination[node],  # what index compute it blocks
@@ -853,15 +1036,206 @@ class OverlapScheduler:
         return False
 
     def _should_force_wait_for_memory(self) -> bool:
-        """Check if we need to force a wait due to memory pressure"""
+        """Check if we need to force a wait due to memory pressure.
+
+        Force a wait if either:
+        1. In-flight bytes exceed limit (existing check)
+        2. Actual tracked memory exceeds allowed peak budget
+        """
         if not self.in_flight:
             return False
 
-        return self.in_flight_bytes >= self.max_in_flight_bytes
+        # Check 1: in-flight memory limit
+        if self.in_flight_bytes >= self.max_in_flight_bytes:
+            return True
+
+        # Check 2: actual memory exceeds budget - force a wait to try to free memory
+        current_mem = self.memory_tracker.current_memory_bytes
+        if current_mem > self.allowed_peak_memory_bytes:
+            if not hasattr(self, '_force_wait_for_memory_count'):
+                self._force_wait_for_memory_count = 0
+            self._force_wait_for_memory_count += 1
+            return True
+
+        return False
 
     def _force_oldest_wait(self) -> None:
         """Schedule the oldest in flight wait"""
         self._handle_wait(self._get_oldest_wait())
+
+    def _should_force_wait_proactively(self) -> bool:
+        """Check if we should proactively force a high-freeing-potential wait.
+
+        Returns True if:
+        1. There are in-flight collectives (waits are available)
+        2. Memory exceeds the ORIGINAL baseline at this point in scheduling
+        3. A high-freeing-potential wait is ready
+
+        This is more aggressive than the budget check - we try to stay close to
+        the original memory profile, not just within the budget.
+        """
+        if not self.in_flight:
+            return False
+
+        # Get the original memory target at the current compute index
+        # This is the baseline we want to stay close to
+        if self.current_compute_index < len(self.original_mem_before_compute_index):
+            original_target = self.original_mem_before_compute_index[
+                self.current_compute_index
+            ]
+        else:
+            original_target = self.original_peak_memory
+
+        current_mem = self.memory_tracker.current_memory_bytes
+
+        # Force waits if we're exceeding the original profile significantly
+        # Allow some headroom (configured memory increase) before forcing
+        max_allowed = original_target + gb_to_bytes(1.0)  # 1 GB headroom above original
+
+        if current_mem <= max_allowed:
+            return False
+
+        # Check if there's a high-freeing-potential wait that's ready
+        best_freeing = self._get_best_ready_wait_freeing()
+        if best_freeing is None:
+            return False
+
+        wait_node, freeing_potential = best_freeing
+        # Force if the wait would help (any significant freeing potential)
+        if freeing_potential > gb_to_bytes(0.5):  # At least 0.5 GB freeing
+            if not hasattr(self, '_proactive_force_count'):
+                self._proactive_force_count = 0
+            self._proactive_force_count += 1
+            return True
+
+        return False
+
+    def _should_schedule_wait_instead(self, popped_node: fx.Node) -> bool:
+        """Check if we should schedule a wait instead of the popped node.
+
+        This is a dynamic check that happens AFTER popping from the heap,
+        allowing us to react to current memory state rather than stale scores.
+        """
+        if not self.in_flight:
+            return False
+
+        # Get current memory and compare to original profile
+        current_mem = self.memory_tracker.current_memory_bytes
+        if self.current_compute_index < len(self.original_mem_before_compute_index):
+            original_target = self.original_mem_before_compute_index[
+                self.current_compute_index
+            ]
+        else:
+            original_target = self.original_peak_memory
+
+        # Only intervene if we're significantly above original profile (1 GB threshold)
+        if current_mem <= original_target + gb_to_bytes(1.0):
+            return False
+
+        # Check if there's a ready wait with good freeing potential
+        best_freeing = self._get_best_ready_wait_freeing()
+        if best_freeing is None:
+            return False
+
+        wait_node, freeing_potential = best_freeing
+
+        # Schedule wait if it would help reduce memory significantly
+        if freeing_potential > gb_to_bytes(0.5):
+            if not hasattr(self, '_swap_for_wait_count'):
+                self._swap_for_wait_count = 0
+            self._swap_for_wait_count += 1
+            return True
+
+        return False
+
+    def _get_best_ready_wait_freeing(self) -> tuple[fx.Node, int] | None:
+        """Find the ready wait with highest freeing potential."""
+        best_wait = None
+        best_freeing = 0
+
+        # Look through in-flight collectives for their waits
+        for start_node in self.in_flight:
+            wait_node = self.collective_info[start_node].wait_node
+
+            # Check if the wait is in the ready queue (all deps satisfied)
+            if self.in_degree[wait_node] > 0:
+                continue
+
+            freeing = self.wait_freeing_potential.get(wait_node, 0)
+            if freeing > best_freeing:
+                best_freeing = freeing
+                best_wait = wait_node
+
+        if best_wait is None:
+            return None
+        return best_wait, best_freeing
+
+    def _force_highest_freeing_wait(self) -> None:
+        """Force the ready wait with highest freeing potential.
+
+        Also schedules the wait's direct users that would free memory,
+        since scheduling just the wait doesn't directly free memory.
+        """
+        result = self._get_best_ready_wait_freeing()
+        if result is None:
+            # Fallback to oldest wait
+            self._force_oldest_wait()
+            return
+
+        wait_node, _ = result
+        self._handle_wait(wait_node)
+
+        # Now also schedule the wait's users that would free memory
+        # These users are what actually free memory, not the wait itself
+        self._schedule_memory_freeing_users(wait_node)
+
+    def _schedule_memory_freeing_users(self, wait_node: fx.Node) -> None:
+        """Schedule users of a wait that would free significant memory."""
+        alias_tracker = self.memory_tracker.alias_tracker
+
+        # Debug: track why users aren't being scheduled
+        if not hasattr(self, '_user_skip_reasons'):
+            self._user_skip_reasons = {'scheduled': 0, 'not_ready': 0, 'special_node': 0, 'low_freeing': 0}
+
+        for user in wait_node.users:
+            # Skip if already scheduled
+            if user in self.scheduled:
+                self._user_skip_reasons['scheduled'] += 1
+                continue
+
+            # Skip if not ready (has unscheduled dependencies)
+            if self.in_degree[user] > 0:
+                self._user_skip_reasons['not_ready'] += 1
+                continue
+
+            # Skip waits, collectives, and compute nodes - let them go through normal scheduling
+            if _schedulable_wait_node(user) or user in self.collective_info or is_compute_node(user):
+                self._user_skip_reasons['special_node'] += 1
+                continue
+
+            # Check how much memory this user would free
+            input_storages = alias_tracker.get_storage_uses(user)
+            freeing = 0
+            for storage_key in input_storages:
+                if not self.memory_tracker.device_filter(storage_key.device):
+                    continue
+                allocator = alias_tracker.storage_to_allocator[storage_key]
+                if not self.memory_tracker.is_releasable(allocator):
+                    continue
+
+                # Check if all other uses are scheduled
+                all_uses = alias_tracker.storage_to_uses[storage_key]
+                if all(u in self.scheduled or u == user for u in all_uses):
+                    freeing += self.memory_tracker._get_storage_size(storage_key)
+
+            # Schedule if it would free significant memory
+            if freeing > gb_to_bytes(0.1):  # At least 0.1 GB
+                self._schedule(user)
+                if not hasattr(self, '_forced_user_schedule_count'):
+                    self._forced_user_schedule_count = 0
+                self._forced_user_schedule_count += 1
+            else:
+                self._user_skip_reasons['low_freeing'] += 1
 
     def _handle_collective_start(self, node: fx.Node) -> None:
         """Handle scheduling a collective start."""
@@ -1002,6 +1376,26 @@ class OverlapScheduler:
             if path is None:
                 continue
 
+            # Check if path + collective memory would exceed budget
+            # Skip this check for reduce_scatter since it's memory-beneficial
+            # (consumes large input, produces small output)
+            if not is_reduce_scatter(collective):
+                path_memory_cost = self._estimate_path_memory_cost(path)
+                total_prefetch_cost = info.size_bytes + path_memory_cost
+                current_mem = self.memory_tracker.current_memory_bytes
+                if current_mem + total_prefetch_cost > self.allowed_peak_memory_bytes:
+                    why(
+                        "path memory would exceed budget (current=%d MB, path=%d MB, coll=%d MB, budget=%d MB)",
+                        current_mem // (1024 * 1024),
+                        path_memory_cost // (1024 * 1024),
+                        info.size_bytes // (1024 * 1024),
+                        self.allowed_peak_memory_bytes // (1024 * 1024),
+                    )
+                    if not hasattr(self, '_path_memory_blocked'):
+                        self._path_memory_blocked = 0
+                    self._path_memory_blocked += 1
+                    continue
+
             log.debug(
                 "Overlapping collective %s with node %s: coll_domination=%d, current_depth=%d",
                 collective.name,
@@ -1016,9 +1410,21 @@ class OverlapScheduler:
             # that wasn't in-flight
 
             # Schedule path and collective
+            path_memory_cost = self._estimate_path_memory_cost(path)
+
+            # Track estimated vs actual path memory for debugging
+            mem_before = self.memory_tracker.current_memory_bytes
             self._schedule_path_to_collective(path, overlap_node)
+            mem_after_path = self.memory_tracker.current_memory_bytes
+            actual_path_cost = mem_after_path - mem_before
+
+            if not hasattr(self, '_path_estimate_vs_actual'):
+                self._path_estimate_vs_actual = []
+            self._path_estimate_vs_actual.append((path_memory_cost, actual_path_cost))
+
             self._handle_collective_start(collective)
-            self._update_cumulative_prefetch_memory(collective, info)
+            # Track both collective and path memory in cumulative prefetch
+            self._update_cumulative_prefetch_memory(collective, info, path_memory_cost)
 
             # Update exposed time for this collective
             overlap_amount = min(pg_available_time, info.exposed_time_ms)
@@ -1033,6 +1439,30 @@ class OverlapScheduler:
 
         if remaining_time_per_pg:
             self.wasted_compute += min(remaining_time_per_pg.values())
+
+    def _estimate_path_memory_cost(self, path: OrderedSet[fx.Node]) -> int:
+        """
+        Estimate memory cost of scheduling a path to a collective.
+
+        This accounts for fresh allocations from path nodes. Nodes with users
+        outside the path will have their outputs stay live longer, but we
+        conservatively estimate based on fresh allocations only.
+        """
+        total_cost = 0
+        alias_tracker = self.memory_tracker.alias_tracker
+
+        for node in path:
+            # Skip waits - they don't allocate new memory
+            if _schedulable_wait_node(node):
+                continue
+
+            # Get fresh allocations for this node
+            fresh_allocations = alias_tracker.get_fresh_allocations(node)
+            for storage_key in fresh_allocations:
+                if self.memory_tracker.device_filter(storage_key.device):
+                    total_cost += self.memory_tracker._get_storage_size(storage_key)
+
+        return total_cost
 
     def _find_schedulable_path(
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
@@ -1114,6 +1544,17 @@ class OverlapScheduler:
     ) -> None:
         """Schedule all nodes needed to reach a collective."""
 
+        # Track nesting level for prefetches
+        if not hasattr(self, '_prefetch_nesting_level'):
+            self._prefetch_nesting_level = 0
+            self._nested_prefetch_count = 0
+        self._prefetch_nesting_level += 1
+        if self._prefetch_nesting_level > 1:
+            self._nested_prefetch_count += 1
+
+        # Track memory impact of scheduling path nodes
+        mem_before_path = self.memory_tracker.current_memory_bytes
+
         assert all(n not in self.scheduled for n in path)
         for node in sorted(path, key=lambda n: self.node_idx[n]):
             assert not (is_compute_node(node) or node in self.unscheduled_collectives)
@@ -1131,6 +1572,16 @@ class OverlapScheduler:
                 continue
 
             self._schedule(node)
+
+        # Track path memory impact
+        mem_after_path = self.memory_tracker.current_memory_bytes
+        path_mem_delta = mem_after_path - mem_before_path
+        if not hasattr(self, '_path_mem_increases'):
+            self._path_mem_increases = []
+        self._path_mem_increases.append(path_mem_delta)
+
+        # Decrement nesting level
+        self._prefetch_nesting_level -= 1
 
     def reorder_graph(self) -> None:
         output_node = self.graph.output_node()
@@ -1170,6 +1621,81 @@ class OverlapScheduler:
         )
         counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
         counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+
+        # Debug: print off-path prefetch stats
+        off_path_count = getattr(self, '_off_path_count', 0)
+        off_path_rs_count = getattr(self, '_off_path_rs_count', 0)
+        print(f"DEBUG off-path prefetch checks: non-reduce_scatter={off_path_count}, reduce_scatter={off_path_rs_count}")
+
+        # Count on-path vs off-path collectives
+        on_path = sum(1 for c in self.collective_info if self.compute_index_domination[c] != sys.maxsize)
+        off_path = sum(1 for c in self.collective_info if self.compute_index_domination[c] == sys.maxsize)
+        print(f"DEBUG collective counts: on_path={on_path}, off_path={off_path}, total={len(self.collective_info)}")
+
+        # Breakdown by type
+        on_path_rs = sum(1 for c in self.collective_info if self.compute_index_domination[c] != sys.maxsize and is_reduce_scatter(c))
+        off_path_rs = sum(1 for c in self.collective_info if self.compute_index_domination[c] == sys.maxsize and is_reduce_scatter(c))
+        on_path_ag = on_path - on_path_rs
+        off_path_ag = off_path - off_path_rs
+        print(f"DEBUG on_path: reduce_scatter={on_path_rs}, other={on_path_ag}")
+        print(f"DEBUG off_path: reduce_scatter={off_path_rs}, other={off_path_ag}")
+
+        # On-path prefetch stats
+        on_path_count = getattr(self, '_on_path_prefetch_count', 0)
+        on_path_blocked = getattr(self, '_on_path_prefetch_blocked', 0)
+        print(f"DEBUG on_path prefetch: attempts={on_path_count}, blocked={on_path_blocked}, allowed={on_path_count - on_path_blocked}")
+        force_wait_count = getattr(self, '_force_wait_for_memory_count', 0)
+        proactive_force_count = getattr(self, '_proactive_force_count', 0)
+        swap_for_wait_count = getattr(self, '_swap_for_wait_count', 0)
+        forced_user_count = getattr(self, '_forced_user_schedule_count', 0)
+        user_skip = getattr(self, '_user_skip_reasons', {})
+        print(f"DEBUG force waits for memory: {force_wait_count}, proactive: {proactive_force_count}, swap: {swap_for_wait_count}, forced_users: {forced_user_count}")
+        print(f"DEBUG user skip reasons: {user_skip}")
+        wait_score_count = getattr(self, '_wait_score_count', 0)
+        wait_score_under_pressure = getattr(self, '_wait_score_under_pressure', 0)
+        wait_score_risk_budget = getattr(self, '_wait_score_risk_budget', 0)
+        print(f"DEBUG wait scoring: total={wait_score_count}, under_pressure={wait_score_under_pressure}, risk_budget={wait_score_risk_budget}")
+        total_wait_freeing = sum(self.wait_freeing_potential.values())
+        print(f"DEBUG wait freeing potential: total={total_wait_freeing/1024**3:.2f} GB, avg={total_wait_freeing/len(self.wait_freeing_potential)/1024**3:.4f} GB per wait")
+        peak_node = getattr(self, '_peak_memory_node', 'unknown')
+        peak_idx = getattr(self, '_peak_memory_index', -1)
+        peak_bytes = getattr(self, '_peak_memory_bytes', 0)
+        print(f"DEBUG peak memory at: node={peak_node}, scheduled_index={peak_idx}/{len(self.scheduled)}, bytes={peak_bytes/1024**3:.2f} GB")
+
+        # Path memory stats
+        path_increases = getattr(self, '_path_mem_increases', [])
+        if path_increases:
+            total_path_increase = sum(max(0, x) for x in path_increases)
+            max_path_increase = max(path_increases) if path_increases else 0
+            positive_paths = sum(1 for x in path_increases if x > 0)
+            print(f"DEBUG path mem: num_paths={len(path_increases)}, positive_increase_paths={positive_paths}, total_increase={total_path_increase/1024**3:.2f} GB, max_single={max_path_increase/1024**3:.2f} GB")
+        path_blocked = getattr(self, '_path_memory_blocked', 0)
+        print(f"DEBUG prefetches blocked by path memory: {path_blocked}")
+
+        # Estimated vs actual path memory
+        estimate_vs_actual = getattr(self, '_path_estimate_vs_actual', [])
+        if estimate_vs_actual:
+            total_estimated = sum(e for e, a in estimate_vs_actual)
+            total_actual = sum(a for e, a in estimate_vs_actual)
+            underestimates = sum(1 for e, a in estimate_vs_actual if e < a)
+            print(f"DEBUG path estimate vs actual: paths={len(estimate_vs_actual)}, estimated={total_estimated/1024**3:.2f} GB, actual={total_actual/1024**3:.2f} GB, underestimates={underestimates}")
+
+        # Nested prefetch count
+        nested_count = getattr(self, '_nested_prefetch_count', 0)
+        print(f"DEBUG nested prefetches (from paths with waits): {nested_count}")
+
+        # Memory freed by wait users
+        wait_user_freed = getattr(self, '_wait_user_mem_freed', 0)
+        wait_user_count = getattr(self, '_wait_user_count', 0)
+        print(f"DEBUG nodes after waits that free memory: count={wait_user_count}, total_freed={wait_user_freed/1024**3:.2f} GB")
+
+        # Original vs rescheduled peak location
+        orig_peak_idx = getattr(self, '_original_peak_index', -1)
+        orig_peak_node = getattr(self, '_original_peak_node', 'unknown')
+        resched_peak_idx = getattr(self, '_peak_memory_index', -1)
+        resched_peak_node = getattr(self, '_peak_memory_node', 'unknown')
+        print(f"DEBUG original peak: index={orig_peak_idx}/{len(self.nodes)}, node={orig_peak_node}")
+        print(f"DEBUG rescheduled peak: index={resched_peak_idx}/{len(self.scheduled)}, node={resched_peak_node}")
 
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
