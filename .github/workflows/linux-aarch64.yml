@@ -32,18 +32,18 @@ jobs:
     needs: get-label-type
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-clang21
       runner: linux.arm64.m7g.4xlarge
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.arm64.m7g.4xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "linux.arm64.m7g.4xlarge" },
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.arm64.m8g.4xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.arm64.m8g.4xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.arm64.m8g.4xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m8g.4xlarge" },
         ]}
     secrets: inherit
 
