@@ -29,9 +29,9 @@ Tensor my_new_zeros(
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def(
-      "my_new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+      "my_new_empty(Tensor self, int[] size, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory) -> Tensor");
   m.def(
-      "my_new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+      "my_new_zeros(Tensor self, int[] size, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_10, CompositeExplicitAutograd, m) {

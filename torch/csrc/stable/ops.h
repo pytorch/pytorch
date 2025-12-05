@@ -66,9 +66,7 @@ inline torch::stable::Tensor narrow(
 
 #if TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 // We expect this to be a stable version of the new_empty op that takes in
-// only dtype information. This overload is only available in versions < 2.10.
-// In 2.10+, use the full new_empty overload with all kwargs instead.
-//
+// only dtype information.
 // This is gated to < 2.10 to avoid ambiguity with the full new_empty overload
 // in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_empty(
@@ -107,13 +105,9 @@ inline torch::stable::Tensor new_empty(
 
   return torch::stable::Tensor(ret0);
 }
-#endif // TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 
-#if TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 // We expect this to be a stable version of the new_zeros op that takes in
-// only dtype information. This overload is only available in versions < 2.10.
-// In 2.10+, use the full new_zeros overload with all kwargs instead.
-//
+// only dtype information.
 // This is gated to < 2.10 to avoid ambiguity with the full new_zeros overload
 // in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_zeros(

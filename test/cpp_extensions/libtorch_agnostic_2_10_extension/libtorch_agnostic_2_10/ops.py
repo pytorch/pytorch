@@ -495,8 +495,8 @@ def my_contiguous_memory_format(t, memory_format) -> Tensor:
 
     Returns: Tensor - contiguous tensor with specified memory format
     """
-    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format(
-        t, memory_format=memory_format
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format.default(
+        t, memory_format
     )
 
 
@@ -525,15 +525,8 @@ def my_to_dtype_layout(
 
     Returns: Tensor - converted tensor
     """
-    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout(
-        t,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        non_blocking=non_blocking,
-        copy=copy,
-        memory_format=memory_format,
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout.default(
+        t, dtype, layout, device, pin_memory, non_blocking, copy, memory_format
     )
 
 
@@ -558,8 +551,8 @@ def my_new_empty(
 
     Returns: Tensor - new uninitialized tensor
     """
-    return torch.ops.libtorch_agnostic_2_10.my_new_empty(
-        self, size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    return torch.ops.libtorch_agnostic_2_10.my_new_empty.default(
+        self, size, dtype, layout, device, pin_memory
     )
 
 
@@ -584,6 +577,6 @@ def my_new_zeros(
 
     Returns: Tensor - new tensor filled with zeros
     """
-    return torch.ops.libtorch_agnostic_2_10.my_new_zeros(
-        self, size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    return torch.ops.libtorch_agnostic_2_10.my_new_zeros.default(
+        self, size, dtype, layout, device, pin_memory
     )
