@@ -15,6 +15,7 @@ aspects of contributing to PyTorch.
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Spin](#spin)
+  - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
   - [Regenerating](#regenerating)
@@ -284,6 +285,14 @@ dependencies as well as the nightly binaries into the repo directory.
 helps running common tasks.
 To list the available tasks, run `spin --help`.
 Currently, we support the following tasks with Spin:
+
+### Building
+
+To support building and general development, the following commands exist.
+
+|command||
+|-|-|
+|`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
 
 ### Linting
 
