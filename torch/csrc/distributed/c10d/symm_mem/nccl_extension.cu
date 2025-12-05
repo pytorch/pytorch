@@ -1,9 +1,14 @@
+#include <c10/cuda/CUDAGuard.h>
+
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
 
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
 __device__ __forceinline__ char* get_remote_ptr(
     void** buffer,  // buffers_dev_
     int peer,  // peer index
@@ -148,8 +153,10 @@ __global__ void nccl_wait_for_signal_kernel(
         }
     }
 }
+#endif
 
 void nccl_put(at::Tensor& tensor, const int64_t peer) {
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -167,22 +174,29 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
     tensor.data_ptr(),
     nbytes);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
+#endif
 }
 
 void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
-  auto symm_mem_nccl = c10::static_intrusive_pointer_cast<c10d::symmetric_memory::NCCLSymmetricMemory>(std::move(symm_mem));
-  int cur_rank = symm_mem_nccl->get_nccl_dev_comm().lsaRank;
+  int cur_rank = symm_mem->get_rank();
   nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
-    symm_mem_nccl->get_signal_pad_ptrs_dev(),
+    symm_mem->get_signal_pad_ptrs_dev(),
     cur_rank,
     signal);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
+#endif
 }
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -209,8 +223,12 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
     blocks_done_dev,
     signal);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
+#endif
 }
 
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
 __global__ void lsa_get_kernel(
     void**  buffer,  // buffers_dev_
     int  peer,
@@ -218,7 +236,7 @@ __global__ void lsa_get_kernel(
     void*  dst,
     size_t  nbytes
 ) {
-    const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
     // remote src pointer
@@ -226,8 +244,10 @@ __global__ void lsa_get_kernel(
     char* dst_bytes = reinterpret_cast<char*>(dst);
     copy_bytes_vec16(src, dst_bytes, nbytes, tid, stride);
 }
+#endif
 
 void nccl_get(at::Tensor& tensor, const int64_t peer) {
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
@@ -245,6 +265,9 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
     tensor.data_ptr(),
     nbytes);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
+#endif
 }
 
 bool is_nccl_symmem_available() {
@@ -254,7 +277,6 @@ bool is_nccl_symmem_available() {
     return false;
 #endif
 }
-
 } // namespace c10d::nccl_extension
 
 

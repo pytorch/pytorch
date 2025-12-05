@@ -308,6 +308,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # for the same tensor because it will be cached by that moment.
         symm_mem.rendezvous(tensor, group=group_name)
         signal_val = 5
+        c10d.barrier()
 
         if self.rank == 1:
             torch.ops.symm_mem.nccl_put_with_signal(tensor, signal_val, 0)
@@ -347,6 +348,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # This is needed to make sure we don't get blocked the second time we call rendezvous
         # for the same tensor because it will be cached by that moment.
         symm_mem.rendezvous(tensor, group=group_name)
+        c10d.barrier()
         if self.rank == 0:
             torch.ops.symm_mem.nccl_get(tensor, 1)
             # TODO: remove after we have wait_signal
