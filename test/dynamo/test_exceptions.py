@@ -964,6 +964,39 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
             torch._dynamo.functional_export.dynamo_graph_capture_for_export(Model())(x)
 
+    def test_runtime_error_caught_during_fake_tensor_execution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mat1 = torch.randint(-2, 4, (2, 3), dtype=torch.int64)
+                self.mat2 = torch.randint(-8, 1, (3, 3), dtype=torch.int64)
+
+            def forward(self, input):
+                # out-of-place addmm should work due to broadcasting
+                out_of_place = torch.addmm(input, self.mat1, self.mat2)
+
+                # in-place addmm_ will fail due to shape mismatch
+                input_inplace = input.clone()
+                try:
+                    input_inplace.addmm_(self.mat1, self.mat2)
+                except Exception:
+                    input_inplace = None
+
+                return out_of_place, input_inplace
+
+        torch.manual_seed(0)
+        model = Model().eval()
+        inp = torch.randint(-2, 1, (1, 3), dtype=torch.int64)
+
+        with torch.no_grad():
+            ref = model(inp)
+
+        compiled = torch.compile(model, backend="eager")
+        with torch.no_grad():
+            res = compiled(inp)
+
+        self.assertEqual(ref, res)
+
 
 instantiate_parametrized_tests(ExceptionTests)
 
