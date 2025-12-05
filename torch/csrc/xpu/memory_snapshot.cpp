@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/csrc/xpu/memory_snapshot.h>
 
 namespace torch::xpu {
