@@ -2042,7 +2042,7 @@ graph(%Ra, %Rb):
             self.assertEqual(inp_refcount + 1, sys.getrefcount(ivalue_holder))
             return ivalue_holder + 1
 
-        test_input = 2200
+        test_input = py_array
         before_count = sys.getrefcount(test_input)
         test_func_scope_helper(test_input)
         after_count = sys.getrefcount(test_input)
