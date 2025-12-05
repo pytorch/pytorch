@@ -790,20 +790,22 @@ graph():
     def test_generate_trivial_abstract_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo_generate_trivial_abstract_impl",
                 "(Tensor x, Tensor[] y, Tensor(a!)? z, SymInt w) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_generate_trivial_abstract_impl", "cpu", lib=lib
+            )
             @torch._dynamo.disable
             def foo_impl(x, y, z, w):
                 x + y[0] + w
                 return
 
             def f(x, y, z, w):
-                return torch.ops.mylib.foo(x, y, z, 2)
+                return torch.ops.mylib.foo_generate_trivial_abstract_impl(x, y, z, 2)
 
             x = torch.randn(3)
             y = (torch.randn(3), torch.randn(3))
@@ -9650,6 +9652,36 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
 
+    def test_constant_hasattr_returns_bool(self):
+        """Test that hasattr on constant values properly returns boolean ConstantVariable."""
+
+        # Test various constant types
+        def fn():
+            # String constant
+            s = "hello"
+            result1 = hasattr(s, "upper")  # True
+            result2 = hasattr(s, "nonexistent")  # False
+
+            # Integer constant
+            i = 42
+            result3 = hasattr(i, "bit_length")  # True
+            result4 = hasattr(i, "fake_method")  # False
+
+            # Float constant
+            f = 3.14
+            result5 = hasattr(f, "is_integer")  # True
+            result6 = hasattr(f, "missing_attr")  # False
+
+            # Use all results to ensure they're compiled
+            return (result1, result2, result3, result4, result5, result6)
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertEqual(fn_out, (True, False, True, False, True, False))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -10116,14 +10148,14 @@ def ___make_guard_fn():
     def test_validate_outputs_unbacked_by_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo_validate_outputs_unbacked",
                 "(Tensor a, Tensor b) -> (Tensor)",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.register_fake("mylib::foo")
+            @torch.library.impl("mylib::foo_validate_outputs_unbacked", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::foo_validate_outputs_unbacked")
             def foo_impl(x, y):
                 return torch.cat([x, y])
 
@@ -10131,7 +10163,7 @@ def ___make_guard_fn():
             def f(x, i):
                 i0, i1 = i.tolist()
                 x0, x1 = x.split([i0, i1])
-                return torch.ops.mylib.foo(x0, x1)
+                return torch.ops.mylib.foo_validate_outputs_unbacked(x0, x1)
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 

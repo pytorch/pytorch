@@ -1,6 +1,4 @@
 # Owner(s): ["module: unknown"]
-import math
-import os
 from collections import defaultdict
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
@@ -8,74 +6,21 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import active_fake_mode
-from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.flop_counter import flop_registry
+from torch.utils._runtime_estimation import (
+    _FLOAT_TYPES,
+    _IGNORE_OPS,
+    _VIEW_OPS,
+    get_compute_time,
+    get_transfer_time,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-aten = torch.ops.aten
-
-# This value is hard-coded here:
-# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
-_PYTORCH_MIN_ALLOCATE = (
-    2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
-)
-
-# No fall-back kernel needed/exists for view ops
-_VIEW_OPS = {
-    aten.lift_fresh,
-    aten.t,
-    aten.transpose,
-    aten.view,
-    aten.detach,
-    aten._unsafe_view,
-    aten.split,
-    aten.adjoint,
-    aten.as_strided,
-    aten.diagonal,
-    aten.expand,
-    aten.expand_as,
-    aten.movedim,
-    aten.permute,
-    aten.select,
-    aten.squeeze,
-    aten.mT,
-    aten.mH,
-    aten.real,
-    aten.imag,
-    aten.view_as,
-    aten.unflatten,
-    aten.unfold,
-    aten.unbind,
-    aten.unsqueeze,
-    aten.vsplit,
-    aten.hsplit,
-    aten.split_with_sizes,
-    aten.swapaxes,
-    aten.swapdims,
-    aten.chunk,
-}
-# We can ignore benchmarking tensor create ops
-_CREATE_OPS = {
-    aten.randint,
-    aten.randn,
-    aten.rand,
-    aten.randn_like,
-    aten.rand_like,
-    aten.randint_like,
-    aten.arange,
-    aten.ones_like,
-    aten.zeros_like,
-}
-
-_IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 __all__ = ["RuntimeEstimator"]
 
@@ -125,12 +70,6 @@ class RuntimeEstimator(TorchDispatchMode):
                 runtime_estimator.display_modulewise_stats()
     """
 
-    _float_types: set[torch.dtype] = {
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-        torch.float64,
-    }
     _no_fallback_kernel: set[torch._ops._OpNamespace] = set()
     fake_mode: FakeTensorMode
 
@@ -186,7 +125,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
             def to_real_tensor(e):  # type: ignore[no-untyped-def]
                 if cls.fake_mode.is_our_fake(e):
-                    if e.dtype in cls._float_types:
+                    if e.dtype in _FLOAT_TYPES:
                         out = torch.rand_like(e, device=e.fake_device)
                     else:
                         out = torch.ones_like(e, device=e.fake_device)
@@ -297,79 +236,6 @@ class RuntimeEstimator(TorchDispatchMode):
             "Roofline estimation needs to access CUDA capabilities to make estimations"
         )
 
-        def get_num_bytes(t: torch.Tensor) -> int:
-            """
-            Calculates the memory consumption of a tensor.
-
-            Args:
-                t (torch.Tensor): The input tensor.
-
-            Returns:
-                int: The memory consumption of the tensor in bytes.
-            """
-            num_bytes = t.untyped_storage().nbytes()
-            mem_consumed = (
-                math.ceil(num_bytes / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-            )
-            return mem_consumed
-
-        def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # type: ignore[no-untyped-def]
-            """
-            Estimates the compute time of an aten operator.
-
-            Args:
-                func_packet: The operator overload packet.
-                args: The arguments to the operator.
-                kwargs: The keyword arguments to the operator.
-                out: The output of the operator.
-                out_dtypes: The output data types.
-
-            Returns:
-                float: The estimated compute time in nanoseconds.
-            """
-            if func_packet in flop_registry:
-                assert len(out_dtypes) == 1, (
-                    f"Only support single out dtype got {out_dtypes} for {func_packet}"
-                )
-                dtype = out_dtypes.pop()
-                # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
-                peak_gpu_flops = get_device_tflops(dtype) * 1e15
-                # We can expect to achieve 75% of theoretical peak flops
-                factor = 0.75
-                peak_empirical_flops = factor * peak_gpu_flops
-                flop_count_func = flop_registry[func_packet]
-                # We divide by a factor of 2 to get the MACs (multiply and accumulate)
-                flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
-                # We multiply by 1e9 to get the time in nano seconds
-                compute_time = (flop_count / peak_empirical_flops) * 1e9
-                return compute_time
-            return 0.0
-
-        def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
-            """
-            Estimates the memory transfer time of input and output tensors.
-
-            Args:
-                flat_args_kwargs (List[torch.Tensor]): The flat list of arguments and keyword arguments.
-                flat_outs (List[torch.Tensor]): The flat list of outputs.
-
-            Returns:
-                float: The estimated memory transfer time in nanoseconds.
-            """
-            gpu_memory_bandwidth = get_gpu_dram_gbps()
-            read_bytes = sum(
-                get_num_bytes(t)
-                for t in flat_args_kwargs
-                if isinstance(t, torch.Tensor)
-            )
-            write_bytes = sum(
-                get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
-            )
-            counted_bytes = read_bytes + write_bytes
-            # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
-            transfer_time = counted_bytes / gpu_memory_bandwidth
-            return transfer_time
-
         # Roofline Cost Model Explanation
 
         # The roofline cost model estimates the execution time of an operator based on
@@ -406,7 +272,7 @@ class RuntimeEstimator(TorchDispatchMode):
             out_dtypes = {
                 t.dtype
                 for t in flat_outs
-                if isinstance(t, torch.Tensor) and t.dtype in cls._float_types
+                if isinstance(t, torch.Tensor) and t.dtype in _FLOAT_TYPES
             }
 
             args, kwargs = pytree.tree_unflatten(flat_args_kwargs, args_spec)

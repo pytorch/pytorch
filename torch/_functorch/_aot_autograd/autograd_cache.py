@@ -507,6 +507,10 @@ def autograd_cache_key(
         # a proper key because we are guaranteed in an AOT precompile world users are in
         # complete control of distributing and loading artifacts.
         if torch._dynamo.config.enable_aot_compile:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
             return str(random.random()), []
         else:
             raise

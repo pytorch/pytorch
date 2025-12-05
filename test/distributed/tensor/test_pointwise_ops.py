@@ -148,6 +148,30 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         d_3 = d_1 + d_2
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
+    def test_partial_replicate_add(self):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        for reduce_op in ("sum", "avg"):
+            d_1 = DTensor.from_local(
+                torch.rand(2, 2),
+                device_mesh,
+                [Partial(reduce_op=reduce_op)],
+            )
+            d_2 = DTensor.from_local(
+                torch.rand(2, 1),
+                device_mesh,
+                [Replicate()],
+                run_check=True,
+            )
+
+            with comm_mode:
+                d_3 = d_1 + d_2
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(d_3.placements, (Partial(reduce_op=reduce_op),))
+            self.assertEqual(d_3.full_tensor(), d_1.full_tensor() + d_2.full_tensor())
+
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -247,6 +271,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ),
         )
 
+    @skip_unless_torch_gpu
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):

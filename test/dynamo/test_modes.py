@@ -70,7 +70,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         counters.clear()
         from torch.utils._python_dispatch import TorchDispatchMode
 
-        @torch.library.custom_op("mylib::foo", mutates_args=())
+        @torch.library.custom_op("mylib::modes_checksum", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
@@ -90,7 +90,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
             def __torch_dispatch__(self, func, types, args, kwargs=None):
                 kwargs = kwargs or {}
 
-                if func is torch.ops.mylib.foo.default:
+                if func is torch.ops.mylib.modes_checksum.default:
                     # Do some compute, smoketest to see if there's a bad interaction
                     _checksums.append(args[0].abs().sum())
 
