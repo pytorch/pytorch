@@ -4049,6 +4049,29 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
+    def test_rnn_bias_and_batch_first_type_validation(self):
+        # test that RNN modules raise TypeError when bias or batch_first is not a bool
+        for mode in ['RNN', 'LSTM', 'GRU']:
+            # test bias parameter validation
+            with self.assertRaisesRegex(TypeError, "bias should be of type bool, got: int"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, bias=0)
+
+            with self.assertRaisesRegex(TypeError, "bias should be of type bool, got: int"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, bias=1)
+
+            with self.assertRaisesRegex(TypeError, "bias should be of type bool, got: str"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, bias="True")
+
+            # test batch_first parameter validation
+            with self.assertRaisesRegex(TypeError, "batch_first should be of type bool, got: int"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, batch_first=0)
+
+            with self.assertRaisesRegex(TypeError, "batch_first should be of type bool, got: int"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, batch_first=1)
+
+            with self.assertRaisesRegex(TypeError, "batch_first should be of type bool, got: str"):
+                getattr(nn, mode)(input_size=3, hidden_size=5, batch_first="False")
+
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
         def forward_backward(cuda, rnn, input_val, grad_output, weights_val, hx_val, grad_hy,
