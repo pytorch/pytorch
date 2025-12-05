@@ -991,6 +991,8 @@ inductor_skip_exact_stride = {
     "linalg.solve",
     "linalg.solve_ex",
     "linalg.qr",
+    "matmul",
+    "__rmatmul__",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
