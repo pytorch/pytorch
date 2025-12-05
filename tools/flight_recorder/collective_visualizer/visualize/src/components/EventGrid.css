@@ -1,0 +1,124 @@
+.event-grid-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #f5f5f5;
+}
+
+.controls {
+  padding: 10px 20px;
+  background-color: white;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.controls button {
+  padding: 6px 12px;
+  background-color: #1877f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.controls button:hover {
+  background-color: #166fe5;
+}
+
+.zoom-level,
+.selection-count {
+  font-size: 14px;
+  color: #666;
+}
+
+.event-grid {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  background-color: #fafafa;
+}
+
+.event-grid-content {
+  position: relative;
+}
+
+.row-group-header {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background-color: #e3f2fd;
+  border-bottom: 2px solid #90caf9;
+  display: flex;
+  align-items: center;
+  padding: 0 15px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  z-index: 10;
+}
+
+.row-group-header:hover {
+  background-color: #bbdefb;
+}
+
+.collapse-icon {
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.row-rank {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  background-color: white;
+}
+
+.row-label {
+  width: 100px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background-color: #f5f5f5;
+  border-right: 1px solid #ddd;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.row-events {
+  flex: 1;
+  display: flex;
+  position: relative;
+}
+
+.mismatch-line {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  background-color: #d32f2f;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.mismatch-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-100%);
+  padding-right: 8px;
+  color: #d32f2f;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  z-index: 101;
+  pointer-events: none;
+  background-color: #fafafa;
+  padding: 2px 8px 2px 0;
+}

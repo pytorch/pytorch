@@ -1,0 +1,35 @@
+.event-cell {
+  position: absolute;
+  top: 4px;
+  height: 32px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  overflow: hidden;
+}
+
+.event-cell:hover {
+  border-color: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.event-cell.selected {
+  border: 2px solid #1877f2;
+  border-color: #1877f2;
+  box-shadow: 0 0 0 2px rgba(24, 119, 242, 0.2);
+  z-index: 20;
+}
+
+.event-text {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1c1e21;
+  font-weight: 500;
+}
