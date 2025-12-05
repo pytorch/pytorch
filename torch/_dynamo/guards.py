@@ -228,6 +228,7 @@ recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
+recompile_stack_log = torch._logging.getArtifactLogger(__name__, "recompile_stack")
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
@@ -788,21 +789,39 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
     extra = ""
     if guard is not None:
         if guard.user_stack:
+            # Collect all non-uninteresting frames to show full stack trace
+            stack_frames = []
             for fs in reversed(guard.user_stack):
                 if fs.filename not in uninteresting_files():
-                    extra = f"  # {format_frame(fs, line=True)}"
-                    if len(extra) > 1024:
+                    frame_str = format_frame(fs, line=True)
+                    if len(frame_str) > 1024:
                         # For fx graphs, the line can be very long in case of
                         # torch.stack ops, where many inputs are set to None
                         # after the operation.  This increases the size of the
                         # guards log file.  In such cases, do not print the line
                         # contents.
-                        extra = f"  # {format_frame(fs)}"
-                    break
+                        frame_str = format_frame(fs)
+                    stack_frames.append(frame_str)
+
+            if stack_frames:
+                # Format full stack trace with proper indentation
+                if len(stack_frames) == 1:
+                    extra = f"  # {stack_frames[0]}"
+                else:
+                    extra = "\n  # Full stack trace:\n" + "\n".join(
+                        f"  #   {i}: {frame}" for i, frame in enumerate(stack_frames)
+                    )
         elif guard.stack:
             summary = guard.stack.summary()
             if len(summary) > 0:
-                extra = f"  # {format_frame(summary[-1])}"
+                # Show full stack trace for CapturedTraceback as well
+                stack_frames = [format_frame(fs) for fs in summary]
+                if len(stack_frames) == 1:
+                    extra = f"  # {format_frame(summary[-1])}"
+                else:
+                    extra = "\n  # Full stack trace:\n" + "\n".join(
+                        f"  #   {i}: {frame}" for i, frame in enumerate(stack_frames)
+                    )
             else:
                 extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
@@ -4268,6 +4287,10 @@ def is_recompiles_verbose_enabled() -> bool:
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
 
 
+def is_recompile_stack_enabled() -> bool:
+    return torch._logging._internal.log_state.is_artifact_enabled("recompile_stack")
+
+
 # this will only be used if cpp guards are disabled
 def make_torch_function_mode_stack_guard(
     initial_stack: list[torch.overrides.TorchFunctionMode],
@@ -4391,6 +4414,18 @@ def get_guard_fail_reason_helper(
             guard_manager, scope
         )
     else:
+        # Build a mapping from code parts to guards for stack trace lookup
+        # This is used when recompile_stack is enabled to show full stack traces
+        code_to_guard: dict[str, Guard] = {}
+        if (
+            is_recompiles_verbose_enabled() or is_recompile_stack_enabled()
+        ) and hasattr(guard_manager, "guards_with_stack"):
+            for guard in guard_manager.guards_with_stack:
+                if guard.code_list:
+                    for code_part in guard.code_list:
+                        # Store the guard for this code part
+                        code_to_guard[code_part] = guard
+
         for part in verbose_code_parts:
             global_scope = dict(guard_manager.global_scope)
             global_scope["__compile_source__"] = part
@@ -4398,7 +4433,7 @@ def get_guard_fail_reason_helper(
                 try:
                     fail_reason = eval(part, global_scope, scope)
                 except Exception:
-                    if is_recompiles_verbose_enabled():
+                    if is_recompiles_verbose_enabled() or is_recompile_stack_enabled():
                         continue
                     else:
                         raise
@@ -4408,8 +4443,24 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
-                reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
+                # For recompile_stack mode, enhance the reason with stack trace information
+                # Look up the guard using the original code part, not the evaluated fail_reason
+                if is_recompile_stack_enabled() and code_to_guard:
+                    # Try to find the guard associated with this code part
+                    guard = code_to_guard.get(part)
+                    if guard and (guard.user_stack or guard.stack):
+                        # Format with full stack trace
+                        formatted_reason = get_verbose_code_part(fail_reason, guard)
+                        reasons.append(formatted_reason)
+                    else:
+                        reasons.append(fail_reason)
+                else:
+                    reasons.append(fail_reason)
+
+                if (
+                    not is_recompiles_verbose_enabled()
+                    and not is_recompile_stack_enabled()
+                ):
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
@@ -4475,11 +4526,15 @@ def get_and_maybe_log_recompilation_reasons(
 
     if skip_logging:
         return reasons
-    # at least one of "recompiles" or "recompiles_verbose" is enabled
-    do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
+    # at least one of "recompiles", "recompiles_verbose", or "recompile_stack" is enabled
+    do_recompiles_log = (
+        is_recompiles_enabled()
+        or is_recompiles_verbose_enabled()
+        or is_recompile_stack_enabled()
+    )
 
     if do_recompiles_log or config.error_on_recompile:
-        if is_recompiles_verbose_enabled():
+        if is_recompiles_verbose_enabled() or is_recompile_stack_enabled():
             failures = "\n\n".join(
                 f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
                 for i, reason in enumerate(reasons)
@@ -4494,7 +4549,9 @@ def get_and_maybe_log_recompilation_reasons(
             f"{textwrap.indent(guard_failure_details, '    ')}"
         )
         if do_recompiles_log:
-            if is_recompiles_verbose_enabled():
+            if is_recompile_stack_enabled():
+                recompile_stack_log.debug(message)
+            elif is_recompiles_verbose_enabled():
                 recompiles_verbose_log.debug(message)
             else:
                 recompiles_log.debug(message)
