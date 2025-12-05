@@ -4,7 +4,6 @@
 import contextlib
 import itertools
 import math
-import copy
 from typing import cast
 
 import torch
@@ -832,13 +831,26 @@ class TestViewOps(DTensorTestBase):
                             for tensor_dims in list(
                                 itertools.product(tensor_dim_values, repeat=tensor_ndim)
                             ):
+                                local_tensor_dims = list(tensor_dims)
                                 placements = (Shard(shard_dim0), Shard(shard_dim1))
                                 ctx = contextlib.nullcontext()
-                                if tensor_dims[shard_dim0] % mesh.size(0) != 0:
+                                if local_tensor_dims[shard_dim0] % mesh.size(
+                                    0
+                                ) != 0 and shard_dim0 != (flatten_end - 1):
                                     ctx = self.assertRaises(RuntimeError)
-                                # unlike 1d S, we cannot support uneven shard on last dim
-                                if tensor_dims[shard_dim1] % mesh.size(1) != 0:
+                                local_tensor_dims[shard_dim0] = math.ceil(
+                                    local_tensor_dims[shard_dim0] * 1.0 / mesh.size(0)
+                                )
+                                if local_tensor_dims[shard_dim1] % mesh.size(
+                                    1
+                                ) != 0 and shard_dim1 != (flatten_end - 1):
                                     ctx = self.assertRaises(RuntimeError)
+                                local_tensor_dims[shard_dim1] = math.ceil(
+                                    local_tensor_dims[shard_dim1] * 1.0 / mesh.size(1)
+                                )
+                                assert False, (
+                                    "support uneven shard on last placement of a mesh, eg ((11, 11, 12), 0, 3, DeviceMesh((3, 2), 'cuda', stride=(2, 1)), (Shard(dim=1), Shard(dim=2)))"
+                                )
                                 with ctx:
                                     self._test_dtensor_flatten_2d_ss(
                                         tensor_dims,
@@ -847,8 +859,6 @@ class TestViewOps(DTensorTestBase):
                                         mesh,
                                         placements,
                                     )
-
-
 
                     # Replicate
                     # tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
@@ -907,8 +917,8 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
-    
-    def _test_dtensor_flatten_2d_ss(
+
+    def _get_expected_placements_ss(
         self,
         tensor_dims,
         flatten_start,
@@ -916,21 +926,7 @@ class TestViewOps(DTensorTestBase):
         mesh,
         placements,
     ):
-        local_tensor_dims = list(copy.deepcopy(tensor_dims))
-        nelem = math.prod(tensor_dims)
-        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
-        global_inps_replicate: DTensor = distribute_tensor(
-            global_inps, mesh, (Replicate(), Replicate())
-        )
-        inps = global_inps_replicate.redistribute(mesh, placements)
-        viewed_tensor_dims = self._get_viewed_tensor_dims(
-            tensor_dims, flatten_start, flatten_end
-        )
-
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            inps_viewed = inps.view(viewed_tensor_dims)
-
+        local_tensor_dims = list(tensor_dims)
         expected_placements = []
         for idx, placement in enumerate(placements):
             assert isinstance(placement, Shard)
@@ -946,14 +942,56 @@ class TestViewOps(DTensorTestBase):
                     dim=flatten_start, split_factor=split_factor
                 )
             # uneven shard on last flattened dim is supported
-            if idx == len(placements) - 1 and shard_dim == flatten_end - 1:
-                local_tensor_dims[shard_dim] = math.ceil(local_tensor_dims[shard_dim] * 1.0 / mesh.size(idx))
+            if shard_dim == flatten_end - 1 and (
+                idx == len(placements) - 1
+                or all(p.dim == flatten_end - 1 for p in placements[idx + 1 :])
+            ):
+                local_tensor_dims[shard_dim] = math.ceil(
+                    local_tensor_dims[shard_dim] * 1.0 / mesh.size(idx)
+                )
             else:
                 # uneven cases all throw error during inps.view
-                assert local_tensor_dims[shard_dim] % mesh.size(idx) == 0
-                local_tensor_dims[shard_dim] = local_tensor_dims[shard_dim] // mesh.size(idx)
+                try:
+                    assert local_tensor_dims[shard_dim] % mesh.size(idx) == 0
+                except:
+                    import fbvscode
+
+                    fbvscode.set_trace()
+                local_tensor_dims[shard_dim] = local_tensor_dims[
+                    shard_dim
+                ] // mesh.size(idx)
             expected_placements.append(expected_placement)
-        expected_placements = tuple(expected_placements)
+        return tuple(expected_placements)
+
+    def _test_dtensor_flatten_2d_ss(
+        self,
+        tensor_dims,
+        flatten_start,
+        flatten_end,
+        mesh,
+        placements,
+    ):
+        nelem = math.prod(tensor_dims)
+        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
+        global_inps_replicate: DTensor = distribute_tensor(
+            global_inps, mesh, (Replicate(), Replicate())
+        )
+        inps = global_inps_replicate.redistribute(mesh, placements)
+        viewed_tensor_dims = self._get_viewed_tensor_dims(
+            tensor_dims, flatten_start, flatten_end
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(viewed_tensor_dims)
+
+        expected_placements = self._get_expected_placements_ss(
+            tensor_dims,
+            flatten_start,
+            flatten_end,
+            mesh,
+            placements,
+        )
 
         expected_local_tensor = (
             distribute_tensor(
@@ -962,11 +1000,7 @@ class TestViewOps(DTensorTestBase):
             .redistribute(mesh, expected_placements)
             ._local_tensor
         )
-        try:
-            self.assertEqual(inps_viewed.placements, expected_placements)
-        except:
-            import fbvscode
-            fbvscode.set_trace()
+        self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
 

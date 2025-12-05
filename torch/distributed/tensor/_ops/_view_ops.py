@@ -541,6 +541,7 @@ def propagate_shape_and_sharding(
     if not len(input_src_placements) == len(mesh_sizes):
         raise AssertionError(f"{input_src_placements} != {mesh_sizes}")
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
+    mesh = input_src_spec.mesh
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
 
@@ -721,22 +722,17 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
-    def _get_split_factor(input_src_spec, input_start_idx, shard_dim, mesh_dim):
-        mesh = input_src_spec.mesh
-        local_tensor_shapes = copy.deepcopy(input_src_spec.shape)
+    def _get_split_factor(mesh, local_tensor_shapes, input_start_idx, shard_dim, mesh_dim):
         split_factor = 1
-        for tensor_dim, local_tensor_size_before_shard in enumerate(local_tensor_shapes):
+        for tensor_dim, local_tensor_size_after_shard in enumerate(local_tensor_shapes):
             if tensor_dim < input_start_idx:
                 continue
             if tensor_dim >= shard_dim:
                 break
-            local_tensor_size_after_shard = math.ceil(
-                local_tensor_size_before_shard * 1.0 / mesh.size(mesh_dim)
-            )
             split_factor = split_factor * local_tensor_size_after_shard
         return split_factor
 
-    def _rewrite_shard_dim(p: Shard, input_src_spec, rule, mesh_dim):
+    def _rewrite_shard_dim(p: Shard, mesh, local_tensor_shapes, rule, mesh_dim):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -765,6 +761,10 @@ def propagate_shape_and_sharding(
                 )
         else:
             # flatten from S to S/SS
+            assert isinstance(p, Shard)
+            local_tensor_shapes[p.dim] = math.ceil(
+                local_tensor_shapes[p.dim] * 1.0 / mesh.size(mesh_dim)
+            )
             tgt_shard_dim = input_dim_to_output_dims[p.dim]
             assert len(tgt_shard_dim) == 1
             tgt_shard_dim = tgt_shard_dim[0]
@@ -772,14 +772,15 @@ def propagate_shape_and_sharding(
             assert isinstance(flatten_cmd, Flatten)
             input_start_idx = flatten_cmd.input_dims[0].input_dim
             if p.dim == input_start_idx:
-                return Shard(tgt_shard_dim)
+                output_placement = Shard(tgt_shard_dim)
             else:
-                assert False, "add global shape update logic"
-                split_factor = _get_split_factor(input_src_spec, input_start_idx, p.dim, mesh_dim)
-                return _StridedShard(tgt_shard_dim, split_factor=split_factor)
+                split_factor = _get_split_factor(mesh, local_tensor_shapes, input_start_idx, p.dim, mesh_dim)
+                output_placement = _StridedShard(tgt_shard_dim, split_factor=split_factor)
+            return output_placement
 
+    local_tensor_shapes = list(input_src_spec.shape)
     output_placements = [
-        _rewrite_shard_dim(p, input_src_spec, rule, mesh_dim) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p, mesh, local_tensor_shapes, rule, mesh_dim) if isinstance(p, Shard) else p
         for mesh_dim, p in enumerate(input_tgt_placements)
     ]
 
