@@ -35,20 +35,21 @@ might be used interchangeably in this documentation.
 :::
 
 :::{warning}
-`torch.compile` is **not supported on Python 3.15+**.
+`torch.compile` may not function correctly on newer major versions of Python.
 
-If you attempt to use `@torch.compile` on Python 3.15 or newer,
-you will encounter an error similar to:
+If you attempt to use `@torch.compile` in an unsupported Python
+environment, you may encounter an error similar to:
 
 ```
-RuntimeError: torch.compile is not supported on Python 3.15+
+RuntimeError: torch.compile is not supported on Python 3.xx.0+
+
 ```
 
-Please ensure that your Python version is lower than 3.15 (e.g., 
-Python 3.10–3.12 are commonly used and supported).
+Please ensure that your current Python version is within the range
+supported by PyTorch for `torch.compile`.
 
-If you have installed PyTorch on Python 3.15, you must switch to 
-an earlier Python version to use `torch.compile`.
+If you have installed PyTorch on a Python version that is too new,
+you will need to switch to an earlier Python version in order to use `torch.compile`.
 :::
 
 As mentioned above, to run your workflows faster, `torch.compile` through
