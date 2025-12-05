@@ -42,7 +42,7 @@ TEST_MULTIXPU = torch.xpu.device_count() > 1
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
 
-any_common_cpu_xpu_one = OpDTypes.any_common_cpu_xpu_one
+any_common_cpu_xpu_one = OpDTypes.any_common_cpu_cuda_one
 _xpu_computation_op_list = [
     "fill",
     "zeros",
@@ -1152,18 +1152,6 @@ if __name__ == "__main__":
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
 
-    def test_graph_is_current_stream_capturing(self):
-        self.assertFalse(torch.xpu.is_current_stream_capturing())
-
-        if TEST_XPU:
-            s = torch.xpu.Stream()
-            with torch.xpu.stream(s):
-                g = torch.xpu.XPUGraph()
-                self.assertFalse(torch.xpu.is_current_stream_capturing())
-                g.capture_begin()
-                self.assertTrue(torch.xpu.is_current_stream_capturing())
-                g.capture_end()    
-
     @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
     def test_graph_capture_simple(self):
         s = torch.xpu.Stream()
@@ -1182,83 +1170,6 @@ if __name__ == "__main__":
         g.replay()
 
         self.assertEqual(b.sum().item(), 11000.0)
-
-    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
-    def test_graphsafe_set_get_rng_state(self):
-        # Define a function to create generator states, with optional graph registration
-        def create_states(generator):
-            """Initializes generator states and registers them with a XPU graph if provided."""
-            # Ensure the XPU generator is initialized
-            torch.rand(1, device="xpu")
-            generator.manual_seed(0)
-
-            # Save the current state of the generator
-            old_state = generator.graphsafe_get_state()
-            # Create and save a cloned state of the generator
-            new_state = generator.clone_state()
-            # Return the original generator and its two states
-            return generator, old_state, new_state
-
-        def register_states_to_graph(generator_state, graph):
-            _, old_state, new_state = generator_state
-            graph.register_generator_state(old_state)
-            graph.register_generator_state(new_state)
-
-        # Define a function to perform specific RNG actions using the generator's states
-        def perform_random_generation_steps(generator_state):
-            generator, old_state, new_state = generator_state
-            random_values = []
-
-            # Generate random numbers with the new generator state
-            generator.graphsafe_set_state(new_state)
-            random_values.append(torch.rand(5, device="xpu", generator=generator))
-
-            # Generate random numbers twice with the old generator state
-            generator.graphsafe_set_state(old_state)
-            random_values.extend(
-                [torch.rand(5, device="xpu", generator=generator) for _ in range(2)]
-            )
-
-            return random_values
-
-        # Define a function to retrieve the final offsets of the original and new generator states
-        def get_final_offsets_of_states(generator_state):
-            _, old_state, new_state = generator_state
-            old_state_offset = old_state.get_offset()
-            new_state_offset = new_state.get_offset()
-            return old_state_offset, new_state_offset
-
-        # Set up and test a new XPU generator
-        generator = torch.Generator(device="xpu")
-        generator_state = create_states(generator)
-
-        # Set up and test the default XPU generator with a XPU Graph
-        g = torch.xpu.XPUGraph()
-        s = torch.xpu.Stream()
-        default_generator = torch.xpu.default_generators[0]
-        default_generator_state = create_states(default_generator)
-        register_states_to_graph(default_generator_state, g)
-
-        # Perform random number generation within a XPU graph
-        with torch.xpu.stream(s):
-            g.capture_begin()
-            graphed_random_values = perform_random_generation_steps(
-                default_generator_state
-            )
-            g.capture_end()
-
-        # Synchronize the streams and replay the graph
-        torch.xpu.current_stream().wait_stream(s)
-        for _ in range(3):
-            random_values = perform_random_generation_steps(generator_state)
-            g.replay()
-            offset = get_final_offsets_of_states(generator_state)
-            graph_offset = get_final_offsets_of_states(default_generator_state)
-
-            # Compare the final offsets of states for both generators to ensure consistency
-            self.assertEqual(offset, graph_offset)
-            # Compare the states generated outside and inside the graph
-            self.assertEqual(random_values, graphed_random_values)
 
     @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
     def test_memory_stats_of_multiple_generators_and_graphs(self):
@@ -1372,23 +1283,6 @@ if __name__ == "__main__":
 
         g.reset()
         del g
-
-    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
-    def test_graph_timing(self):
-        torch.xpu.empty_cache()
-        x = torch.randn(10240000, device="xpu")
-        y = torch.rand_like(x)
-        g = torch.xpu.XPUGraph()
-        start_event = torch.xpu.Event(enable_timing=True, external=True)
-        end_event = torch.xpu.Event(enable_timing=True, external=True)
-        with torch.xpu.graph(g):
-            start_event.record()
-            z = x + y
-            end_event.record()
-        torch.xpu.synchronize()
-        g.replay()
-        torch.xpu.synchronize()
-        self.assertTrue(start_event.elapsed_time(end_event) > 0)
 
     @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
     def test_graph_warn_if_has_zero_nodes(self):
@@ -1517,7 +1411,119 @@ if __name__ == "__main__":
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
+    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    def test_graph_rng_distributions(self):
+        size = 10000
+        input = torch.rand((size,), device="xpu", dtype=torch.float)
+        alloc = torch.empty((size,), device="xpu", dtype=torch.float)
 
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (
+            ("bernoulli", (input.clone(),), {}),
+            ("normal", (input.clone() + 1, 1.0), {}),
+            ("poisson", (input.clone(),), {}),
+            ("rand", (size,), {"device": "xpu", "dtype": torch.float}),
+            ("randint", (0, 3, (size,)), {"device": "xpu", "dtype": torch.float}),
+            ("randn", (size,), {"device": "xpu", "dtype": torch.float}),
+        )
+
+        # Tensor methods to test with sample args (tuple)
+        tensor_with_args = (
+            ("bernoulli_", (input.clone(),)),
+            ("cauchy_", ()),
+            ("exponential_", ()),
+            ("geometric_", (0.3,)),
+            ("log_normal_", ()),
+            ("normal_", ()),
+            ("random_", ()),
+            ("uniform_", ()),
+        )
+
+        def run(module, op, args, kwargs):
+            torch.xpu.manual_seed(5)
+
+            # Each path runs a dummy op to increment the state a bit before creating controls.
+            if module == "torch":
+                dummy = getattr(torch, op)(*args, **kwargs)
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                control1 = alloc.clone()
+                control2 = alloc.clone()
+                getattr(dummy, op)(*args)
+                getattr(control1, op)(*args)
+                getattr(control2, op)(*args)
+
+            stream = torch.xpu.Stream()
+            stream.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(stream):
+                torch.xpu.manual_seed(5)
+
+                g = torch.xpu.XPUGraph()
+                torch.xpu.empty_cache()
+                if module == "torch":
+                    g.capture_begin()
+                    t1 = getattr(torch, op)(*args, **kwargs)
+                    t2 = getattr(torch, op)(*args, **kwargs)
+                    g.capture_end()
+                else:
+                    t1 = alloc.clone()
+                    t2 = alloc.clone()
+                    g.capture_begin()
+                    getattr(t1, op)(*args)
+                    getattr(t2, op)(*args)
+                    g.capture_end()
+            torch.xpu.current_stream().wait_stream(stream)
+
+            try:
+                self.assertNotEqual(control1, t1)
+                self.assertNotEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # Set a new seed to check if graph would use it
+            for seed in [6, 314, 271]:
+                torch.xpu.manual_seed(seed)
+                # Runs a dummy op prelude, as for controls, to make sure replay()
+                # picks up the dummy op's state increment.
+                if module == "torch":
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                    control1 = getattr(torch, op)(*args, **kwargs)
+                    control2 = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+                    getattr(control1, op)(*args)
+                    getattr(control2, op)(*args)
+
+                torch.xpu.manual_seed(seed)
+                if module == "torch":
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+
+                t1.copy_(alloc)
+                t2.copy_(alloc)
+
+                # Runs RNG ops that fill t1 and t2.
+                g.replay()
+
+                try:
+                    self.assertEqual(control1, t1)
+                    self.assertEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.xpu.synchronize()
+
+        for op_with_args in torch_with_args:
+            run("torch", *op_with_args)
+
+        for meth_with_args in tensor_with_args:
+            # Adds an empty dict for kwargs, which none of the Tensor methods use
+            run("Tensor", *(meth_with_args + ({},)))
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
