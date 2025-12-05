@@ -980,6 +980,18 @@ inductor_one_sample["xpu"] = {
     "xlogy": {f16},
 }
 
+# TODO: Fix these so strides match.
+inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+}
 
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
@@ -1349,9 +1361,7 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
-                        # TODO: remove when exact_stride=True by default
-                        # exact_stride = op_name.endswith("_like")
-                        exact_stride = True
+                        exact_stride = op_name not in inductor_skip_exact_stride
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
