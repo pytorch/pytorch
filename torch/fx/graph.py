@@ -6,6 +6,7 @@ import enum
 import functools
 import inspect
 import keyword
+import logging
 import math
 import os
 import pprint
@@ -29,6 +30,8 @@ from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -2085,11 +2088,15 @@ class Graph:
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
-        changed = False
+        removed_nodes = set()
         for node in reversed(self.nodes):
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
-                changed = True
+                removed_nodes.add(node.name)
+
+        changed = len(removed_nodes) > 0
+        if changed:
+            log.info("The following nodes were dead code eliminated: %s", removed_nodes)
 
         # Call DCE on the subgraphs
         if self.owning_module is not None:
