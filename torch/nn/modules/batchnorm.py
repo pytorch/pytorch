@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -29,7 +29,7 @@ class _NormBase(Module):
     __constants__ = ["track_running_stats", "momentum", "eps", "num_features", "affine"]
     num_features: int
     eps: float
-    momentum: Optional[float]
+    momentum: float | None
     affine: bool
     track_running_stats: bool
     # WARNING: weight and bias purposely not defined here.
@@ -39,7 +39,7 @@ class _NormBase(Module):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -65,8 +65,8 @@ class _NormBase(Module):
             self.register_buffer(
                 "running_var", torch.ones(num_features, **factory_kwargs)
             )
-            self.running_mean: Optional[Tensor]
-            self.running_var: Optional[Tensor]
+            self.running_mean: Tensor | None
+            self.running_var: Tensor | None
             self.register_buffer(
                 "num_batches_tracked",
                 torch.tensor(
@@ -76,7 +76,7 @@ class _NormBase(Module):
                     **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
                 ),
             )
-            self.num_batches_tracked: Optional[Tensor]
+            self.num_batches_tracked: Tensor | None
         else:
             self.register_buffer("running_mean", None)
             self.register_buffer("running_var", None)
@@ -146,7 +146,7 @@ class _BatchNorm(_NormBase):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -718,10 +718,10 @@ class SyncBatchNorm(_BatchNorm):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
-        process_group: Optional[Any] = None,
+        process_group: Any | None = None,
         device=None,
         dtype=None,
     ) -> None:

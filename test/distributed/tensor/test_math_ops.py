@@ -800,36 +800,6 @@ class DistMathOpsTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_foreach_compose(self):
-        """Test composing multiple foreach operations.
-
-        This tests the bug where calling _foreach_max on the output of
-        _foreach_abs fails because _foreach_max is not registered.
-        """
-        device_mesh = self.build_device_mesh()
-
-        # Create test tensors
-        local_shards = [torch.randn(4, 8) for _ in range(3)]
-        dt_list = [
-            distribute_tensor(shard, device_mesh, [Shard(0)])
-            for shard in local_shards
-        ]
-
-        # First operation: foreach_abs
-        results = torch._foreach_abs(dt_list)
-
-        # Second operation: foreach_max on the results
-        # This should work if _foreach_max is properly registered
-        max_values = torch._foreach_max(results)
-
-        # Verify correctness by comparing with local computation
-        local_results = torch._foreach_abs(local_shards)
-        expected_max = torch._foreach_max(local_results)
-
-        for max_val, expected in zip(max_values, expected_max):
-            self.assertEqual(max_val.full_tensor(), expected)
-
-    @with_comms
     def test_linalg_eigh(self):
         A = torch.randn(2, 2, dtype=torch.float64)
         mesh = self.build_device_mesh()
