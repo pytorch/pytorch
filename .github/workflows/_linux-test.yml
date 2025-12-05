@@ -534,7 +534,7 @@ jobs:
       # As both the root cause and recovery path are unclear, let's take the runner out of
       # service so that it doesn't get any more jobs
       - name: Check NVIDIA driver installation step
-        if: failure() && steps.install-nvidia-driver.outputs.has-nvidia == 'true' && !contains(matrix.runner, 'b200'))
+        if: failure() && steps.install-nvidia-driver.outputs.has-nvidia == 'true' && !contains(matrix.runner, 'b200')
         shell: bash
         run: |
           set +e
