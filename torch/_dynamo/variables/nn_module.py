@@ -122,7 +122,7 @@ def initialize_lazy_module(
 def record_nn_module_stack(
     module_key: str, source: Source, tx: "InstructionTranslator", mod: torch.nn.Module
 ) -> Any:
-    fully_qualified_name = source.name()
+    fully_qualified_name = source.name
     # Remove redundant namings
     fully_qualified_name = re.sub(
         r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]",
