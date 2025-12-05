@@ -7999,6 +7999,52 @@ copy_tests(
 )
 
 
+class TestCheckLowerboundConfig(TestCase):
+    def test_aoti_check_lowerbound_codegen(self):
+        """
+        Test that check_lowerbound config controls lowerbound check codegen.
+        When check_lowerbound=False, no lowerbound checks should be generated.
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model()
+        batch = Dim("batch", min=2, max=10)
+        example_inputs = (torch.randn(4, 3),)
+
+        # Test with check_lowerbound=True (default)
+        with config.patch({"aot_inductor.check_lowerbound": True}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                1,
+                exactly=True,
+            ).run(code)
+
+        # Test with check_lowerbound=False
+        with config.patch({"aot_inductor.check_lowerbound": False}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should NOT have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                0,
+                exactly=True,
+            ).run(code)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
