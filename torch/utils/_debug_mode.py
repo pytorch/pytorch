@@ -263,7 +263,6 @@ _annotate_decorated = False
 def _ensure_annotate_decorated():
     """
     Lazily apply dont_skip_tracing decorator to DebugMode.annotate, to avoid circular import/initialization issues.
-    DebugMode.annotate is a no-op in compiled regions.
     """
     global _annotate_decorated
     if not _annotate_decorated:
@@ -642,7 +641,7 @@ def _get_call_name(call: _DebugCall) -> str:
 @torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
 def _annotate(tag: str) -> None:
     # This is special-cased in DebugMode.__torch_dispatch__
-    return
+    return None
 
 
 @_annotate.register_fake
