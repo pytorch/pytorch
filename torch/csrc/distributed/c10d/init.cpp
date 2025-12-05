@@ -1014,6 +1014,15 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
+  // Register an alias for a process group name
+  module.def(
+      "_register_process_group_alias",
+      [](const std::string& alias_name, const std::string& canonical_name) {
+        ::c10d::register_process_group_alias(alias_name, canonical_name);
+      },
+      py::arg("alias_name"),
+      py::arg("canonical_name"));
+
 #ifdef USE_NVSHMEM
   // Initializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
@@ -2672,6 +2681,10 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def_property_readonly(
+              "_group_name_alias",
+              &::c10d::ProcessGroup::getGroupNameAlias,
+              "(Gets this process group name alias. It's cluster unique)")
           .def(
               "_set_group_desc",
               &::c10d::ProcessGroup::setGroupDesc,
