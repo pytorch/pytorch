@@ -2,7 +2,7 @@
 
 ## What Was Created
 
-I've created a GitHub Action workflow that automatically notifies PR authors when their documentation preview links are ready.
+A GitHub Action workflow that automatically notifies PR authors when their documentation preview links are ready.
 
 ### Files Created
 
@@ -27,8 +27,8 @@ This workflow:
 ## Key Features
 
 ### ✅ Intelligent Polling
-- Checks the preview URL every 10 seconds
-- Waits up to 30 minutes (configurable)
+- Checks the preview URL every 30 seconds
+- Waits up to 40 minutes (configurable)
 - Uses HTTP status codes to detect when docs are ready
 
 ### ✅ Supports Both Doc Types
@@ -73,8 +73,8 @@ Based on the `_docs.yml` workflow, docs are uploaded to:
 ### Configuration Variables
 
 ```bash
-MAX_ATTEMPTS=180   # Number of polling attempts
-SLEEP_TIME=10      # Seconds between attempts
+MAX_ATTEMPTS=80   # Number of polling attempts
+SLEEP_TIME=30      # Seconds between attempts
 # Total wait time = 180 × 10 = 1800 seconds (30 minutes)
 ```
 
@@ -123,7 +123,7 @@ To test this workflow:
 ### Adjust Timeout
 Change these values in the workflow:
 ```yaml
-MAX_ATTEMPTS=120  # Double the wait time to 20 minutes
+MAX_ATTEMPTS=120  # Change the wait time to 20 minutes
 SLEEP_TIME=5      # Check more frequently (every 5 seconds)
 ```
 
@@ -169,23 +169,6 @@ Checking preview URL: https://docs-preview.pytorch.org/pytorch/pytorch/12345/ind
 Posted timeout notification
 ```
 
-## Future Enhancements
-
-Potential improvements:
-- **Progressive notifications**: Update comment with build progress
-- **Status checks**: Add PR status check that goes green when ready
-- **Multiple retry strategies**: Exponential backoff for polling
-- **Email notifications**: Optional email when docs are ready
-- **Slack integration**: Post to Slack channels for certain PRs
-
-## Rollout Strategy
-
-1. **Phase 1**: Deploy to test repository
-2. **Phase 2**: Monitor for a few PRs to ensure it works
-3. **Phase 3**: Adjust timeouts/polling if needed
-4. **Phase 4**: Deploy to main PyTorch repository
-5. **Phase 5**: Monitor and iterate based on user feedback
-
 ## Success Metrics
 
 Track these metrics to measure effectiveness:
@@ -195,8 +178,3 @@ Track these metrics to measure effectiveness:
 - False positive rate (timeout notifications when docs are actually ready)
 
 ---
-
-**Status**: ✅ Ready for testing and deployment
-**Files**: 2 files created
-**Validation**: No errors found
-**Next Steps**: Test on a development PR before production deployment
