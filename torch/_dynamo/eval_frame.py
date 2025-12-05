@@ -145,6 +145,7 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
+_in_compiled_region = False
 
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
@@ -438,7 +439,11 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        global _in_compiled_region
+        _in_compiled_region = True
+        result = super().__call__(*args, **kwargs)
+        _in_compiled_region = False
+        return result
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """

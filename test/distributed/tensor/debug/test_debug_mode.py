@@ -487,6 +487,43 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+    def test_nn_module_with_regional_compile(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = x * torch.ones(4)
+                return self.l1(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = torch.compile(Bar(), backend="eager")
+
+            def forward(self, x):
+                x = x + 2
+                return self.bar(x)
+
+        mod = Foo()
+        with DebugMode(record_nn_module=True) as debug_mode:
+            mod(torch.randn(4, 4))
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::randn([4, 4], device=cpu, pin_memory=False)
+    [nn.Mod] Foo
+      aten::add.Tensor(t: f32[4, 4], 2)
+      [nn.Mod] [compiled region]
+        aten::ones([4], device=cpu, pin_memory=False)
+        aten::mul.Tensor(t: f32[4, 4], t: f32[4])
+        [nn.Mod] L['self'].l1
+          aten::t(t: f32[4, 4])
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_triton_kernel_logs(self):

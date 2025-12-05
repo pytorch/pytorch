@@ -584,6 +584,48 @@ def _get_call_name(call: _DebugCall) -> str:
         return str(call)
 
 
+class DebugInterpreter(torch.fx.Interpreter):
+    def __init__(self, module):
+        super().__init__(module)
+        self.mode = get_active_debug_mode()
+        assert self.mode
+
+        self.base_fqn = list(self.mode.current_module_fqn)
+        self.current_fqn = list(self.base_fqn)
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        # Skip placeholder and output nodes for module tracking
+        if n.op in ["placeholder", "output"]:
+            return super().run_node(n)
+
+        node_module_stack = n.meta.get("nn_module_stack", {})
+
+        # Detect module stack changes
+        old_keys = self.current_fqn
+        new_keys = self.base_fqn + ["[compiled region]"] + [fqn for fqn, _ in sorted(node_module_stack.values())]
+
+        exited = set(old_keys) - set(new_keys)
+        entered = set(new_keys) - set(old_keys)
+
+        # Decrement depth for exited modules
+        for _ in exited:
+            if self.mode.call_depth > 0:
+                self.mode.call_depth -= 1
+
+        # Add _NNModuleCall entries for newly entered modules
+        for fqn in sorted(entered):  # Sort for deterministic ordering
+            self.mode.operators.append(
+                _NNModuleCall(fqn, self.mode.call_depth + 1)
+            )
+            self.mode.call_depth += 1
+
+        # Update current stack
+        self.current_fqn = list(new_keys)
+
+        # Execute the node
+        return super().run_node(n)
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -647,6 +689,9 @@ class DebugMode(TorchDispatchMode):
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
+        # Track current module FQN stack for regional compilation
+        # This is a stack of (fqn, module_type) tuples maintained by ModTracker hooks
+        self.current_module_fqn: list[tuple[str, type]] = []
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
@@ -779,12 +824,17 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
+            module_type = type(module)
+            self.current_module_fqn.append(fqn)
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
         def post_fw_hook(module, input, output) -> None:
             self.call_depth -= 1
+            # Pop from the module stack
+            if self.current_module_fqn:
+                self.current_module_fqn.pop()
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
 

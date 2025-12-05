@@ -36,6 +36,7 @@ from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+from torch.utils._debug_mode import get_active_debug_mode, DebugInterpreter
 
 from .common import aot_autograd
 from .registry import CompiledFn, CompilerFn, register_debug_backend as register_backend
@@ -54,7 +55,14 @@ def eager(
 ) -> Callable[..., Any]:
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
-    return gm.forward
+
+    def _eager_maybe_with_debug_mode(*args, **kwargs):
+        if get_active_debug_mode() is not None:
+            return DebugInterpreter(gm).run(*args, **kwargs)
+        else:
+            return gm.forward(*args, **kwargs)
+
+    return _eager_maybe_with_debug_mode
 
 
 def make_eager_backend_with_torch_function_mode(
