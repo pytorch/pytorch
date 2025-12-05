@@ -389,7 +389,7 @@ class GraphArg:
         self.example_strong_ref = None
 
     def __eq__(self, other):
-        return self.source.name() == other.source.name()
+        return self.source.name == other.source.name
 
 
 class BackwardStateGraphArg(GraphArg):
@@ -444,7 +444,7 @@ class VariableBuilder:
         super().__init__()
         self.tx = tx
         self.source = source
-        self.name = source.name()
+        self.name = source.name
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -1645,7 +1645,7 @@ class VariableBuilder:
             elif value.dynamism.type == _DimHintType.DYNAMIC:
                 log.debug(
                     "%s marked %s via IntWrapper",
-                    self.source.name(),
+                    self.source.name,
                     DimDynamic.DYNAMIC,
                 )
                 return self.wrap_symint(
@@ -1658,7 +1658,7 @@ class VariableBuilder:
             elif value.dynamism.type == _DimHintType.AUTO:
                 log.debug(
                     "%s marked %s via IntWrapper",
-                    self.source.name(),
+                    self.source.name,
                     DimDynamic.DYNAMIC,
                 )
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
@@ -1699,7 +1699,7 @@ class VariableBuilder:
         if (
             istype(value, tuple)
             and all(ConstantVariable.is_literal(item) for item in value)
-            and self.source.guard_source().is_unspecialized_nn_module()
+            and self.source.guard_source.is_unspecialized_nn_module()
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
@@ -1831,7 +1831,7 @@ class VariableBuilder:
         from ..decorators import mark_static_address
 
         static_inputs_log.debug(
-            "Marking static input %s, id: %s)", self.source.name(), id(value)
+            "Marking static input %s, id: %s)", self.source.name, id(value)
         )
         mark_static_address(value, guard=guard)
 
@@ -2003,12 +2003,12 @@ class VariableBuilder:
     def wrap_literal(self, value):
         if type(value) is int:
             # allowlist has higher precedence over specialization control.
-            if is_dynamic_source(self.source.name()):
-                log.debug("%s marked dynamic via source whitelist", self.source.name())
+            if is_dynamic_source(self.source.name):
+                log.debug("%s marked dynamic via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
-            if is_unbacked_source(self.source.name()):
-                log.debug("%s marked unbacked via source whitelist", self.source.name())
+            if is_unbacked_source(self.source.name):
+                log.debug("%s marked unbacked via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
 
             if not config.specialize_int:
@@ -2017,8 +2017,8 @@ class VariableBuilder:
                 if is_int_specialization_case(value, self.source):
                     recompile_hint = None
                     if (
-                        self.source.guard_source().is_unspecialized_builtin_nn_module()
-                        or self.source.guard_source().is_unspecialized_nn_module()
+                        self.source.guard_source.is_unspecialized_builtin_nn_module()
+                        or self.source.guard_source.is_unspecialized_nn_module()
                     ):
                         # This means that it is an integer from a NN module.
                         # Dynamo considers nn module int attributes to be static
@@ -2034,9 +2034,9 @@ class VariableBuilder:
 
                     process_automatic_dynamic(
                         self.tx,
-                        self.source.name(),
+                        self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
-                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                        is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
                     self.install_guards(
                         functools.partial(
@@ -2078,7 +2078,7 @@ class VariableBuilder:
                 isinstance(value, torch.nn.Parameter)
                 # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
                 # compatible with previous behavior.
-                or (source and source.guard_source().is_unspecialized_nn_module())
+                or (source and source.guard_source.is_unspecialized_nn_module())
             )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
@@ -2101,8 +2101,8 @@ class VariableBuilder:
         )
 
         if should_install_free_tensor or (
-            (source.guard_source().is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source().is_fsdp_module()
+            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+            and not source.guard_source.is_fsdp_module()
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2440,20 +2440,20 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
 
-            name = self.source.name()
+            name = self.source.name
 
             frame_state_entry = process_automatic_dynamic(
                 self.tx,
                 name,
                 FrameStateSizeEntry.make_scalar(value),
-                is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
             )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            normalized_source_name = normalize_source_name(self.source.name())
+            normalized_source_name = normalize_source_name(self.source.name)
             base_source = self.source
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
@@ -2539,9 +2539,9 @@ class VariableBuilder:
 
         frame_state_entry = process_automatic_dynamic(
             self.tx,
-            self.source.name(),
+            self.source.name,
             FrameStateSizeEntry.make_scalar(value),
-            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+            is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
         )
 
         # NB: we specialize on nan input, because our guard modeling in
@@ -3386,7 +3386,7 @@ def _automatic_dynamic(
             hints=[],
         )
 
-    name = source.name()
+    name = source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -3509,7 +3509,7 @@ def _automatic_dynamic(
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
 
-        normalized_source_name = normalize_source_name(source.name())
+        normalized_source_name = normalize_source_name(source.name)
         base_source = source
         if isinstance(base_source, ChainedSource):
             base_source = base_source.get_base()
@@ -3670,7 +3670,7 @@ def wrap_to_fake_tensor_and_record(
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
-            source.name(),
+            source.name,
             tuple(e.shape),
             symbolic_context,
             type(e),

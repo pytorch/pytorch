@@ -1803,12 +1803,12 @@ class BuiltinVariable(VariableTracker):
                 "call_function", py_fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
-        elif a.is_python_constant() and b.is_python_constant():
+        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             value = self.fn(
                 a.as_python_constant(),
                 b.as_python_constant(),
             )
-            return ConstantVariable(value)
+            return ConstantVariable.create(value)
         return None
 
     call_min = _call_min_max
@@ -3258,15 +3258,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.fn)
-
-    def is_python_equal(self, other):
-        return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
 @contextlib.contextmanager
