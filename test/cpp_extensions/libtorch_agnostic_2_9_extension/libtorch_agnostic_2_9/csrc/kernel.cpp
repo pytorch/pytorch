@@ -228,11 +228,13 @@ Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
-Tensor my_empty_like(Tensor t) {
+// This is used to test const torch::stable::Tensor& with TORCH_BOX
+Tensor my_empty_like(const Tensor& t) {
   return empty_like(t);
 }
 
-bool my_is_cpu(Tensor t) {
+// This is used to test torch::stable::Tensor& with TORCH_BOX
+bool my_is_cpu(Tensor& t) {
   return t.is_cpu();
 }
 
@@ -443,4 +445,36 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_flatten", TORCH_BOX(&my_flatten));
+}
+
+// Test function for const std::optional<Tensor>& with TORCH_BOX
+// Returns the tensor if present, otherwise returns a zeros tensor of specified size
+Tensor my_optional_tensor_ref(
+    const std::optional<Tensor>& maybe_tensor,
+    int64_t default_size) {
+  if (maybe_tensor.has_value()) {
+    return maybe_tensor.value();
+  }
+  // Create a zeros tensor as default
+  AtenTensorHandle zeros_ath;
+  int64_t sizes[] = {default_size};
+  int64_t strides[] = {1};
+  aoti_torch_empty_strided(
+      1,
+      sizes,
+      strides,
+      aoti_torch_dtype_float32(),
+      aoti_torch_device_type_cpu(),
+      0,
+      &zeros_ath);
+  Tensor zeros_tensor(zeros_ath);
+  return zero_(zeros_tensor);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("my_optional_tensor_ref(Tensor? maybe_tensor, int default_size) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
+  m.impl("my_optional_tensor_ref", TORCH_BOX(&my_optional_tensor_ref));
 }

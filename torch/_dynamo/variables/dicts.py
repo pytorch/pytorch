@@ -437,8 +437,10 @@ class ConstDictVariable(VariableTracker):
                     f"Debug representation of the key is {arg.debug_repr()!r}"
                 )
             except Exception:
-                error_message = f"Dict key lookup failed for {str(arg)}"
-            raise_observed_exception(KeyError, tx, msg=error_message)
+                error_message = ConstantVariable.create(
+                    f"Dict key lookup failed for {str(arg)}"
+                )
+            raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
 
     def getitem_const(
