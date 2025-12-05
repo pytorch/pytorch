@@ -488,6 +488,84 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         remove_redundant_views(gm)
 
 
+def replace_future_symints_with_constants(gm: torch.fx.GraphModule):
+    """
+    Replace args of nodes with symints defined in future with constants.
+    """
+
+    future_symint_nodes = {}
+    visited_symint_nodes = OrderedSet()
+
+    def replace_in_args(
+        args: tuple[Any, ...], old_node: torch.fx.Node, new_value: Any
+    ) -> tuple[Any, ...]:
+        """Replace old_node with new_value in nested args structure."""
+
+        def replace_item(item):
+            if item == old_node:
+                return new_value
+            elif isinstance(item, (list, tuple)):
+                replaced = [replace_item(x) for x in item]
+                return type(item)(replaced)
+            else:
+                return item
+
+        return tuple(map(replace_item, args))
+
+    for idx, node in enumerate(list(gm.graph.nodes)):
+        for arg in node.args:
+            # Detect future symint nodes in the args
+            if isinstance(arg, (list, tuple)):
+                for sub_arg in arg:
+                    if not isinstance(sub_arg, torch.fx.Node):
+                        continue
+                    if (
+                        sub_arg.target != torch.ops.aten.sym_size.int
+                        or sub_arg in visited_symint_nodes
+                    ):
+                        continue
+                    future_symint_nodes.setdefault(sub_arg, []).append(node)
+            elif isinstance(arg, torch.fx.Node):
+                if (
+                    arg.target != torch.ops.aten.sym_size.int
+                    or arg in visited_symint_nodes
+                ):
+                    continue
+                future_symint_nodes.setdefault(arg, []).append(node)
+
+        # Replace symint nodes in the args with constants
+        if node in future_symint_nodes:
+            visited_symint_nodes.add(node)
+            symIntConstant = None
+            if (
+                "val" in node.meta
+                and isinstance(node.meta["val"], torch.SymInt)
+                and hasattr(node.meta["val"].node, "expr")
+            ):
+                shape_env = node.meta["val"].node.shape_env
+                subs = {
+                    s: shape_env.var_to_val[s]
+                    for s in node.meta["val"].node.expr.free_symbols
+                    if s in shape_env.var_to_val
+                }
+                if len(subs) == len(node.meta["val"].node.expr.free_symbols):
+                    evaluated = node.meta["val"].node.expr.subs(subs)
+                    if evaluated.is_number:
+                        symIntConstant = int(evaluated.evalf())
+            else:
+                continue
+            if len(future_symint_nodes[node]) >= 1:
+                for symint_arg_node in future_symint_nodes[node]:
+                    symint_arg_node.args = replace_in_args(
+                        symint_arg_node.args, node, symIntConstant
+                    )
+        elif (
+            isinstance(node, torch.fx.Node)
+            and node.target == torch.ops.aten.sym_size.int
+        ):
+            visited_symint_nodes.add(node)
+
+
 def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     """
 
@@ -593,6 +671,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
+    GraphTransformObserver(
+        graph, "replace_future_symints_with_constants"
+    ).apply_gm_pass(replace_future_symints_with_constants)
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
