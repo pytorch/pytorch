@@ -752,6 +752,8 @@ class PallasKernel(SIMDKernel):
         self.is_gpu = device.type == "cuda"
         self.use_masked_ops: bool | None = None
         self.tensor_masks = {}  # Map tensor name to mask variable name
+        # Track which output param each store uses: list of (out_ptr_name, store_line)
+        self.store_with_output: list[tuple[str, str]] = []
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1147,9 +1149,13 @@ class PallasKernel(SIMDKernel):
 
         # Check if this is a scalar output (reduction to scalar)
         # Only shape () is a true scalar, not (1,) which is a 1-element tensor
-        buf = V.graph.get_buffer(name)
-        output_shape = buf.get_size()
-        is_scalar = len(output_shape) == 0
+        try:
+            buf = V.graph.get_buffer(name)
+            output_shape = buf.get_size()
+            is_scalar = len(output_shape) == 0
+        except Exception:
+            output_shape = ()
+            is_scalar = False
 
         if is_scalar:
             # For scalar outputs, use [...] to assign the entire scalar
@@ -1166,18 +1172,22 @@ class PallasKernel(SIMDKernel):
                 # GPU masked store: flatten tensor and apply per-tensor mask
                 mask_var = self._get_or_create_mask(name)
                 store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            elif index_str == "..." and len(output_shape) > 1:
-                # When storing the full array to a multi-dimensional output,
-                # the value may have been produced by mixed indexing (flatten + index)
-                # which creates a flat result. Reshape to match the output shape.
-                # If shapes already match, reshape is a no-op.
-                shape_str = ", ".join(str(s) for s in output_shape)
-                store_expr = f"{out}[...] = {value}.reshape({shape_str})"
+            elif index_str == "...":
+                # When storing the full array, reshape to match the output shape.
+                # This handles:
+                # - Mixed indexing producing flat results needing reshape
+                # - Squeeze operations where value has more dims than output
+                # - If shapes already match, reshape is a no-op.
+                # Use the output array's shape at runtime to avoid issues with
+                # symbolic sizes not being defined in the kernel.
+                store_expr = f"{out}[...] = {value}.reshape({out}.shape)"
             else:
                 # Direct indexed assignment
                 store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
+        # Track which output param this store uses for filtering in codegen_kernel
+        self.store_with_output.append((out, store_expr))
 
     def reduction(
         self,
@@ -1217,11 +1227,83 @@ class PallasKernel(SIMDKernel):
             "any": "jnp.any",
         }
 
+        # Determine if this is a partial reduction (has pointwise dimensions)
+        # or a full reduction to scalar
+        pointwise_prefixes = OrderedSet(["x", "y", "z"])
+        has_pointwise = any(p in self.numels for p in pointwise_prefixes)
+
+        # Get the individual pointwise dimension sizes from range_tree_nodes
+        pointwise_sizes = []
+        for var, entry in sorted(
+            self.range_tree_nodes.items(), key=lambda x: str(x[0])
+        ):
+            if not entry.prefix.startswith("r"):
+                try:
+                    pointwise_sizes.append(int(entry.length))
+                except (TypeError, ValueError):
+                    pointwise_sizes = None
+                    break
+
+        # Get the pointwise and reduction numels
+        pointwise_numel = 1
+        for p in pointwise_prefixes:
+            if p in self.numels:
+                numel = self.numels[p]
+                try:
+                    pointwise_numel *= int(numel)
+                except (TypeError, ValueError):
+                    pointwise_numel = None
+                    break
+
+        reduction_numel = 1
+        for p in self.numels:
+            if p.startswith("r"):
+                numel = self.numels[p]
+                try:
+                    reduction_numel *= int(numel)
+                except (TypeError, ValueError):
+                    reduction_numel = None
+                    break
+
         if reduction_type == "xor_sum":
-            reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+            if has_pointwise and pointwise_numel and reduction_numel:
+                reduction_expr = f"jnp.bitwise_xor.reduce({value}.reshape({pointwise_numel}, -1), axis=-1)"
+            else:
+                reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in reduction_ops:
-            # Apply reduction over all axes to get scalar result
-            reduction_expr = f"{reduction_ops[reduction_type]}({value})"
+            if (
+                has_pointwise
+                and pointwise_numel
+                and reduction_numel
+                and pointwise_sizes
+            ):
+                # For partial reductions, we need to:
+                # 1. Move pointwise axes to the front and reduction axes to the back
+                # 2. Reshape to (pointwise_numel, reduction_numel)
+                # 3. Reduce over the last axis
+                #
+                # We use moveaxis to reorder: first move axes matching pointwise sizes
+                # to the front, then the remaining (reduction) axes go to the back.
+                # Finally reshape and reduce.
+                #
+                # Generate code to dynamically determine and reorder axes:
+                pw_sizes_str = str(pointwise_sizes)
+                reduction_expr = (
+                    f"(lambda v: (lambda pw_sizes: "
+                    f"jnp.sum(v.reshape(-1, {reduction_numel}), axis=-1) "
+                    f"if v.ndim == 2 else "
+                    f"(lambda input_shape, pw_axes: "
+                    f"{reduction_ops[reduction_type]}("
+                    f"jnp.moveaxis(v, pw_axes, list(range(len(pw_axes)))).reshape({pointwise_numel}, -1), axis=-1)"
+                    f")("
+                    f"v.shape, "
+                    f"[i for i, s in enumerate(v.shape) if s in pw_sizes][:len(pw_sizes)]"
+                    f")"
+                    f")({pw_sizes_str}))({value})"
+                )
+            else:
+                # Full reduction to scalar
+                reduction_expr = f"{reduction_ops[reduction_type]}({value})"
         else:
             raise Unsupported(
                 f"Reduction type '{reduction_type}' not yet supported in Pallas backend. "
@@ -1434,8 +1516,12 @@ class PallasKernel(SIMDKernel):
             # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
             for line in self.compute._lines:
                 code.writeline(str(line))
-            for line in self.stores._lines:
-                code.writeline(str(line))
+            # Filter stores to only emit those for outputs that are in kernel params.
+            # This handles cases where an intermediate value was stored but the buffer
+            # was later optimized away (not passed to the kernel).
+            for out_ptr, store_line in self.store_with_output:
+                if out_ptr in full_kernel_params:
+                    code.writeline(store_line)
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
