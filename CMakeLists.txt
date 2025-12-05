@@ -898,16 +898,6 @@ include(cmake/MiscCheck.cmake)
 # External projects
 include(ExternalProject)
 
-# ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
-# CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-  message(WARNING
-    "x64 operating system is required for FBGEMM. "
-    "Not compiling with FBGEMM. "
-    "Turn this warning off by USE_FBGEMM=OFF.")
-  set(USE_FBGEMM OFF)
-endif()
-
 set(BUILD_ONEDNN_GRAPH OFF)
 
 if(MSVC)

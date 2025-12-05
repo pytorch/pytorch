@@ -16,6 +16,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/dequantize.h>                           // for dequantize
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
@@ -29,12 +30,20 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
-  float x_min, x_max;
+  float x_min = std::numeric_limits<float>::quiet_NaN(), x_max = std::numeric_limits<float>::quiet_NaN();
+#if defined(__AVX__)
   fbgemm::FindMinMax(
       /*m=*/input.data_ptr<float>(),
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
+#else
+  if (input.numel() > 0) {
+    auto [t_min, t_max] = at::aminmax(input);
+    x_max = t_max.item<float>();
+    x_min = t_min.item<float>();
+  }
+#endif
 
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;

@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
@@ -81,11 +82,19 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // Calculate statistics for quantization of the input Tensor
   float x_min = std::numeric_limits<float>::quiet_NaN();
   float x_max = std::numeric_limits<float>::quiet_NaN();
+#if defined(__AVX__)
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
+#else
+  if (input.numel() > 0) {
+    auto [t_min, t_max] = at::aminmax(input);
+    x_max = t_max.item<float>();
+    x_min = t_min.item<float>();
+  }
+#endif
 
   // Input tensor is quantized as 8-bit unsigned values
   constexpr int kPrecision = 8;
@@ -237,11 +246,19 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate weight statistics
   float w_min = std::numeric_limits<float>::quiet_NaN();
   float w_max = std::numeric_limits<float>::quiet_NaN();
+#if defined(__AVX__)
   fbgemm::FindMinMax(
       /*m=*/weight_contig.data_ptr<float>(),
       /*min=*/&w_min,
       /*max=*/&w_max,
       /*len=*/weight_contig.numel());
+#else
+  if (weight_contig.numel() > 0) {
+    auto [t_min, t_max] = at::aminmax(weight_contig);
+    w_max = t_max.item<float>();
+    w_min = t_min.item<float>();
+  }
+#endif
 
   // Choose parameters for quantizing the weight as 8-bit signed integer
   constexpr bool kIsSigned = true;
