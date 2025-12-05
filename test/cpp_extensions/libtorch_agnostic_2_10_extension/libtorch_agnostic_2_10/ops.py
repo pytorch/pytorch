@@ -445,3 +445,86 @@ def my_set_requires_grad(t, requires_grad) -> Tensor:
     return torch.ops.libtorch_agnostic_2_10.my_set_requires_grad.default(
         t, requires_grad
     )
+
+
+def my_to_device(t, device) -> Tensor:
+    """
+    Moves a tensor to the specified device.
+
+    Args:
+        t: Tensor - input tensor
+        device: Device - target device
+
+    Returns: Tensor - tensor on the new device
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_device.default(t, device)
+
+
+def my_to_dtype(t, dtype) -> Tensor:
+    """
+    Converts a tensor to the specified dtype.
+
+    Args:
+        t: Tensor - input tensor
+        dtype: ScalarType - target dtype (e.g., torch.float64)
+
+    Returns: Tensor - tensor with the new dtype
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype.default(t, dtype)
+
+
+def my_contiguous(t) -> Tensor:
+    """
+    Returns a contiguous tensor with the default memory format.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: Tensor - contiguous tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous.default(t)
+
+
+def my_contiguous_memory_format(t, memory_format) -> Tensor:
+    """
+    Returns a contiguous tensor with the specified memory format.
+
+    Args:
+        t: Tensor - input tensor
+        memory_format: MemoryFormat - memory format (e.g., torch.channels_last)
+
+    Returns: Tensor - contiguous tensor with specified memory format
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format.default(
+        t, memory_format
+    )
+
+
+def my_to_dtype_layout(
+    t,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    non_blocking=False,
+    copy=False,
+    memory_format=None,
+) -> Tensor:
+    """
+    Converts a tensor to the specified dtype, layout, device, and/or memory format.
+
+    Args:
+        t: Tensor - input tensor
+        dtype: ScalarType or None - target dtype (e.g., torch.float64)
+        layout: Layout or None - target layout (e.g., torch.strided)
+        device: Device or None - target device
+        pin_memory: bool or None - whether to use pinned memory
+        non_blocking: bool - if True, try to perform the operation asynchronously
+        copy: bool - if True, always copy the tensor
+        memory_format: MemoryFormat or None - target memory format (e.g., torch.channels_last)
+
+    Returns: Tensor - converted tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout.default(
+        t, dtype, layout, device, pin_memory, non_blocking, copy, memory_format
+    )
