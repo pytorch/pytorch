@@ -573,18 +573,6 @@ def propagate_shape_and_sharding(
                 )
                 input_sharded = shard_mesh_dim is not None
 
-                # # Check for _StridedShard on any dimension being flattened
-                # if (
-                #     strict_view
-                #     and input_sharded
-                #     and isinstance(shard_placement, _StridedShard)
-                # ):
-                #     raise RuntimeError(
-                #         f"Attempted to flatten dimension {dim.input_dim} with _StridedShard placement. "
-                #         "Flattening with _StridedShard is not supported in strict view mode as it would "
-                #         "require redistribution."
-                #     )
-
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
@@ -635,18 +623,6 @@ def propagate_shape_and_sharding(
                 shard_mesh_dim, shard_placement = (
                     maybe_get_shard_mesh_dim_and_placement(in_dim)
                 )
-
-                # # Check for _StridedShard on dimension being split
-                # if (
-                #     strict_view
-                #     and shard_mesh_dim is not None
-                #     and isinstance(shard_placement, _StridedShard)
-                # ):
-                #     raise RuntimeError(
-                #         f"Attempted to split dimension {in_dim.input_dim} with _StridedShard placement. "
-                #         "Splitting with _StridedShard is not supported in strict view mode as it would "
-                #         "require redistribution."
-                #     )
 
                 if strict_view and shard_mesh_dim is not None:
                     if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
@@ -741,6 +717,7 @@ def register_op_strategy_map(
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
     def reshape_strategy(op_schema: OpSchema) -> StrategyType:
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
+        print(rules)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
         mesh = op_schema.get_mesh_from_args(validate=False)
 
