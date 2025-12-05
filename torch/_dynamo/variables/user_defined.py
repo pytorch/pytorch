@@ -654,7 +654,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.closing,
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
-                contextlib.suppress,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
