@@ -296,6 +296,11 @@ class CachingAutotuner(KernelInterface):
             "device_type": self.device_props.type,
         }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        # Add device properties to inductor_meta for use by coordinate descent tuner
+        self.inductor_meta["warp_size"] = self.device_props.warp_size
+        self.inductor_meta["max_threads_per_block"] = (
+            self.device_props.max_threads_per_block
+        )
         self.deterministic_mode = self.inductor_meta.get("deterministic", False)
 
         self.save_cache_hook = save_cache_hook
@@ -2571,7 +2576,7 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
         if inductor_meta.get("persistent_reduction"):
             tma_min_block_sizes = {
                 block_type: block_size
-                for block_type, block_size in tma_min_block_sizes
+                for block_type, block_size in tma_min_block_sizes.items()
                 if not prefix_is_reduction(block_type.lower())
             }
 

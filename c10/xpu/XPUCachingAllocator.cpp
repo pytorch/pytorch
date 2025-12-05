@@ -15,8 +15,6 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
-class XPUAllocator;
-
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
@@ -393,6 +391,26 @@ struct MempoolIdHash {
   }
 };
 
+void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
+  if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
+    *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
+  } else {
+    *ptr = sycl::aligned_alloc_device(
+        kDeviceAlignment,
+        size,
+        xpu::get_raw_device(p.device()),
+        xpu::get_device_context());
+  }
+}
+
+void deletePrimitive(void* ptr, BlockPool* pool) {
+  if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
+    pool->owner_PrivatePool->allocator()->raw_delete(ptr);
+  } else {
+    sycl::free(ptr, xpu::get_device_context());
+  }
+}
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -713,7 +731,8 @@ class DeviceCachingAllocator {
 
   bool alloc_block(AllocParams& p, bool isRetry) {
     auto size = p.alloc_size;
-    auto device = p.device();
+    void* ptr = nullptr;
+
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
@@ -728,27 +747,24 @@ class DeviceCachingAllocator {
       TORCH_CHECK(
           !active_pool,
           "torch.xpu.MemPool doesn't currently support expandable_segments.");
-      p.block =
-          try_allocate_expandable_block(device, p.queue(), p.pool, p.size());
+      p.block = try_allocate_expandable_block(
+          p.device(), p.queue(), p.pool, p.size());
       if (p.block && p.pool->owner_PrivatePool) {
         // The block is used only for XPU graph's PrivatePool.
         p.pool->owner_PrivatePool->allocation_count++;
       }
       return bool(p.block);
-    }
-    void* ptr = sycl::aligned_alloc_device(
-        kDeviceAlignment,
-        size,
-        xpu::get_raw_device(device),
-        xpu::get_device_context());
-    if (!ptr) {
-      return false;
+    } else {
+      allocPrimitive(&ptr, size, p);
+      if (!ptr) {
+        return false;
+      }
     }
 
     if (p.pool->owner_PrivatePool) {
       p.pool->owner_PrivatePool->allocation_count++;
     }
-    p.block = new Block(device, p.queue(), size, p.pool, ptr);
+    p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(size);
     });
@@ -806,8 +822,13 @@ class DeviceCachingAllocator {
      * guarantee that all kernels can access to the blocks have finished.
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
-    sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
+    deletePrimitive(block->ptr, pool);
+
+    if (pool->owner_PrivatePool) {
+      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
+      pool->owner_PrivatePool->allocation_count--;
+    }
     pool->blocks.erase(block);
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
@@ -1297,7 +1318,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public DeviceAllocator {
+class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -1332,7 +1353,7 @@ class XPUAllocator : public DeviceAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) {
+  void init(DeviceIndex device_count) override {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
@@ -1413,7 +1434,7 @@ class XPUAllocator : public DeviceAllocator {
     return &local_raw_delete;
   }
 
-  void* raw_alloc(size_t size) {
+  void* raw_alloc(size_t size) override {
     if (size == 0) {
       return nullptr;
     }
@@ -1433,7 +1454,7 @@ class XPUAllocator : public DeviceAllocator {
     return r;
   }
 
-  void raw_delete(void* ptr) {
+  void raw_delete(void* ptr) override {
     this->free(ptr);
   }
 
@@ -1517,87 +1538,61 @@ class XPUAllocator : public DeviceAllocator {
   }
 };
 
-static XPUAllocator allocator;
+static NativeCachingAllocator native_allocator;
 
 void local_raw_delete(void* ptr) {
-  allocator.free(ptr);
+  native_allocator.free(ptr);
 }
 
-Allocator* get() {
-  return &allocator;
-}
+std::atomic<XPUAllocator*> allocator;
 
-void init(DeviceIndex device_count) {
-  return allocator.init(device_count);
-}
+struct NativeAllocatorStaticInitializer {
+  NativeAllocatorStaticInitializer() {
+    allocator.store(&native_allocator);
+    c10::SetAllocator(c10::kXPU, &native_allocator, 0);
+  }
+};
 
-void emptyCache(MempoolId_t mempool_id) {
-  return allocator.emptyCache(mempool_id);
-}
-
-void resetPeakStats(DeviceIndex device) {
-  return allocator.resetPeakStats(device);
-}
-
-void resetAccumulatedStats(DeviceIndex device) {
-  return allocator.resetAccumulatedStats(device);
-}
-
-DeviceStats getDeviceStats(DeviceIndex device) {
-  return allocator.getDeviceStats(device);
-}
-
-void* raw_alloc(size_t size) {
-  return allocator.raw_alloc(size);
-}
-
-void raw_delete(void* ptr) {
-  return allocator.raw_delete(ptr);
-}
-
-void recordStream(const DataPtr& dataPtr, XPUStream stream) {
-  return allocator.recordStream(dataPtr, stream);
-}
+static NativeAllocatorStaticInitializer native_allocator_static_initializer;
 
 void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
-  return allocator.enablePeerAccess(dev, dev_to_access);
+  return native_allocator.enablePeerAccess(dev, dev_to_access);
 }
 
 double getMemoryFraction(DeviceIndex device) {
-  return allocator.getMemoryFraction(device);
+  return native_allocator.getMemoryFraction(device);
 }
 
 void setMemoryFraction(double fraction, DeviceIndex device) {
-  return allocator.setMemoryFraction(fraction, device);
+  return native_allocator.setMemoryFraction(fraction, device);
 }
 
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
     XPUAllocator* allocator_ptr) {
-  return allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
+  return native_allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 
 void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
     std::function<bool(sycl::queue*)> filter) {
-  return allocator.beginAllocateToPool(device, mempool_id, std::move(filter));
+  return native_allocator.beginAllocateToPool(
+      device, mempool_id, std::move(filter));
 }
 
 void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.endAllocateToPool(device, mempool_id);
+  return native_allocator.endAllocateToPool(device, mempool_id);
 }
 
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.releasePool(device, mempool_id);
+  return native_allocator.releasePool(device, mempool_id);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.getPoolUseCount(device, mempool_id);
+  return native_allocator.getPoolUseCount(device, mempool_id);
 }
-
-REGISTER_ALLOCATOR(kXPU, &allocator)
 
 } // namespace c10::xpu::XPUCachingAllocator
 
