@@ -2,8 +2,6 @@
 # implement matrix related ops for distributed tensor
 
 
-from typing import Optional
-
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -15,6 +13,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -22,7 +21,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
     map_placements_after_broadcast,
     prod,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -708,7 +706,7 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
     ) = op_schema.args_schema
     return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
     has_attn_bias = attn_bias_strategy is not None
-    debug_attn_mask_sharding: Optional[Placement] = (
+    debug_attn_mask_sharding: Placement | None = (
         Replicate() if return_debug_mask else None
     )
 
@@ -1073,7 +1071,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec], output_specs: tuple[Optional[DTensorSpec], ...]
+        input_specs: list[DTensorSpec], output_specs: tuple[DTensorSpec | None, ...]
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function

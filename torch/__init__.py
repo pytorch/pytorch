@@ -33,11 +33,7 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import (
-    deprecated as _deprecated,
-    ParamSpec as _ParamSpec,
-    TypeIs as _TypeIs,
-)
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
 # As a bunch of torch.packages internally still have this check
@@ -324,7 +320,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
         ctypes.CDLL(lib_path)
 
 
-def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
+def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
@@ -1281,7 +1277,7 @@ def set_default_device(device: "Device") -> None:
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
-def set_default_tensor_type(t: _Union[type["torch.Tensor"], str], /) -> None:
+def set_default_tensor_type(t: type["torch.Tensor"] | str, /) -> None:
     r"""
     .. warning::
 
@@ -1529,7 +1525,7 @@ def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     return _C._get_deterministic_algorithms_warn_only()
 
 
-def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
+def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
     r"""Sets the debug mode for deterministic operations.
 
     .. note:: This is an alternative interface for
@@ -1691,7 +1687,7 @@ def is_warn_always_enabled() -> builtins.bool:
 
 def _check_with(
     error_type,
-    cond: _Union[builtins.bool, SymBool],
+    cond: builtins.bool | SymBool,
     message: _Callable[[], str],
 ):  # noqa: F811
     if not isinstance(cond, (builtins.bool, SymBool)):
@@ -1739,10 +1735,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-@_deprecated(
-    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
-    Use _check(i >= 0) instead."
-)
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2100,7 +2093,7 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 
-_storage_classes: set[type[_Union[TypedStorage, UntypedStorage]]] = {
+_storage_classes: set[type[TypedStorage | UntypedStorage]] = {
     UntypedStorage,
     DoubleStorage,
     FloatStorage,
@@ -2406,13 +2399,13 @@ class _TorchCompileInductorWrapper:
             and self.dynamic == other.dynamic
         )
 
-    def apply_mode(self, mode: _Optional[str]):
+    def apply_mode(self, mode: str | None):
         if mode and mode != "default":
             from torch._inductor import list_mode_options
 
             self.apply_options(list_mode_options(mode, self.dynamic))
 
-    def apply_options(self, options: _Optional[dict[str, _Any]]):
+    def apply_options(self, options: dict[str, _Any] | None):
         if not options:
             return
 
@@ -2532,12 +2525,10 @@ def compile(
     model: _Callable[_InputT, _RetT],
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2547,31 +2538,27 @@ def compile(
     model: None = None,
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
-    model: _Optional[_Callable[_InputT, _RetT]] = None,
+    model: _Callable[_InputT, _RetT] | None = None,
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
-) -> _Union[
-    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
-    _Callable[_InputT, _RetT],
-]:
+) -> (
+    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
+    | _Callable[_InputT, _RetT]
+):
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2879,7 +2866,7 @@ else:
 
 
 @functools.cache
-def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
+def get_device_module(device: torch.device | str | None = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
     If no device is given, return the module for the current accelerator or CPU if none is present.
@@ -2905,8 +2892,8 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
 
 def _constrain_as_size(
     symbol,
-    min: _Optional[builtins.int] = None,
-    max: _Optional[builtins.int] = None,
+    min: builtins.int | None = None,
+    max: builtins.int | None = None,
 ):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.

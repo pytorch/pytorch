@@ -733,6 +733,17 @@ def scaled_mm(
 
 __all__ += ["scaled_mm"]
 
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    *,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    out_dtype: _dtype | None = None,
+) -> Tensor: ...
+
+__all__ += ["grouped_mm"]
+
 class SwizzleType(Enum):
     NO_SWIZZLE = 0
     SWIZZLE_32_4_4 = 1

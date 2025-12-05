@@ -910,6 +910,35 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.expectedFailure
+    def test_nonlocal_list_mutation_hidden(self):
+        """Test that nonlocal list mutation inside nested_compile_region is handled correctly."""
+
+        @nested_compile_region
+        def gn(x, z):
+            o = torch.matmul(x, x) @ x
+            out = x.sin()
+            z.append(out)
+            return torch.cos(torch.sin(o)), torch.sin(x)
+
+        def fn(x):
+            z = []
+
+            outs = gn(x, z)
+            out1 = outs[0]
+            # Check that the extra output pytree handling is done properly
+            out2 = outs[-1]
+
+            return out1 + out2, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
     @inductor_config.patch("fx_graph_cache", False)
     def test_view_to_reshape(self):
         @nested_compile_region
@@ -2568,7 +2597,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    # High piority - grads are wrong
+    # High priority - grads are wrong
     @unittest.expectedFailure
     def test_grad_accuracy_check(self):
         class Foo:

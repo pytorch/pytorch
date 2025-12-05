@@ -52,8 +52,7 @@ jobs:
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
           pytorch-linux-jammy-py3.10-clang12,
           pytorch-linux-jammy-py3.11-clang12,
@@ -75,7 +74,8 @@ jobs:
           pytorch-linux-jammy-py3-clang12-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
-          pytorch-linux-jammy-py3-clang12-executorch,
+          # TODO: Re-enable me when docker pin update happens
+          # pytorch-linux-jammy-py3-clang12-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
           pytorch-linux-noble-riscv64-py3.12-gcc14
         ]

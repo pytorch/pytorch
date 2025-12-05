@@ -3,6 +3,7 @@ import functools
 import re
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -12,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
+from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
 
 
@@ -458,8 +460,295 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
+    def test_complex64_mul(self):
+        """Test complex64 multiplication."""
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+        def fn(a, b):
+            return a * b
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        b = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_complex_conj(self):
+        """Test complex conjugate."""
+
+        def fn(x):
+            return torch.conj(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_real(self):
+        """Test extracting real part of complex tensor."""
+
+        def fn(x):
+            return torch.real(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_imag(self):
+        """Test extracting imaginary part of complex tensor."""
+
+        def fn(x):
+            return torch.imag(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_abs(self):
+        """Test complex absolute value (magnitude)."""
+
+        def fn(x):
+            return torch.abs(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex128_conj(self):
+        """Test complex128 conjugate operation."""
+
+        def fn(x):
+            return torch.conj(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex128, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_mul_scalar(self):
+        """Test complex multiplication with scalar."""
+
+        def fn(x):
+            return x * 2.5
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_conj_mul(self):
+        """Test conjugate followed by multiplication."""
+
+        def fn(x, y):
+            return torch.conj(x) * y
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        y = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_where(self):
+        """Test torch.where operation."""
+
+        def fn(x, y):
+            return torch.where(x > 0, x, y)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        y = torch.randn(16, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_clamp(self):
+        """Test torch.clamp operation."""
+
+        def fn(x):
+            return torch.clamp(x, -1.0, 1.0)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) * 2
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_comparison_ops(self):
+        """Test comparison operations."""
+
+        def fn(a, b):
+            gt = a > b
+            lt = a < b
+            eq = a == b
+            return gt.float() + lt.float() + eq.float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_logical_ops(self):
+        """Test logical operations."""
+
+        def fn(a, b):
+            return torch.logical_and(a > 0, b > 0).float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_sign(self):
+        """Test sign operation."""
+
+        def fn(x):
+            return torch.sign(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_reciprocal(self):
+        """Test reciprocal operation."""
+
+        def fn(x):
+            return torch.reciprocal(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) + 1.0  # Avoid zeros
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_square(self):
+        """Test square operation."""
+
+        def fn(x):
+            return torch.square(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_erf(self):
+        """Test erf operation."""
+        if self.DEVICE == "cuda":
+            self.skipTest("erf not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            return torch.erf(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_atan2(self):
+        """Test atan2 operation."""
+
+        def fn(a, b):
+            return torch.atan2(a, b)
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_sum_reduction(self):
+        """Test sum reduction."""
+
+        def fn(x):
+            return x.sum()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_max_reduction(self):
+        """Test max reduction."""
+
+        def fn(x):
+            return x.max()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_min_reduction(self):
+        """Test min reduction."""
+
+        def fn(x):
+            return x.min()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_prod_reduction(self):
+        """Test prod reduction."""
+        if self.DEVICE == "cuda":
+            self.skipTest("prod reduction not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            # Use smaller values to avoid overflow
+            return (x * 0.1).prod()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+
+@unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
     DEVICE = "cuda"
 
@@ -467,6 +756,28 @@ class PallasTestsCUDA(PallasTestsMixin, TestCase):
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
+
+
+@unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
+@config.patch({"_debug_cpu_to_tpu_pallas": True})
+class PallasTestsTPU(PallasTestsMixin, TestCase):
+    DEVICE = "cpu"
+
+    @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+    def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+        def fn(a, b):
+            return a + b
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            (
+                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                "Please make sure that you have a TPU available and that JAX is configured correctly."
+            ),
+        ):
+            torch.compile(fn, backend="inductor", options={"cpu_backend": "pallas"})(
+                torch.randn(16), torch.randn(16)
+            )
 
 
 if test_torchinductor.HAS_CPU and HAS_PALLAS:

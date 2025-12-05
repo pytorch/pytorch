@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass, field
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch._C
@@ -129,7 +129,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, Optional[int]]:
+    ) -> tuple[int, int | None]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -151,7 +151,7 @@ class Shard(torch._C._distributed.Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         shard and scatter a tensor on a mesh dimension (use coordinate
@@ -203,7 +203,7 @@ class Shard(torch._C._distributed.Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         shard_placement = cls(dim)
         return shard_placement._shard_tensor(tensor, mesh, mesh_dim, src_data_rank)
@@ -566,7 +566,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
         split_factor: int = 1,
     ) -> torch.Tensor:
         strided_shard_placement = cls(dim=dim, split_factor=split_factor)
@@ -689,7 +689,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, Optional[int]]:
+    ) -> tuple[int, int | None]:
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -742,7 +742,7 @@ class Replicate(torch._C._distributed.Replicate):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
@@ -765,7 +765,7 @@ class Replicate(torch._C._distributed.Replicate):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
@@ -816,14 +816,18 @@ class Partial(torch._C._distributed.Partial):
         # Partial placement contract #3:
         # _partition_value: partition the value of a replicated tensor on the mesh dimension
 
-        # _partition_value is the conjugate operation of _reduce_value
-        # - i.e. _partition_value on a sum reduce op is just a division operation
-        # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
-        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
-        # different operation
-        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
+        # _partition_value is the conjugate operation of _reduce_value, e.g.
+        # - _partition_value on a sum reduce op is just a division operation
+        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        return tensor / num_chunks
+        if self.reduce_op == "sum":
+            return tensor / num_chunks
+        elif self.reduce_op in ("avg", "min", "max"):
+            return tensor
+        else:
+            raise ValueError(
+                f"Replicate to Partial({self.reduce_op}) conversion is not supported."
+            )
 
     def __hash__(self) -> int:
         return 1 + hash(self.reduce_op)
@@ -838,7 +842,7 @@ class Partial(torch._C._distributed.Partial):
         """
         human readable representation of the Partial placement
         """
-        return "P"
+        return f"P({self.reduce_op})"
 
 
 # We keep the old _Partial name for a while for BC reason
@@ -859,7 +863,7 @@ class MaskPartial(Partial):
     mask_buffer: MaskBuffer = field(default_factory=MaskBuffer)
 
     # required fields for computing the local offset and deriving the mask
-    offset_shape: Optional[torch.Size] = None
+    offset_shape: torch.Size | None = None
     offset_dim: int = 0
 
     def __init__(
@@ -982,10 +986,10 @@ class MaskPartial(Partial):
         """
         machine readable representation of the MaskPartial placement
         """
-        return f"MaskPartial(offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
         human readable representation of the MaskPartial placement
         """
-        return "MaskP"
+        return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"

@@ -99,6 +99,7 @@ from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    innermost_fn,
     skip_code,
     TorchPatcher,
 )
@@ -933,7 +934,11 @@ class GraphRuntimeEnv:
     argdefs: Optional[tuple[Any, ...]]
 
     def forward_callable(
-        self, backend_id: str, compiled_fn: Callable[..., Any]
+        self,
+        backend_id: str,
+        compiled_fn: Callable[..., Any],
+        *,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -942,6 +947,7 @@ class GraphRuntimeEnv:
         f_globals = {
             **import_sources,
             **self.used_globals,
+            **(extra_globals or {}),
             backend_id: compiled_fn,
         }
         return types.FunctionType(
@@ -1026,13 +1032,16 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Optional[Callable[..., Any]] = None,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
         # pyrefly: ignore [not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
-        return runtime_env.forward_callable(backend_id, compiled_fn)
+        return runtime_env.forward_callable(
+            backend_id, compiled_fn, extra_globals=extra_globals
+        )
 
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
@@ -1043,6 +1052,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
+        resolved_forward = mod.forward
+        if hasattr(resolved_forward, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_forward = resolved_forward.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1054,7 +1068,12 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
+            and resolved_forward != torch.nn.Module.forward
         ):
+            # We cannot trace __call__ by default because it will break
+            # the legacy dynamo export. If we want to revisit this,
+            # feel free to remove this path and try unittests in
+            # test_strict_export_v2.py
             mod = mod.forward
         elif isinstance(mod, torch.fx.GraphModule):
             mod = mod._call_impl
@@ -1556,7 +1575,9 @@ def _compile(
         # Check recompilations
         recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
-            reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
+            reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, innermost_fn(compiler_fn)
+            )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
@@ -1564,7 +1585,7 @@ def _compile(
         inline_inbuilt_nn_modules_candidate = False
         if not config.inline_inbuilt_nn_modules and frame:
             inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, skip_logging=True
+                cache_entry, frame, innermost_fn(compiler_fn), skip_logging=True
             )
             inbuilt_nn_recompile_reason = (
                 None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]

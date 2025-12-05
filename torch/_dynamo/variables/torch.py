@@ -1435,162 +1435,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from .builder import wrap_fx_proxy
 
         if self.nonstrict_traceable:
-            import torch._higher_order_ops.flat_apply as flat_apply
-            from torch._higher_order_ops.flat_apply import (
-                func_to_graphable,
-                is_graphable_type,
-            )
-            from torch._subclasses.fake_tensor import fake_tensor_tls
-            from torch.utils._pytree import tree_flatten
-
-            from .base import AsPythonConstantNotImplementedError
-
-            # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
-            #
-            # Rather than reconstructing `args, kwargs` into python objects and
-            # then tree_flatten them, we just let Dynamo symbolically interpret
-            # `tree_flatten((args, kwargs))`. This saves us from having to
-            # worry about the reconstruction logic, side effects, and guards.
-            packed_input_vt = TupleVariable.build(
-                tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
-            )
-            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
-                tx, [packed_input_vt], {}
-            )
-            assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
-            flat_args_vts, input_spec_vt = out_vt.items
-            assert isinstance(flat_args_vts, ListVariable)
-
-            # Handle the case when the input contains a non-graphable type.
-            for flat_arg_vt in flat_args_vts.items:
-                arg_type = flat_arg_vt.python_type()
-                if not is_graphable_type(arg_type):
-                    type_name = flat_arg_vt.python_type().__qualname__
-                    unimplemented(
-                        gb_type="Invalid input type for nonstrict_trace-ed function",
-                        context=f"Encountered input of type <{type_name}>.",
-                        explanation=(
-                            "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, float) "
-                            "or pytree containers of those are allowed as inputs. The provided argument contains "
-                            "an unsupported type."
-                        ),
-                        hints=[
-                            "Use one of the following to register the type with pytree:\n"
-                            "* `torch.utils._pytree.register_constant`\n"
-                            "* `torch.utils._pytree.register_dataclass`\n"
-                            "* `torch.utils._pytree.register_pytree_node`",
-                        ],
-                    )
-
-            # Since we checked with `is_graphable` above, `as_proxy` on the
-            # flat_arg VT should always work.
-            proxified_flat_args = [
-                flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vts.items
-            ]
-
-            # The downstream `flat_apply` call requires the input spec; however,
-            # the spec not a graphable type, so we still have to reconstruct it
-            # into a python object, and store it as a constant attribute on the
-            # fx graph.
-            try:
-                input_spec = input_spec_vt.as_python_constant()
-            except AsPythonConstantNotImplementedError as e:
-                typ = e.vt.python_type()
-                type_name = typ.__qualname__
-                import torch.utils._pytree as pytree
-
-                if pytree.is_constant_class(typ):
-                    unimplemented(
-                        gb_type="Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
-                        context=f"Input={input_spec_vt}, offending type <{type_name}>.",
-                        explanation=(
-                            "Calling a `nonstrict_trace`-ed function with an input that contains an object "
-                            f"of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object "
-                            "was constructed _inside_ the `torch.compile` region. This is not supported."
-                        ),
-                        hints=[
-                            "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                        from_exc=e,
-                    )
-                else:
-                    unimplemented(
-                        gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function",
-                        context=f"Input={input_spec_vt}, offending type <{type_name}>.",
-                        explanation=(
-                            "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered "
-                            f"with a `pytree_flatten` that places an object of type <{type_name}> into the context."
-                        ),
-                        hints=[
-                            "Modifying the `pytree_flatten` to avoid placing the object into the context.",
-                            f"Apply one of the following to <{type_name}>:\n"
-                            "* `torch.utils._pytree.register_constant`\n"
-                            "* `torch.utils._pytree.register_dataclass`\n"
-                            "* `torch.utils._pytree.register_pytree_node`",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                        from_exc=e,
-                    )
-
-            fn = self.value
-
-            def patched_fn(*args, **kwargs):
-                # This enables reads to global/captured tensors, and we'll just
-                # treat them as constants in the graph. Note that after
-                # AOTDispatcher, this logic would disappear.
-                old_val = fake_tensor_tls.allow_non_fake_inputs_override
-                fake_tensor_tls.allow_non_fake_inputs_override = True
-                try:
-                    res = fn(*args, **kwargs)
-                finally:  # reset even when `fn` raises
-                    fake_tensor_tls.allow_non_fake_inputs_override = old_val
-                return res
-
-            # `flat_apply` wants a TreeSpec for the function input.
-            _, f_spec = func_to_graphable(patched_fn)
-
-            # TreeSpec isn't graphable, so we register the function and input
-            # specs as attributes on the graph module.
-            f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                f"{fn.__name__}_spec", f_spec
-            )
-            input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                fn.__name__ + "_input_spec",
-                # pyrefly: ignore [unbound-name]
-                input_spec,
-            )
-            f_spec_proxy.node.type = type(f_spec)
-            # pyrefly: ignore [unbound-name]
-            input_spec_proxy.node.type = type(input_spec)
-            all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
-
-            # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
-            # the call and wrap output into a VariableTracker.
-            proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
-            try:
-                # TODO support more output types once `flat_apply` supports
-                # pytree-able output types. We can have Dynamo trace through an
-                # unflatten call (just like we traced through a flatten above)
-                # to rebuild the actual output VT.
-                out_vt = wrap_fx_proxy(tx, proxy)
-            except (
-                # From `handle_traced_output`.
-                torch._dynamo.exc.Unsupported,
-                # From `flat_apply` assert on output type.
-                torch._dynamo.exc.TorchRuntimeError,
-            ):
-                unimplemented(
-                    gb_type="Unsupported output type for nonstrict_trace-ed function",
-                    context=f"Function: {fn.__name__}",
-                    explanation=(
-                        "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
-                        " are allowed as output. The result of this call contains an unsupported type."
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-
-            return out_vt
+            return self._call_nonstrict_traceable_function(tx, args, kwargs)
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
@@ -1828,6 +1673,170 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     )
 
         return tensor_variable
+
+    def _call_nonstrict_traceable_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        import torch._higher_order_ops.flat_apply as flat_apply
+        from torch._higher_order_ops.flat_apply import (
+            func_to_graphable,
+            is_graphable_type,
+        )
+        from torch._subclasses.fake_tensor import fake_tensor_tls
+        from torch.utils._pytree import tree_flatten
+
+        from .base import AsPythonConstantNotImplementedError
+        from .builder import wrap_fx_proxy
+
+        # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
+        #
+        # Rather than reconstructing `args, kwargs` into python objects and
+        # then tree_flatten them, we just let Dynamo symbolically interpret
+        # `tree_flatten((args, kwargs))`. This saves us from having to
+        # worry about the reconstruction logic, side effects, and guards.
+        packed_input_vt = TupleVariable.build(
+            tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
+        )
+        out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
+            tx, [packed_input_vt], {}
+        )
+        assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
+        flat_args_vts, input_spec_vt = out_vt.items
+        assert isinstance(flat_args_vts, ListVariable)
+
+        # Handle the case when the input contains a non-graphable type.
+        for flat_arg_vt in flat_args_vts.items:
+            arg_type = flat_arg_vt.python_type()
+            if not is_graphable_type(arg_type):
+                type_name = flat_arg_vt.python_type().__qualname__
+                unimplemented(
+                    gb_type="Invalid input type for nonstrict_trace-ed function",
+                    context=f"Encountered input of type <{type_name}>.",
+                    explanation=(
+                        "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, float) "
+                        "or pytree containers of those are allowed as inputs. The provided argument contains "
+                        "an unsupported type."
+                    ),
+                    hints=[
+                        "Use one of the following to register the type with pytree:\n"
+                        "* `torch.utils._pytree.register_constant`\n"
+                        "* `torch.utils._pytree.register_dataclass`\n"
+                        "* `torch.utils._pytree.register_pytree_node`",
+                    ],
+                )
+
+        # Since we checked with `is_graphable` above, `as_proxy` on the
+        # flat_arg VT should always work.
+        proxified_flat_args = [
+            flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vts.items
+        ]
+
+        # The downstream `flat_apply` call requires the input spec; however,
+        # the spec not a graphable type, so we still have to reconstruct it
+        # into a python object, and store it as a constant attribute on the
+        # fx graph.
+        try:
+            input_spec = input_spec_vt.as_python_constant()
+        except AsPythonConstantNotImplementedError as e:
+            typ = e.vt.python_type()
+            type_name = typ.__qualname__
+            import torch.utils._pytree as pytree
+
+            if pytree.is_constant_class(typ):
+                unimplemented(
+                    gb_type="Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                    context=f"Input={input_spec_vt}, offending type <{type_name}>.",
+                    explanation=(
+                        "Calling a `nonstrict_trace`-ed function with an input that contains an object "
+                        f"of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object "
+                        "was constructed _inside_ the `torch.compile` region. This is not supported."
+                    ),
+                    hints=[
+                        "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                    from_exc=e,
+                )
+            else:
+                unimplemented(
+                    gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function",
+                    context=f"Input={input_spec_vt}, offending type <{type_name}>.",
+                    explanation=(
+                        "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered "
+                        f"with a `pytree_flatten` that places an object of type <{type_name}> into the context."
+                    ),
+                    hints=[
+                        "Modifying the `pytree_flatten` to avoid placing the object into the context.",
+                        f"Apply one of the following to <{type_name}>:\n"
+                        "* `torch.utils._pytree.register_constant`\n"
+                        "* `torch.utils._pytree.register_dataclass`\n"
+                        "* `torch.utils._pytree.register_pytree_node`",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                    from_exc=e,
+                )
+
+        fn = self.value
+
+        def patched_fn(*args, **kwargs):
+            # This enables reads to global/captured tensors, and we'll just
+            # treat them as constants in the graph. Note that after
+            # AOTDispatcher, this logic would disappear.
+            old_val = fake_tensor_tls.allow_non_fake_inputs_override
+            fake_tensor_tls.allow_non_fake_inputs_override = True
+            try:
+                res = fn(*args, **kwargs)
+            finally:  # reset even when `fn` raises
+                fake_tensor_tls.allow_non_fake_inputs_override = old_val
+            return res
+
+        # `flat_apply` wants a TreeSpec for the function input.
+        _, f_spec = func_to_graphable(patched_fn)
+
+        # TreeSpec isn't graphable, so we register the function and input
+        # specs as attributes on the graph module.
+        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_spec", f_spec
+        )
+        input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            fn.__name__ + "_input_spec",
+            # pyrefly: ignore [unbound-name]
+            input_spec,
+        )
+        f_spec_proxy.node.type = type(f_spec)
+        # pyrefly: ignore [unbound-name]
+        input_spec_proxy.node.type = type(input_spec)
+        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+
+        # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
+        # the call and wrap output into a VariableTracker.
+        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+        try:
+            # TODO support more output types once `flat_apply` supports
+            # pytree-able output types. We can have Dynamo trace through an
+            # unflatten call (just like we traced through a flatten above)
+            # to rebuild the actual output VT.
+            out_vt = wrap_fx_proxy(tx, proxy)
+        except (
+            # From `handle_traced_output`.
+            torch._dynamo.exc.Unsupported,
+            # From `flat_apply` assert on output type.
+            torch._dynamo.exc.TorchRuntimeError,
+        ):
+            unimplemented(
+                gb_type="Unsupported output type for nonstrict_trace-ed function",
+                context=f"Function: {fn.__name__}",
+                explanation=(
+                    "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
+                    " are allowed as output. The result of this call contains an unsupported type."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        return out_vt
 
     def _call_ntuple(self, tx: "InstructionTranslator", args, kwargs):
         """inline behavior of torch.nn.modules.utils._ntuple"""

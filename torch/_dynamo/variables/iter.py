@@ -262,7 +262,7 @@ class IteratorVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
