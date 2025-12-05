@@ -742,10 +742,18 @@ Tensor instance_norm(
   shape[1] = b * c;
   shape[0] = SymInt(1);
 
+  // handle mixed dtype for running stats
+  const auto input_dtype = input.scalar_type();
+  const bool mixed_dtype_stats = running_mean.defined() &&
+                                 running_mean.scalar_type() != input_dtype;
+
+  Tensor running_mean_for_bn = mixed_dtype_stats ? running_mean.to(input_dtype) : running_mean;
+  Tensor running_var_for_bn = mixed_dtype_stats ? running_var.to(input_dtype) : running_var;
+
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
-  Tensor running_mean_ = repeat_if_defined(running_mean, b);
-  Tensor running_var_ = repeat_if_defined(running_var, b);
+  Tensor running_mean_ = repeat_if_defined(running_mean_for_bn, b);
+  Tensor running_var_ = repeat_if_defined(running_var_for_bn, b);
 
   auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
@@ -753,10 +761,12 @@ Tensor instance_norm(
 
   // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {
-    at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
+    auto updated_mean = running_mean_.view_symint({ b, c }).mean(0, false);
+    at::alias(running_mean).copy_(updated_mean.to(running_mean.scalar_type()));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
+    auto updated_var = running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false);
+    at::alias(running_var).copy_(updated_var.to(running_var.scalar_type()));
   }
 
   return out.view_symint(input.sym_sizes());
