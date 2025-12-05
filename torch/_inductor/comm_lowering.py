@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 #
 # For eligible collective ops, we identify communication buffers at lowering
 # time and optionally choose to lower the op to a different kernel
-# (ommunication libraries like NCCL handle both registered and non-registered
+# (communication libraries like NCCL handle both registered and non-registered
 # buffers transparently within the same op, though some may require different
 # ops for different cases). Later, the codegen will perform "persistent
 # allocation" to satisfy the aforementioned constraints, and optionally,
