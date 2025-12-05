@@ -60,8 +60,7 @@ static void upsample_out_template(const Tensor& input,
                                   const Tensor& output,
                                   bool align_corners,
                                   const std::string_view resize_mode_str) {
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
-                              "upsample for MPS does not support complex inputs");
+  TORCH_CHECK_NOT_IMPLEMENTED(!input.is_complex(), "upsample for MPS does not support complex inputs");
   if (input.numel() == 0) {
     return;
   }
