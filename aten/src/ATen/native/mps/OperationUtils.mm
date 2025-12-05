@@ -947,7 +947,7 @@ class BundledShaderLibary : public MetalShaderLibrary {
     if (C10_UNLIKELY(!library)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
-      auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS) ? "metal_nax" : "metal_basic";
+      auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS) ? "metal4" : "metal_basic";
       library = [device newLibraryWithData:getSectionData(section_name) error:&error];
       TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
     }
