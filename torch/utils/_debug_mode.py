@@ -262,11 +262,11 @@ _annotate_decorated = False
 
 def _ensure_annotate_decorated():
     """
-    Lazily apply dont_skip_tracing decorator to DebugMode.annotate, to avoid circular import/initialization issues.
+    Lazily apply dont_skip_tracing decorator to DebugMode._annotate, to avoid circular import/initialization issues.
     """
     global _annotate_decorated
     if not _annotate_decorated:
-        DebugMode.annotate = torch._dynamo.dont_skip_tracing(DebugMode.annotate)  # type: ignore[has-type]
+        DebugMode._annotate = torch._dynamo.dont_skip_tracing(DebugMode._annotate)  # type: ignore[has-type]
 
         # Mark annotate as side-effectful so aot_eager doesn't DCE it.
         from torch.fx.node import _side_effectful_functions
