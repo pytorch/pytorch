@@ -1990,7 +1990,7 @@ void recordHistory(
 }
 
 SnapshotInfo snapshot(MempoolId_t mempool_id) {
-  return allocator.snapshot(mempool_id);
+  return native_allocator.snapshot(mempool_id);
 }
 
 void createOrIncrefPool(
