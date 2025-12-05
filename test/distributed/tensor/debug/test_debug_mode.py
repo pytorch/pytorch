@@ -444,12 +444,12 @@ class TestDTensorDebugMode(TestCase):
                 self.l1 = torch.nn.Linear(8, 8)
 
             def forward(self, x):
-                DebugMode.annotate("Foo")
+                DebugMode._annotate("Foo")
                 return self.l1(x)
 
         mod = Foo()
         with DebugMode(record_nn_module=True) as debug_mode:
-            DebugMode.annotate("forward")
+            DebugMode._annotate("forward")
             mod(x)
 
         self.assertExpectedInline(
