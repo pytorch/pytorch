@@ -2588,7 +2588,6 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(f(x, other), f_compile(x, other))
                 self.assertTrue(called)
 
-    @unittest.expectedFailure
     def test_udf_output(self):
         class Foo:
             def __init__(self, a, b):
