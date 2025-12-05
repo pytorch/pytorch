@@ -35,7 +35,6 @@ Usage::
 import contextlib
 import functools
 import inspect
-import logging
 import os
 import traceback
 import weakref
@@ -62,8 +61,6 @@ if TYPE_CHECKING:
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
-
-log = logging.getLogger(__name__)
 
 
 REDISTRIBUTE_FUNC = "redistribute_input"
@@ -624,6 +621,17 @@ def _get_call_name(call: _DebugCall) -> str:
         return str(call)
 
 
+@torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
+def _annotate(tag: str) -> None:
+    # This is special-cased in __torch_dispatch__
+    return
+
+
+@_annotate.register_fake
+def _annotate_fake(tag: str) -> None:
+    return None
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -641,8 +649,7 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
-        _ensure_annotate_decorated()  # Ensure annotate is decorated
-
+        _ensure_annotate_decorated()
         self.supports_higher_order_operators = True
 
         # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
@@ -746,6 +753,11 @@ class DebugMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        if func is torch.ops.debug_mode_ops.annotate.default:
+            assert len(args) == 1
+            self._handle_annotate(args[0])
+            return
 
         # Record the operation with its call depth
         call = None
@@ -1054,23 +1066,18 @@ class DebugMode(TorchDispatchMode):
     def logs(self):
         return list(self.operators)
 
+    def _handle_annotate(self, tag):
+        """Handles DebugMode.annotate()"""
+        call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
+        self.operators.append(call)
+
     @staticmethod
     def annotate(tag: Any) -> None:
         """
         If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
-        A no-op inside compiled regions.
+        Implemented with a custom op.
         """
-        if torch.compiler.is_compiling():
-            from torch._logging import warning_once
-
-            warning_once(
-                log, "DebugMode.annotate() is ignored inside compiled regions."
-            )
-            return
-        if (debug_mode := get_active_debug_mode()) is None:
-            return
-        call = _AnnotateCall(tag, debug_mode.call_depth, debug_mode.record_stack_trace)
-        debug_mode.operators.append(call)
+        torch.ops.debug_mode_ops.annotate(tag)
 
     @staticmethod
     def check_hash_mismatches(

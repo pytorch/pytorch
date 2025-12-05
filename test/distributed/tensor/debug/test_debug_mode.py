@@ -469,6 +469,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
+  [annotate] Foo
     aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
     aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
         )
