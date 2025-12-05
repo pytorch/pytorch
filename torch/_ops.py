@@ -556,6 +556,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def name(self):
         return self._name
 
+    # it's a no-op since HigherOrderOperator is immutable and must be unique for a given op.
+    def __deepcopy__(self, memo=None):
+        return self
+
 
 def _to_flat_tuple(args, kwargs):
     return pytree.arg_tree_leaves(*args, **kwargs)
