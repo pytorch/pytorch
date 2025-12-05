@@ -2491,6 +2491,7 @@ class FakeTensorDispatchCache(TestCase):
         run()
         torch.compiler.reset()
         gc.collect()
+        gc.collect()  # second collection needed for 3.14t
         self.assertTrue(count_invoke_subgraph_keys() == 0)
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
