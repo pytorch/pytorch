@@ -377,3 +377,27 @@ def my_optional_tensor_ref(maybe_tensor, default_size) -> Tensor:
     return torch.ops.libtorch_agnostic_2_9.my_optional_tensor_ref.default(
         maybe_tensor, default_size
     )
+
+
+def my_storage_offset(t) -> int:
+    """
+    Returns the storage offset of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - storage offset
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_storage_offset.default(t)
+
+
+def my_element_size(t) -> int:
+    """
+    Returns the element size in bytes of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - element size in bytes
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_element_size.default(t)

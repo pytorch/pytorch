@@ -430,3 +430,18 @@ def my_string_op_string_ref(t, accessor, passthru) -> tuple[list[str], int]:
     return torch.ops.libtorch_agnostic_2_10.my_string_op_string_ref.default(
         t, accessor, passthru
     )
+
+
+def my_set_requires_grad(t, requires_grad) -> Tensor:
+    """
+    Sets the requires_grad attribute on a tensor.
+
+    Args:
+        t: Tensor - input tensor
+        requires_grad: bool - whether the tensor requires gradient
+
+    Returns: Tensor - the input tensor with requires_grad set
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_set_requires_grad.default(
+        t, requires_grad
+    )
