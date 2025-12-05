@@ -2798,6 +2798,12 @@ if torch._C._has_mkldnn:
         "quantized", "IMPL", "Meta"
     )
 
+    @register_meta(aten.quantize_per_tensor)
+    def meta_quantize_per_tensor(
+        input: torch.Tensor, scale: float, zero_point: int, dtype: torch.dtype
+    ) -> torch.Tensor:
+        return torch.empty_like(input, device="meta")
+
     @register_meta(torch.ops.quantized.max_pool2d)
     def meta_quantized_max_pool2d(
         input,
