@@ -1692,6 +1692,22 @@ from user code:
     torch._dynamo.graph_break()""",
             )
 
+    def test_runtime_error_readable_shape_mismatch(self):
+        x = torch.randn(4, 4)
+        y = torch.randn(10, 10)
+
+        def fn(x, y):
+            return x + y
+
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        self.assertExpectedInlineMunged(
+            RuntimeError,
+            lambda: torch.compile(fn, backend="eager")(x, y),
+            "The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 1",
+        )
+
 
 class NestedGraphBreakLoggingTests(
     LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
