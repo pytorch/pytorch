@@ -40,6 +40,7 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
+import torch.utils._pytree as _pytree
 from torch._guards import TracingContext
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
@@ -1722,8 +1723,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        import torch._higher_order_ops.flat_apply as flat_apply
         from torch._higher_order_ops.flat_apply import (
+            FlatApply,
             func_to_graphable,
             is_graphable_type,
         )
@@ -1855,13 +1856,18 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
-        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+        flat_apply = FlatApply()
+        proxy = tx.output.create_proxy(
+            "call_function", flat_apply, all_args, {"flatten_output": True}
+        )
+
+        # Instead of calling tree_unflatten at runtime, symbolically trace it
+        # just like we did for tree_flatten on inputs. This lets Dynamo
+        # capture the unflatten into the FX graph as well.
+
+        # Build VTs representing (flat_output_list, out_spec)
         try:
-            # TODO support more output types once `flat_apply` supports
-            # pytree-able output types. We can have Dynamo trace through an
-            # unflatten call (just like we traced through a flatten above)
-            # to rebuild the actual output VT.
-            out_vt = wrap_fx_proxy(tx, proxy)
+            proxy_list_vt = wrap_fx_proxy(tx, proxy)
         except (
             # From `handle_traced_output`.
             torch._dynamo.exc.Unsupported,
@@ -1877,6 +1883,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+            # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
+            raise RuntimeError("unreachable")  # noqa: B904
+
+        assert flat_apply.out_spec is not None
+        out_spec_vt = VariableTracker.build(tx, flat_apply.out_spec)
+
+        # Reuse the same pattern used above for tree_flatten: call the python
+        # function through Dynamo so it symbolically interprets it.
+        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+            tx, [proxy_list_vt, out_spec_vt], {}
+        )
 
         return out_vt
 

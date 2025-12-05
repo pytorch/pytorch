@@ -82,14 +82,23 @@ _FXOutput = _Base | Sequence["_FXOutput"]
 
 
 class FlatApply(HigherOrderOperator):
-    def __init__(self) -> None:
+    # If True (default) then the output is flattened. If False then the output
+    # is returned verbatim (and must be valid graphable output).
+    flatten_output: bool = True
+
+    def __init__(self, *, flatten_output: bool = True) -> None:
         super().__init__("flat_apply")
+        self.out_spec: pytree.TreeSpec | None = None
+        self.flatten_output = flatten_output
 
     def __call__(
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
         *flat_args: tuple[Unpack[_Ts]],
+        # If True then the output is flattened. If False (the default) then the
+        # output is returned verbatim (and must be valid graphable output).
+        flatten_output: bool = False,
         **_unused: object,
     ) -> object:
         """
@@ -103,7 +112,8 @@ class FlatApply(HigherOrderOperator):
         >>> def flat_apply_impl(func, in_spec, *flat_args):
         >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         >>>     output = func(*args, **kwargs)
-        >>>     return output
+        >>>     flat_output, self.out_spec = pytree.tree_flatten(output)
+        >>>     return flat_output
 
         flat_apply supports the following two cases:
         - an input type is a container type (e.g. of tensors) registered as a pytree.
@@ -112,10 +122,38 @@ class FlatApply(HigherOrderOperator):
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
 
+        Output is handled in a similar, but reverse, fashion with the output
+        spec stored on the FlatApply object. Note that wrapped functions must
+        return the same pytree structure every time they're called.
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-        return impl(func, in_spec, flat_args)
+
+        if isinstance(func, pytree.TreeSpec):
+            # assume _ConstantFunction
+            func = pytree._retrieve_constant(func)
+            assert isinstance(func, _ConstantFunction)
+
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+        args, kwargs = from_graphable(flat_args, in_spec)
+        out = func(*args, **kwargs)
+
+        if flatten_output:
+            out, out_spec = to_graphable(out)
+
+            if self.out_spec is None:
+                self.out_spec = out_spec
+            elif self.out_spec != out_spec:
+                raise RuntimeError(
+                    "Invalid function passed to FlatApply. The called function returned a value with a different "
+                    "pytree shape on a subsequent call."
+                )
+
+        assert _is_valid_output(out)
+        return out
+
+
+flat_apply = FlatApply()
 
 
 @overload
@@ -130,34 +168,3 @@ def _is_valid_output(x: object) -> bool:
     if isinstance(x, (tuple, list)):
         return all(map(_is_valid_output, x))
     return is_graphable(x)
-
-
-def impl(
-    func: _OpTypes | pytree.TreeSpec,
-    in_spec: pytree.TreeSpec,
-    flat_args: tuple[Unpack[_Ts]],
-) -> _FXOutput:
-    if isinstance(func, pytree.TreeSpec):
-        # assume _ConstantFunction
-        func = pytree._retrieve_constant(func)
-        assert isinstance(func, _ConstantFunction)
-
-    # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
-    args, kwargs = from_graphable(flat_args, in_spec)
-    out = func(*args, **kwargs)
-
-    # Right now, all outputs must either be graphable or lists/tuples of graphables.
-    #
-    # TODO: The following can be updated to support non-graphable outputs and pytrees.
-    # For non-graphable constant outputs: the assumption would be that they are constant
-    # (every time the function runs those MUST be the same)
-    # For pytree outputs:
-    # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
-    # in the latter case the tracers need to carry out the output specs
-    # (they need to know how to reconstruct the object from just the flat_output).
-
-    assert _is_valid_output(out)
-    return out
-
-
-flat_apply = FlatApply()
