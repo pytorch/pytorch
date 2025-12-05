@@ -47,6 +47,12 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
+def last_power_of_2(n: int) -> int:
+    """Return the largest power of 2 less than or equal to n"""
+    next_pow2 = next_power_of_2(n)
+    return next_pow2 // 2 if next_pow2 > n else next_pow2
+
+
 def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     """
     Return the total number of bytes the arguments of tensor type takes.
