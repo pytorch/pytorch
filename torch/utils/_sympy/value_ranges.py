@@ -718,7 +718,17 @@ class SymPyValueRangeAnalysis:
     def floordiv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+
+        # TODO We shall assume division is always valid probably.
         if 0 in b:
+            if b.lower >= 0 and a.lower >= 0:
+                return ValueRanges(0, int_oo)
+            if b.lower <= 0 and a.lower <= 0:
+                return ValueRanges(0, int_oo)
+            if b.lower <= 0 and a.lower >= 0:
+                return ValueRanges(-int_oo, 0)
+            if b.lower >= 0 and a.lower <= 0:
+                return ValueRanges(-int_oo, 0)
             return ValueRanges.unknown_int()
         products = []
         for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
@@ -779,9 +789,13 @@ class SymPyValueRangeAnalysis:
         - When y > 0: result is in [0, y - 1]
         - When y < 0: result is in [y + 1, 0]
         """
+
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
-
+        if x.lower >= 0 and y.lower >= 0:
+            return SymPyValueRangeAnalysis.mod(x, y)
+        print(x)
+        print(y)
         lower = 0 if y.lower > 0 else y.lower + 1
         upper = 0 if y.upper < 0 else y.upper - 1
         return ValueRanges(lower, upper)
