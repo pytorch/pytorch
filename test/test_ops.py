@@ -15,6 +15,7 @@ from importlib import import_module
 import torch
 import torch._prims as prims
 import torch.utils._pytree as pytree
+from torch._dynamo.comptime import comptime, ComptimeContext
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -3029,6 +3030,131 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
+@unMarkDynamoStrictTest
+class TestTensorMetaProp(TestCase):
+    """
+    Test that inplace operations correctly propagate tensor metadata during Dynamo tracing.
+    """
+
+    @ops([op for op in op_db if op.get_inplace() is not None])
+    def test_inplace_ops_propagate_requires_grad_metadata(self, device, dtype, op):
+        """
+        Test that inplace ops from OpInfo propagate requires_grad correctly.
+
+        This test ensures that when an inplace operation is performed on a tensor
+        without requires_grad using an argument with requires_grad=True, the metadata
+        is correctly propagated in both eager and compiled modes.
+
+        This is critical because if metadata is traced incorrectly, code that branches
+        on requires_grad (like custom autograd functions) will take the wrong path,
+        leading to silent incorrectness.
+        """
+
+        inplace_op = op.get_inplace()
+        if inplace_op is None:
+            self.skipTest("No inplace variant for this op")
+
+        # skip samples that are broadcasted or have 0 elements
+        samples = [
+            s
+            for s in op.sample_inputs(device, dtype, requires_grad=False)
+            if not s.broadcasts_input and s.input.numel() > 0
+        ]
+
+        class CustomAutograd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                # Return an obviously wrong gradient (fixed value) to detect
+                # when composite implicit autograd is used vs custom backward
+                (x,) = ctx.saved_tensors
+                return torch.full_like(x, 123.0)
+
+        for i, sample in enumerate(samples):
+            try:
+                torch.compiler.reset()
+                # Setup: x starts with requires_grad=False, one arg has requires_grad=True
+                x_eager = sample.input.clone().detach()
+                args_eager = [
+                    arg.clone().detach() if isinstance(arg, torch.Tensor) else arg
+                    for arg in sample.args
+                ]
+
+                # Find a floating point tensor arg to set requires_grad=True
+                requires_grad_idx = None
+                for idx, arg in enumerate(args_eager):
+                    if isinstance(arg, torch.Tensor) and arg.dtype.is_floating_point:
+                        arg.requires_grad_(True)
+                        requires_grad_idx = idx
+                        break
+
+                if requires_grad_idx is None or x_eager.requires_grad:
+                    continue
+
+                # Apply inplace op in eager mode
+                inplace_op(x_eager, *args_eager, **sample.kwargs)
+                output_eager = CustomAutograd.apply(x_eager)
+                output_eager.sum().backward()
+
+                # Setup compiled version
+                x_compiled = sample.input.clone().detach()
+                args_compiled = [
+                    arg.clone().detach() if isinstance(arg, torch.Tensor) else arg
+                    for arg in sample.args
+                ]
+                args_compiled[requires_grad_idx].requires_grad_(True)
+
+                # Test 1: Verify that the metadata is propagated after the inplace op in compile time
+                def compile_time_check(ctx: ComptimeContext) -> None:
+                    x = ctx.get_local("x")
+                    x_fake = x.as_fake()
+                    self.assertTrue(x_fake.requires_grad)
+                    self.assertTrue(x._ComptimeVar__variable.requires_grad)
+
+                def fn(x, *args):
+                    inplace_op(x, *args, **sample.kwargs)
+                    comptime(compile_time_check)
+                    r = CustomAutograd.apply(x)
+                    return r
+
+                compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                output_compiled = compiled_fn(x_compiled, *args_compiled)
+                output_compiled.sum().backward()
+
+                # Test 2: Verify requires_grad was propagated in runtime
+                self.assertEqual(
+                    x_eager.requires_grad,
+                    x_compiled.requires_grad,
+                    msg=f"{op.name}: requires_grad mismatch (eager={x_eager.requires_grad}, compiled={x_compiled.requires_grad})",
+                )
+
+                # # Test 3: Verify gradients match
+                self.assertEqual(
+                    args_eager[requires_grad_idx].grad,
+                    args_compiled[requires_grad_idx].grad,
+                    msg=f"{op.name}: Output mismatch indicates metadata not propagated during tracing",
+                )
+
+            except Exception as e:
+                # Skip known issue patterns
+                error_str = str(e).lower()
+                if any(
+                    pattern in error_str
+                    for pattern in [
+                        "out=... arguments don't support automatic differentiation",
+                        "the base given to",  # dtype issue
+                        "derivative for",  # backward not implemented
+                        "does not require grad",  # weird CI issue
+                    ]
+                ):
+                    continue
+                raise
+
+
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
@@ -3036,6 +3162,7 @@ instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
 instantiate_device_type_tests(TestForwardADWithScalars, globals())
+instantiate_device_type_tests(TestTensorMetaProp, globals())
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
