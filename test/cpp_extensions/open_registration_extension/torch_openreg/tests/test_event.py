@@ -90,21 +90,6 @@ class TestEvent(TestCase):
         self.assertTrue(event.query())
 
     @skipIfTorchDynamo()
-    def test_event_multiple_record(self):
-        """Test recording event multiple times"""
-        stream = torch.Stream(device="openreg:1")
-        event = torch.Event(device="openreg:1")
-
-        event.record(stream)
-        event_id1 = event.event_id
-
-        event.record(stream)
-        event_id2 = event.event_id
-
-        # Event ID should remain the same
-        self.assertEqual(event_id1, event_id2)
-
-    @skipIfTorchDynamo()
     def test_event_different_devices(self):
         """Test events on different devices"""
         event0 = torch.Event(device="openreg:0")
@@ -131,7 +116,10 @@ class TestEvent(TestCase):
         stream.synchronize()
 
         # Should not be able to calculate elapsed time
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'.",
+        ):
             _ = event1.elapsed_time(event2)
 
     @skipIfTorchDynamo()

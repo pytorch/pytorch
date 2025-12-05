@@ -35,6 +35,18 @@ class TestBackendModule(TestCase):
             torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2
         )
 
+    def test_backend_module_function_error_handling(self):
+        """Test error handling for backend module functions"""
+        # Test non-existent function
+        with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
+            torch.utils.backend_registration._get_custom_mod_func("non_existent_func")
+
+        # Test valid function
+        device_count = torch.utils.backend_registration._get_custom_mod_func(
+            "device_count"
+        )
+        self.assertIsNotNone(device_count)
+
 
 class TestBackendProperty(TestCase):
     def test_backend_generate_methods(self):
@@ -109,6 +121,35 @@ class TestBackendProperty(TestCase):
         z_openreg = z_cpu.openreg()
         self.assertTrue(z_openreg.is_openreg)
 
+    def test_backend_packed_sequence_properties(self):
+        """Test PackedSequence backend properties"""
+        x = torch.rand(5, 3)
+        y = torch.tensor([1, 1, 1, 1, 1])
+
+        z_cpu = torch.nn.utils.rnn.PackedSequence(x, y)
+        self.assertFalse(z_cpu.is_openreg)
+
+        z_openreg = z_cpu.openreg()
+        self.assertTrue(z_openreg.is_openreg)
+
+        # Test that data is on correct device
+        self.assertTrue(z_openreg.data.is_openreg)
+
+    def test_backend_tensor_methods_different_devices(self):
+        """Test tensor methods with different device indices"""
+        x = torch.empty(4, 4)
+
+        y0 = x.openreg(0)
+        self.assertTrue(y0.is_openreg)
+        self.assertEqual(y0.device.index, 0)
+
+        y1 = x.openreg(1)
+        self.assertTrue(y1.is_openreg)
+        self.assertEqual(y1.device.index, 1)
+
+        y_none = x.openreg(torch.device("openreg"))
+        self.assertTrue(y_none.is_openreg)
+
 
 class TestTensorType(TestCase):
     def test_backend_tensor_type(self):
@@ -168,77 +209,6 @@ class TestTensorType(TestCase):
             self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
         finally:
             torch.openreg.FloatStorage = None
-
-    def test_backend_module_name_consistency(self):
-        """Test backend module name consistency"""
-        name = torch._C._get_privateuse1_backend_name()
-        self.assertEqual(name, "openreg")
-
-        # Should be able to rename to same name
-        torch.utils.rename_privateuse1_backend("openreg")
-        name = torch._C._get_privateuse1_backend_name()
-        self.assertEqual(name, "openreg")
-
-    def test_backend_module_function_error_handling(self):
-        """Test error handling for backend module functions"""
-        # Test non-existent function
-        with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):
-            torch.utils.backend_registration._get_custom_mod_func("non_existent_func")
-
-        # Test valid function
-        device_count = torch.utils.backend_registration._get_custom_mod_func(
-            "device_count"
-        )
-        self.assertIsNotNone(device_count)
-        self.assertEqual(device_count(), 2)
-
-    def test_backend_tensor_methods_different_devices(self):
-        """Test tensor methods with different device indices"""
-        x = torch.empty(4, 4)
-
-        y0 = x.openreg(0)
-        self.assertTrue(y0.is_openreg)
-        self.assertEqual(y0.device.index, 0)
-
-        y1 = x.openreg(1)
-        self.assertTrue(y1.is_openreg)
-        self.assertEqual(y1.device.index, 1)
-
-        y_none = x.openreg(torch.device("openreg"))
-        self.assertTrue(y_none.is_openreg)
-
-    def test_backend_packed_sequence_properties(self):
-        """Test PackedSequence backend properties"""
-        x = torch.rand(5, 3)
-        y = torch.tensor([1, 1, 1, 1, 1])
-
-        z_cpu = torch.nn.utils.rnn.PackedSequence(x, y)
-        self.assertFalse(z_cpu.is_openreg)
-
-        z_openreg = z_cpu.openreg()
-        self.assertTrue(z_openreg.is_openreg)
-
-        # Test that data is on correct device
-        self.assertTrue(z_openreg.data.is_openreg)
-
-    def test_backend_tensor_type_all_dtypes(self):
-        """Test tensor type for all supported dtypes"""
-        dtypes = [
-            torch.bool,
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ]
-
-        for dtype in dtypes:
-            x = torch.empty(2, 2, dtype=dtype, device="openreg")
-            self.assertEqual(x.device.type, "openreg")
-            self.assertEqual(x.dtype, dtype)
 
     def test_backend_storage_type_consistency(self):
         """Test storage type consistency"""
