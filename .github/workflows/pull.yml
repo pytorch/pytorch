@@ -82,7 +82,7 @@ jobs:
       - linux-jammy-py3_10-gcc11-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-gcc11
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
@@ -92,7 +92,7 @@ jobs:
     uses: ./.github/workflows/_docs.yml
     needs: linux-jammy-py3_10-gcc11-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
     secrets: inherit
 
@@ -154,7 +154,7 @@ jobs:
       - linux-jammy-py3_10-clang18-asan-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-clang18-asan
+      build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
@@ -182,7 +182,7 @@ jobs:
       - linux-jammy-py3_10-clang12-onnx-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-clang12-onnx
+      build-environment: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.test-matrix }}
     secrets: inherit
@@ -219,7 +219,7 @@ jobs:
       - linux-jammy-py3_10-clang12-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-clang12
+      build-environment: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.test-matrix }}
     secrets: inherit
@@ -254,7 +254,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_14-clang12-build
     with:
-      build-environment: linux-jammy-py3.14-clang12
+      build-environment: ${{ needs.linux-jammy-py3_14-clang12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_14-clang12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang12-build.outputs.test-matrix }}
     secrets: inherit
@@ -342,7 +342,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cuda12_8-py3_10-gcc11-inductor-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm75
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
