@@ -3,7 +3,7 @@
 import contextlib
 import warnings
 from logging import getLogger
-from typing import Optional, Union, Tuple
+from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
@@ -550,7 +550,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
     def get_sharding_spec(
         self, name: str
-    ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
         if name not in self.rng_states:
             raise RuntimeError(
                 f"{self.__class__.__name__} does not have random state for {name}"
@@ -570,8 +570,8 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
     def set_sharding_spec(
         self,
         name: str,
-        sharding_spec: Tuple[
-            Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]
+        sharding_spec: tuple[
+            tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
         ],
         offset: int,
     ) -> None:
