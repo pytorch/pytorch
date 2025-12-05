@@ -153,6 +153,7 @@ class CooperativeReductionTests(TestCase):
             )
         return source_code
 
+    @slowTest
     @parametrize(
         "name",
         [
@@ -229,6 +230,7 @@ class CooperativeReductionTests(TestCase):
         )
         self.assertEqual(source_code.count(f"empty_strided_{GPU_TYPE}"), 5)
 
+    @slowTest
     def test_reduce_split(self):
         def fn(a, b):
             a1 = torch.linalg.vector_norm(a)
