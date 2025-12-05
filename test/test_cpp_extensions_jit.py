@@ -9,6 +9,7 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
@@ -193,15 +194,12 @@ class TestCppExtensionJIT(common.TestCase):
             },
         ]
         if IS_LINUX:
-            # In the case of virtual environment python .so library will be located at paths
-            # returned by python config in ldflags.
-            result = subprocess.run(
-                ["python3-config", "--ldflags"],
-                check=True,
-                capture_output=True,
-                text=True,
+            # In the case of virtual environment python .so library will be located at LIBDIR
+            # returned by python sysconfig.
+            (libdir,) = sysconfig.get_config_vars("LIBDIR")
+            lib_python = (
+                f"-L{libdir} -lpython{sys.version_info.major}.{sys.version_info.minor}"
             )
-            lib_python = f"{result.stdout.strip()} -lpython{sys.version_info.major}.{sys.version_info.minor}"
             cases.append(
                 {
                     # Testing that we link with all potentially required dependencies.
