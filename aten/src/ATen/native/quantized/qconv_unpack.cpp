@@ -86,6 +86,7 @@ class QConv1dUnpackWeightsInt8 final {
     std::optional<at::Tensor> bias;
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
+
         ctx.qEngine() == at::QEngine::X86) {
       std::tie(weight, bias) = packed_weight->unpack();
       weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
