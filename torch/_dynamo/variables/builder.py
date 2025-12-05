@@ -3682,11 +3682,15 @@ def wrap_to_fake_tensor_and_record(
         # we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
         # can check it to know if they are running in an eager context or not
         with enable_python_dispatcher():
+            # FakeTensors made here can hold on to the FakeTensorMode longer than needed, so they will only hold a weak
+            # reference to the FakeTensorMode and use the TracingContext to keep it alive, except in Export where the
+            # FakeTensors keep the FakeTensorMode alive
             fake_e = wrap_fake_exception(
                 lambda: tx.fake_mode.from_tensor(
                     e,
                     source=source,
                     symbolic_context=symbolic_context,
+                    strong_fake_mode=tx.fake_mode.fake_tensor_converter.export,
                 )
             )
         if (

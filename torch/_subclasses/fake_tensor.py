@@ -364,6 +364,7 @@ class FakeTensorConverter:
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
+        strong_fake_mode: bool = True,
     ) -> FakeTensor:
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -411,6 +412,7 @@ class FakeTensorConverter:
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
                     constant=constant,
+                    strong_fake_mode=strong_fake_mode,
                 )
 
         out = self.meta_converter(
@@ -653,7 +655,9 @@ class FakeTensor(Tensor):
     """
 
     fake_device: torch.device
-    fake_mode: FakeTensorMode
+    _fake_mode: Optional[FakeTensorMode]
+    _fake_mode_ref: Optional[weakref.ReferenceType[FakeTensorMode]]  # Store as weakref
+    _strong_fake_mode: bool = True
     constant: Optional[Tensor]
     real_tensor: Optional[Tensor]
 
@@ -681,12 +685,50 @@ class FakeTensor(Tensor):
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
 
     @property
+    def fake_mode(self) -> FakeTensorMode:
+        """Access the FakeTensorMode.
+
+        In general we use a strong reference to keep the mode alive, but in
+        wrap_to_fake_tensor_and_record we use a weak reference to allow garbage
+        collection and prevent reference cycles (Python 3.14 issue).
+        """
+        # If we have a strong reference, use it
+        if self._fake_mode is not None:
+            return self._fake_mode
+
+        # Otherwise, dereference the weak reference
+        assert self._fake_mode_ref is not None, "Neither strong nor weak ref set"
+        mode = self._fake_mode_ref()
+        if mode is None:
+            raise RuntimeError(
+                "FakeTensorMode has been garbage collected. "
+                "This usually means the FakeTensor outlived its FakeTensorMode. "
+                "Either use strong_fake_mode=True or keep a strong reference to the FakeTensorMode."
+            )
+        return mode
+
+    @fake_mode.setter
+    def fake_mode(self, value: FakeTensorMode) -> None:
+        # Store fake_mode as strong ref or weak ref based on usage context because
+        # we need to break reference cycles that prevent garbage collection in Python 3.14+.
+        if self._strong_fake_mode:
+            self._fake_mode = value
+            self._fake_mode_ref = None
+        else:
+            self._fake_mode = None
+            self._fake_mode_ref = weakref.ref(value)
+
+    @property
     # pyrefly: ignore [bad-override]
     def device(self) -> torch.device:
-        if self.fake_mode.in_kernel_invocation:
-            return torch.device("meta")
-        else:
-            return self.fake_device
+        # Handle the case where fake_mode has been GC'd (Python 3.14 with weakrefs)
+        try:
+            if self.fake_mode.in_kernel_invocation:
+                return torch.device("meta")
+        except RuntimeError:
+            # FakeTensorMode was garbage collected, just return fake_device
+            pass
+        return self.fake_device
 
     @device.setter
     def device(self, _: torch.device) -> None:
@@ -729,6 +771,7 @@ class FakeTensor(Tensor):
         real_tensor: Optional[Tensor] = None,
         pytype: Optional[type[Tensor]] = None,
         dispatch_keys: Optional[torch.DispatchKeySet] = None,
+        strong_fake_mode: bool = True,
     ) -> Self:
         self = Tensor._make_subclass(
             cls,
@@ -777,7 +820,10 @@ class FakeTensor(Tensor):
                 device = torch.device(f"{device.type}:0")
         # pyrefly: ignore [read-only]
         self.fake_device = device
+
+        self._strong_fake_mode = strong_fake_mode
         self.fake_mode = fake_mode
+
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
@@ -3052,6 +3098,7 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
+        strong_fake_mode: bool = True,
     ) -> FakeTensor:
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -3068,6 +3115,7 @@ class FakeTensorMode(TorchDispatchMode):
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
+            strong_fake_mode=strong_fake_mode,
         )
 
 
