@@ -4595,10 +4595,11 @@ class TestCase(expecttest.TestCase):
         import subprocess
 
         with subprocess.Popen(
-            [sys.executable, '-c', code],
+            [sys.executable, "-c", code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env) as p:
+            env=env,
+        ) as p:
             (stdout, stderr) = p.communicate()
             return (stdout, stderr)
 
