@@ -10,6 +10,8 @@ if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/n
     export ROCM_BIN="$(python3 -m rocm_sdk path --bin 2>/dev/null || echo ${ROCM_PATH}/bin)"
     export ROCM_CMAKE="$(python3 -m rocm_sdk path --cmake 2>/dev/null || echo ${ROCM_PATH})"
     export ROCM_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+    # theRock bundles system dependencies like libdrm in rocm_sysdeps
+    export ROCM_SYSDEPS_INCLUDE="${ROCM_PATH}/lib/rocm_sysdeps/include"
 else
     # Traditional installation
     export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"

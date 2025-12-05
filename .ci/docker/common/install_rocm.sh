@@ -71,6 +71,11 @@ install_ubuntu() {
       export PATH="${ROCM_BIN}:${PATH}"
       export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
 
+      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
+      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
+      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
+      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+
       # Write environment to file that build.sh can source
       cat > /etc/rocm_env.sh << ROCM_ENV
 export ROCM_PATH="${ROCM_HOME}"
@@ -78,6 +83,9 @@ export ROCM_HOME="${ROCM_HOME}"
 export PATH="${ROCM_BIN}:\${PATH}"
 export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
 export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
+export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
+export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 ROCM_ENV
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
