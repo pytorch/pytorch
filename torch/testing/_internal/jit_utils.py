@@ -197,20 +197,24 @@ class JitTestCase(JitCommonTestCase):
     def _compared_saved_loaded(self, m):
         def extract_files(buffer):
             # crack open the zip format to get at the main module code
-            archive = zipfile.ZipFile(buffer)
-            # check that we have no duplicate names
-            self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
-            files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
-            # unwrap all the code files into strings
-            code_files_str = filter(lambda x: x.endswith('.py'), files)
-            code_files_stream = (archive.open(f) for f in code_files_str)
-            code_files = ("".join([line.decode() for line in file]) for file in code_files_stream)
+            with zipfile.ZipFile(buffer) as archive:
+                # check that we have no duplicate names
+                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
+                files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
+                # unwrap all the code files into strings
+                code_files_str = filter(lambda x: x.endswith('.py'), files)
+                code_files = []
+                for f in code_files_str:
+                    with archive.open(f) as stream:
+                        code_files.append("".join([line.decode() for line in stream]))
 
-            # unpickled all the debug files
-            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files_stream = (archive.open(f) for f in debug_files_str)
-            debug_files = (pickle.load(f) for f in debug_files_stream)
-            return code_files, debug_files
+                # unpickled all the debug files
+                debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+                debug_files = []
+                for f in debug_files_str:
+                    with archive.open(f) as stream:
+                        debug_files.append(pickle.load(stream))
+                return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch._jit_internal._disable_emit_hooks():
