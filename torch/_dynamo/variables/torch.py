@@ -227,17 +227,10 @@ def get_overridable_functions():
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more: set[Callable[..., Any]] = {
-        torch.ones,
-        torch.ones_like,
-        torch.zeros,
-        torch.zeros_like,
-        torch.empty,
-        torch.full,
-    }
-    funcs.update(more)
+    funcs.update(_device_constructors())
     return funcs
 
 
@@ -1608,23 +1601,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 saved_out_shapes = (
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
-
-        from torch.utils._device import _device_constructors
-
-        # Check if we are calling a torch factory function which
-        # accepts device as a kwarg
-        if (
-            self.value in _device_constructors()
-            and tx.output.current_device is not None
-        ):
-            device_kwarg = kwargs.get("device")
-            # Check if the user provided a device kwarg
-            # other than None - if they did, honor their choice
-            if device_kwarg is None or (
-                isinstance(device_kwarg, ConstantVariable)
-                and device_kwarg.as_python_constant() is None
-            ):
-                kwargs["device"] = ConstantVariable.create(tx.output.current_device)
 
         tensor_variable = wrap_fx_proxy(
             tx=tx,
