@@ -104,7 +104,7 @@ def _get_total_norm(
             )
 
     total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
+        torch.cat([norm.to(first_device).flatten() for norm in norms]), norm_type
     )
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
