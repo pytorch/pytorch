@@ -70,7 +70,6 @@ class TestDevice(TestCase):
 
         self.assertEqual(torch.accelerator.current_device_index(), original_device)
 
-
     def test_device_switch_persistence(self):
         """Test that device switch persists across operations"""
         old_index = torch.accelerator.current_device_index()
@@ -89,8 +88,7 @@ class TestDevice(TestCase):
     def test_device_count_consistency(self):
         """Test device count consistency"""
         count = torch.accelerator.device_count()
-        self.assertGreater(count, 0)
-        self.assertLess(count, 10)  # Reasonable upper bound
+        self.assertEqual(count, 2)
 
         # Test that we can access all devices
         for i in range(count):
