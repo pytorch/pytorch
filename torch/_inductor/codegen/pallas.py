@@ -1178,8 +1178,9 @@ class PallasKernel(SIMDKernel):
                 # - Mixed indexing producing flat results needing reshape
                 # - Squeeze operations where value has more dims than output
                 # - If shapes already match, reshape is a no-op.
-                shape_str = ", ".join(str(s) for s in output_shape)
-                store_expr = f"{out}[...] = {value}.reshape({shape_str})"
+                # Use the output array's shape at runtime to avoid issues with
+                # symbolic sizes not being defined in the kernel.
+                store_expr = f"{out}[...] = {value}.reshape({out}.shape)"
             else:
                 # Direct indexed assignment
                 store_expr = f"{out}[{index_str}] = {value}"
