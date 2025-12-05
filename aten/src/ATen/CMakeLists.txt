@@ -800,16 +800,16 @@ if(USE_MPS)
         set(METALLIB_TARGETS kernels_basic.metallib)
 
         # Compile Metal 4.0 if supported
-        if(MPS_ENABLE_NAX)
+        if(MPS_METAL_4)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
-                string(CONCAT TGT_NAX ${TGT_STEM} "_40.air")
-                list(APPEND AIR_NAX ${TGT_NAX})
-                metal_to_air(${SHADER} ${TGT_NAX} "-std=metal4.0;-Wno-c++20-extensions")
+                string(CONCAT TGT_METAL4 ${TGT_STEM} "_40.air")
+                list(APPEND AIR_METAL4 ${TGT_METAL4})
+                metal_to_air(${SHADER} ${TGT_METAL4} "-std=metal4.0;-Wno-c++20-extensions")
             endforeach()
 
-            air_to_metallib(kernels_nax.metallib ${AIR_NAX})
-            list(APPEND METALLIB_TARGETS kernels_nax.metallib)
+            air_to_metallib(kernels_metal4.metallib ${AIR_METAL4})
+            list(APPEND METALLIB_TARGETS kernels_metal4.metallib)
         endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp

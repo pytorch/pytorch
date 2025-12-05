@@ -18,16 +18,16 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY)
 
-# Check for NAX(Neural Accelerator) support based on Metal version and macOS SDK version
-if(MPS_METAL_VERSION GREATER_EQUAL 400 AND MACOS_SDK_VERSION GREATER_EQUAL 26.2)
-    set(MPS_ENABLE_NAX TRUE CACHE BOOL "Enable NAX support for MPS")
+# Check for Metal 4 support based on Metal version
+if(MPS_METAL_VERSION GREATER_EQUAL 400)
+    set(MPS_METAL_4 TRUE CACHE BOOL "Enable metal 4 for MPS")
 else()
-    set(MPS_ENABLE_NAX FALSE CACHE BOOL "Enable NAX support for MPS")
+    set(MPS_METAL_4 FALSE CACHE BOOL "Enable metal 4 for MPS")
 endif()
 
 set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
 
-if(MPS_ENABLE_NAX)
+if(MPS_METAL_4)
     set(METAL_FLAGS ${METAL_FLAGS} -Wno-c++20-extensions -std=metal4.0)
     list(APPEND METAL_CFLAGS ${METAL_FLAGS})
 endif()
