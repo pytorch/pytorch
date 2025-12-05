@@ -440,8 +440,7 @@ def check_model(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
-    # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -677,8 +676,7 @@ def check_model_gpu(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
-    # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -825,6 +823,8 @@ class SweepInputs2:
                     getattr(cls.gen, name1)(),
                     getattr(cls.gen, name2)(),
                 ),
+                # TODO: Fix this
+                exact_stride=False,
             )
 
         test.__name__ = f"test_{cls.gen.device}_{name1}_{name2}"
@@ -6347,6 +6347,8 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+            # TODO: Fix this
+            exact_stride=False,
         )
 
         with self.assertRaises(RuntimeError):
