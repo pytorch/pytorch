@@ -1030,33 +1030,106 @@ class PallasKernel(SIMDKernel):
         where tmp0 is loaded from indices and i0 is the iteration variable.
 
         We need to convert this to JAX advanced indexing with proper broadcasting.
+        When there are multiple iteration variables, they need different shapes
+        to form an outer product (grid) rather than broadcasting together.
         """
         # Get iteration variables
         iter_vars = OrderedSet(self.range_tree_nodes.keys())
         free_symbols = index.free_symbols
-        used_iter_vars = sorted(free_symbols & iter_vars, key=str)
+        used_iter_vars_set = free_symbols & iter_vars
 
-        if len(used_iter_vars) == 0:
+        if len(used_iter_vars_set) == 0:
             return self.kexpr(index)
 
-        index_str = self.kexpr(index)
-        indirect_vars = [str(sym) for sym in free_symbols if str(sym).startswith("tmp")]
+        # Sort iteration variables by their coefficient (stride) in the index expression.
+        # Variables with larger strides correspond to earlier output dimensions.
+        def get_coefficient(var):
+            """Extract the coefficient of a variable in the index expression."""
+            coeff = index.coeff(var)
+            if coeff == 0:
+                # Variable appears in a more complex form, try differentiation
+                coeff = sympy.diff(index, var)
+            # Convert to int if possible for sorting
+            try:
+                return int(coeff)
+            except (TypeError, ValueError):
+                return 0
 
+        used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
+        iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
+
+        index_str = self.kexpr(index)
+        indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
+        indirect_vars = [str(sym) for sym in indirect_var_syms]
+
+        # Get coefficients for indirect vars to determine output ordering
+        indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
+
+        # Build a sorted list of all components by coefficient (descending)
+        # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
+        all_components = []
+        for var in used_iter_vars:
+            all_components.append((get_coefficient(var), "iter", var))
+        for sym in indirect_var_syms:
+            all_components.append((get_coefficient(sym), "indirect", sym))
+        all_components.sort(key=lambda x: x[0], reverse=True)
+
+        # Calculate trailing dims needed for each component
+        # Each component needs trailing dims for all subsequent iter vars
+        # plus trailing dims for all dimensions of subsequent indirect vars
+        # For simplicity, assume each indirect var contributes some dimensions
+        # that will be handled by the reshape at store time
+
+        # For iter vars, we need to count how many dimensions come after in the output
         for i, var in enumerate(used_iter_vars):
             var_name = str(var)
             if var in self.range_tree_nodes:
                 range_entry = self.range_tree_nodes[var]
                 range_size = range_entry.length
+                var_coeff = get_coefficient(var)
 
                 arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                if indirect_vars:
-                    arange_expr = f"{arange_expr}[None, :]"
+
+                # Count trailing dims needed:
+                # - One for each subsequent iter var (with smaller coeff)
+                # - One for each dimension of indirect vars with smaller coeff
+                # For indirect vars, assume each contributes 2 dims (common case)
+                # The actual reshape at store time will fix any shape mismatches
+                n_trailing_iter = sum(1 for c in iter_coeffs if c < var_coeff)
+                n_trailing_indirect = sum(
+                    2 for c in indirect_coeffs.values() if c < var_coeff
+                )
+                n_trailing = n_trailing_iter + n_trailing_indirect
+
+                if n_trailing > 0:
+                    trailing_dims = ", None" * n_trailing
+                    arange_expr = f"{arange_expr}[:{trailing_dims}]"
 
                 index_str = index_str.replace(var_name, arange_expr)
 
-        # Reshape indirect variables for proper broadcasting
+        # Reshape indirect variables for proper broadcasting.
         for indirect_var in indirect_vars:
-            index_str = index_str.replace(indirect_var, f"{indirect_var}[:, None]")
+            indirect_coeff = indirect_coeffs[indirect_var]
+
+            # Count dims needed before and after this indirect var
+            n_leading = sum(1 for c in iter_coeffs if c > indirect_coeff)
+            n_trailing = sum(1 for c in iter_coeffs if c < indirect_coeff)
+
+            # Build the indexing expression with leading Nones, ellipsis, trailing Nones
+            if n_leading > 0 and n_trailing > 0:
+                leading_nones = "None, " * n_leading
+                trailing_nones = ", None" * n_trailing
+                reshape_expr = f"{indirect_var}[{leading_nones}...{trailing_nones}]"
+            elif n_leading > 0:
+                leading_nones = "None, " * n_leading
+                reshape_expr = f"{indirect_var}[{leading_nones}...]"
+            elif n_trailing > 0:
+                trailing_nones = ", None" * n_trailing
+                reshape_expr = f"{indirect_var}[...{trailing_nones}]"
+            else:
+                reshape_expr = indirect_var
+
+            index_str = index_str.replace(indirect_var, reshape_expr)
 
         return index_str
 
@@ -1074,12 +1147,9 @@ class PallasKernel(SIMDKernel):
 
         # Check if this is a scalar output (reduction to scalar)
         # Only shape () is a true scalar, not (1,) which is a 1-element tensor
-        try:
-            buf = V.graph.get_buffer(name)
-            output_shape = buf.get_size()
-            is_scalar = len(output_shape) == 0
-        except Exception:
-            is_scalar = False
+        buf = V.graph.get_buffer(name)
+        output_shape = buf.get_size()
+        is_scalar = len(output_shape) == 0
 
         if is_scalar:
             # For scalar outputs, use [...] to assign the entire scalar
@@ -1096,6 +1166,13 @@ class PallasKernel(SIMDKernel):
                 # GPU masked store: flatten tensor and apply per-tensor mask
                 mask_var = self._get_or_create_mask(name)
                 store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            elif index_str == "..." and len(output_shape) > 1:
+                # When storing the full array to a multi-dimensional output,
+                # the value may have been produced by mixed indexing (flatten + index)
+                # which creates a flat result. Reshape to match the output shape.
+                # If shapes already match, reshape is a no-op.
+                shape_str = ", ".join(str(s) for s in output_shape)
+                store_expr = f"{out}[...] = {value}.reshape({shape_str})"
             else:
                 # Direct indexed assignment
                 store_expr = f"{out}[{index_str}] = {value}"
