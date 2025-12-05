@@ -242,7 +242,7 @@ class <lambda>(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "autograd.grad with external grad_fn input",
+            r"autograd.grad with external grad_fn \(input\)",
         ):
             fn(external_computation)
 
