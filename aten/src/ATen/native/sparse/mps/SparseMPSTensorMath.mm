@@ -1117,7 +1117,6 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   return result;
 }
 
-  
 Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& index) {
   TORCH_CHECK(self_.is_sparse(), "index_select_sparse_mps: expected a sparse COO tensor");
   TORCH_CHECK(self_.is_mps(), "index_select_sparse_mps: expected 'self' to be on MPS, got ", self_.device());
