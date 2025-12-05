@@ -623,6 +623,11 @@ Available options:
   on all the CUDA devices to a specified fraction of the available memory. This is a value
   between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
 
+* ``memset_value`` option will call cudaMemsetAsync on all allocations returned from the
+  allocator. This is a debugging feature. For example, poison memory using 255 or clear
+  memory with 0. Value must be between 0 and 255, inclusive. Otherwise the content of
+  returned memory is undefined, as usual.
+
 .. note::
 
     Some stats reported by the
