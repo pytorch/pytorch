@@ -156,6 +156,14 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "recompile_stack",
+    "Prints the full stack trace for each guard failure during recompilation. "
+    "Shows the complete call stack where the guard was created, making it easier "
+    "to debug guard failures that occur deep in utility functions.",
+    visible=True,
+    off_by_default=True,
+)
+register_artifact(
     "graph_breaks",
     "Prints whenever Dynamo decides that it needs to graph break (i.e. create a new graph). Useful for debugging why torch.compile has poor performance",
     visible=True,
