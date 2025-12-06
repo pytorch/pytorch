@@ -127,6 +127,7 @@ SPECIAL_NUMBERS = {
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 FLOAT8_SATURATING_DYTPES = [torch.float8_e4m3fn]
 
+
 def _int_bits_to_float(x):
     y = struct.unpack("!f", struct.pack("!I", x))[0]
     return y
