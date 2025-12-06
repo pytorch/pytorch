@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
+    TEST_WITH_ROCM,
     TestCase,
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
@@ -1613,14 +1614,24 @@ class TestUnaryUfuncs(TestCase):
     @onlyCUDA
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
-    @skipIfRocm(msg="ROCM tries to allocate 60GB")
     def test_nonzero_large(self, device, dtype):
-        indices = (
-            torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
-            torch.tensor((0, 1, 1, 1, 0, 1, 0, 1, 0, 0)),
-        )
+        # Use smaller tensor size for ROCm to avoid excessive memory allocation
+        if TEST_WITH_ROCM:
+            # ROCm: use 2^29 elements instead of 2^31 to fit in reasonable memory
+            tensor_size = 2**29 - 1
+            indices = (
+                torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**28, 2**29 - 3, 2**29 - 2)),
+                torch.tensor((0, 1, 1, 1, 0, 1, 0, 1, 0, 0)),
+            )
+        else:
+            # CUDA: use full 2^31 size
+            tensor_size = 2**31 - 1
+            indices = (
+                torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
+                torch.tensor((0, 1, 1, 1, 0, 1, 0, 1, 0, 0)),
+            )
 
-        x = torch.zeros(2**31 - 1, 2, device=device, dtype=dtype)
+        x = torch.zeros(tensor_size, 2, device=device, dtype=dtype)
         x[indices[0], indices[1]] = 1
         y = torch.nonzero(x, as_tuple=True)
         self.assertEqual(y, indices)
