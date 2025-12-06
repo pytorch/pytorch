@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <cassert>
 #include <cstdint>
 

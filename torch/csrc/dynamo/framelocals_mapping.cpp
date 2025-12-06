@@ -1,5 +1,6 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
+#include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 

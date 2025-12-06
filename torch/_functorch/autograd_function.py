@@ -811,9 +811,11 @@ class DynamoAutogradFunctionTraceHelper:
                     new_outs.append(out)
             return tuple(new_outs)
 
-            # TODO - there is missing functionality here, where autograd.Function
-            # overwrites the requires_grad_ of the output tensors depending on the
-            # `mark_non_differentiable`. Currently, this is handled hackily in
-            # Dynamo, where we just overwrite the variable trackers requires_grad.
+            # TODO - there is missing functionality here, where
+            # autograd.Function overwrites the requires_grad_ of the output
+            # tensors depending on the `mark_non_differentiable`. Currently,
+            # this is handled hackily in Dynamo, where we just overwrite the
+            # variable trackers requires_grad. Refer to the function -
+            # overwrite_tensor_vt_requires_grad
 
         return inner

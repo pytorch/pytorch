@@ -1,4 +1,5 @@
 //NS: CUDACachingAllocator must be included before to get CUDART_VERSION definedi
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/cuda/Exceptions.h>
 
