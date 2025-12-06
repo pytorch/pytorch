@@ -10965,7 +10965,8 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
-    def test_grid_sample(self):
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_grid_sample(self, dtype):
         def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
                 for grid_dim_contig_order in [(0, 1, 2, 3), (0, 3, 1, 2), (3, 0, 1, 2), (0, 2, 1, 3)]:
@@ -10986,18 +10987,18 @@ class TestConvolutionMPS(TestCaseMPS):
                             assert list(data.shape) == grid_shape
                             data = data.permute(grid_dim_contig_order).to(device)
                         else:
-                            data = torch.randn(grid_init_shape, device=device)
+                            data = torch.randn(grid_init_shape, device=device, dtype=dtype)
                         grid = data.permute(grid_fwd_permute)
                         assert grid.permute(grid_dim_contig_order).is_contiguous()
                         return grid
 
-                    input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
+                    input_cpu = torch.randn(C, N, IH, IW, dtype=dtype).transpose(0, 1).requires_grad_(input_requires_grad)
                     grid_cpu = get_grid().requires_grad_()
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
                     self.assertEqual(out_cpu.size(), torch.Size([N, C, H, W]))
 
-                    gradients = torch.randn_like(out_cpu)
+                    gradients = torch.randn_like(out_cpu, dtype=dtype)
                     out_cpu.backward(gradients)
 
 
@@ -11096,6 +11097,8 @@ class TestConvolutionMPS(TestCaseMPS):
             W = random.randint(3, IW + 2)
             test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
 
+        if dtype != torch.float32:
+            return
         for mode in ('bilinear', 'nearest'):
             for padding_mode in ('zeros', 'reflection'):
                 for align_corners in (True, False):
@@ -11103,7 +11106,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     input = torch.arange(1., 11, device="mps").view(1, 1, 2, 5)
                     grid = torch.tensor(
                         [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
-                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
+                        [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -11198,7 +11201,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     else:
                         raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                           align_corners=align_corners)
+                                        align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
@@ -13065,6 +13068,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestConvolutionMPS)
 
 if __name__ == "__main__":
     run_tests()
