@@ -908,16 +908,13 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
     for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
-      events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      streams[i].synchronize();
     }
   }
 
@@ -1261,16 +1258,13 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
-      events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      streams[i].synchronize();
     }
   }
 
@@ -1456,16 +1450,13 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
       for (const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
-      outputEvents[i].record(outputStreams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputStreams[i].synchronize();
     }
   }
 
@@ -1903,16 +1894,13 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
       for (const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
-      outputEvents[i].record(outputStreams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputStreams[i].synchronize();
     }
   }
 
@@ -2116,16 +2104,13 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     for (const auto i : c10::irange(outputs.size())) {
       guard.reset_stream(outputStreams[i]);
       outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
-      outputEvents[i].record(outputStreams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputStreams[i].synchronize();
     }
   }
 

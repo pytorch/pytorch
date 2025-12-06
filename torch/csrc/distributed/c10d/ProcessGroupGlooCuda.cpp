@@ -3,7 +3,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <utility>
 
-#include <gloo/cuda_allreduce_ring_chunked.h>
+#include <gloo/hip_allreduce_ring_chunked.h>
 
 namespace c10d {
 
@@ -36,7 +36,7 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
       ptrs.push_back(static_cast<T*>(tensor.data_ptr()));
     }
     algo = std::make_unique<
-        gloo::CudaAllreduceRingChunked<T, gloo::CudaDeviceWorkspace<T>>>(
+        gloo::HipAllreduceRingChunked<T, gloo::HipDeviceWorkspace<T>>>(
         context_, ptrs, count);
   }
 
@@ -112,16 +112,13 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
     for (const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
-      events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      streams[i].synchronize();
     }
   }
 
