@@ -22,7 +22,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, IS_SM89, PLATFORM_SUPPORTS_FP8, xfailIfSM89, xfailIfSM89PreCUDA13
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, xfailIfSM89PreCUDA13
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
