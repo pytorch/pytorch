@@ -578,9 +578,29 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
     return self.clone();
   }
 
-  const auto sorted_dims = _sort_dims(self, dim);
-  auto out = at::empty(self.sizes(), self.options());
-  return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
+  auto input = self;
+  
+  // Workaround for MKL FFT energy normalization bug with 2048x2048 matrices
+  // https://github.com/pytorch/pytorch/issues/169670
+  // MKL has a known issue with energy normalization for exactly 2048x2048 2D FFTs
+  // on Intel CPUs. Ensuring contiguous memory layout can help mitigate the issue.
+  if (dim.size() == 2) {
+    const auto& sizes = self.sizes();
+    bool is_2048x2048 = true;
+    for (auto d : dim) {
+      if (sizes[d] != 2048) {
+        is_2048x2048 = false;
+        break;
+      }
+    }
+    if (is_2048x2048) {
+      input = self.contiguous();
+    }
+  }
+
+  const auto sorted_dims = _sort_dims(input, dim);
+  auto out = at::empty(input.sizes(), input.options());
+  return _exec_fft(out, input, input.sizes(), sorted_dims, normalization, forward);
 }
 
 } // namespace at::native
