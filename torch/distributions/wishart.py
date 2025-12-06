@@ -131,6 +131,7 @@ class Wishart(ExponentialFamily):
                 stacklevel=2,
             )
 
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 

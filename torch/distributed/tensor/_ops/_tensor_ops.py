@@ -1006,6 +1006,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
             cost_values_spec = generate_redistribute_costs(values_spec, new_values_spec)
             op_strategy.strategies.append(
                 OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     input_specs=(
                         new_in_spec,
                         *new_indices_spec,  # type: ignore[arg-type]

@@ -264,6 +264,7 @@ def cudagraphs_inner(
     """This isn't registered as a backend, but is used in some benchmarks"""
     assert isinstance(inputs, (list, tuple))
     if copy_inputs:
+        # pyrefly: ignore [bad-argument-type]
         static_inputs = [torch.zeros_like(x) for x in inputs]
     else:
         static_inputs = list(inputs)

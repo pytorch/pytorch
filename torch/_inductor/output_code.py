@@ -824,6 +824,7 @@ class CompiledAOTI(OutputCode):
             current_callable = self.filename
 
         if isinstance(current_callable, torch.fx.GraphModule):
+            # pyrefly: ignore [bad-assignment]
             self.current_callable = current_callable
             return
 

@@ -2400,19 +2400,20 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index]
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or

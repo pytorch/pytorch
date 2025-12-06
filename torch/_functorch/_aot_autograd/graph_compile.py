@@ -280,7 +280,10 @@ def aot_stage2_export(
     # We still run these wrappers to make sure that they're not needed pre compile,
     # but we technically don't need to run them post compile at all here.
     compiled_fn, aot_state.fw_metadata = post_compile(
-        wrappers, graph, aot_config, runtime_metadata=aot_state.fw_metadata
+        wrappers,
+        graph,  # pyrefly: ignore [bad-argument-type]
+        aot_config,
+        runtime_metadata=aot_state.fw_metadata,
     )
 
     # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
@@ -1956,6 +1959,7 @@ def _aot_stage2b_bw_compile(
             saved_compile_context = CompileContext.try_get()
 
             lazy_backward_info = AutogradLazyBackwardCompileInfo(
+                # pyrefly: ignore [bad-argument-type]
                 bw_module,
                 placeholder_list,
                 saved_context,

@@ -978,6 +978,7 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
+                # pyrefly: ignore [bad-instantiation]
                 return type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
