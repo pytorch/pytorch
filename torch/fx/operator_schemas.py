@@ -544,6 +544,7 @@ def _args_kwargs_to_normalized_args_kwargs(
 
     # Don't currently support positional-only
     # or varargs (*args, **kwargs) signatures
+    num_pos_only_params = 0
     supported_parameter_types = {
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
@@ -555,6 +556,11 @@ def _args_kwargs_to_normalized_args_kwargs(
         # positional-only args, but at the same time they could be dispatched as kwargs
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
+        else:
+            num_pos_only_params = sum(
+                p.kind == inspect.Parameter.POSITIONAL_ONLY
+                for p in sig.parameters.values()
+            )
 
     bound_args = sig.bind(*args, **kwargs)
     bound_args.apply_defaults()
@@ -563,6 +569,8 @@ def _args_kwargs_to_normalized_args_kwargs(
     new_args: list[Any] = []
     for i, param in enumerate(sig.parameters):
         if not normalize_to_only_use_kwargs and i < len(args):
+            new_args.append(bound_args.arguments[param])
+        elif i < num_pos_only_params:
             new_args.append(bound_args.arguments[param])
         else:
             new_kwargs[param] = bound_args.arguments[param]
