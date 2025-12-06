@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/CallOnce.h>
 
+#include <ATen/cuda/CUDAConfig.h>
 #include <deque>
 #include <vector>
 
