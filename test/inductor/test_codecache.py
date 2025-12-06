@@ -3060,7 +3060,6 @@ class TestAutotuneCache(TestCase):
             self.reset()
             f_compiled(a, b, c, d, e, f)
 
-
             self.assertEqual(global_stats.autotune_local, Stats(2, 1, 1))
 
             self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
