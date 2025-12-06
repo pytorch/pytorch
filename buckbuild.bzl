@@ -979,6 +979,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":generated-version-header",
+            third_party("libkineto_headers"),
         ],
     )
 
