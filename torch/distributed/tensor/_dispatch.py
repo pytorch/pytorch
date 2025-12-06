@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -154,6 +155,17 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
         }
 
+    # ********************************************************************************************
+    # def dispatch(...)
+    #
+    # NOTE: this class no longer contains the top-level dispatch entrypoint!
+    # See #167051 for details
+    #
+    # The entrypoint has been moved to C++, and it handles common cases and then calls back into
+    # OpDispatcher python to handle corner cases.
+    # See dispatchDTensorOp() defined in python_variable.cpp and called from python_arg_parser.cpp
+    # ********************************************************************************************
+
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
     # as implicitly replicated or we throw error to user.
     # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
@@ -166,17 +178,39 @@ class OpDispatcher:
     def _allow_implicit_replication(self, value: bool) -> None:
         return torch._C._set_dtensor_allow_implicit_replication(value)
 
-    def _propagate_op_sharding_non_cached_dispatch_slow_path(
+    def _propagate_op_sharding_dispatch_slow_path(
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
         kwargs: dict[str, object],
         op_info: OpInfo,
+        # The logic here is a bit messy.  There are several reasons why the
+        # C++ fastpath may have bailed out.  If we just cache missed, we will
+        # come here because we need to actually calculate the real thing.
+        # There's no need to have a SECOND Python cache lookup; the C++ native
+        # cache completely subsumes it.  But sometimes, we will have failed
+        # to compute the cache key in C++ entirely.  In this case, we DO need
+        # to do a cache lookup in Python, as the missing cache key in C++
+        # means we don't have access to it all.  Furthermore, without duping
+        # this function, we need to do the try_cache test inside of the
+        # try-except block so that either case hits the inference mode /
+        # exception rewrapping case.
+        #
+        # This should be cleaned up.  First, ensuring the C++ codepath can
+        # always compute a key will be a big help.  Second, we should properly
+        # fastpath inference mode composite implicit autograd so that you
+        # don't have to throw an exception even in "fastpath".
+        try_cache: bool,
     ) -> object:
         try:
-            return self.sharding_propagator.propagate_op_sharding_non_cached(
-                op_info.schema
-            )
+            # We have basically inlined propagate() here, but WITHOUT the
+            # output_sharding assignment
+            if try_cache and not _are_we_tracing():
+                return self.sharding_propagator.propagate_op_sharding(op_info.schema)
+            else:
+                return self.sharding_propagator.propagate_op_sharding_non_cached(
+                    op_info.schema
+                )
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd

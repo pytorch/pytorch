@@ -354,6 +354,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
+      inductor/test_torchinductor \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -1763,12 +1764,14 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  test_inductor_set_cpu_affinity
+
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile

@@ -21,8 +21,13 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._redistribute import (
+    _gen_transform_infos,
+    use_min_cost_redistribution_plan,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -507,6 +512,7 @@ class RedistributeTest(DTensorTestBase):
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
@@ -877,6 +883,76 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
             )
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+    @with_comms
+    def test_force_min_cost_redistribution_plan(self):
+        """
+        Test that the disable_graph_based_transform context manager correctly controls
+        the redistribution algorithm selection (graph-based vs greedy).
+        """
+        # Set deterministic seed for reproducible tensor generation
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+
+        # the redistribution path differs if we use graph-based or greedy search solution
+        src_placement, src_order = (
+            [Shard(0), Shard(0), Shard(0)],  # All mesh dims shard tensor dim 0
+            (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),
+            ),  # Device order: 0→1→2
+        )
+        dst_placement, dst_order = (
+            [Shard(1), Shard(1), Shard(1)],  # All mesh dims shard tensor dim 1
+            (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1, 2)),
+            ),  # Device order: 0→1→2
+        )
+
+        # Test both graph-based (enable_graph=True) and greedy (enable_graph=False) algorithms
+        for idx, enable_graph in enumerate([True, False]):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(), mesh, src_placement, shard_order=src_order
+            )
+
+            with (
+                use_min_cost_redistribution_plan(enabled=enable_graph),
+                DebugMode(record_torchfunction=False) as debug_mode,
+            ):
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+
+            # Validate graph-based algorithm trace (idx=0, disable_graph=False)
+            # Graph-based uses optimal path search (Dijkstra's algorithm)
+            # Expected path has 6 transformations with strategic intermediate states
+            # Path: S(0)[0,1,2] → S(0)[0,1]S(2) → S(0)S(2)[1,0] →
+            #       S(1)S(2)[1,0] → S(1)[0,1]S(2) → S(1)[0,1,2]
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(2)->S(0)S(2)[1]S(2)[0]->S(1)S(2)[1]S(2)[0]->S(1)[0]S(1)[1]S(2)->S(1)[0]S(1)[1]S(1)[2]""",
+                )
+            # Validate greedy algorithm trace (idx=1, disable_graph=True)
+            # Greedy uses simple heuristic approach (processes mesh dims sequentially)
+            # Expected path has 6 transformations but with different intermediate states
+            # Path: S(0)[0,1,2] → S(0)[0,1]R → S(0)RR →
+            #       S(1)RR → S(1)[0,1]R → S(1)[0,1,2]
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(), mesh, dst_placement, shard_order=dst_order
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+            # Clear the transformation cache between iterations. Without this,
+            # the second iteration would use cached paths from the first,
+            # causing the trace validation to fail because:
+            _gen_transform_infos.cache_clear()
 
     @with_comms
     def test_generate_shard_orders(self):

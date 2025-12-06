@@ -968,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
@@ -7085,15 +7094,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(

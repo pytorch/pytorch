@@ -341,7 +341,7 @@ void Reducer::check_grad_layout(
         grad.sizes(),
         ", strides() = ",
         grad.strides(),
-        "\n",
+        '\n',
         "bucket_view.sizes() = ",
         bucket_view.sizes(),
         ", strides() = ",

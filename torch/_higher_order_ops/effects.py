@@ -91,7 +91,6 @@ class WithEffects(HigherOrderOperator):
     ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
-        assert has_effects(op)
         assert isinstance(kwargs, dict)
         return super().__call__(token, op, *args, **kwargs)
 
@@ -102,7 +101,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return not _get_effect(op)
+        return False
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:

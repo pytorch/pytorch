@@ -3159,7 +3159,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # to (body_node, lifted_args_tuple, {})
         body_node = p_args[0]
         lifted_args = p_args[1:]
-        p_args = (body_node, lifted_args, {})
+        p_args = (body_node, tuple(lifted_args), {})
 
         # add hints into p_kwargs
         p_kwargs = {}

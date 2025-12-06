@@ -391,4 +391,5 @@ package = 'torch'
   ".spin/cmds.py:regenerate_version",
   ".spin/cmds.py:regenerate_type_stubs",
   ".spin/cmds.py:regenerate_clangtidy_files",
+  ".spin/cmds.py:regenerate_github_workflows",
 ]

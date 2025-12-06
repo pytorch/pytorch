@@ -38,7 +38,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -96,6 +96,7 @@ from ..utils import (
 )
 from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable
+from .lists import SizeVariable
 
 
 try:
@@ -113,7 +114,7 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    from .lists import TupleVariable
+    from .constant import ConstantVariable
 
 
 def is_standard_setattr(val):
@@ -738,16 +739,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
-            from .lists import NamedTupleVariable  # XXX Today come back to this
 
-            return NamedTupleVariable(
+            return variables.NamedTupleVariable(
                 items, self.value, mutation_type=AttributeMutationNew()
             )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
-            from .lists import SizeVariable
-
             return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
@@ -917,7 +915,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
@@ -2020,8 +2018,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, dict_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
@@ -2093,8 +2089,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
-
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, set_vt=None, **kwargs):
         super().__init__(value, **kwargs)
@@ -2169,8 +2163,6 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, list_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
@@ -2212,17 +2204,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(
-        self,
-        value,
-        tuple_vt: Optional["TupleVariable"] = None,
-        init_args=None,
-        **kwargs,
-    ):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         super().__init__(value, init_args=init_args, **kwargs)
-        if tuple_vt is None:
+        self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
             )
@@ -2237,9 +2222,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
-
-        else:
-            self._tuple_vt = tuple_vt
 
     def call_method(
         self,
@@ -2262,8 +2244,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})

@@ -127,13 +127,14 @@ from torch._inductor.compile_fx import (
 )
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import (
+from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
+    HAS_TPU,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
@@ -2172,7 +2173,6 @@ class CommonTemplate:
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
-    @xfailIfS390X  # accuracy failure
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
@@ -2484,7 +2484,7 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
-    def test__dyn_quant_pack_4bit_weight(self):
+    def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
         k = 128
         n = 128
@@ -2517,10 +2517,52 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    @skip_if_halide  # bf16
+    def test__dyn_quant_pack_4bit_weight_bf16(self):
+        k = 128
+        n = 128
+        q_group = 32
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        torch.manual_seed(1)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(b, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            return b_int4pack
+
+        self.common(fn, (b, in_features, out_features))
+
+    @xfail_if_mps_unimplemented
+    @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
-    def test__dyn_quant_matmul_4bit(self):
+    def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
         m = 32
         k = 128
@@ -2559,6 +2601,68 @@ class CommonTemplate:
             return res
 
         self.common(fn, (a, q_group, in_features, out_features))
+
+    @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
+    @xfail_if_mps_unimplemented
+    @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    @skip_if_halide  # bf16
+    def test__dyn_quant_matmul_4bit_bf16_input(self):
+        m = 32
+        k = 128
+        n = 128
+        q_group = k
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+
+        # codegen_dynamic_shape test fails without explicitly marking these dynamic
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 1)
+
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(a, q_group, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            res = torch.ops.aten._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            return res
+
+        self.common(fn, (a, q_group, in_features, out_features), atol=1, rtol=0.5)
 
     def test_expanded_reduction(self):
         def fn(x, y):
@@ -15062,7 +15166,7 @@ if RUN_GPU:
         def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
-                return torch._grouped_mm(
+                return F.grouped_mm(
                     a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
                 )
 
