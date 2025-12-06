@@ -2670,9 +2670,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # and then doubled to 240 for wiggle room if our calculations
         # are slightly off
         if (num_workers := get_num_workers()) > 0:
-            import atexit
             self.executor = ThreadPoolExecutor(max_workers=num_workers)
-            atexit.register(self.executor.shutdown)
 
         # the autotuning will get occur in the scheduler, so there is
         # no guarantee that the first lowering for a given key will also be the
@@ -2690,6 +2688,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
+
+    def __del__(self) -> None:
+        # atexit can be problematic since we actually want to delete this
+        # when compile is finished, not just when the program terminates
+        if self.executor:
+            self.executor.shutdown(wait=True)
 
     def _register_default_preprocessing_fns(self):
         """Register default preprocessing functions."""
