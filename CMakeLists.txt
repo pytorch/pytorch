@@ -900,7 +900,7 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
     "x64 operating system is required for FBGEMM. "
     "Not compiling with FBGEMM. "
