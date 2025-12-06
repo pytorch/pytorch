@@ -237,6 +237,15 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
+            if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+                with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                    cast_fn = functools.partial(
+                        _cast_fp_tensor, self._mp_policy.param_dtype
+                    )
+                    args, kwargs = (
+                        _apply_to_tensors(cast_fn, args),
+                        _apply_to_tensors(cast_fn, kwargs),
+                    )
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
@@ -261,6 +270,14 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
+            if self._mp_policy.output_dtype is not None:
+                with torch.profiler.record_function("FSDP::cast_forward_outputs"):
+                    output = _apply_to_tensors(
+                        functools.partial(
+                            _cast_fp_tensor, self._mp_policy.output_dtype
+                        ),
+                        output,
+                    )
             return output
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
