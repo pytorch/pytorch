@@ -661,8 +661,10 @@ class ForeachTests(TestCase):
         )
 
         self.check_model_gpu(fn, inputs)
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
@@ -764,7 +766,10 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(fn, args)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
     def test_zero_elems(self):
@@ -1043,7 +1048,10 @@ class ForeachTests(TestCase):
         for ref, act in zip(tree_flatten(ref_inps)[0], tree_flatten(inps)[0]):
             torch.allclose(ref.grad, act.grad)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu
     def test_foreach_map_input_mutation(self):
@@ -1111,7 +1119,10 @@ class ForeachTests(TestCase):
         for ref, act in zip(ref_inp, inp):
             torch.allclose(ref.grad, act.grad)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
 
 if __name__ == "__main__":

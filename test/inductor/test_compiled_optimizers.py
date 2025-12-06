@@ -447,6 +447,7 @@ def make_test(
     **kwargs,
 ):
     @config.patch("score_fusion_memory_threshold", 1)
+    @config.patch("combo_kernels", False)
     def test_fn(self):
         stack = ExitStack()
         try:
@@ -535,6 +536,7 @@ def make_test(
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @config.patch("score_fusion_memory_threshold", 1)
+    @config.patch("combo_kernels", False)
     @requires_gpu
     def test_fn(self):
         torch._dynamo.reset()
@@ -590,6 +592,7 @@ class CompiledOptimizerParityTests(TestCase):
     @skipXPUIf(not has_triton(), "torch.compile with xpu requires triton")
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
+    @config.patch("combo_kernels", False)
     def test_correctness(self, device, dtype, optim_info, use_closure):
         torch.cuda.manual_seed_all(0)
         torch.manual_seed(0)

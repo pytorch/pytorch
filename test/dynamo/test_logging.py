@@ -239,8 +239,13 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
+    # When combo_kernels is enabled, there are 2 extra log records
+    test_inductor_debug = within_range_record_test(
+        3, 30 if torch._inductor.config.combo_kernels else 28, inductor=logging.DEBUG
+    )
+    test_inductor_info = within_range_record_test(
+        2, 12 if torch._inductor.config.combo_kernels else 10, inductor=logging.INFO
+    )
 
     @make_logging_test()
     def test_inductor_error(self, records):

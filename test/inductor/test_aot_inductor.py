@@ -5620,6 +5620,11 @@ class AOTInductorTestsTemplate:
             "triton_poi_fused_ones_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
+        if config.combo_kernels:
+            expected_scalar_args = [
+                "triton_poi_fused_0_xnumel",
+                "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+            ]
 
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
@@ -5791,6 +5796,11 @@ class AOTInductorTestsTemplate:
             expected_scalar_args = [
                 "buf4, u0",
                 "buf5, u0",
+                "buf5, buf6, buf4, u0",
+            ]
+        if config.combo_kernels:
+            expected_scalar_args = [
+                "buf4, buf5, buf6, u0, u0, u0",
                 "buf5, buf6, buf4, u0",
             ]
         # check the new behavior of codegen is expected
