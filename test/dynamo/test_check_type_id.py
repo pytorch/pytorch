@@ -64,14 +64,22 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
         matches = self._find_guard_lines(guard_str, "ID_MATCH")
         self.assertIn("___check_obj_id", matches[0])
         self.assertIn(
-            "type=<class '__main__.TestCheckTypeId.test_type_match_with_different_values.<locals>.Config'>",
+            ".TestCheckTypeId.test_type_match_with_different_values.<locals>.Config'>",
             matches[0],
         )
-        self.assertEqual(
-            matches[0].split("#")[0],
-            "| | +- ID_MATCH: ___check_obj_id(L['Config'], <type_id>), type=<class '__main__.TestCheckTypeId.\
-test_type_match_with_different_values.<locals>.Config'>  ",
+        # Match the first part (everything before "type=")
+        first_part = matches[0].split("type=")[0]
+        expected_first_part = (
+            "| | +- ID_MATCH: ___check_obj_id(L['Config'], <type_id>), "
         )
+        self.assertEqual(first_part, expected_first_part)
+
+        # Match the second part (the type string)
+        second_part = matches[0].split("type=")[1].rstrip()
+        expected_second_part = (
+            "TestCheckTypeId.test_type_match_with_different_values.<locals>.Config'>"
+        )
+        self.assertIn(expected_second_part, second_part)
 
     def test_type_match_with_custom_classes(self):
         """
@@ -110,11 +118,19 @@ test_type_match_with_different_values.<locals>.Config'>  ",
 
         guard_str = str(cache_entries[0].guard_manager)
         matches = self._find_guard_lines(guard_str, "TYPE_MATCH")
-        self.assertEqual(
-            matches[0].split("#")[0],
-            "| | +- TYPE_MATCH: ___check_type_id(L['point'], <type_id>), type=<class '__main__.\
-TestCheckTypeId.test_type_match_with_custom_classes.<locals>.Point'>  ",
+        # Match the first part (everything before "type=")
+        first_part = matches[0].split("type=")[0]
+        expected_first_part = (
+            "| | +- TYPE_MATCH: ___check_type_id(L['point'], <type_id>), "
         )
+        self.assertEqual(first_part, expected_first_part)
+
+        # Match the second part (the type string)
+        second_part = matches[0].split("type=")[1].rstrip()
+        expected_second_part = (
+            "TestCheckTypeId.test_type_match_with_custom_classes.<locals>.Point'>"
+        )
+        self.assertIn(expected_second_part, second_part)
 
 
 if __name__ == "__main__":

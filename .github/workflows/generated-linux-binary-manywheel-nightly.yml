@@ -405,7 +405,7 @@ jobs:
     needs:
       - manywheel-py3_10-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -521,7 +521,7 @@ jobs:
     needs:
       - manywheel-py3_10-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -627,7 +627,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1079,7 +1079,7 @@ jobs:
     needs:
       - manywheel-py3_11-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1195,7 +1195,7 @@ jobs:
     needs:
       - manywheel-py3_11-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1301,7 +1301,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1753,7 +1753,7 @@ jobs:
     needs:
       - manywheel-py3_12-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1869,7 +1869,7 @@ jobs:
     needs:
       - manywheel-py3_12-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1975,7 +1975,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2427,7 +2427,7 @@ jobs:
     needs:
       - manywheel-py3_13-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2543,7 +2543,7 @@ jobs:
     needs:
       - manywheel-py3_13-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2649,7 +2649,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -3101,7 +3101,7 @@ jobs:
     needs:
       - manywheel-py3_13t-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3217,7 +3217,7 @@ jobs:
     needs:
       - manywheel-py3_13t-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3323,7 +3323,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -3775,7 +3775,7 @@ jobs:
     needs:
       - manywheel-py3_14-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3891,7 +3891,7 @@ jobs:
     needs:
       - manywheel-py3_14-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3997,7 +3997,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4449,7 +4449,7 @@ jobs:
     needs:
       - manywheel-py3_14t-rocm7_0-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4565,7 +4565,7 @@ jobs:
     needs:
       - manywheel-py3_14t-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4671,7 +4671,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.2.1 | intel-cmplr-lib-ur==2025.2.1 | intel-cmplr-lic-rt==2025.2.1 | intel-sycl-rt==2025.2.1 | oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-sycl-blas==2025.2.0 | onemkl-sycl-dft==2025.2.0 | onemkl-sycl-lapack==2025.2.0 | onemkl-sycl-rng==2025.2.0 | onemkl-sycl-sparse==2025.2.0 | dpcpp-cpp-rt==2025.2.1 | intel-opencl-rt==2025.2.1 | mkl==2025.2.0 | intel-openmp==2025.2.1 | tbb==2022.2.0 | tcmlib==1.4.0 | umf==0.11.0 | intel-pti==0.13.1
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
