@@ -530,7 +530,7 @@ def with_comms(
             try:
                 func(self, *args, **kwargs)  # type: ignore[misc]
             except Exception as e:
-                dist.destroy_process_group()
+                # dist.destroy_process_group()
                 raise e
 
             self.destroy_pg()

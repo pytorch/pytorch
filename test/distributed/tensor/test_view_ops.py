@@ -775,14 +775,14 @@ class TestViewOps(DTensorTestBase):
         mesh_ndim = 2
         mesh: DeviceMesh = init_device_mesh(self.device_type, (3, self.world_size // 3))
 
-        # self._test_dtensor_flatten_2d_ss(
-        #     (12, 11),
-        #     0,
-        #     2,
-        #     mesh,
-        #     (Shard(0), Shard(1)),
-        # )
-        # return
+        self._test_dtensor_flatten_2d_ss(
+            (11, 11, 12),
+            0,
+            3,
+            mesh,
+            (Shard(1), Shard(2)),
+        )
+        return
 
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
@@ -848,17 +848,24 @@ class TestViewOps(DTensorTestBase):
                                 local_tensor_dims[shard_dim1] = math.ceil(
                                     local_tensor_dims[shard_dim1] * 1.0 / mesh.size(1)
                                 )
-                                assert False, (
-                                    "support uneven shard on last placement of a mesh, eg ((11, 11, 12), 0, 3, DeviceMesh((3, 2), 'cuda', stride=(2, 1)), (Shard(dim=1), Shard(dim=2)))"
-                                )
-                                with ctx:
-                                    self._test_dtensor_flatten_2d_ss(
-                                        tensor_dims,
-                                        flatten_start,
-                                        flatten_end,
-                                        mesh,
-                                        placements,
-                                    )
+                                # assert False, (
+                                #     "support uneven shard on last placement of a mesh, eg ((11, 11, 12), 0, 3, DeviceMesh((3, 2), 'cuda', stride=(2, 1)), (Shard(dim=1), Shard(dim=2)))"
+                                # )
+                                try:
+                                    with ctx:
+                                        print(f"rank={mesh.get_coordinate()}: start test", flush=True)
+                                        self._test_dtensor_flatten_2d_ss(
+                                            tensor_dims,
+                                            flatten_start,
+                                            flatten_end,
+                                            mesh,
+                                            placements,
+                                        )
+                                        print(f"rank={mesh.get_coordinate()}: end test", flush=True)
+                                except:
+                                    import fbvscode
+
+                                    fbvscode.set_trace()
 
                     # Replicate
                     # tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
@@ -942,6 +949,9 @@ class TestViewOps(DTensorTestBase):
                     dim=flatten_start, split_factor=split_factor
                 )
             # uneven shard on last flattened dim is supported
+            if mesh.get_coordinate() == [0, 0]:
+                import fbvscode
+                fbvscode.set_trace()
             if shard_dim == flatten_end - 1 and (
                 idx == len(placements) - 1
                 or all(p.dim == flatten_end - 1 for p in placements[idx + 1 :])
@@ -981,9 +991,11 @@ class TestViewOps(DTensorTestBase):
             tensor_dims, flatten_start, flatten_end
         )
 
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            inps_viewed = inps.view(viewed_tensor_dims)
+        # comm_mode = CommDebugMode()
+        # with comm_mode:
+        inps_viewed = inps.view(viewed_tensor_dims)
+
+        print(f"rank={mesh.get_coordinate()}: {inps_viewed.placements=}", flush=True)
 
         expected_placements = self._get_expected_placements_ss(
             tensor_dims,

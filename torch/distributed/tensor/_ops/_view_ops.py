@@ -722,17 +722,8 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
-    def _get_split_factor(mesh, local_tensor_shapes, input_start_idx, shard_dim, mesh_dim):
-        split_factor = 1
-        for tensor_dim, local_tensor_size_after_shard in enumerate(local_tensor_shapes):
-            if tensor_dim < input_start_idx:
-                continue
-            if tensor_dim >= shard_dim:
-                break
-            split_factor = split_factor * local_tensor_size_after_shard
-        return split_factor
 
-    def _rewrite_shard_dim(p: Shard, mesh, local_tensor_shapes, rule, mesh_dim):
+    def _rewrite_shard_dim(p: Shard, mesh, local_tensor_shapes, rule, mesh_dim, placements):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -762,9 +753,6 @@ def propagate_shape_and_sharding(
         else:
             # flatten from S to S/SS
             assert isinstance(p, Shard)
-            local_tensor_shapes[p.dim] = math.ceil(
-                local_tensor_shapes[p.dim] * 1.0 / mesh.size(mesh_dim)
-            )
             tgt_shard_dim = input_dim_to_output_dims[p.dim]
             assert len(tgt_shard_dim) == 1
             tgt_shard_dim = tgt_shard_dim[0]
@@ -774,13 +762,18 @@ def propagate_shape_and_sharding(
             if p.dim == input_start_idx:
                 output_placement = Shard(tgt_shard_dim)
             else:
-                split_factor = _get_split_factor(mesh, local_tensor_shapes, input_start_idx, p.dim, mesh_dim)
+                split_factor = math.prod(local_tensor_shapes[input_start_idx:p.dim])
                 output_placement = _StridedShard(tgt_shard_dim, split_factor=split_factor)
+            
+            assert False, "throw error if there are future shards that are on the uneven dim and it leads to non spmd split facot"
+            local_tensor_shapes[p.dim] = math.ceil(
+                local_tensor_shapes[p.dim] * 1.0 / mesh.size(mesh_dim)
+            )
             return output_placement
 
     local_tensor_shapes = list(input_src_spec.shape)
     output_placements = [
-        _rewrite_shard_dim(p, mesh, local_tensor_shapes, rule, mesh_dim) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p, mesh, local_tensor_shapes, rule, mesh_dim, input_tgt_placements) if isinstance(p, Shard) else p
         for mesh_dim, p in enumerate(input_tgt_placements)
     ]
 
