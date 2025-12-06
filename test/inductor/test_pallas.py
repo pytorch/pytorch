@@ -5,6 +5,8 @@ import sys
 import unittest
 from unittest import mock
 
+from torch_tpu import api
+
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import make_test_cls_with_patches
@@ -90,6 +92,20 @@ class PallasTestsMixin:
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
+
+    def test_matmul(self):
+        """Test matrix multiplication."""
+
+        def fn(a, b):
+            return torch.matmul(a, b)
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected, rtol=1e-1, atol=1e-1)
 
     def test_sin(self):
         """Test sin operation."""
@@ -806,7 +822,7 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
 @config.patch({"_debug_cpu_to_tpu_pallas": True})
 class PallasTestsTPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
+    DEVICE = api.tpu_device()
 
     @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
     def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):

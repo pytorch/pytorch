@@ -548,6 +548,15 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    if get_scheduling_for_device("tpu") is None:
+        register_backend_for_device(
+            "tpu",
+            PallasScheduling,
+            PythonWrapperCodegen,
+            # CppWrapperGpu,
+            # WrapperFxCodegen,
+        )
+
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
