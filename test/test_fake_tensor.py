@@ -1099,6 +1099,33 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
 
+    def test_sdpa_flash_attention_cpu_output_contiguous(self):
+        # Regression test: the meta function for _scaled_dot_product_flash_attention_for_cpu
+        # should return contiguous output regardless of input strides.
+        # This is important for export/decomposition flows where stride consistency matters.
+        with FakeTensorMode():
+            # Create a non-contiguous query by transposing
+            # Shape after transpose: [batch, num_heads, seq_len, head_dim]
+            # Strides after transpose: non-contiguous
+            batch, num_heads, seq_len, head_dim = 1, 16, 8, 128
+            q = torch.randn(batch, seq_len, num_heads, head_dim).transpose(1, 2)
+            k = torch.randn(batch, seq_len, num_heads, head_dim).transpose(1, 2)
+            v = torch.randn(batch, seq_len, num_heads, head_dim).transpose(1, 2)
+
+            # Verify inputs are non-contiguous
+            self.assertFalse(q.is_contiguous())
+            self.assertFalse(k.is_contiguous())
+            self.assertFalse(v.is_contiguous())
+
+            # Call the flash attention for CPU op directly
+            output, logsumexp = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                q, k, v, dropout_p=0.0, is_causal=False
+            )
+
+            # The output should be contiguous
+            self.assertTrue(output.is_contiguous())
+            self.assertEqual(output.shape, (batch, num_heads, seq_len, head_dim))
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 

@@ -5864,17 +5864,24 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
 
-    attention = torch.empty_like(query)
+    # Return a contiguous output tensor to ensure consistent strides across
+    # all SDPA backends. This is important for export/decomposition flows.
+    attention = torch.empty(
+        (batch_size, num_heads, max_seqlen_batch_q, head_dim),
+        dtype=query.dtype,
+        device=query.device,
+    )
     logsumexp = torch.empty(
         (
             batch_size,
-            max_seqlen_batch_q,
             num_heads,
+            max_seqlen_batch_q,
         ),
         dtype=torch.float,
         device=query.device,
-    ).transpose(1, 2)
+    )
     return (
         attention,
         logsumexp,
