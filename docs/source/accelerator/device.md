@@ -87,6 +87,8 @@ Here's the complete mapping from C++ to Python:
 | `_setDevice`         | `torch_openreg._C._set_device(idx)`      | `torch.openreg.set_device(idx)`  | Sets the active device                       |
 | `_exchangeDevice`    | `torch_openreg._C._exchange_device(idx)` | N/A (internal use only)          | Atomically swaps device and returns previous |
 
+(device-guard)=
+
 ## Guard
 
 Device guards provide automatic device switching with exception safety. They're similar to lock guards in C++ - they switch device on construction and restore it on destruction.
@@ -96,8 +98,8 @@ Implement `DeviceGuardImplInterface` to integrate with PyTorch's guard system:
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.h
     :language: c++
-    :start-after: LITERALINCLUDE START: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
-    :end-before: LITERALINCLUDE END: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
+    :start-after: LITERALINCLUDE START: OPENREG ALL DEVICE GUARD IMPL
+    :end-before: LITERALINCLUDE END: OPENREG ALL DEVICE GUARD IMPL
     :linenos:
 ```
 
