@@ -2817,6 +2817,28 @@ class _TritonLibrary:
         return cls.ops_table[(op_key, dispatch_key)]
 
 
+# Check if cuDNN version is compatible with available CUDA devices
+def _check_support_matrix():
+    if torch.cuda.is_available() and not torch.version.hip:
+        cudnn_version = torch.backends.cudnn.version() or 0
+        min_cc = builtins.min(
+            [
+                torch.cuda.get_device_capability(i)
+                for i in builtins.range(torch.cuda.device_count())
+            ]
+        )
+        if cudnn_version >= 91100 and min_cc < (7, 5):
+            raise RuntimeError(
+                f"cuDNN version {cudnn_version} is not compatible with devices with SM < 7.5. "
+                f"Please install a version of PyTorch with a compatible cuDNN version. "
+                f"https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix"
+            )
+
+
+_check_support_matrix()
+del _check_support_matrix
+
+
 # Deprecated attributes
 _deprecated_attrs = {
     "has_mps": torch.backends.mps.is_built,
