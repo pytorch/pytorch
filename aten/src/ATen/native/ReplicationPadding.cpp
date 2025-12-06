@@ -109,6 +109,7 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t nslices = input.size(dimslices);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
+  
   const int64_t INT64_MAX = std::numeric_limits<int64_t>::max();
   
   int64_t safe_pad_t = std::max(pad_t, (int64_t)0);
@@ -129,6 +130,7 @@ TORCH_META_FUNC(replication_pad2d) (
 
   TORCH_CHECK(temp_width <= INT64_MAX - safe_pad_r,
     "Padding value ", pad_r, " for width is too large and would cause int64 overflow.");
+  
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
