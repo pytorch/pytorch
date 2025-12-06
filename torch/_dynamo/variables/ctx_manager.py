@@ -231,7 +231,6 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
 
     def exit_on_graph_break(self) -> bool:
         """
-        functional_call is side-effect free and purely functional.
         We don't need to break the graph when using it, which allows
         it to work with higher-order ops like cond and scan.
 
