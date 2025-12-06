@@ -1,4 +1,7 @@
 #include "Minimal.h"
+#include "runtime/OpenRegGenerator.h"
+
+#include <ATen/core/DistributionsHelper.h>
 
 #include <unordered_set>
 
@@ -181,5 +184,185 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 }
 // LITERALINCLUDE END: FALLBACK IMPL
+
+namespace {
+
+inline void check_supported_rand_dtype(c10::ScalarType dtype, const char* op) {
+  TORCH_CHECK(
+      c10::isFloatingType(dtype) || c10::isComplexType(dtype),
+      op,
+      " only supports floating and complex dtypes, but got ",
+      c10::toString(dtype));
+}
+
+// Helper to fetch a usable OpenReg generator for a device index
+inline c10::openreg::OpenRegGeneratorImpl* get_openreg_gen(
+    const std::optional<at::Generator>& gen_opt,
+    c10::DeviceIndex device_index) {
+  if (gen_opt.has_value()) {
+    auto* gen = at::check_generator<c10::openreg::OpenRegGeneratorImpl>(
+        gen_opt.value());
+    TORCH_CHECK(
+        gen->device().index() == device_index,
+        "Generator device index (",
+        (int)gen->device().index(),
+        ") does not match target tensor device index (",
+        (int)device_index,
+        ") for openreg backend");
+    return gen;
+  }
+  const auto& gen = c10::openreg::getDefaultOpenRegGenerator(device_index);
+  return at::check_generator<c10::openreg::OpenRegGeneratorImpl>(gen);
+}
+
+template <typename T>
+inline void fill_uniform(
+    T* data,
+    int64_t numel,
+    c10::openreg::OpenRegGeneratorImpl* gen) {
+  at::uniform_real_distribution<double> dist(0.0, 1.0);
+  for (int64_t i = 0; i < numel; ++i) {
+    data[i] = static_cast<T>(dist(gen));
+  }
+}
+
+template <typename T>
+inline void fill_normal(
+    T* data,
+    int64_t numel,
+    c10::openreg::OpenRegGeneratorImpl* gen) {
+  at::normal_distribution<double> dist(0.0, 1.0);
+  for (int64_t i = 0; i < numel; ++i) {
+    data[i] = static_cast<T>(dist(gen));
+  }
+}
+
+} // anonymous namespace
+
+at::Tensor rand(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  const auto device = c10::device_or_default(device_opt);
+  auto dtype = c10::dtype_or_default(dtype_opt);
+  TORCH_CHECK(device.is_privateuseone());
+  TORCH_CHECK(
+      c10::layout_or_default(layout_opt) == c10::Layout::Strided,
+      "Non strided layout not supported");
+  TORCH_CHECK(
+      !c10::pinned_memory_or_default(pin_memory_opt),
+      "Pin memory can only be on CPU");
+  if (!dtype_opt.has_value()) {
+    // Ensure floating default dtype
+    if (!c10::isFloatingType(dtype) && !c10::isComplexType(dtype)) {
+      dtype = at::kFloat;
+    }
+  }
+  check_supported_rand_dtype(dtype, "rand");
+
+  const c10::DeviceGuard device_guard(device);
+  auto* gen = get_openreg_gen(generator, device.index());
+
+  // Allocate output on openreg and treat as CPU for writing
+  constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
+  auto allocator = at::GetAllocator(at::kPrivateUse1);
+  auto result =
+      at::detail::empty_generic(size, allocator, pu1_dks, dtype, std::nullopt);
+
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  MemoryGuard guard(result);
+  at::Tensor as_cpu = at::from_blob(
+      result.data_ptr(),
+      result.sizes(),
+      result.strides(),
+      result.options().device(at::kCPU));
+
+  switch (dtype) {
+    case at::kFloat: {
+      fill_uniform<float>(as_cpu.data_ptr<float>(), as_cpu.numel(), gen);
+      break;
+    }
+    case at::kDouble: {
+      fill_uniform<double>(as_cpu.data_ptr<double>(), as_cpu.numel(), gen);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported dtype for rand on openreg: ",
+          c10::toString(dtype));
+    }
+  }
+
+  return result;
+}
+
+at::Tensor randn(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  const auto device = c10::device_or_default(device_opt);
+  auto dtype = c10::dtype_or_default(dtype_opt);
+  TORCH_CHECK(device.is_privateuseone());
+  TORCH_CHECK(
+      c10::layout_or_default(layout_opt) == c10::Layout::Strided,
+      "Non strided layout not supported");
+  TORCH_CHECK(
+      !c10::pinned_memory_or_default(pin_memory_opt),
+      "Pin memory can only be on CPU");
+  if (!dtype_opt.has_value()) {
+    if (!c10::isFloatingType(dtype) && !c10::isComplexType(dtype)) {
+      dtype = at::kFloat;
+    }
+  }
+  check_supported_rand_dtype(dtype, "randn");
+
+  const c10::DeviceGuard device_guard(device);
+  auto* gen = get_openreg_gen(generator, device.index());
+
+  constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
+  auto allocator = at::GetAllocator(at::kPrivateUse1);
+  auto result =
+      at::detail::empty_generic(size, allocator, pu1_dks, dtype, std::nullopt);
+
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  MemoryGuard guard(result);
+  at::Tensor as_cpu = at::from_blob(
+      result.data_ptr(),
+      result.sizes(),
+      result.strides(),
+      result.options().device(at::kCPU));
+
+  switch (dtype) {
+    case at::kFloat: {
+      fill_normal<float>(as_cpu.data_ptr<float>(), as_cpu.numel(), gen);
+      break;
+    }
+    case at::kDouble: {
+      fill_normal<double>(as_cpu.data_ptr<double>(), as_cpu.numel(), gen);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported dtype for randn on openreg: ",
+          c10::toString(dtype));
+    }
+  }
+
+  return result;
+}
 
 } // namespace at::native::openreg

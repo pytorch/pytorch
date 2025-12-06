@@ -1,9 +1,9 @@
-#include "native/Minimal.h"
+#include <torch/library.h>
 
 #include <ATen/native/CPUFallback.h>
 #include <ATen/native/DispatchStub.h>
 
-#include <torch/library.h>
+#include "native/Minimal.h"
 
 namespace at::openreg {
 
@@ -101,6 +101,28 @@ at::Tensor wrapper_view(const at::Tensor& self, c10::SymIntArrayRef size) {
   return at::native::openreg::view(self, size);
 }
 
+at::Tensor wrapper_rand_generator(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  return at::native::openreg::rand(
+      size, generator, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
+at::Tensor wrapper_randn_generator(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  return at::native::openreg::randn(
+      size, generator, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 // LITERALINCLUDE START: FALLBACK WRAPPER
 void wrapper_cpu_fallback(
     const c10::OperatorHandle& op,
@@ -127,6 +149,8 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
       "set_.source_Storage_storage_offset",
       wrapper_set_source_Storage_storage_offsetset_);
   m.impl("view", wrapper_view);
+  m.impl("rand.generator", wrapper_rand_generator);
+  m.impl("randn.generator", wrapper_randn_generator);
 }
 // LITERALINCLUDE END: TORCH_LIBRARY_IMPL DEFAULT
 
