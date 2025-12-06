@@ -50,7 +50,7 @@ class FuseHandler(ABC):
 
 
 class DefaultFuseHandler(FuseHandler):
-    def __init__(self, node: Node):  # pylint: disable=useless-parent-delegation
+    def __init__(self, node: Node):
         super().__init__(node)  # type:ignore[safe-super]
 
     def fuse(
