@@ -3432,7 +3432,7 @@ def get_concrete_sizes_from_symints(
             None,
         )
         if isinstance(val, (int, Integer)):
-            return str(val)
+            return f"{sym_name}: hint = {str(val)}"
         return sym_name
 
     msg = re.sub(pattern, replace_sym, msg)
@@ -3622,11 +3622,8 @@ def get_fake_value(
                 explanation="",
                 hints=[],
             )
-        elif isinstance(cause, BaseException):
-            msg = get_concrete_sizes_from_symints(str(cause), fake_mode)
-            raise TorchRuntimeError(msg).with_traceback(cause.__traceback__) from None
-
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        raise TorchRuntimeError(msg).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
