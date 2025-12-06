@@ -6979,7 +6979,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
-    @config.patch(force_disable_caches=True)
+    @config.patch(force_disable_caches=True, split_reductions=False)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
         if "cpu" in str(self.device) and config.is_fbcode():
@@ -7029,7 +7029,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
 
-    @config.patch(force_disable_caches=True)
+    @config.patch(force_disable_caches=True, split_reductions=False)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
         if "cpu" in str(self.device) and config.is_fbcode():
@@ -7053,6 +7053,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         force_disable_caches=True,
         # Test expects a single (fused) kernel to be generated
         max_autotune_gemm_backends="ATEN",
+        split_reductions=False,
     )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
