@@ -1077,23 +1077,45 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
-  const bool input_is_scalar = input.dim() == 0;
-  const bool other_is_scalar = other.dim() == 0;
-  const bool use_scalar_kernel = (input_is_scalar || other_is_scalar);
+  bool use_broadcast_kernel = false;
+  bool broadcast_on_lhs = false;
+  int64_t broadcast_numel = 0;
+
+  const bool input_is_full = input.numel() == out.numel();
+  const bool other_is_full = other.numel() == out.numel();
+  const bool input_is_bc = is_dense_broadcastable(input, out) && !input_is_full;
+  const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
+
+  if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
+    use_broadcast_kernel = true;
+    broadcast_on_lhs = true;
+    broadcast_numel = input.numel();
+  } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
+    use_broadcast_kernel = true;
+    broadcast_on_lhs = false;
+    broadcast_numel = other.numel();
+  }
 
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
   std::string kernel_name;
-  if (use_scalar_kernel) {
-    const bool scalar_on_lhs = input_is_scalar;
-    const auto& tensor_operand = scalar_on_lhs ? other : input;
-    kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
-                              name,
-                              scalar_on_lhs ? "_rhs" : "",
-                              scalarToMetalTypeString(out),
-                              scalarToMetalTypeString(tensor_operand),
-                              alpha_suffix);
+  if (use_broadcast_kernel) {
+    const auto& tensor_operand = broadcast_on_lhs ? other : input;
+    if (cast_needed) {
+      kernel_name = fmt::format("{}_dense_broadcast{}_cast_{}{}",
+                                name,
+                                broadcast_on_lhs ? "_rhs" : "",
+                                scalarToMetalTypeString(out),
+                                alpha_suffix);
+    } else {
+      kernel_name = fmt::format("{}_dense_broadcast{}_{}_{}{}",
+                                name,
+                                broadcast_on_lhs ? "_rhs" : "",
+                                scalarToMetalTypeString(out),
+                                scalarToMetalTypeString(tensor_operand),
+                                alpha_suffix);
+    }
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
@@ -1111,19 +1133,21 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
-      if (use_scalar_kernel) {
-        const bool scalar_on_lhs = input_is_scalar;
-        const auto& tensor_operand = scalar_on_lhs ? other : input;
-        const auto& scalar_operand = scalar_on_lhs ? input : other;
-        mtl_setArgs(computeEncoder, out);
-        if (scalar_on_lhs) {
-          mtl_setArgs<1>(computeEncoder, scalar_operand, tensor_operand);
-        } else {
-          mtl_setArgs<1>(computeEncoder, tensor_operand, scalar_operand);
-        }
-
-        if (alpha) {
-          mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
+      bind_iter_tensors(computeEncoder, iter);
+      if (use_broadcast_kernel) {
+        mtl_setArgs<3>(computeEncoder, broadcast_numel);
+        if (cast_needed) {
+          std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
+                                                 static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
+                                                 static_cast<uint32_t>(input.scalar_type()),
+                                                 static_cast<uint32_t>(other.scalar_type())};
+          if (alpha) {
+            mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type), sizes_types);
+          } else {
+            mtl_setArgs<4>(computeEncoder, sizes_types);
+          }
+        } else if (alpha) {
+          mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else {
         // Set input and output tensors
@@ -1183,7 +1207,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name);
+      exec_binary_kernel(sub_iter, name);
     }
     return;
   }
