@@ -262,7 +262,7 @@ Tensor computeDequantizeExternalCall(
   }
 
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
-  const int64_t qdtype = (int64_t)immQDType(qx);
+  const int64_t qdtype = static_cast<int64_t>(immQDType(qx));
 
   BufHandle ResultBuf("dequantize", outputShape, dtype);
   StmtPtr s = ExternalCall::make(
@@ -314,7 +314,7 @@ Tensor computeQuantizedConv2dPrepack(
        groups,
        immQScale(qw),
        immQZero(qw),
-       (int64_t)immQDType(qw)});
+       static_cast<int64_t>(immQDType(qw))});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -342,7 +342,7 @@ Tensor computeQuantizedConv1d(
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -372,7 +372,7 @@ Tensor computeQuantizedConv2d(
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -402,7 +402,7 @@ Tensor computeQuantizedConv2dRelu(
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -432,7 +432,7 @@ Tensor computeQuantizedLinear(
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -462,7 +462,7 @@ Tensor computeQuantizedLinearRelu(
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -501,10 +501,10 @@ Tensor computeQuantizedAddExternalCall(
       {qa, qb},
       {immQScale(qa),
        immQZero(qa),
-       (int64_t)immQDType(qa),
+       static_cast<int64_t>(immQDType(qa)),
        immQScale(qb),
        immQZero(qb),
-       (int64_t)immQDType(qb),
+       static_cast<int64_t>(immQDType(qb)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -530,10 +530,10 @@ Tensor computeQuantizedMul(
       {qa, qb},
       {immQScale(qa),
        immQZero(qa),
-       (int64_t)immQDType(qa),
+       static_cast<int64_t>(immQDType(qa)),
        immQScale(qb),
        immQZero(qb),
-       (int64_t)immQDType(qb),
+       static_cast<int64_t>(immQDType(qb)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);
@@ -560,7 +560,7 @@ Tensor computeQuantizedMulScalar(
       ResultBuf,
       "nnc_aten_quantized_mul_scalar",
       {qa},
-      {scale1, immQZero(qa), (int64_t)immQDType(qa), scalar});
+      {scale1, immQZero(qa), static_cast<int64_t>(immQDType(qa)), scalar});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -589,7 +589,7 @@ Tensor computeQuantizedRelu(
       ResultBuf,
       "nnc_aten_quantized_relu",
       {qa},
-      {immQScale(qa), immQZero(qa), (int64_t)immQDType(qa)});
+      {immQScale(qa), immQZero(qa), static_cast<int64_t>(immQDType(qa))});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -613,7 +613,7 @@ Tensor computeQuantizedCat(
     args.emplace_back(bh);
     extra_args.emplace_back(immQScale(bh));
     extra_args.emplace_back(immQZero(bh));
-    extra_args.emplace_back((int64_t)immQDType(bh));
+    extra_args.emplace_back(static_cast<int64_t>(immQDType(bh)));
   }
   extra_args.emplace_back(argDim);
   extra_args.emplace_back(out_qscale);
@@ -738,7 +738,7 @@ Tensor computeUpsampleNearest2dExternalCall(
   if (isQuantized(x)) {
     qx_qscale = immQScale(x);
     qx_qzero = immQZero(x);
-    qx_qdtype = (int64_t)immQDType(x);
+    qx_qdtype = static_cast<int64_t>(immQDType(x));
   }
 
   BufHandle ResultBuf = [&]() {
@@ -797,7 +797,7 @@ Tensor computeQuantizedSigmoidExternalCall(
       {qx},
       {immQScale(qx),
        immQZero(qx),
-       (int64_t)immQDType(qx),
+       static_cast<int64_t>(immQDType(qx)),
        out_qscale,
        out_qzero});
   return Tensor(ResultBuf.node(), s);

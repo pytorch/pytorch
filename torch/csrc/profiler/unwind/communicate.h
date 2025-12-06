@@ -24,7 +24,7 @@ struct Communicate {
       dup2(inpipe_[0], STDIN_FILENO);
       dup2(outpipe_[1], STDOUT_FILENO);
       dup2(errpipe_[1], STDERR_FILENO);
-      execvp(command, (char* const*)args);
+      execvp(command, const_cast<char* const*>(args));
       throw UnwindError("failed execvp");
     } else { // parent process
       close(inpipe_[0]);

@@ -22,7 +22,7 @@ struct LineNumberProgram {
     parsed_ = true;
     CheckedLexer L = s_.debug_line.lexer(offset_);
     std::tie(length_, is_64bit_) = L.readSectionLength();
-    program_end_ = (char*)L.loc() + length_;
+    program_end_ = static_cast<char*>(L.loc()) + length_;
     auto version = L.read<uint16_t>();
     UNWIND_CHECK(
         version == 5 || version == 4,
@@ -38,7 +38,7 @@ struct LineNumberProgram {
     }
     header_length_ = is_64bit_ ? L.read<uint64_t>() : L.read<uint32_t>();
     program_ = L;
-    program_.skip(int64_t(header_length_));
+    program_.skip(static_cast<int64_t>(header_length_));
     minimum_instruction_length_ = L.read<uint8_t>();
     maximum_operations_per_instruction_ = L.read<uint8_t>();
     default_is_stmt_ = L.read<uint8_t>();
@@ -167,7 +167,7 @@ struct LineNumberProgram {
   void skipForm(CheckedLexer& L, uint64_t form) {
     auto sz = formSize(form, is_64bit_ ? 8 : 4);
     UNWIND_CHECK(sz, "unsupported form {}", form);
-    L.skip(int64_t(*sz));
+    L.skip(static_cast<int64_t>(*sz));
   }
 
   uint64_t readData(CheckedLexer& L, uint64_t encoding) {
@@ -219,7 +219,7 @@ struct LineNumberProgram {
       PRINT_INST("{:x}: ", (char*)program_.loc() - (s_.debug_line.data));
       uint8_t op = program_.read<uint8_t>();
       if (op >= opcode_base_) {
-        auto op2 = int64_t(op - opcode_base_);
+        auto op2 = static_cast<int64_t>(op - opcode_base_);
         address_ += op2 / line_range_;
         entry_.line += line_base_ + (op2 % line_range_);
         PRINT_INST(
@@ -251,7 +251,7 @@ struct LineNumberProgram {
               } break;
               default: {
                 PRINT_INST("skip extended op {}\n", extended_op);
-                program_.skip(int64_t(len - 1));
+                program_.skip(static_cast<int64_t>(len - 1));
               } break;
             }
           } break;

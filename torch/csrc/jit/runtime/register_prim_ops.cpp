@@ -326,7 +326,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           int64_t i = 0;
           pop(stack, i);
-          push(stack, (bool)i);
+          push(stack, static_cast<bool>(i));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -334,7 +334,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           double d = 0;
           pop(stack, d);
-          push(stack, (bool)d);
+          push(stack, static_cast<bool>(d));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -416,7 +416,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           int64_t i = 0;
           pop(stack, i);
-          push(stack, (float)i);
+          push(stack, static_cast<float>(i));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -424,7 +424,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           bool b = false;
           pop(stack, b);
-          push(stack, (float)b);
+          push(stack, static_cast<float>(b));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1051,7 +1051,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
               "String for ord() must be 1 character, found ",
               string.size());
           uint8_t ord = string.at(0);
-          push(stack, int64_t(ord));
+          push(stack, static_cast<int64_t>(ord));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1419,7 +1419,7 @@ void dictSetItem(Stack& stack) {
 
 void dictLen(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  push(stack, int64_t(dict.size()));
+  push(stack, static_cast<int64_t>(dict.size()));
 }
 
 void dictValues(Stack& stack) {
@@ -1706,10 +1706,10 @@ int64_t stringFindImpl(
     bool reverse = false) {
   int64_t size = string.size();
   if (start < 0) {
-    start = std::max(int64_t(0), size + start);
+    start = std::max(static_cast<int64_t>(0), size + start);
   }
   if (end < 0) {
-    end = std::max(int64_t(0), int64_t(size + end + 1));
+    end = std::max(static_cast<int64_t>(0), (size + end + 1));
   }
   if (end > start) {
     string = string.substr(start, end - start);
@@ -1955,10 +1955,10 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             return;
           }
           if (start < 0) {
-            start = std::max(int64_t(0), size + start);
+            start = std::max(static_cast<int64_t>(0), size + start);
           }
           if (end < 0) {
-            end = std::max(int64_t(0), int64_t(size + end + 1));
+            end = std::max(static_cast<int64_t>(0), (size + end + 1));
           }
 
           int64_t occurrences = 0;
@@ -1984,10 +1984,10 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(int64_t(0), (size + start));
+            start = std::max(static_cast<int64_t>(0), (size + start));
           }
           if (end < 0) {
-            end = std::max(int64_t(0), int64_t(size + end + 1));
+            end = std::max(static_cast<int64_t>(0), (size + end + 1));
           }
 
           string = string.substr(start, end - start);
@@ -2010,10 +2010,10 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(int64_t(0), (size + start));
+            start = std::max(static_cast<int64_t>(0), (size + start));
           }
           if (end < 0) {
-            end = std::max(int64_t(0), int64_t(size + end + 1));
+            end = std::max(static_cast<int64_t>(0), (size + end + 1));
           }
 
           string = string.substr(start, end - start);
@@ -2173,8 +2173,9 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           TORCH_CHECK(
               fillchar.size() == 1,
               "TypeError: The fill character must be exactly one character long");
-          auto to_append =
-              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(
+              static_cast<int64_t>(0),
+              width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           ss << string;
@@ -2195,8 +2196,9 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           TORCH_CHECK(
               fillchar.size() == 1,
               "TypeError: The fill character must be exactly one character long");
-          auto to_append =
-              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(
+              static_cast<int64_t>(0),
+              width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           for (const auto i : c10::irange(to_append)) {
@@ -2212,8 +2214,9 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
         [](Stack& stack) {
           int64_t width = pop(stack).toInt();
           std::string string = pop(stack).toStringRef();
-          auto to_append =
-              std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(
+              static_cast<int64_t>(0),
+              width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           for (const auto i : c10::irange(to_append)) {
@@ -2586,7 +2589,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           auto generator = pop(stack);
           auto current_seed = generator.toGenerator().current_seed();
-          push(stack, (int64_t)current_seed);
+          push(stack, static_cast<int64_t>(current_seed));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2604,7 +2607,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           auto generator = pop(stack);
           auto current_seed = generator.toGenerator().seed();
-          push(stack, (int64_t)current_seed);
+          push(stack, static_cast<int64_t>(current_seed));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

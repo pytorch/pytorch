@@ -42,7 +42,8 @@ static PyObject* DisableTorchFunctionSubclass__enter(
     PyObject* self,
     PyObject* unused) {
   const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
-  ((DisableTorchFunctionSubclass*)self)->old_state = old_state;
+  (reinterpret_cast<DisableTorchFunctionSubclass*>(self))->old_state =
+      old_state;
   if (old_state == at::impl::TorchFunctionDisabledState::ENABLED) {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
@@ -54,7 +55,7 @@ static PyObject* DisableTorchFunctionSubclass__exit(
     PyObject* self,
     PyObject* unused) {
   at::impl::PythonTorchFunctionTLS::set_disabled_state(
-      ((DisableTorchFunctionSubclass*)self)->old_state);
+      (reinterpret_cast<DisableTorchFunctionSubclass*>(self))->old_state);
   Py_RETURN_NONE;
 }
 
@@ -127,7 +128,7 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
     return nullptr;
   }
 
-  return (PyObject*)(&DisableTorchFunctionSubclassType);
+  return reinterpret_cast<PyObject*>(&DisableTorchFunctionSubclassType);
 }
 
 typedef struct {
@@ -137,7 +138,7 @@ typedef struct {
 } DisableTorchFunction;
 
 static PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
-  ((DisableTorchFunctionSubclass*)self)->old_state =
+  (reinterpret_cast<DisableTorchFunctionSubclass*>(self))->old_state =
       at::impl::PythonTorchFunctionTLS::get_disabled_state();
   at::impl::PythonTorchFunctionTLS::set_disabled_state(
       at::impl::TorchFunctionDisabledState::ALL_DISABLED);
@@ -146,7 +147,7 @@ static PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
 
 static PyObject* DisableTorchFunction__exit(PyObject* self, PyObject* unused) {
   at::impl::PythonTorchFunctionTLS::set_disabled_state(
-      ((DisableTorchFunctionSubclass*)self)->old_state);
+      (reinterpret_cast<DisableTorchFunctionSubclass*>(self))->old_state);
   Py_RETURN_NONE;
 }
 
@@ -201,7 +202,7 @@ PyObject* THPModule_DisableTorchFunctionType() {
     return nullptr;
   }
 
-  return (PyObject*)(&DisableTorchFunctionType);
+  return reinterpret_cast<PyObject*>(&DisableTorchFunctionType);
 }
 
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {

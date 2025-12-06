@@ -113,7 +113,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
 
-  std::map<const void*, ID> objectId{};
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -402,8 +402,8 @@ static void dumpTensorData2File(
     size_t tensor_nbyte = tensor_impl->numel() * tensor_impl->itemsize();
 
     fs.write(
-        (const char*)tensor_impl->storage().data() + tensor_offset,
-        (long)tensor_nbyte);
+        static_cast<const char*>(tensor_impl->storage().data()) + tensor_offset,
+        static_cast<long>(tensor_nbyte));
   }
 }
 

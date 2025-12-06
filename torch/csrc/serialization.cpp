@@ -402,7 +402,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (storage->device_type() != at::kCPU) {
     // Here we use a tensor.copy_() to impl H2D for all non-CPU device.
     auto cpu_tensor = at::from_blob(
-        (void*)data,
+        reinterpret_cast<void*>(data),
         {static_cast<int64_t>(nbytes)},
         at::device(at::kCPU).dtype(c10::kByte));
     auto device_tensor = at::from_blob(

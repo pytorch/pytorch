@@ -1078,7 +1078,7 @@ void MemDependencyChecker::visit(const BlockPtr& v) {
   }
 
   if (currentScope_->block != v) {
-    currentScope_ = std::make_shared<Scope>((BlockPtr)v, prev_scope);
+    currentScope_ = std::make_shared<Scope>(BlockPtr(v), prev_scope);
   }
 
   for (const auto& s : *v) {

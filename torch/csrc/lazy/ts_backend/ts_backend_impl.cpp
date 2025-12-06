@@ -25,16 +25,16 @@ namespace torch::lazy {
 struct TSBackendDeviceType : public BackendDeviceType {
   TSBackendDeviceType() = delete;
   TSBackendDeviceType(c10::DeviceType deviceType)
-      : BackendDeviceType((int8_t)deviceType) {
+      : BackendDeviceType(static_cast<int8_t>(deviceType)) {
     TORCH_CHECK(deviceType == at::kCPU || deviceType == at::kCUDA);
   }
 
   std::string toString() const override {
-    return c10::DeviceTypeName((c10::DeviceType)type);
+    return c10::DeviceTypeName(static_cast<c10::DeviceType>(type));
   }
 
   c10::DeviceType c10Type() const {
-    return (c10::DeviceType)type;
+    return static_cast<c10::DeviceType>(type);
   }
 };
 
@@ -261,7 +261,7 @@ void TSBackendImpl::PrepareToExit() const {}
 
 c10::DeviceType TSBackendImpl::EagerFallbackDeviceType() const {
   // For TS backend, hardware device _is_ eager device
-  return (c10::DeviceType)GetDefaultDeviceType()->type;
+  return static_cast<c10::DeviceType>(GetDefaultDeviceType()->type);
 }
 
 torch::lazy::BackendImplInterface* GetTSBackendImpl() {

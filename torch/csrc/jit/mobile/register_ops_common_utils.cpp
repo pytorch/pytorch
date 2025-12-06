@@ -27,15 +27,16 @@ IValue tensorToListRecursive(
     // If the output type is a scalar, read and push one scalar of
     // the right type onto the stack.
     if (ty == at::IntType::get()) {
-      int64_t scalar = *(int64_t*)data;
+      int64_t scalar = *reinterpret_cast<int64_t*>(data);
       return IValue(scalar);
     } else if (ty == at::FloatType::get()) {
       TORCH_INTERNAL_ASSERT(
           scalar_ty == at::ScalarType::Float ||
               scalar_ty == at::ScalarType::Double,
           "Unexpected scalar type for Tensor");
-      double scalar =
-          scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
+      double scalar = scalar_ty == at::ScalarType::Float
+          ? *reinterpret_cast<float*>(data)
+          : *reinterpret_cast<double*>(data);
       return IValue(scalar);
     } else if (ty == at::ComplexType::get()) {
       TORCH_INTERNAL_ASSERT(
@@ -43,11 +44,11 @@ IValue tensorToListRecursive(
               scalar_ty == at::ScalarType::ComplexDouble,
           "Unexpected scalar type for Tensor");
       c10::complex<double> scalar = scalar_ty == at::ScalarType::ComplexFloat
-          ? *(c10::complex<float>*)data
-          : *(c10::complex<double>*)data;
+          ? *reinterpret_cast<c10::complex<float>*>(data)
+          : *reinterpret_cast<c10::complex<double>*>(data);
       return IValue(scalar);
     } else if (ty == at::BoolType::get()) {
-      bool scalar = *(bool*)data;
+      bool scalar = *reinterpret_cast<bool*>(data);
       return IValue(scalar);
     } else {
       TORCH_CHECK(

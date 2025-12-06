@@ -127,7 +127,7 @@ void HashProvider::visit(const CompareSelectPtr& v) {
       v,
       hash_combine(
           hashOf(v->lhs()),
-          (int)v->compare_select_op(),
+          static_cast<int>(v->compare_select_op()),
           hashOf(v->rhs()),
           hashOf(v->ret_val1()),
           hashOf(v->ret_val2())));
@@ -234,7 +234,7 @@ void HashProvider::visit(const IntrinsicsPtr& v) {
   // should not hash to anything and this is the best we can do.
   if (v->op_type() == kRand) {
     // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
-    putHash(v, (SimplifierHashType)rand());
+    putHash(v, SimplifierHashType(rand()));
     return;
   }
 

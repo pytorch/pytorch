@@ -39,12 +39,12 @@ inline bool isTuple(PyObject* obj) {
 // manually create a new tuple object from structseq.
 inline THPObjectPtr maybeAsTuple(PyStructSequence* obj) {
   Py_INCREF(obj);
-  return THPObjectPtr((PyObject*)obj);
+  return THPObjectPtr(reinterpret_cast<PyObject*>(obj));
 }
 
 inline THPObjectPtr maybeAsTuple(PyObject* obj) {
   if (isStructSeq(obj))
-    return maybeAsTuple((PyStructSequence*)obj);
+    return maybeAsTuple(reinterpret_cast<PyStructSequence*>(obj));
   Py_INCREF(obj);
   return THPObjectPtr(obj);
 }

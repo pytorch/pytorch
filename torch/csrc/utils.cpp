@@ -119,7 +119,7 @@ void THPUtils_addPyMethodDefs(
 
 static const char* classOrTypename(PyObject* obj) {
   if (PyType_Check(obj)) {
-    return ((PyTypeObject*)obj)->tp_name;
+    return (reinterpret_cast<PyTypeObject*>(obj))->tp_name;
   }
   return Py_TYPE(obj)->tp_name;
 }
@@ -248,22 +248,22 @@ std::string uuid_to_string(const char* uuid_bytes) {
       "{:02x}{:02x}-"
       "{:02x}{:02x}-"
       "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-      (uint8_t)uuid_bytes[0],
-      (uint8_t)uuid_bytes[1],
-      (uint8_t)uuid_bytes[2],
-      (uint8_t)uuid_bytes[3],
-      (uint8_t)uuid_bytes[4],
-      (uint8_t)uuid_bytes[5],
-      (uint8_t)uuid_bytes[6],
-      (uint8_t)uuid_bytes[7],
-      (uint8_t)uuid_bytes[8],
-      (uint8_t)uuid_bytes[9],
-      (uint8_t)uuid_bytes[10],
-      (uint8_t)uuid_bytes[11],
-      (uint8_t)uuid_bytes[12],
-      (uint8_t)uuid_bytes[13],
-      (uint8_t)uuid_bytes[14],
-      (uint8_t)uuid_bytes[15]);
+      static_cast<uint8_t>(uuid_bytes[0]),
+      static_cast<uint8_t>(uuid_bytes[1]),
+      static_cast<uint8_t>(uuid_bytes[2]),
+      static_cast<uint8_t>(uuid_bytes[3]),
+      static_cast<uint8_t>(uuid_bytes[4]),
+      static_cast<uint8_t>(uuid_bytes[5]),
+      static_cast<uint8_t>(uuid_bytes[6]),
+      static_cast<uint8_t>(uuid_bytes[7]),
+      static_cast<uint8_t>(uuid_bytes[8]),
+      static_cast<uint8_t>(uuid_bytes[9]),
+      static_cast<uint8_t>(uuid_bytes[10]),
+      static_cast<uint8_t>(uuid_bytes[11]),
+      static_cast<uint8_t>(uuid_bytes[12]),
+      static_cast<uint8_t>(uuid_bytes[13]),
+      static_cast<uint8_t>(uuid_bytes[14]),
+      static_cast<uint8_t>(uuid_bytes[15]));
 }
 
 template class THPPointer<THPStorage>;

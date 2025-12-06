@@ -101,7 +101,9 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
 
 c10::IValue SourceRangeSerializer::serialize(const SourceRange& sr) {
   return c10::ivalue::Tuple::create(
-      serialize_source(sr.source()), (int64_t)sr.start(), (int64_t)sr.end());
+      serialize_source(sr.source()),
+      static_cast<int64_t>(sr.start()),
+      static_cast<int64_t>(sr.end()));
 }
 
 int64_t SourceRangeSerializer::store_text_and_get_index(
@@ -139,14 +141,16 @@ c10::IValue SourceRangeSerializer::serialize_source(
         fname_pos = store_text_and_get_index(*s->filename());
       }
       serialized = c10::ivalue::Tuple::create(
-          {lines, fname_pos, (int64_t)s->starting_line_no()});
+          {lines, fname_pos, static_cast<int64_t>(s->starting_line_no())});
     }
   } else {
     if (s == nullptr) {
       serialized = c10::ivalue::Tuple::create({"", "", 0});
     } else {
       serialized = c10::ivalue::Tuple::create(
-          {s->text_str().str(), s->filename(), (int64_t)s->starting_line_no()});
+          {s->text_str().str(),
+           s->filename(),
+           static_cast<int64_t>(s->starting_line_no())});
     }
   }
   serialized_sources[s] = serialized;
@@ -167,7 +171,9 @@ std::vector<char> SourceRangePickler::pickle(
     }
 
     ivalues.emplace_back(c10::ivalue::Tuple::create(
-        {(int64_t)range.bytes, srs->serialize(range.range), source_range_tag}));
+        {static_cast<int64_t>(range.bytes),
+         srs->serialize(range.range),
+         source_range_tag}));
   }
 
   std::vector<at::Tensor> table;
