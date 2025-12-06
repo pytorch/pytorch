@@ -2385,6 +2385,7 @@ class _MemPool:
         allocator: _cuda_CUDAAllocator | None = None,
         is_user_created: _bool = True,
         use_on_oom: _bool = False,
+        no_split: _bool = False,
     ) -> None: ...
     @property
     def id(self) -> tuple[_int, _int]: ...
