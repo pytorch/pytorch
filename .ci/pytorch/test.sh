@@ -867,7 +867,7 @@ test_inductor_halide() {
 
 test_inductor_pallas() {
 	python test/run_test.py --include inductor/test_pallas.py --verbose
-	python inductor/test_pallas.py
+	python test/inductor/test_pallas.py
 	assert_git_not_dirty
 }
 
