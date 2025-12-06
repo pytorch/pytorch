@@ -521,7 +521,7 @@ triton_scaled_grouped_mm_template = TritonTemplate(
 
 cutedsl_grouped_mm_template = CuteDSLTemplate(
     name="grouped_gemm_cutedsl",
-    source=load_kernel_template("cutedsl_mm_grouped"),
+    source=load_kernel_template("cutedsl_mm_grouped_launcher"),
 )
 
 
