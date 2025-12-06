@@ -1692,6 +1692,74 @@ from user code:
     torch._dynamo.graph_break()""",
             )
 
+    def test_hop_side_effect_error_includes_hop_context(self):
+        # Test that graph breaks inside HOPs include the HOP context
+        stack = []
+
+        def fn(x):
+            stack.append(1)  # Mutation outside checkpoint scope
+            return x.sin()
+
+        def model(x):
+            return torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=True)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(model, backend="eager", fullgraph=True)(
+                torch.rand(4)
+            ),
+            """\
+HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)
+  Explanation: Mutating a variable from outside the scope of the HOP is not supported.
+  Hint: If the HOP is activation checkpointing, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Higher Order Operator: torch.utils.checkpoint.checkpoint
+
+  Developer debug context: Attempted to mutate ListVariable(length=0)
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0067.html
+
+from user code:
+   File "test_error_messages.py", line N, in model
+    return torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=True)
+  File "test_error_messages.py", line N, in fn
+    stack.append(1)  # Mutation outside checkpoint scope""",
+        )
+
+    def test_cond_with_graph_break_shows_hop_context(self):
+        # Test that torch.cond graph breaks include HOP context
+        def true_fn(x):
+            torch._dynamo.graph_break()
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def fn(x):
+            return torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+
+        from torch._dynamo.exc import UncapturedHigherOrderOpError
+
+        self.assertExpectedInlineMunged(
+            UncapturedHigherOrderOpError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
+This higher order operator doesn't work unless it is captured completely with torch.compile. Got:
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+  Higher Order Operator: torch.cond
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+  File "test_error_messages.py", line N, in true_fn
+    torch._dynamo.graph_break()""",
+        )
+
 
 class NestedGraphBreakLoggingTests(
     LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
