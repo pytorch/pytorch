@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Optional
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -50,14 +49,14 @@ class _Loss(Module):
 class _WeightedLoss(_Loss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
-        self.weight: Optional[Tensor]
+        self.weight: Tensor | None
 
 
 class L1Loss(_Loss):
@@ -122,9 +121,6 @@ class L1Loss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -244,7 +240,7 @@ class NLLLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -275,7 +271,7 @@ class NLLLoss(_WeightedLoss):
 class NLLLoss2d(NLLLoss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -623,9 +619,6 @@ class MSELoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -709,15 +702,6 @@ class BCELoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -832,17 +816,17 @@ class BCEWithLogitsLoss(_Loss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-        pos_weight: Optional[Tensor] = None,
+        pos_weight: Tensor | None = None,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
-        self.weight: Optional[Tensor]
-        self.pos_weight: Optional[Tensor]
+        self.weight: Tensor | None
+        self.pos_weight: Tensor | None
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -982,9 +966,6 @@ class MultiLabelMarginLoss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1172,9 +1153,6 @@ class SoftMarginLoss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1368,7 +1346,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -1431,15 +1409,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1656,7 +1625,7 @@ class MultiMarginLoss(_WeightedLoss):
         self,
         p: int = 1,
         margin: float = 1.0,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
@@ -1899,7 +1868,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(
         self,
         *,
-        distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+        distance_function: Callable[[Tensor, Tensor], Tensor] | None = None,
         margin: float = 1.0,
         swap: bool = False,
         reduction: str = "mean",
@@ -1909,7 +1878,7 @@ class TripletMarginWithDistanceLoss(_Loss):
             raise ValueError(
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
-        self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = (
+        self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin

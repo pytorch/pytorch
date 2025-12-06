@@ -812,7 +812,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             n0, n1 = list(fused_norm_read_writes.var_ranges.keys())
 
             # translation of above is n0 + 6 * n1
-            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads.keys())
+            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads)
 
             return nodes
 
@@ -1192,14 +1192,16 @@ class TestTiling(TestCase):
         """Test broadcast variable detection for tiling improvements."""
         from torch._inductor import tiling_utils
 
-        i, j = sympy.symbols("i j", integer=True)
+        i, j, k = sympy.symbols("i j k", integer=True)
 
         # Test broadcast pattern detection: FloorDiv creates broadcast
-        result = tiling_utils.find_broadcast_var(FloorDiv(i, 10), {i: 100, j: 50})
+        result = tiling_utils.find_broadcast_var(
+            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
+        )
         self.assertEqual(result, i)
 
         # Test non-broadcast: linear access pattern
-        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8})
+        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
         self.assertEqual(result, None)
 
 

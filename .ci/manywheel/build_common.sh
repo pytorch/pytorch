@@ -35,12 +35,8 @@ if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
         aarch64)
             PLATFORM="manylinux_2_28_aarch64"
             ;;
-        s390x)
-            PLATFORM="manylinux_2_28_s390x"
-            ;;
         *)
-            echo "Unsupported architecture: $ARCH"
-            exit 1
+            echo "Other architectures: $ARCH, not setting PLATFORM"
             ;;
     esac
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
@@ -367,22 +363,13 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     done
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
-    # Support all architectures (x86_64, aarch64, s390x)
-    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "xpu" ]]; then
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        echo "Updating wheel tag for $ARCH architecture"
-        # Replace linux_* with manylinux_2_28_* based on architecture
-        case $ARCH in
-            x86_64)
-                sed -i -e 's#linux_x86_64#manylinux_2_28_x86_64#g' $wheel_file
-                ;;
-            aarch64)
-                sed -i -e 's#linux_aarch64#manylinux_2_28_aarch64#g' $wheel_file
-                ;;
-            s390x)
-                sed -i -e 's#linux_s390x#manylinux_2_28_s390x#g' $wheel_file
-                ;;
-        esac
+        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+    fi
+    if [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
+        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
+        sed -i -e s#linux_aarch64#"${PLATFORM}"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes
