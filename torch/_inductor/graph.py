@@ -671,6 +671,14 @@ class GraphLowering(torch.fx.Interpreter):
         conv_nodes = [
             n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
+
+        for n in gm.graph.nodes:
+            if isinstance(n.target, functools.partial):
+                for target in n.target.args[0].targets:
+                    if target.fns[0] is torch.ops.mkldnn._convolution_pointwise.default:
+                        conv_nodes.append(n)
+                        break
+
         nconv = len(conv_nodes)
 
         if nconv == 0:
@@ -868,6 +876,16 @@ class GraphLowering(torch.fx.Interpreter):
         nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
+            # When mkldnn_fusion is enabled, mkldnn conv will be replaced by the lowering pattern.
+            # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
+            if isinstance(n.target, functools.partial):
+                for target in n.target.args[0].targets:
+                    if target.fns[0] is torch.ops.mkldnn._convolution_pointwise.default:
+                        output_set.add(n)
+                        if last_conv is None:
+                            last_conv = n
+                        break
+                continue
             if n.target is torch.ops.aten.convolution.default:
                 output_set.add(n)
                 if last_conv is None:
@@ -1777,12 +1795,8 @@ class GraphLowering(torch.fx.Interpreter):
                     allow_padding = (
                         config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
-                        n.meta["val"]
-                    )
-                    unbacked_symbols_in_strides = (
-                        len(free_unbacked_symbols(strides)) > 0
-                    )
+                    dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                    unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                     if (
                         not unbacked_symbols_in_strides
                         and dense
@@ -1896,6 +1910,27 @@ class GraphLowering(torch.fx.Interpreter):
                 # Prevent excessive accumulation in a computed buffer, when
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
+                dense = torch._prims_common.is_non_overlapping_and_dense(
+                        n.meta["val"]
+                    )
+                strides = n.meta["val"].stride()
+                unbacked_symbols_in_strides = (
+                    len(free_unbacked_symbols(strides)) > 0
+                )
+                if (
+                    not unbacked_symbols_in_strides
+                    and dense
+                    and len(result.get_size()) == 4
+                    and n in self.nodes_prefer_channels_last
+                    and not is_user_visible
+                    and not is_input_for_as_strided
+                ):
+                    result = ir.ExternKernel.require_stride_order(
+                        result,
+                        ir.get_stride_order(
+                            make_channels_last_strides_for(n.meta["val"].shape)
+                        ),
+                    )
                 result.realize_hint()
 
             # Realize if a Pointwise has too much stuff to be inlined.
