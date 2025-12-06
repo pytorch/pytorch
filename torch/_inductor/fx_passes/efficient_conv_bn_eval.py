@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-import torch
 import inspect
+
+import torch
 import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
