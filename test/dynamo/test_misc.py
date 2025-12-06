@@ -6424,7 +6424,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = "Higher Order Operator: torch.ops.higher_order.map"
+            error_message = r"Higher Order Operator: torch\.ops\.higher_order\.map"
         else:
             error_message = "Can't inplace modify module params/buffers"
 
