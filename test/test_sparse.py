@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef
+    skipIfCrossRef, slowTest
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
@@ -81,7 +81,10 @@ def _make_lowp_aware_gradcheck(gradcheck_fn):
                 cloned.append(inp)
                 continue
             gradcheck_dtype = torch.complex128 if inp.dtype.is_complex else torch.float64
-            c = inp.detach().clone().to("cpu").to(gradcheck_dtype).coalesce().requires_grad_(inp.requires_grad)
+            c = inp.detach().clone().to("cpu").to(gradcheck_dtype)
+            if c.is_sparse:
+                c = c.coalesce()
+            c = c.requires_grad_(inp.requires_grad)
             cloned.append(c)
         return tuple(cloned)
 
@@ -101,8 +104,8 @@ def _make_lowp_aware_gradcheck(gradcheck_fn):
         orig_grads, orig_inputs = compute_grads(fn, inputs)
 
         for i, (og, rg, o_inp, r_inp) in enumerate(zip(orig_grads, ref_grads, orig_inputs, ref_inputs)):
-            og_dense = og.to_dense()
-            rg_dense = rg.to_dense()
+            og_dense = og.to_dense() if og.is_sparse else og
+            rg_dense = rg.to_dense() if rg.is_sparse else rg
             og_dense = og_dense.to('cpu')
             rg_dense = rg_dense.to(device='cpu', dtype=og_dense.dtype)
             if not torch.allclose(og_dense, rg_dense):
@@ -1315,7 +1318,6 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.dtype, t[0, 0].dtype)
             self.assertEqual(t.dtype, t[1, 1].dtype)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1369,7 +1371,6 @@ class TestSparse(TestSparseBase):
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1377,7 +1378,6 @@ class TestSparse(TestSparseBase):
         # will trigger brute-force algo
         self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1385,7 +1385,6 @@ class TestSparse(TestSparseBase):
         # will trigger more sophisticated algos
         self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -2302,7 +2301,6 @@ class TestSparse(TestSparseBase):
         nnzs = (0, 5, 15, 25)
 
         lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
                 lhs = torch.sparse_coo_tensor(
@@ -2321,15 +2319,29 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                lhs_mask = lhs.detach().clone()
+
+                def op_masked(x):
+                    m, r = lhs_mask, rhs
+                    if x.device != m.device:
+                        m = m.to(device=x.device)
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(m).sparse_mask(r).to_dense(masked_grad=True)
+
                 gradcheck(
-                    lambda x, mask, r: x.sparse_mask(mask).sparse_mask(r).to_dense(masked_grad=True),
-                    (lhs, lhs_mask, rhs),
+                    op_masked,
+                    (lhs,),
                     masked=True
                 )
+
+                def op_unmasked(x):
+                    r = rhs
+                    if x.device != r.device:
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(r).to_dense(masked_grad=False)
+
                 gradcheck(
-                    lambda x, r: x.sparse_mask(r).to_dense(masked_grad=False),
-                    (lhs, rhs),
+                    op_unmasked,
+                    (lhs, ),
                     masked=False
                 )
 
@@ -3450,7 +3462,6 @@ class TestSparse(TestSparseBase):
         self.assertRaises(TypeError, lambda: t.numpy())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_softmax(self, device, dtype, coalesced):
@@ -3765,7 +3776,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
@@ -3773,18 +3783,18 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
     @dtypes(torch.float)
-    @expectedFailureMPS
     def test_log_softmax_float(self, device, dtype):
+        # float16 -> float32 comparison for mps since mps doesn't have float64
+        dtype = torch.float16 if device == "mps:0" else dtype
         x = (torch.rand(4, 3, dtype=dtype, device=device) - 10000000.0).to_sparse()
         out = torch.sparse.log_softmax(x, dim=1).to_dense()
-        x_double = x.double()
+        x_double = x.double() if device != "mps:0" else x.float()
         out_double = torch.sparse.log_softmax(x_double, dim=1).to_dense()
         self.assertEqual(out, out_double.to(dtype=dtype))
 
@@ -4919,6 +4929,7 @@ class TestSparseAny(TestCase):
                                         f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
         assert not untested_combinations, untested_combinations
 
+    @slowTest
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_autograd(self, device, layout):
 
@@ -5475,6 +5486,7 @@ class TestSparseAny(TestCase):
             result = mask.to_dense().sparse_mask(mask)
             self.assertEqual(result, mask)
 
+    @slowTest
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
