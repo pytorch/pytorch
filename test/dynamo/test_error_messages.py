@@ -1691,7 +1691,7 @@ from user code:
   File "test_error_messages.py", line N, in __setattr__
     torch._dynamo.graph_break()""",
             )
-    
+
     def test_runtime_error_readable_shape_mismatch(self):
         def fn(x, y):
             return x + y
@@ -1718,6 +1718,7 @@ from user code:
     return x + y""",
             post_munge=post_munge,
         )
+
 
 class NestedGraphBreakLoggingTests(
     LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
