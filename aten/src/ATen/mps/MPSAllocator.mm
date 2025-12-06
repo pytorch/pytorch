@@ -687,6 +687,9 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
 
 void MPSHeapAllocatorImpl::emptyCache() {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  // Free buffers waiting for command buffer completion first
+  // This is critical - without this, buffers in buffers_pending_free accumulate indefinitely
+  freeInactiveBuffers();
   release_cached_buffers();
 }
 
