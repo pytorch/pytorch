@@ -109,6 +109,19 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t nslices = input.size(dimslices);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
+
+  TORCH_CHECK(
+      pad_t <= INT64_MAX - iheight &&
+      pad_b <= INT64_MAX - iheight - pad_t,
+      "Padding values too large; integer overflow detected while computing output height."
+  );
+
+  TORCH_CHECK(
+      pad_l <= INT64_MAX - iwidth &&
+      pad_r <= INT64_MAX - iwidth - pad_l,
+      "Padding values too large; integer overflow detected while computing output width."
+  );
+  
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
