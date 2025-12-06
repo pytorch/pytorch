@@ -75,9 +75,6 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     of the optimized kernels in oneDNN library.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
-
     """
         Following annotate_xx overrides the impls in base class, as
         no XPU implementation for these operators currently. We would
