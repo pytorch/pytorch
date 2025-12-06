@@ -1211,7 +1211,7 @@ Tensor _sparse_sum_backward_mps(const Tensor& grad_, const SparseTensor& input_,
   } else {
     auto grad_keys = at::sparse::flatten_indices(
         grad_indices.contiguous(),
-        grad.sizes().slice(0, grad_sparse_dim)).to(at::kInt).contiguous();
+        grad.sizes().slice(0, grad_sparse_dim)).to(at::TensorOptions().dtype(at::kInt).memory_format(at::MemoryFormat::Contiguous));
 
     std::vector<int64_t> sizes_keep;
     sizes_keep.reserve(sparse_dims_to_keep_v.size());
@@ -1240,7 +1240,7 @@ Tensor _sparse_sum_backward_mps(const Tensor& grad_, const SparseTensor& input_,
 
   return at::_sparse_coo_tensor_with_dims_and_tensors(
       input_sparse_dim, input_dense_dim, input_sizes,
-      input_indices.clone(at::MemoryFormat::Contiguous),
+      input_indices,
       grad_input_values, grad.options());
 }
 
