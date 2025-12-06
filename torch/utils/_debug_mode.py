@@ -35,6 +35,7 @@ Usage::
 import contextlib
 import functools
 import inspect
+import logging
 import os
 import traceback
 import weakref
@@ -59,6 +60,8 @@ if TYPE_CHECKING:
     from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
@@ -248,6 +251,34 @@ def _get_op_name(op) -> str:
     else:
         op_name = str(op)
     return op_name
+
+
+_annotate_decorated = False
+
+
+def _ensure_annotate_decorated():
+    """
+    Lazily apply dont_skip_tracing decorator to DebugMode._annotate, to avoid circular import/initialization issues.
+    """
+    global _annotate_decorated
+    if not _annotate_decorated:
+        DebugMode._annotate = torch._dynamo.dont_skip_tracing(DebugMode._annotate)  # type: ignore[has-type]
+
+        # Mark annotate as side-effectful so aot_eager doesn't DCE it.
+        from torch.fx.node import _side_effectful_functions
+
+        _side_effectful_functions.add(torch.ops.debug_mode_ops.annotate.default)
+
+        # Register no-op lowering for inductor backend
+        from torch._inductor.lowering import register_lowering
+        from torch._logging import warning_once
+
+        @register_lowering(torch.ops.debug_mode_ops.annotate)
+        def _annotate_lowering(tag: str) -> None:
+            warning_once(log, 'DebugMode._annotate() is a no-op for backend="inductor"')
+            return None
+
+        _annotate_decorated = True
 
 
 class _DebugCall:
@@ -543,6 +574,25 @@ class _TritonKernelCall(_DebugCall):
         yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
 
 
+class _AnnotateCall(_DebugCall):
+    """Custom annotation call"""
+
+    def __init__(self, tag: Any, call_depth: int, stack: bool = False) -> None:
+        super().__init__(call_depth, stack=stack)
+        self.tag = tag
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[annotate] {self.tag}"
+
+    def __iter__(self):
+        yield from [
+            f"[nn.Mod] {self.tag}",
+            (),
+            {},
+            self.call_depth,
+        ]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -584,6 +634,17 @@ def _get_call_name(call: _DebugCall) -> str:
         return str(call)
 
 
+@torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
+def _annotate(tag: str) -> None:
+    # This is special-cased in DebugMode.__torch_dispatch__
+    return None
+
+
+@_annotate.register_fake
+def _annotate_fake(tag: str) -> None:
+    return None
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -601,6 +662,7 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        _ensure_annotate_decorated()
         self.supports_higher_order_operators = True
 
         # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
@@ -705,6 +767,11 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if func is torch.ops.debug_mode_ops.annotate.default:
+            assert len(args) == 1
+            self._handle_annotate(args[0])
+            return
+
         # Record the operation with its call depth
         call = None
         if torch.distributed.tensor.DTensor in types:
@@ -779,7 +846,7 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
+            self.operators.append(_NNModuleCall(fqn, self.call_depth))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
@@ -1011,6 +1078,19 @@ class DebugMode(TorchDispatchMode):
     @property
     def logs(self):
         return list(self.operators)
+
+    def _handle_annotate(self, tag):
+        """Handles DebugMode._annotate()"""
+        call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
+        self.operators.append(call)
+
+    @staticmethod
+    def _annotate(tag: Any) -> None:
+        """
+        If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
+        Implemented with a custom op.
+        """
+        torch.ops.debug_mode_ops.annotate(tag)
 
     @staticmethod
     def check_hash_mismatches(
