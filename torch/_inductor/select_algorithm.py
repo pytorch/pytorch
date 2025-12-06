@@ -2669,7 +2669,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # set the maximum number of worker threads to 30 * 4 = 120,
         # and then doubled to 240 for wiggle room if our calculations
         # are slightly off
-        if (num_workers := min(get_num_workers(), 120)) > 0:
+        if (num_workers := min(get_num_workers(), 240)) > 0:
             import atexit
             self.executor = ThreadPoolExecutor(max_workers=num_workers)
             atexit.register(self.executor.shutdown)
