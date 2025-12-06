@@ -146,8 +146,8 @@ public:
     allocator_->createOrIncrefPool(device, mempool_id, allocator);
   }
 
-  void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) override {
-    allocator_->setUseOnOOM(device, mempool_id);
+  void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom) override {
+    allocator_->setUseOnOOM(device, mempool_id, use_on_oom);
   }
 
   bool checkPoolLiveAllocations(
