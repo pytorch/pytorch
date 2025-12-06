@@ -634,13 +634,7 @@ def mirror_inductor_external_kernels() -> None:
     """
     Copy external kernels into Inductor so they are importable.
     """
-    paths = [
-        (
-            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
-            CWD
-            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
-        ),
-    ]
+    paths = []
     for new_path, orig_path in paths:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
