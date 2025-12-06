@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence, Sized
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch._prims_common import IntLike
@@ -723,7 +723,7 @@ def _derive_follow_placements_from_tuple_strategy(
             # current replicate, just follow new placement
             return new_placement
 
-    follow_placements: Optional[list[Placement]] = None
+    follow_placements: list[Placement] | None = None
     mesh = tuple_strategy.child_mesh(0)
     for arg_strategy in tuple_strategy.children:
         if not isinstance(arg_strategy, OpStrategy):
@@ -759,9 +759,11 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     input_tuple_strategy = args_schema[0]
     if not isinstance(input_tuple_strategy, TupleStrategy):
         raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
-    first_input_strategy = input_tuple_strategy.children[0]
-    if not isinstance(first_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {first_input_strategy}")
+    input_strategies: list[OpStrategy] = []
+    for child in input_tuple_strategy.children:
+        assert isinstance(child, OpStrategy), f"Expected OpStrategy, got {child}"
+        input_strategies.append(child)
+    first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
@@ -784,22 +786,18 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
     # be normalized with the new Shard placement
     follow_placements = shift_shard_dims_after_insert(follow_placements, dim)
-
-    for strategy in input_tuple_strategy.children:
-        if not isinstance(strategy, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
-        output_spec = DTensorSpec(mesh, tuple(follow_placements))
-        redistribute_cost = []
-        for input_spec in input_specs:
-            cost = generate_redistribute_costs(strategy, input_spec)
-            redistribute_cost.append(cost)
-        op_strategy.strategies.append(
-            OpSpec(
-                output_specs=output_spec,
-                input_specs=input_specs,
-                redistribute_cost=redistribute_cost,
-            )
+    output_spec = DTensorSpec(mesh, tuple(follow_placements))
+    redistribute_cost = [
+        generate_redistribute_costs(input_strategies[i], input_specs[i])
+        for i in range(len(input_specs))
+    ]
+    op_strategy.strategies.append(
+        OpSpec(
+            output_specs=output_spec,
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
+    )
     return op_strategy
 
 
@@ -889,7 +887,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     if not isinstance(indices_spec, DTensorSpec):
         raise AssertionError(f"Expected DTensorSpec, got {type(indices_spec)}")
 
-    all_indices_spec: list[Optional[DTensorSpec]] = [
+    all_indices_spec: list[DTensorSpec | None] = [
         indices_spec if dim == i else None for i in range(values_spec.ndim)
     ]
 
@@ -936,7 +934,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
     op_strategy = OpStrategy([])
     # 1. `indices` should all be replicated first.
     indices_redistribute_costs = []
-    new_indices_spec: list[Optional[DTensorSpec]] = []
+    new_indices_spec: list[DTensorSpec | None] = []
     for indices_spec_child in indices_spec.children:
         if not isinstance(indices_spec_child, OpStrategy):
             raise AssertionError(f"Expected OpStrategy, got {type(indices_spec_child)}")
@@ -1046,7 +1044,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         raise AssertionError(f"Expected DTensorSpec, got {type(values_spec)}")
     if not isinstance(multi_indices_spec, list):
         raise AssertionError(f"Expected list, got {type(multi_indices_spec)}")
-    multi_indices_spec = cast(list[Optional[DTensorSpec]], multi_indices_spec)
+    multi_indices_spec = cast(list[DTensorSpec | None], multi_indices_spec)
     valid_indices_spec: list[tuple[int, DTensorSpec]] = [
         (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
     ]
