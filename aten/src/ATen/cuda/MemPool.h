@@ -19,7 +19,8 @@ struct TORCH_CUDA_CPP_API MemPool {
   MemPool(
       c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false);
+      bool use_on_oom = false,
+      bool no_split = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
