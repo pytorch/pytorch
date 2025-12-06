@@ -241,11 +241,10 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             (
                 FileCheck()
                 .check("extern_kernels.mm")
-                .check("triton_poi_fused_all_reduce_0")
+                .check("triton_poi_fused_0")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
-                .check("triton_poi_fused_relu")
+                .check("triton_poi_fused_relu_1")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("extern_kernels.mm")
@@ -299,8 +298,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
             (
                 FileCheck()
+                .check("triton_poi_fused")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
@@ -359,8 +358,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
             (
                 FileCheck()
+                .check("triton_poi_fused")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
