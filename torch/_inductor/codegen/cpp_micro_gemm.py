@@ -55,7 +55,7 @@ class CppMicroGemm:
 
     # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
-template <bool accum, bool prefetch=false>
+template <bool accum, bool horizontal_transverse=false, bool prefetch=false>
 inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
@@ -138,6 +138,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        horizontal_transverse: bool = False,
         prefetch: bool = False,
         **kwargs_for_extra_args,
     ) -> str:
@@ -156,7 +157,10 @@ inline void {{kernel_name}}(
         ldc = kernel.stride(C, 0)
         res = IndentedBuffer()
         res.writeline(
-            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(prefetch, 'bool')}>("
+            f"{self.name}<"
+            f"{value_to_cpp(accum, 'bool')}, "
+            f"{value_to_cpp(horizontal_transverse, 'bool')}, "
+            f"{value_to_cpp(prefetch, 'bool')}>("
         )
         with res.indent():
             kwargs_for_extra_args.update({"kernel": kernel})
@@ -1117,7 +1121,7 @@ class CppMicroGemmAMX(CppMicroGemm):
             else
     {%- endif %}
             if (block_m >= {{num_rows}}) {
-                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
@@ -1139,7 +1143,7 @@ class CppMicroGemmAMX(CppMicroGemm):
             }
 {%- endfor %}
             if (block_m > 0) {
-                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
@@ -1164,7 +1168,7 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     TEMPLATE_KERNEL = r"""
 
-template <bool accum, bool prefetch=false>
+template <bool accum, bool horizontal_transverse, bool prefetch=false>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
@@ -1223,10 +1227,22 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- set tile_idx_b = tile_offset_b + tile_col %}
         {%- set tile_idx_c = tile_row * num_columns + tile_col %}
         {%- if tile_col == 0 %}
-        _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        if constexpr (horizontal_transverse) {
+            _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        } else {
+            _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        }
         {%- endif %}
         {%- if tile_row == 0 %}
-        _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
+        if constexpr (horizontal_transverse) {
+            _tile_stream_loadd(
+                {{tile_idx_b}},
+                B + k * ldb + {{tile_col * 16 * vnni_size}},
+                ldb * {{vnni_size}} * sizeof({{input_t}})
+            );
+        } else {
+            _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
+        }
         {%- endif %}
         {%- if int8_gemm %}
             {%- if input_dtype == torch.int8 %}
@@ -1858,7 +1874,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             else
         {%- endif %}
             if (block_m >= {{num_rows}}) {
-                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m * lda,
                     dequantized_B_buf + n * K,
@@ -1874,7 +1890,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             }
         {%- endfor %}
             if (block_m > 0) {
-                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m_tail * lda,
                     dequantized_B_buf + n * K,
