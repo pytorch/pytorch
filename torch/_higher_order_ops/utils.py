@@ -1253,3 +1253,92 @@ def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
 def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+
+# Generic helpers for functional wrappers (shared by auto_functionalized and triton_kernel_wrapper_functional)
+def make_functional_wrapper_functionalize_impl(func_op: Callable) -> Callable:
+    """Create a generic functionalize implementation for functional wrapper ops.
+
+    Args:
+        func_op: The functional wrapper operator to wrap
+
+    Returns:
+        A functionalize implementation that unwraps, redispatches, and wraps tensors
+    """
+
+    def functionalize_impl(ctx, *args, **kwargs):
+        # Unwrap all tensors
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+        # Redispatch to next mode
+        with ctx.redispatch_to_next():
+            result = func_op(*unwrapped_args, **unwrapped_kwargs)
+
+        # Wrap and return results
+        return ctx.wrap_tensors(result)
+
+    return functionalize_impl
+
+
+def make_functional_wrapper_fake_impl(func_op: Callable) -> Callable:
+    """Create a generic fake tensor mode implementation for functional wrapper ops.
+
+    Args:
+        func_op: The functional wrapper operator to call
+
+    Returns:
+        A fake tensor mode implementation that calls the op within the mode context
+    """
+
+    def fake_impl(mode, *args, **kwargs):
+        with mode:
+            return func_op(*args, **kwargs)
+
+    return fake_impl
+
+
+def trace_functional_wrapper(
+    proxy_mode,
+    func_overload: Callable,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Generic proxy tracing for functional wrapper ops.
+
+    This function implements the common proxy tracing pattern used by functional
+    wrapper higher-order operators.
+
+    Args:
+        proxy_mode: The ProxyTorchDispatchMode instance
+        func_overload: The functional wrapper operator being traced
+        args: Positional arguments to the operator
+        kwargs: Keyword arguments to the operator
+
+    Returns:
+        The traced result with proxy tracking
+    """
+    from torch.fx.experimental.proxy_tensor import (
+        disable_proxy_modes_tracing,
+        track_tensor_tree,
+    )
+
+    # Disable proxy tracing and call the actual function
+    with disable_proxy_modes_tracing():
+        out = func_overload(*args, **kwargs)
+
+    # Unwrap proxies from arguments
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
+    proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)
+
+    # Create proxy for tracing
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function",
+        func_overload,
+        proxy_args,
+        proxy_kwargs,
+    )
+
+    # Track tensor tree and return
+    result = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return result
