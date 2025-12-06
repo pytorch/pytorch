@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/dev/pytorch/torch/_ops.py", line 815, in __call__
-    return self._op(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-RuntimeError: USE_MEM_EFF_ATTENTION was not enabled for build.
