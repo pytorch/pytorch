@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>

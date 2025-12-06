@@ -5,6 +5,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
