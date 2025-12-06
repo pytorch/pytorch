@@ -1077,13 +1077,33 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const bool input_is_scalar = input.dim() == 0;
+  const bool other_is_scalar = other.dim() == 0;
+  const bool use_scalar_kernel = (input_is_scalar || other_is_scalar);
+
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
-  // TODO: Implicitly pass both input and output types to non-cast kernels
-  const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
-      : fmt::format(
-            "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
+
+  std::string kernel_name;
+  if (use_scalar_kernel) {
+    const bool scalar_on_lhs = input_is_scalar;
+    const auto& tensor_operand = scalar_on_lhs ? other : input;
+    kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
+                              name,
+                              scalar_on_lhs ? "_rhs" : "",
+                              scalarToMetalTypeString(out),
+                              scalarToMetalTypeString(tensor_operand),
+                              alpha_suffix);
+  } else {
+    // TODO: Implicitly pass both input and output types to non-cast kernels
+    kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+                              : fmt::format("{}_{}_{}_{}{}",
+                                            name,
+                                            suffix,
+                                            scalarToMetalTypeString(out),
+                                            scalarToMetalTypeString(input),
+                                            alpha_suffix);
+  }
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1091,40 +1111,56 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
-      // Set input and output tensors
-      bind_iter_tensors(computeEncoder, iter);
-      // Iterator is contiguous if all of its elements are dense in storage,
-      // i.e. it's true for both row-first and column-first tensors
-      if (iter.is_contiguous()) {
-        if (alpha) {
-          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);
+      if (use_scalar_kernel) {
+        const bool scalar_on_lhs = input_is_scalar;
+        const auto& tensor_operand = scalar_on_lhs ? other : input;
+        const auto& scalar_operand = scalar_on_lhs ? input : other;
+        mtl_setArgs(computeEncoder, out);
+        if (scalar_on_lhs) {
+          mtl_setArgs<1>(computeEncoder, scalar_operand, tensor_operand);
+        } else {
+          mtl_setArgs<1>(computeEncoder, tensor_operand, scalar_operand);
         }
-        if (cast_needed) {
-          std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
-                                               static_cast<int>(c10::elementSize(other.scalar_type())),
-                                               static_cast<int>(input.scalar_type()),
-                                               static_cast<int>(other.scalar_type())};
-          mtl_setBytes(computeEncoder, size_and_types, alpha ? 4 : 3);
+
+        if (alpha) {
+          mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else {
-        // Please note that shapes and strides of the iterator might be
-        // different than that of its operands, for example binary op
-        // between 4x4 tensor and scalar will result in 1D 16 element iterator
-        std::array<int, 4> ndim_and_types = {iter.ndim(),
-                                             static_cast<int>(input.scalar_type()),
-                                             static_cast<int>(other.scalar_type()),
-                                             static_cast<int>(out.scalar_type())};
-        if (alpha) {
-          mtl_setArgs<3>(computeEncoder,
-                         getMPSScalar(*alpha, alpha_type),
-                         iter.shape(),
-                         iter.strides(0),
-                         iter.strides(1),
-                         iter.strides(2),
-                         ndim_and_types);
+        // Set input and output tensors
+        bind_iter_tensors(computeEncoder, iter);
+        // Iterator is contiguous if all of its elements are dense in storage,
+        // i.e. it's true for both row-first and column-first tensors
+        if (iter.is_contiguous()) {
+          if (alpha) {
+            mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);
+          }
+          if (cast_needed) {
+            std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                                 static_cast<int>(c10::elementSize(other.scalar_type())),
+                                                 static_cast<int>(input.scalar_type()),
+                                                 static_cast<int>(other.scalar_type())};
+            mtl_setBytes(computeEncoder, size_and_types, alpha ? 4 : 3);
+          }
         } else {
-          mtl_setArgs<3>(
-              computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+          // Please note that shapes and strides of the iterator might be
+          // different than that of its operands, for example binary op
+          // between 4x4 tensor and scalar will result in 1D 16 element iterator
+          std::array<int, 4> ndim_and_types = {iter.ndim(),
+                                               static_cast<int>(input.scalar_type()),
+                                               static_cast<int>(other.scalar_type()),
+                                               static_cast<int>(out.scalar_type())};
+          if (alpha) {
+            mtl_setArgs<3>(computeEncoder,
+                           getMPSScalar(*alpha, alpha_type),
+                           iter.shape(),
+                           iter.strides(0),
+                           iter.strides(1),
+                           iter.strides(2),
+                           ndim_and_types);
+          } else {
+            mtl_setArgs<3>(
+                computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+          }
         }
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
@@ -1147,7 +1183,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name);
     }
     return;
   }

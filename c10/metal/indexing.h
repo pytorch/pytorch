@@ -209,10 +209,7 @@ inline device T& ref_at_offs(device void* ptr, long offs) {
 // strided
 // - binary_dense_cast - inputs are dense, but of different dtypes
 // - binary_strided_cast - inputs or output are strided and of different dtypes
-// TODO: Look like binary_dense_scalar are frequently used specialization that
-// should be added Pulse 4 variants of the same, but that accept optional
-// `alpha` parameter
-//   (currently only used add/sub/lerp.Scalar)
+// - binary_dense_scalar - one input is dense, another one is scalar
 // Note about accuracy (for more info see
 // https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
 // invoked to produce `half` output, but one of the arguments is float arguments
@@ -371,6 +368,50 @@ kernel void binary_alpha_dense_cast(
   out[tid] = f(a, b, alpha);
 }
 
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_scalar(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T& scalar [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(scalar)));
+}
+
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_dense_scalar_rhs(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T& scalar [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(scalar), om_t(input[tid])));
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T& scalar [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], scalar, alpha);
+}
+
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_scalar_rhs(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T& scalar [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(scalar, input[tid], alpha);
+}
+
 #define REGISTER_BINARY_OP_(NAME, DTYPEI, DTYPEO, OMT)                         \
   static_assert(                                                               \
       ::metal::is_same_v<                                                      \
@@ -413,6 +454,20 @@ kernel void binary_alpha_dense_cast(
           constant void* input,                                                \
           constant void* other,                                                \
           constant uint4& sizes_types,                                         \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI)]]           \
+  kernel void ::c10::metal::binary_dense_scalar<DTYPEI, NAME##_functor, OMT>(  \
+      device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> * out_,   \
+      constant DTYPEI * input_,                                                \
+      constant DTYPEI & scalar_,                                               \
+      uint tid);                                                               \
+  template [[host_name(#NAME "_dense_scalar_rhs_" #DTYPEO "_" #DTYPEI)]]       \
+  kernel void ::c10::metal::                                                   \
+      binary_dense_scalar_rhs<DTYPEI, NAME##_functor, OMT>(                    \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI & scalar_,                                           \
+          constant DTYPEI * input_,                                            \
           uint tid)
 
 // OpMath Binary Op promotes inputs to higher precision type before Functor call
@@ -474,7 +529,27 @@ kernel void binary_alpha_dense_cast(
               constant void* other,                                            \
               constant DTYPEA& alpha,                                          \
               constant uint4& sizes_types,                                     \
-              uint tid)
+              uint tid);                                                       \
+  template [[host_name(#NAME "_dense_scalar_" #DTYPEO "_" #DTYPEI              \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
+      binary_alpha_dense_scalar<DTYPEI, DTYPEA, NAME##_functor>(               \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI & scalar_,                                           \
+          constant DTYPEA & alpha,                                             \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_scalar_rhs_" #DTYPEO "_" #DTYPEI          \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::         \
+      binary_alpha_dense_scalar_rhs<DTYPEI, DTYPEA, NAME##_functor>(           \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *          \
+              out_,                                                            \
+          constant DTYPEI & scalar_,                                           \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEA & alpha,                                             \
+          uint tid)
 
 // Ternary elementwise ops kernels
 // Right now there are 4 flavors available:
