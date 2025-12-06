@@ -798,6 +798,47 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    @requires_gpu
+    def test_default_device_factory_functions(self):
+        """Test that factory functions respect default device in compiled code"""
+
+        @torch.compile(fullgraph=True)
+        def random_func(x: torch.Tensor) -> torch.Tensor:
+            # Test various factory functions
+            rnd = torch.randint(0, 2**32, size=x.shape, dtype=torch.uint32)
+            return x + rnd, rnd
+
+        torch.set_default_device("cuda")
+        (result, rnd) = random_func(torch.randn(()))
+
+        # Verify tensors are on CUDA
+        self.assertEqual(rnd.device.type, "cuda")
+        self.assertEqual(result.device.type, "cuda")
+
+        torch.set_default_device("cpu")
+        (result, rnd) = random_func(torch.randn(()))
+
+        # Verify tensors are on cpu
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+
+        torch.set_default_device(None)
+
+    @requires_gpu
+    def test_default_device_factory_functions_priority(self):
+        torch.set_default_device("cuda")
+
+        @torch.compile(fullgraph=True)
+        def with_explicit_device(x: torch.Tensor) -> torch.Tensor:
+            rnd = torch.randint(
+                0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
+            )
+            return x + rnd, rnd
+
+        (result, rnd) = with_explicit_device(torch.randn(()))
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, "cuda")
+
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):
