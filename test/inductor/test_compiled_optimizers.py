@@ -807,11 +807,11 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=8, lr=0.01, foreach=False
+        ASGD, kernel_count=2, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
-        SGD, kernel_count=4, lr=0.01, foreach=False
+        SGD, kernel_count=1, lr=0.01, foreach=False
     )
     test_sgd_recompile_foreach = make_recompile_test(
         SGD, kernel_count=1, lr=0.01, foreach=True

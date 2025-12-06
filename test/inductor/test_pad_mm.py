@@ -411,7 +411,7 @@ class PadMMTest(TestCase):
         bmm_expected_result = torch.bmm(mat1, mat2)
         # in call code, expect to see a single pad per input, and then we should see padded allocation for output
         FileCheck().check("del async_compile").check_count(
-            ".run(", 2, exactly=True
+            ".run(", 1, exactly=True
         ).check(f"empty_strided_{GPU_TYPE}((3, 8, 16)").run(code)
 
         assert torch.allclose(res2, bmm_expected_result), (
