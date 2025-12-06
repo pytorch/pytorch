@@ -320,7 +320,7 @@ class LazyLinear(LazyModuleMixin, Linear):
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
             with torch.no_grad():
-                self.in_features = input.shape[-1]
+                self.in_features = int(input.shape[-1]) if isinstance(input.shape[-1], torch.SymInt) else input.shape[-1]
                 self.weight.materialize((self.out_features, self.in_features))
                 if self.bias is not None:
                     self.bias.materialize((self.out_features,))
@@ -331,7 +331,7 @@ class LazyLinear(LazyModuleMixin, Linear):
                 f"is not equal to in_features from self.weight: "
                 f"{self.weight.shape[-1]}"
             )
-            self.in_features = input.shape[-1]
+            self.in_features = int(input.shape[-1]) if isinstance(input.shape[-1], torch.SymInt) else input.shape[-1]
 
 
 # TODO: PartialLinear - maybe in sparse?
