@@ -1428,7 +1428,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_infinite_loop_error(self):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "while_loop doesn't work unless it is captured completely",
+            "torch.while_loop",
         ):
             self._run_test(
                 model=WhileLoopModels.InfiniteLoop(),
