@@ -3991,6 +3991,7 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
