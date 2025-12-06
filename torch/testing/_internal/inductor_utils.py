@@ -106,6 +106,7 @@ RUN_CPU = HAS_CPU and any(
 )
 
 HAS_TPU = has_tpu_pallas()
+RUN_TPU = HAS_TPU
 
 
 def _check_has_dynamic_shape(
