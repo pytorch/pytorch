@@ -75,10 +75,11 @@ class AOTInductorModelContainer {
       output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
     }
     model->load_constants();
-    constant_blob_ = model->release_constant_blob();
+    constant_blobs_ = model->release_constant_blobs();
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
-    model->compute_constant_blob(blob_size_, constants_internal_offset_);
+    model->compute_constant_blobs(
+        device_to_blob_size_, constants_internal_offset_);
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
@@ -256,10 +257,11 @@ class AOTInductorModelContainer {
   }
 
   uint64_t constant_blob_size() const {
-    if (this->num_models() == 0) {
-      throw std::runtime_error("No available models in container!");
+    uint64_t total_size = 0;
+    for (const auto& item : device_to_blob_size_) {
+      total_size += item.second;
     }
-    return models_[0]->constant_blob_size();
+    return total_size;
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
@@ -485,8 +487,10 @@ class AOTInductorModelContainer {
         continue;
       }
 
-      auto* constants_blob_ptr =
-          static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
+      int32_t device_type = models_[0]->constant_device_type(idx);
+      int32_t device_idx = models_[0]->constant_device_idx(idx);
+      auto* constants_blob_ptr = static_cast<uint8_t*>(
+          get_constant_blob_ptr(use_inactive, device_type, device_idx));
 
       // Move the data to container handled blob.
       uint8_t* internal_constants_ptr =
@@ -534,8 +538,6 @@ class AOTInductorModelContainer {
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
       AtenTensorHandle tensor_handle;
-      int device_type = models_[0]->get_device_type();
-      int device_idx = models_[0]->get_device_idx();
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_constants_ptr,
           models_[0]->constant_ndim(idx),
@@ -590,10 +592,10 @@ class AOTInductorModelContainer {
   void free_inactive_constant_buffer() {
     if (use_secondary_) {
       constant_folded_ = ConstantState::NONE;
-      constant_blob_.reset();
+      constant_blobs_.clear();
     } else {
       constant_folded_secondary_ = ConstantState::NONE;
-      constant_blob_secondary_.reset();
+      constant_blobs_secondary_.clear();
     }
     // Free the internally held constants
     int num_constants = static_cast<int>(models_[0]->num_constants());
@@ -646,10 +648,10 @@ class AOTInductorModelContainer {
 
   // Holds the blob storage for constants' at::Tensor within the container.
   // This blob of memory will be managed by the container.
-  RAIIDataPtr constant_blob_;
-  RAIIDataPtr constant_blob_secondary_;
+  std::map<std::pair<int32_t, int32_t>, RAIIDataPtr> constant_blobs_;
+  std::map<std::pair<int32_t, int32_t>, RAIIDataPtr> constant_blobs_secondary_;
 
-  size_t blob_size_;
+  std::map<std::pair<int32_t, int32_t>, size_t> device_to_blob_size_;
   std::vector<size_t> constants_internal_offset_;
 
   // Determine which constants is being used for the model.
@@ -706,26 +708,50 @@ class AOTInductorModelContainer {
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
-  RAIIDataPtr allocate_constant_blob() {
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    return RAII_gpuMalloc(blob_size_);
-#else
-    return RAII_cpuMalloc(blob_size_);
-#endif // USE_CUDA
+  RAIIDataPtr allocate_constant_blob(int32_t device_type, int32_t device_idx) {
+    auto key = std::make_pair(device_type, device_idx);
+    size_t size = device_to_blob_size_.at(key);
+    if (device_type == aoti_torch_device_type_cpu()) {
+      return RAII_cpuMalloc(size);
+#ifdef USE_CUDA
+    } else if (device_type == aoti_torch_device_type_cuda()) {
+      AOTI_RUNTIME_CUDA_CHECK(cudaSetDevice(device_idx));
+      return RAII_gpuMalloc(size);
+#endif
+#ifdef USE_XPU
+    } else if (device_type == aoti_torch_device_type_xpu()) {
+      aoti_torch_set_current_xpu_device(device_idx);
+      return RAII_gpuMalloc(size);
+#endif
+#ifdef USE_MPS
+    } else if (device_type == aoti_torch_device_type_mps()) {
+      return RAII_gpuMalloc(size);
+#endif
+    } else {
+      throw std::runtime_error(
+          "Unsupported device type for constant allocation");
+    }
   }
 
-  void* get_constant_blob_ptr(bool get_inactive) {
+  void* get_constant_blob_ptr(
+      bool get_inactive,
+      int32_t device_type,
+      int32_t device_idx) {
+    auto key = std::make_pair(device_type, device_idx);
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
-      if (!constant_blob_) {
-        constant_blob_ = allocate_constant_blob();
+      if (constant_blobs_.find(key) == constant_blobs_.end()) {
+        constant_blobs_.emplace(
+            key, allocate_constant_blob(device_type, device_idx));
       }
-      return constant_blob_.get();
+      return constant_blobs_.at(key).get();
     } else {
-      if (!constant_blob_secondary_) {
-        constant_blob_secondary_ = allocate_constant_blob();
+      if (constant_blobs_secondary_.find(key) ==
+          constant_blobs_secondary_.end()) {
+        constant_blobs_secondary_.emplace(
+            key, allocate_constant_blob(device_type, device_idx));
       }
-      return constant_blob_secondary_.get();
+      return constant_blobs_secondary_.at(key).get();
     }
   }
 

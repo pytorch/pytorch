@@ -363,7 +363,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#else
+#endif // USE_CUDA
 
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   void* data_ptr = std::malloc(num_bytes);
@@ -373,8 +373,6 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
-
-#endif // USE_CUDA
 
 } // anonymous namespace
 
@@ -595,16 +593,39 @@ class AOTInductorModelBase {
 
     std::vector<size_t> constants_internal_offset(
         num_constants - num_folded_constants);
-    size_t blob_size = 0;
-    compute_constant_blob(blob_size, constants_internal_offset);
+    std::map<std::pair<int32_t, int32_t>, size_t> device_to_size;
+    compute_constant_blobs(device_to_size, constants_internal_offset);
+
     if (!force && !include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    constant_blob_ = RAII_gpuMalloc(blob_size);
-#else
-    constant_blob_ = RAII_cpuMalloc(blob_size);
+
+    for (auto& item : device_to_size) {
+      auto device_type = item.first.first;
+      auto device_idx = item.first.second;
+      auto blob_size = item.second;
+
+      if (device_type == aoti_torch_device_type_cpu()) {
+        constant_blobs_.emplace(item.first, RAII_cpuMalloc(blob_size));
+#ifdef USE_CUDA
+      } else if (device_type == aoti_torch_device_type_cuda()) {
+        AOTI_RUNTIME_CUDA_CHECK(cudaSetDevice(device_idx));
+        constant_blobs_.emplace(item.first, RAII_gpuMalloc(blob_size));
 #endif
+#ifdef USE_XPU
+      } else if (device_type == aoti_torch_device_type_xpu()) {
+        aoti_torch_set_current_xpu_device(device_idx);
+        constant_blobs_.emplace(item.first, RAII_gpuMalloc(blob_size));
+#endif
+#ifdef USE_MPS
+      } else if (device_type == aoti_torch_device_type_mps()) {
+        constant_blobs_.emplace(item.first, RAII_gpuMalloc(blob_size));
+#endif
+      } else {
+        throw std::runtime_error(
+            "Unsupported device type for constant loading");
+      }
+    }
 
     size_t bytes_read = 0;
     size_t non_folded_idx = 0; // Separate index for non-folded constants
@@ -615,12 +636,19 @@ class AOTInductorModelBase {
       }
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
+      int32_t device_type = this->constant_device_type(i);
+      int32_t device_idx = this->constant_device_idx(i);
+      auto key = std::make_pair(device_type, device_idx);
+
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
+                constant_blobs_[key],
                 constants_internal_offset[non_folded_idx],
                 bytes_read,
                 data_size,
-                /* skip_copy = */ false)
+                /* skip_copy = */ false,
+                device_type,
+                device_idx)
           : nullptr;
       bytes_read += data_size;
       non_folded_idx++; // Increment the non-folded index
@@ -648,8 +676,8 @@ class AOTInductorModelBase {
           stride,
           offset,
           dtype,
-          device_type_,
-          device_idx_,
+          device_type,
+          device_idx,
           &tensor_handle,
           layout,
           opaque_metadata_ptr,
@@ -661,8 +689,8 @@ class AOTInductorModelBase {
     }
   }
 
-  RAIIDataPtr&& release_constant_blob() {
-    return std::move(constant_blob_);
+  std::map<std::pair<int32_t, int32_t>, RAIIDataPtr> release_constant_blobs() {
+    return std::move(constant_blobs_);
   }
 
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
@@ -678,46 +706,57 @@ class AOTInductorModelBase {
   }
 
   uint8_t* constant_ptr(
+      const RAIIDataPtr& constant_blob,
       size_t constant_offset,
       size_t bytes_read,
       size_t data_size,
-      bool skip_copy) {
-    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+      bool skip_copy,
+      int32_t device_type,
+      int32_t device_idx) {
+    auto* constants_ptr = static_cast<uint8_t*>(constant_blob.get());
     uint8_t* internal_ptr = constants_ptr + constant_offset;
     // TODO: Handle shared storage case.
     if (!skip_copy) {
+      if (device_type == aoti_torch_device_type_cpu()) {
+        memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #ifdef USE_XPU
-      sycl::queue* queue_ptr = nullptr;
-      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
-      queue_ptr
-          ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
-          .wait();
-#elif USE_CUDA
-      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
-          internal_ptr,
-          _get_constants_start() + bytes_read,
-          data_size,
-          cudaMemcpyHostToDevice));
-#elif USE_MPS
-      aoti_torch_mps_memcpy(
-          constants_ptr,
-          constant_offset,
-          bytes_read,
-          data_size,
-          _get_constants_start());
-      return constants_ptr;
-#else
-      memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
+      } else if (device_type == aoti_torch_device_type_xpu()) {
+        sycl::queue* queue_ptr = nullptr;
+        aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+        queue_ptr
+            ->memcpy(
+                internal_ptr, _get_constants_start() + bytes_read, data_size)
+            .wait();
 #endif
+#ifdef USE_CUDA
+      } else if (device_type == aoti_torch_device_type_cuda()) {
+        AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+            internal_ptr,
+            _get_constants_start() + bytes_read,
+            data_size,
+            cudaMemcpyHostToDevice));
+#endif
+#ifdef USE_MPS
+      } else if (device_type == aoti_torch_device_type_mps()) {
+        aoti_torch_mps_memcpy(
+            constants_ptr,
+            constant_offset,
+            bytes_read,
+            data_size,
+            _get_constants_start());
+        return constants_ptr;
+#endif
+      } else {
+        throw std::runtime_error("Unsupported device type for constant copy");
+      }
     }
     return internal_ptr;
   }
 
-  void compute_constant_blob(
-      size_t& blob_size,
+  void compute_constant_blobs(
+      std::map<std::pair<int32_t, int32_t>, size_t>& device_to_size,
       std::vector<size_t>& constants_internal_offset) {
     size_t num_constants = this->num_constants();
-    blob_size = 0;
     size_t curr_idx = 0;
     for (size_t i = 0; i < num_constants; i++) {
       if (this->constant_from_folded(i)) {
@@ -728,8 +767,11 @@ class AOTInductorModelBase {
         data_size = AOTI_CONST_ALIGNMENT +
             (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
       }
-      constants_internal_offset[curr_idx++] = blob_size;
-      blob_size += data_size;
+      int32_t device_type = this->constant_device_type(i);
+      int32_t device_idx = this->constant_device_idx(i);
+      auto key = std::make_pair(device_type, device_idx);
+      constants_internal_offset[curr_idx++] = device_to_size[key];
+      device_to_size[key] += data_size;
     }
   }
 
@@ -814,6 +856,16 @@ class AOTInductorModelBase {
 
   int32_t constant_type(int64_t idx) const {
     return constants_info_.at(idx).type;
+  }
+
+  int32_t constant_device_type(int64_t idx) const {
+    int32_t type = constants_info_.at(idx).device_type;
+    return type != -1 ? type : device_type_;
+  }
+
+  int32_t constant_device_idx(int64_t idx) const {
+    int32_t type = constants_info_.at(idx).device_type;
+    return type != -1 ? constants_info_.at(idx).device_idx : device_idx_;
   }
 
   const char* get_in_spec() const {
@@ -987,6 +1039,8 @@ class AOTInductorModelBase {
     const char* original_fqn = nullptr;
     bool from_folded{};
     int32_t type{};
+    int32_t device_type = -1;
+    int32_t device_idx = -1;
   };
 
   std::vector<ParamInfo> inputs_info_;
@@ -999,7 +1053,9 @@ class AOTInductorModelBase {
   std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
   // Holds the blob storage for constants' at::Tensor.
-  RAIIDataPtr constant_blob_;
+  // Holds the blob storage for constants' at::Tensor.
+  // Key is {device_type, device_idx}
+  std::map<std::pair<int32_t, int32_t>, RAIIDataPtr> constant_blobs_;
 
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights
