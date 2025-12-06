@@ -23,7 +23,7 @@ import functools
 import inspect
 import operator
 import types
-from collections.abc import Hashable as py_Hashable, Sequence
+from collections.abc import Hashable as py_Hashable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._subclasses.fake_tensor import is_fake
@@ -1087,12 +1087,10 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(items, SetVariable._default_value())
-        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:
