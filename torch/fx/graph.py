@@ -499,6 +499,9 @@ class CodeGen:
                 # Empty tuple is used for empty tuple type annotation Tuple[()]
                 return "()"
 
+            if isinstance(o, str):
+                return repr(o)
+
             typename = _type_repr(o)
             if isinstance(o, types.UnionType) and "|" in typename:
                 # str | int
