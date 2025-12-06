@@ -11,7 +11,7 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._inductor import config, ir, scheduler
+from torch._inductor import ir, scheduler
 from torch._inductor.comm_analysis import (
     baseLat,
     hwLat,
@@ -238,33 +238,19 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # matmul but below the 1st matmul.
             # - The wait_tensor should be sinked below the 3rd matmul but above
             # the 4th matmul.
-            if config.combo_kernels:
-                (
-                    FileCheck()
-                    .check("extern_kernels.mm")
-                    .check("triton_poi_fused_0")
-                    .check("torch.ops._c10d_functional.all_reduce_.default")
-                    .check("extern_kernels.mm")
-                    .check("triton_poi_fused_relu_1")
-                    .check("extern_kernels.mm")
-                    .check("torch.ops._c10d_functional.wait_tensor.default")
-                    .check("extern_kernels.mm")
-                    .run(code)
-                )
-            else:
-                (
-                    FileCheck()
-                    .check("extern_kernels.mm")
-                    .check("triton_poi_fused_all_reduce_0")
-                    .check("torch.ops._c10d_functional.all_reduce_.default")
-                    .check("triton_poi_fused_relu")
-                    .check("extern_kernels.mm")
-                    .check("triton_poi_fused_relu")
-                    .check("extern_kernels.mm")
-                    .check("torch.ops._c10d_functional.wait_tensor.default")
-                    .check("extern_kernels.mm")
-                    .run(code)
-                )
+            (
+                FileCheck()
+                .check("extern_kernels.mm")
+                .check("triton_poi_fused_all_reduce_0")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("extern_kernels.mm")
+                .run(code)
+            )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -314,7 +300,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             (
                 FileCheck()
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("aten.relu")
+                .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
@@ -374,7 +360,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             (
                 FileCheck()
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("aten.relu")
+                .check("triton_poi_fused_relu")
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
