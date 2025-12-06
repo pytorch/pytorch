@@ -29,19 +29,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
 
 
-TORCH_DTYPE_TO_NP_DTYPE = {
-    torch.bool: np.bool_,
-    torch.uint8: np.uint8,
-    torch.uint16: np.uint16,
-    torch.uint32: np.uint32,
-    torch.uint64: np.uint64,
-    torch.int8: np.int8,
-    torch.int16: np.int16,
-    torch.int32: np.int32,
-    torch.int64: np.int64,
-}
-
-
 # Wraps a tensor, exposing only DLPack methods:
 #    - __dlpack__
 #    - __dlpack_device__
@@ -482,12 +469,9 @@ class TestTorchDlPack(TestCase):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
-            arr = np.from_dlpack(t)
-            assert arr.shape == t.shape
-            expected_np_type = TORCH_DTYPE_TO_NP_DTYPE[dtype]
-            assert arr.dtype == expected_np_type
-            for i in range(N):
-                assert arr[i].item() == t[i].item()
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.
