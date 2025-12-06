@@ -1,0 +1,105 @@
+name: abi-check
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Build environment name (used to download artifacts)
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in
+      build-type:
+        required: false
+        type: string
+        default: "cpu"
+        description: Build type - 'cpu' or 'cuda'
+      s3-bucket:
+        required: false
+        type: string
+        default: "gha-artifacts"
+        description: S3 bucket to download artifacts from
+
+jobs:
+  abi-check:
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.2xlarge
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            ABI compatibility check is running inside a container.
+            To debug, run: docker exec -it $(docker container ps --format '{{.ID}}') bash
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ inputs.docker-image }}
+
+      - name: Run ABI check
+        id: abi-check
+        env:
+          BUILD_TYPE: ${{ inputs.build-type }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euxo pipefail
+
+          # Check for suppression label
+          SUPPRESSED="false"
+          if echo "$PR_LABELS" | grep -q "suppress-abi-check"; then
+            SUPPRESSED="true"
+          fi
+
+          # Create a directory for the summary output
+          mkdir -p abi-reports
+
+          # Run ABI check in Docker container
+          # Note: We mount the summary file and write to it from inside the container
+          docker run --rm \
+            -v "$(pwd):/pytorch" \
+            -w /pytorch \
+            -e BUILD_TYPE="$BUILD_TYPE" \
+            -e SUPPRESSED="$SUPPRESSED" \
+            "${{ inputs.docker-image }}" \
+            bash -c ".ci/pytorch/abi_check.sh \$BUILD_TYPE \$SUPPRESSED ." || ABI_EXIT_CODE=$?
+
+          # Copy the summary to GitHub step summary if it exists
+          if [ -f abi-reports/summary.md ]; then
+            cat abi-reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Exit with the ABI check exit code
+          exit ${ABI_EXIT_CODE:-0}
+
+      - name: Upload ABI reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: abi-reports-${{ inputs.build-type }}
+          path: abi-reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

@@ -1,0 +1,33 @@
+name: ABI Compatibility Check
+
+# This workflow can be triggered manually to run ABI checks on existing builds.
+# For PR integration, ABI checks are added directly to the pull.yml workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-environment:
+        description: 'Build environment to check (e.g., linux-jammy-py3.10-gcc11)'
+        required: true
+        type: string
+        default: 'linux-jammy-py3.10-gcc11'
+      build-type:
+        description: 'Build type (cpu or cuda)'
+        required: true
+        type: choice
+        options:
+          - cpu
+          - cuda
+        default: 'cpu'
+
+permissions: read-all
+
+jobs:
+  abi-check:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_abi-check.yml
+    with:
+      build-environment: ${{ inputs.build-environment }}
+      docker-image: ci-image:pytorch-linux-jammy-py3.10-gcc11
+      build-type: ${{ inputs.build-type }}
+    secrets: inherit
