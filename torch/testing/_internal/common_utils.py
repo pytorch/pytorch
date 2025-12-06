@@ -890,7 +890,8 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     old_prof_exec_state = False
     old_prof_mode_state = False
-    assert GRAPH_EXECUTOR
+    if not GRAPH_EXECUTOR:
+        raise AssertionError("GRAPH_EXECUTOR must be set")
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
@@ -925,7 +926,8 @@ meth_call = torch._C.ScriptMethod.__call__
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
-        assert GRAPH_EXECUTOR
+        if not GRAPH_EXECUTOR:
+            raise AssertionError("GRAPH_EXECUTOR must be set")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
@@ -1790,7 +1792,8 @@ def serialTest(condition=True):
     """
     # If one apply decorator directly condition will be callable
     # And test will essentially be essentially skipped, which is undesirable
-    assert type(condition) is bool
+    if type(condition) is not bool:
+        raise AssertionError(f"condition must be a bool, got {type(condition)}")
 
     def decorator(fn):
         if has_pytest and condition:
@@ -1847,7 +1850,8 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                assert GRAPH_EXECUTOR
+                if not GRAPH_EXECUTOR:
+                    raise AssertionError("GRAPH_EXECUTOR must be set")
                 if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                     raise unittest.SkipTest(msg)
                 else:
