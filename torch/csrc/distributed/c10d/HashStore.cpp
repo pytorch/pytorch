@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
+#include <unistd.h>
 #include <cstdint>
 
 #include <chrono>

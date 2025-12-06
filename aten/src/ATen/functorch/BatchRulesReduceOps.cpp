@@ -6,6 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
+#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <utility>

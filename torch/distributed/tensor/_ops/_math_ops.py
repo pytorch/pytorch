@@ -370,6 +370,9 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.amax.out: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
+    # argmax and argmin is using custom hanndler leveraging linear reduction of max and min
+    aten.argmax.default: "max",
+    aten.argmin.default: "min",
 }
 
 

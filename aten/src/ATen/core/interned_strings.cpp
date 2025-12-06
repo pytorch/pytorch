@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <cstring>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <ATen/core/interned_strings_class.h>
 
