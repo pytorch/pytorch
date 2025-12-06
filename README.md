@@ -164,6 +164,8 @@ If you are installing from source, you will need:
 - Python 3.10 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
 - Visual Studio or Visual Studio Build Tool (Windows only)
+- At least 10 GB of free disk space
+- 30-60 minutes for the initial build (subsequent rebuilds are much faster)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
@@ -172,10 +174,26 @@ come with Visual Studio Code by default.
 
 An example of environment setup is shown below:
 
+> [!NOTE]
+> If conda is not in your PATH, you'll need to initialize it first or use the full path to conda.
+> On macOS/Linux with zsh: `eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.zsh hook)"`
+> On macOS/Linux with bash: `eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.bash hook)"`
+> Or use the full path: `<CONDA_INSTALL_DIR>/bin/conda create -y -n <CONDA_NAME>`
+
 * Linux:
 
 ```bash
 $ source <CONDA_INSTALL_DIR>/bin/activate
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+```
+
+* macOS:
+
+```bash
+# If conda is not in PATH, initialize it first:
+$ eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.zsh hook)"  # or shell.bash for bash
+# Or use full path: <CONDA_INSTALL_DIR>/bin/conda create ...
 $ conda create -y -n <CONDA_NAME>
 $ conda activate <CONDA_NAME>
 ```
@@ -268,6 +286,9 @@ pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
+
+> [!NOTE]
+> On macOS with Apple Silicon (ARM64), you may see warnings during the build about CUDA, FBGEMM, and MKL not being found. These are **expected and normal** - Apple Silicon Macs use the Accelerate framework for BLAS operations instead of MKL, and do not support CUDA. The build will configure itself to use MPS (Metal Performance Shaders) for GPU acceleration instead.
 
 **On Windows**
 
@@ -451,6 +472,20 @@ the new module, you might need to install torch [from source](#from-source).
 See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
 for docstring conventions.
 
+> [!NOTE]
+> **Prerequisites for building documentation:**
+> - Node.js must be installed for math rendering (KaTeX). Install via: `conda install -c conda-forge nodejs` or download from [nodejs.org](https://nodejs.org/)
+> - After installing Node.js, install katex: `npm install -g katex`
+
+> [!IMPORTANT]
+> The `docs/requirements.txt` file is incomplete and may fail on modern systems (especially macOS ARM64).
+> If `pip install -r requirements.txt` fails, install the core dependencies manually:
+> ```bash
+> pip install sphinx pytorch_sphinx_theme2 sphinxcontrib-katex \
+>     sphinxext-opengraph sphinx_sitemap matplotlib \
+>     sphinx_copybutton sphinx_design myst-nb sphinxcontrib-mermaid
+> ```
+
 ```bash
 cd docs/
 pip install -r requirements.txt
@@ -475,6 +510,13 @@ If you get a katex error run `npm install katex`.  If it persists, try
 > If you see a numpy incompatibility error, run:
 > ```
 > pip install 'numpy<2'
+> ```
+
+> [!NOTE]
+> On macOS ARM64 (Apple Silicon), the old matplotlib version in requirements.txt may fail to build.
+> If you encounter matplotlib build errors, install a newer version:
+> ```
+> pip install 'matplotlib>=3.9.0'
 > ```
 
 When you make changes to the dependencies run by CI, edit the
