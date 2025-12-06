@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -65,6 +66,19 @@ AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+# Known safe classes that may require weights_only=False in torch.export context.
+# These are internal PyTorch types used during serialization that are safe to load.
+_SAFE_FALLBACK_PATTERNS = (
+    "torch._C.ScriptObject",
+    "torch.ScriptObject",
+)
+
+
+def _is_safe_fallback_error(error_msg: str) -> bool:
+    """Check if the unpickling error is for a known safe class that requires fallback."""
+    return any(pattern in error_msg for pattern in _SAFE_FALLBACK_PATTERNS)
 
 
 def is_pt2_package(serialized_model: bytes | str) -> bool:
@@ -866,9 +880,16 @@ def _load_state_dict(
                 weight_bytes = archive_reader.read_bytes(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
-                state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
-                )
+                buffer = io.BytesIO(weight_bytes)
+                try:
+                    state_dict[weight_fqn] = torch.load(buffer, weights_only=True)
+                except pickle.UnpicklingError as e:
+                    error_msg = str(e)
+                    if _is_safe_fallback_error(error_msg):
+                        buffer.seek(0)
+                        state_dict[weight_fqn] = torch.load(buffer, weights_only=False)
+                    else:
+                        raise
             else:
                 tensor_meta = payload_meta.tensor_meta
                 assert tensor_meta is not None
@@ -922,9 +943,16 @@ def _load_constants(
                     constant_bytes = archive_reader.read_bytes(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
-                    constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
-                    )
+                    buffer = io.BytesIO(constant_bytes)
+                    try:
+                        constants[constant_fqn] = torch.load(buffer, weights_only=True)
+                    except pickle.UnpicklingError as e:
+                        error_msg = str(e)
+                        if _is_safe_fallback_error(error_msg):
+                            buffer.seek(0)
+                            constants[constant_fqn] = torch.load(buffer, weights_only=False)
+                        else:
+                            raise
                 else:
                     tensor_meta = payload_meta.tensor_meta
                     assert tensor_meta is not None

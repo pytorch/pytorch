@@ -11,6 +11,7 @@ import keyword
 import logging
 import math
 import operator
+import pickle
 import re
 import traceback
 import typing
@@ -413,6 +414,19 @@ def serialize_torch_artifact(
         del copyreg.dispatch_table[FakeTensor]
 
 
+# Known safe classes that may require weights_only=False in torch.export context.
+# These are internal PyTorch types used during serialization that are safe to load.
+_SAFE_FALLBACK_PATTERNS = (
+    "torch._C.ScriptObject",
+    "torch.ScriptObject",
+)
+
+
+def _is_safe_fallback_error(error_msg: str) -> bool:
+    """Check if the unpickling error is for a known safe class that requires fallback."""
+    return any(pattern in error_msg for pattern in _SAFE_FALLBACK_PATTERNS)
+
+
 def deserialize_torch_artifact(
     serialized: Union[dict[str, Any], tuple[Any, ...], bytes],
 ):
@@ -422,18 +436,23 @@ def deserialize_torch_artifact(
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
-    # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
+    # Try weights_only=True first for security, only fallback for known safe types
     try:
         artifact = torch.load(buffer, weights_only=True)
-    except Exception as e:
-        buffer.seek(0)
-        artifact = torch.load(buffer, weights_only=False)
-        log.warning(
-            "Fallback to weights_only=False succeeded. "
-            "Loaded object of type %s after initial failure: %s",
-            type(artifact),
-            exc_info=e,
-        )
+    except pickle.UnpicklingError as e:
+        error_msg = str(e)
+        if _is_safe_fallback_error(error_msg):
+            buffer.seek(0)
+            artifact = torch.load(buffer, weights_only=False)
+            log.warning(
+                "Fallback to weights_only=False for known safe type. "
+                "Loaded object of type %s. Original error: %s",
+                type(artifact),
+                error_msg,
+            )
+        else:
+            # Re-raise for unknown/potentially unsafe classes
+            raise
     assert isinstance(artifact, (tuple, dict))
     return artifact
 

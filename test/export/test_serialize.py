@@ -7,6 +7,7 @@ with test_sym_bool)
 import copy
 import io
 import math
+import pickle
 import tempfile
 import unittest
 import zipfile
@@ -1914,6 +1915,23 @@ class TestSaveLoad(TestCase):
 
         self.assertIsInstance(result, dict)
         self.assertTrue(torch.equal(result["key"], torch.tensor([1, 2, 3])))
+
+    def test_deserialize_torch_artifact_rejects_unknown_classes(self):
+        # Test that deserialize_torch_artifact does NOT fall back to
+        # weights_only=False for unknown/unsafe classes - this ensures
+        # we don't silently allow arbitrary code execution
+        class CustomClass:
+            def __init__(self, value):
+                self.value = value
+
+        data = {"custom": CustomClass(42), "tensor": torch.tensor([1, 2, 3])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+
+        # This should raise an error since CustomClass is not a known safe type
+        with self.assertRaises(pickle.UnpicklingError):
+            deserialize_torch_artifact(serialized)
 
     @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
