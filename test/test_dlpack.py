@@ -462,8 +462,7 @@ class TestTorchDlPack(TestCase):
     def test_numpy_dlpack_protocol_conversion(self, device, dtype):
         import numpy as np
 
-        N = 5
-        t = make_tensor((N,), dtype=dtype, device=device)
+        t = make_tensor((5,), dtype=dtype, device=device)
 
         if hasattr(np, "from_dlpack"):
             # DLPack support only available from NumPy 1.22 onwards.
