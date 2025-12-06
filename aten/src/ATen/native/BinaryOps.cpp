@@ -429,6 +429,7 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(ldexp_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1569,12 +1570,34 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(self)
+      .add_input(other)
+      .build();
+
+    ldexp_stub(iter.device_type(), iter);
+    return result;
+  }
+
   return at::mul_out(result, self, _pow2(self, other));
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, _pow2(self, other));
+  ScalarType out_type = c10::promoteTypes(self.scalar_type(), other.scalar_type());
+  if (isIntegralType(out_type, /*includeBool=*/true)) {
+    // All integral types are promoted to float32
+    out_type = ScalarType::Float;
+  }
+  Tensor result = at::empty(self.sizes(), self.options().dtype(out_type));
+  return at::ldexp_out(result, self, other);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
