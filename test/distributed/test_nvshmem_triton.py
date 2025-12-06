@@ -4,6 +4,16 @@
 
 import sys
 
+# Import TEST_WITH_ROCM first to check for ROCm before importing NVSHMEM modules
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
+
+
+# Skip entire module on ROCm before importing NVSHMEM-specific modules
+# NVSHMEM is NVIDIA-specific and can cause crashes during import on ROCm
+if TEST_WITH_ROCM:
+    print("NVSHMEM not available on ROCm, skipping tests")
+    sys.exit(0)
+
 import triton.language as tl
 
 import torch
@@ -12,7 +22,6 @@ import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
-from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -265,10 +274,6 @@ def my_reduce_kernel(
     nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
-@skip_but_pass_in_sandcastle_if(
-    SM100OrLater,
-    "Skipping all NVSHMEM Triton tests due to https://github.com/pytorch/pytorch/issues/162897",
-)
 @instantiate_parametrized_tests
 class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
