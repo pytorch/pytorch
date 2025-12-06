@@ -1711,7 +1711,7 @@ from user code:
             TorchRuntimeError,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
             """\
-Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94: hint = 10))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
 
 from user code:
    File "test_error_messages.py", line N, in fn
