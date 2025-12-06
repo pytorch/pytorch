@@ -869,6 +869,7 @@ test_inductor_halide() {
 
 test_inductor_pallas() {
   python test/run_test.py --include inductor/test_pallas.py --verbose
+  echo "oulgen test"
   python test/inductor/test_pallas.py
   assert_git_not_dirty
 }

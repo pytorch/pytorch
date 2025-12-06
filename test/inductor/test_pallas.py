@@ -814,6 +814,14 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+print("oulgen test")
+print(test_torchinductor.RUN_CPU)
+print(HAS_PALLAS)
+print(test_torchinductor.RUN_GPU)
+print(has_cuda_pallas())
+print(test_torchinductor.RUN_TPU)
+print(has_jax_tpu_backend())
+
 
 if test_torchinductor.RUN_CPU and HAS_PALLAS:
 
