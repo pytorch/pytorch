@@ -365,7 +365,7 @@ class _AllGatherBase(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
-        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+        if dist.get_backend(group=ctx.group) in (dist.Backend.NCCL, dist.Backend.XCCL):
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:
