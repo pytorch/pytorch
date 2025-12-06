@@ -172,6 +172,10 @@ class SocketImpl {
   bool enableExclusiveAddressUse() noexcept;
 #endif
 
+#ifndef _WIN32
+  bool enablePortReuse() noexcept;
+#endif
+
   std::uint16_t getPort() const;
 
   Handle handle() const noexcept {
@@ -427,6 +431,12 @@ bool SocketImpl::enableExclusiveAddressUse() noexcept {
 }
 #endif
 
+#ifdef _WIN32
+bool SocketImpl::enablePortReuse() noexcept {
+  return setSocketFlag(SOL_SOCKET, SO_REUSEPORT, true);
+}
+#endif
+
 std::uint16_t SocketImpl::getPort() const {
   ::sockaddr_storage addr_s{};
 
@@ -607,6 +617,7 @@ bool SocketListenOp::tryListen(int family) {
 bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   SocketImpl::Handle hnd =
       ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
+
   if (hnd == SocketImpl::invalid_socket) {
     C10D_DEBUG(
         "The server socket cannot be initialized on {} {}.",
@@ -615,6 +626,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
 
     return false;
   }
+
 
   socket_ = std::make_unique<SocketImpl>(hnd);
 
@@ -637,6 +649,16 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
     C10D_WARNING(
         "The exclusive address use option cannot be enabled for the server socket on {}.",
         addr);
+  }
+#endif
+
+#ifndef _WIN32
+  if (opts_->reuse_port()) {
+    if (!socket_->enablePortReuse()) {
+      C10D_WARNING(
+          "The port reuse option cannot be enabled for the server socket on {}.",
+          addr);
+    }
   }
 #endif
 
@@ -673,6 +695,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
 
   return true;
 }
+
 
 class SocketListenFromFdOp {
  public:
