@@ -73,7 +73,7 @@ class DDPMeshInfo(DataParallelMeshInfo):
 
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
-    def __post_init__(self):  # pylint:disable=useless-parent-delegation
+    def __post_init__(self):
         # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
         super().__post_init__()
 
