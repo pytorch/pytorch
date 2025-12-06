@@ -74,6 +74,7 @@ TORCH_API sycl::event deconvolution_backward_data(
     const at::Tensor& weight,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     bool bias_defined,
@@ -86,6 +87,7 @@ TORCH_API sycl::event deconvolution_backward_weights(
     const at::Tensor& src,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
