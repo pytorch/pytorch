@@ -835,10 +835,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
         for name in ("resume_in_f4", "resume_in_f7"):
             self.assertTrue(
-                any(
-                    name in key
-                    for key in torch._dynamo.utils.counters["resumes"].keys()
-                )
+                any(name in key for key in torch._dynamo.utils.counters["resumes"])
             )
 
     def test_disable_nested_graph_breaks(self):
@@ -873,6 +870,32 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         # 2 frames from each of f5+f4, f3, f2, f1
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
+
+    def test_functorch_with_nested_graph_break(self):
+        def f1(x):
+            x = x * 2
+            torch._dynamo.graph_break()
+            return x * 4
+
+        def f2(x):
+            return (f1(x * 8) * 16).sum()
+
+        def f3(x):
+            return torch.func.grad(f2)(x * 32) * 64
+
+        def f4(x):
+            return f3(x * 128) * 256
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        x = torch.randn(3)
+        actual = f4(x)
+        expected = torch.compile(f4, backend=cnts, fullgraph=False)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+        # f4 + f3, f3 end + f4 end
+        self.assertEqual(cnts.frame_count, 2)
+        # multiplication by 32, 64, 128, 256
+        self.assertEqual(cnts.op_count, 4)
 
 
 if __name__ == "__main__":

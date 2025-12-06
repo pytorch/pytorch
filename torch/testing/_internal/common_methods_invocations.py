@@ -31,8 +31,10 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol, skipXPU)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
-    _get_torch_rocm_version,
+    SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
+)
+from torch.testing._internal.common_quantized import (
+    _bfloat16_to_float4_e2m1fn_x2,
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -153,6 +155,10 @@ if TEST_SCIPY:
     from scipy import stats
     import scipy.spatial
     import scipy.special
+
+
+def round_up(x: int, y: int) -> int:
+    return ((x + y - 1) // y) * y
 
 
 # test if a tensor is close to an integer
@@ -3000,6 +3006,14 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
+    # Negative indices sample — guarded against python_ref
+    if not kwargs.get('is_python_ref', False):
+        neg_idx = gather_variable((S, S), 1, S, True, device=device) - S
+        yield SampleInput(
+            make_arg((S, S)),
+            neg_idx,
+            1)
+
 
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
 
@@ -3786,6 +3800,11 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
                                  kwargs={'kernel_size': 1}),
                      error_regex=err_msg)
 
+    # error: inputs when kernel size too large for input
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4)),
+                                 kwargs={'kernel_size': 2}),
+                     error_regex='Output size is too small')
+
 
 def error_inputs_max_pool3d(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
@@ -3817,6 +3836,12 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg((2, 1, 0, 1, 2)),
                                  kwargs={'kernel_size': 1}),
                      error_regex=err_msg)
+
+    # error: inputs when kernel size too large for input
+    yield ErrorInput(SampleInput(make_arg((1, 1, 1, 4, 4)),
+                                 kwargs={'kernel_size': 2}),
+                     error_regex='Output size is too small')
+
 
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
@@ -6178,6 +6203,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
+    yield SampleInput(tensor_nd(), dim=None, correction=-1)
+    yield SampleInput(tensor_nd(), dim=None, correction=-5)
+    yield SampleInput(tensor_nd(), correction=0.5, keepdim=True)
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
     yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
@@ -6286,7 +6314,7 @@ def reference_inputs_permute(op, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_softshrink(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"lambd": -0.5}),
-                     error_regex="lambda must be greater or equal to 0, but found to be -0.5")
+                     error_regex=r"lambda must be in range \[0,.*input dtype.*found -0\.5")
 
 def sample_inputs_softshrink(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8840,6 +8868,158 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 
     yield from samples
 
+def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
+    from torch.nn.functional import ScalingType, SwizzleType
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+
+    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+
+    M, N, K = 15, 32, 16
+    samples = []
+    # two e4m3 tensorwise
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(
+        SampleInput(
+            mat1,
+            mat2,
+            [scale1, ],
+            [ScalingType.TensorWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            [scale2, ],
+            [ScalingType.TensorWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            None,  # bias
+            torch.bfloat16,  # out_dtype
+        )
+    )
+    # two e4m3 rowwise
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    scale1 = make_scale((M, 1))
+    scale2 = make_scale((1, N))
+    samples.append(
+        SampleInput(
+            mat1,
+            mat2,
+            [scale1, ],
+            [ScalingType.RowWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            [scale2, ],
+            [ScalingType.RowWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            None,  # bias
+            torch.bfloat16,  # out_dtype
+        )
+    )
+    M, K, N = 256, 512, 768
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+
+    dmajor, dminor = torch.cuda.get_device_capability()
+
+    if dmajor == 9 and not torch.version.hip:
+        # 1x128 x 1x128
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((K // 128, N)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # 128x128 x 1x128
+        L4 = round_up(K // 128, 4)
+        scale1 = make_scale((M // 128, L4)).t()
+        scale2 = make_scale((K // 128, N)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise128x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # 1x128 x 128x128
+        L4 = round_up(K // 128, 4)
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((N // 128, L4)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise128x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+
+    if dmajor >= 10:
+        # MXFP8
+        scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
+        scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x32, ],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x32, ],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # NVFP4
+        # [M, K] -> [M, K // 2]
+        # [K, N] -> [K // 2, N]
+        mat1_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat1.to(torch.bfloat16))
+        mat2_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat2.to(torch.bfloat16).t()).t()
+        scale1 = make_scale((M, K // 16)).to(torch.float8_e4m3fn)
+        global_scale1 = make_scale((1, ))
+        scale2 = make_scale((K // 16, N)).to(torch.float8_e4m3fn)
+        global_scale2 = make_scale((1, ))
+        samples.append(
+            SampleInput(
+                mat1_fp4,
+                mat2_fp4,
+                [scale1, global_scale1],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                [scale2, global_scale2],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+
+
+    yield from samples
+
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
@@ -9204,6 +9384,42 @@ def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_input((2,)), offset=1)
     yield SampleInput(make_input((2,)), offset=-1)
 
+
+_UNPOOL_NAME_TO_DIM = {
+    'nn.functional.max_unpool1d': 1,
+    'nn.functional.max_unpool2d': 2,
+    'nn.functional.max_unpool3d': 3
+}
+
+
+def error_inputs_max_unpool(op_info, device, **kwargs):
+    """Error inputs for max_unpool: shape mismatch between input and indices."""
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    pool_dim = _UNPOOL_NAME_TO_DIM[op_info.name]
+
+    # Create mismatched shapes for input and indices
+    kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
+    if pool_dim == 1:
+        input_shape = (8, 8)
+        indices_shape = (8, 7)
+    elif pool_dim == 2:
+        input_shape = (1, 1, 4, 4)
+        indices_shape = (1, 1, 4, 1)
+    else:  # pool_dim == 3
+        input_shape = (1, 1, 4, 4, 4)
+        indices_shape = (1, 1, 4, 4, 1)
+
+    yield ErrorInput(
+        SampleInput(
+            make_arg(input_shape),
+            args=(torch.zeros(indices_shape, device=device, dtype=torch.long),),
+            kwargs=kwargs_dict
+        ),
+        error_type=RuntimeError,
+        error_regex='Expected shape of indices to be'
+    )
+
+
 def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
     unpool_name_to_pool_method_dict = {
         'nn.functional.max_unpool1d': torch.nn.functional.max_pool1d,
@@ -9211,15 +9427,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_unpool3d': torch.nn.functional.max_pool3d
     }
 
-    unpool_name_to_dim = {
-        'nn.functional.max_unpool1d': 1,
-        'nn.functional.max_unpool2d': 2,
-        'nn.functional.max_unpool3d': 3
-    }
-
     unpool_to_pool_name_dict = {k: f'nn.functional.{v.__name__}' for k, v in unpool_name_to_pool_method_dict.items()}
 
-    pool_dim = unpool_name_to_dim[op_info.name]
+    pool_dim = _UNPOOL_NAME_TO_DIM[op_info.name]
     pool_method = unpool_name_to_pool_method_dict[op_info.name]
 
     pool_op_info = copy.copy(op_info)
@@ -11542,11 +11752,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11563,7 +11773,7 @@ def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], 
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
@@ -13641,9 +13851,6 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
-                               or (_get_torch_rocm_version() >= (5, 2))),
-                          "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse,
                skipXPU],
            skips=(
@@ -14105,15 +14312,11 @@ op_db: list[OpInfo] = [
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
-                    )),
+                    supports_rhs_python_scalar=False),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -14311,7 +14514,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14320,7 +14523,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            supports_out=True,
            supports_forward_ad=True,
@@ -14465,7 +14668,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,),
     OpInfo('min',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14474,7 +14677,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14784,7 +14987,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
@@ -16079,6 +16282,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
@@ -16113,6 +16317,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
@@ -16150,6 +16355,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
@@ -16366,6 +16572,33 @@ op_db: list[OpInfo] = [
             ), ],
     ),
     OpInfo(
+        'torch._scaled_mm_v2',
+        sample_inputs_func=sample_inputs_scaled_mm_v2,
+        dtypes=float8_types(),
+        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        supports_out=True,
+        supports_forward_ad=False,
+        supports_autograd=False,
+        decorators=[onlyCUDA, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # "add_stub" not implemented for 'Float8_e4m3fn'
+            # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # "mul_cpu_reduced_float" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
+            # aten::_scaled_mm hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
+        )
+    ),
+    OpInfo(
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
@@ -16424,7 +16657,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+                         device_type='cuda'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
                          dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
@@ -20320,6 +20553,7 @@ op_db: list[OpInfo] = [
                                                   torch.float32: 1e-4}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   supports_sparse=True,
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
@@ -21126,7 +21360,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
@@ -21141,7 +21375,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
@@ -23456,10 +23690,12 @@ python_ref_db = [
         torch_opinfo_name="logaddexp",
         skips=(
             # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
         ),
     ),
     PythonRefInfo(

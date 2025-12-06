@@ -26,6 +26,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -449,13 +450,13 @@ class BuiltinVariable(VariableTracker):
                 ["__rshift__", "__rrshift__", "__irshift__"],
                 operator.irshift,
             ),
+            operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
             # operator.and_
             # operator.or_
-            # operator.xor
         }
         return fns
 
@@ -1502,10 +1503,17 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
             if isinstance(args[0], ConstantVariable):
                 try:
-                    fn = getattr(float, name)
+                    fn = getattr(self.fn, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:
@@ -1607,6 +1615,21 @@ class BuiltinVariable(VariableTracker):
 
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
+
+    def call_repr(self, tx: "InstructionTranslator", arg):
+        """Handle repr() on user defined objects."""
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            repr_method = arg.value.__repr__
+
+            if type(arg.value).__repr__ is object.__repr__:
+                # Default repr - build and trace it
+                fn_vt = VariableTracker.build(tx, repr_method)
+                return fn_vt.call_function(tx, [], {})
+            else:
+                # Custom repr - inline the method for tracing
+                bound_method = repr_method.__func__
+                fn_vt = VariableTracker.build(tx, bound_method)
+                return fn_vt.call_function(tx, [arg], {})
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2265,11 +2288,11 @@ class BuiltinVariable(VariableTracker):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", False)
+        strict = kwargs.pop("strict", ConstantVariable.create(False))
         iter_args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             iter_args,
-            strict=strict,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2459,8 +2482,31 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        *seqs: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
+        strict = ConstantVariable.create(False)
+        if kwargs:
+            if sys.version_info >= (3, 14):
+                if not (len(kwargs) == 1 and "strict" in kwargs):
+                    raise_args_mismatch(
+                        tx,
+                        "map",
+                        "1 kwargs (`strict`)",
+                        f"{len(kwargs)} kwargs",
+                    )
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "map",
+                    "0 kwargs",
+                    f"{len(kwargs)} kwargs",
+                )
+
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2468,6 +2514,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
@@ -3051,7 +3098,24 @@ class BuiltinVariable(VariableTracker):
     def call_xor(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.xor, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+
+        if isinstance(
+            a,
+            (DictKeysVariable, SetVariable, UserDefinedObjectVariable),
+        ):
             return a.call_method(tx, "__xor__", [b], {})
         return None
 
@@ -3210,6 +3274,15 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.fn)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
 @contextlib.contextmanager

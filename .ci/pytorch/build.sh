@@ -36,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
@@ -168,14 +173,16 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # shellcheck disable=SC1091
+  source /opt/intel/oneapi/umf/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
   export USE_MPI=0
-  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
-  export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
 fi
 

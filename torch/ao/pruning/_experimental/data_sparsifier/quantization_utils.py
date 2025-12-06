@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,7 +27,7 @@ def post_training_sparse_quantize(
     model,
     data_sparsifier_class,
     sparsify_first=True,
-    select_embeddings: Optional[list[nn.Module]] = None,
+    select_embeddings: list[nn.Module] | None = None,
     **sparse_config,
 ):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
