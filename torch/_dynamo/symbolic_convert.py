@@ -858,6 +858,10 @@ def break_graph_if_unsupported(
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.active_generic_context_managers:
+                    # raise original graph break if fullgraph/error_on_graph_break=True
+                    if self.one_graph or self.error_on_graph_break:
+                        raise
+
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
