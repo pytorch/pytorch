@@ -6,21 +6,18 @@ This package enables an interface for accessing MTIA backend in python
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
-from torch import device as _device, Tensor
-from torch._utils import _dummy_type, _LazySeedTracker, classproperty
+from torch import Tensor
+
+# torch.mtia.Event/Stream is alias of torch.Event/Stream
+from torch._C import Event, Stream
+from torch._utils import _LazySeedTracker
 from torch.types import Device
 
 from ._utils import _get_device_index
 
-
-_device_t = Union[_device, str, int]
-
-# torch.mtia.Event/Stream is alias of torch.Event/Stream
-Event = torch.Event
-Stream = torch.Stream
 
 _initialized = False
 _queued_calls: list[
@@ -132,7 +129,7 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize(device: Optional[_device_t] = None) -> None:
+def synchronize(device: Device = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
     with torch.mtia.device(device):
         return torch._C._mtia_deviceSynchronize()
@@ -149,7 +146,7 @@ def current_device() -> int:
     return torch._C._accelerator_hooks_get_current_device()
 
 
-def current_stream(device: Optional[_device_t] = None) -> Stream:
+def current_stream(device: Device = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -161,7 +158,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
 
 
-def default_stream(device: Optional[_device_t] = None) -> Stream:
+def default_stream(device: Device = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
     Args:
@@ -174,7 +171,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
 
 
 def record_memory_history(
-    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+    enabled: str | None = "all", stacks: str = "python", max_entries: int = 0
 ) -> None:
     r"""Enable/Disable the memory profiler on MTIA allocator
 
@@ -210,7 +207,7 @@ def is_bf16_supported(including_emulation: bool = True):
     return True
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
+def get_device_capability(device: Device = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:
@@ -240,7 +237,7 @@ def set_stream(stream: Stream):
     torch._C._mtia_setCurrentStream(stream)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: Device) -> None:
     r"""Set the current device.
 
     Args:
@@ -252,7 +249,7 @@ def set_device(device: _device_t) -> None:
         torch._C._accelerator_hooks_set_current_device(device)
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+def get_device_properties(device: Device = None) -> dict[str, Any]:
     r"""Return a dictionary of MTIA device properties
 
     Args:
@@ -295,9 +292,9 @@ class StreamContext:
     .. note:: Streams are per-device.
     """
 
-    cur_stream: Optional["torch.mtia.Stream"]
+    cur_stream: Stream | None
 
-    def __init__(self, stream: Optional["torch.mtia.Stream"]):
+    def __init__(self, stream: Stream | None):
         self.cur_stream = None
         self.stream = stream
         self.idx = _get_device_index(None, True)
@@ -352,7 +349,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
     torch._C._mtia_setStream(stream_id, device_index, device_type)
 
 
-def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
+def stream(stream: Stream | None) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
@@ -363,7 +360,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
+def get_rng_state(device: int | str | torch.device = "mtia") -> Tensor:
     r"""Returns the random number generator state as a ByteTensor.
 
     Args:
@@ -378,9 +375,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
     return torch.zeros([1], dtype=torch.uint8, device=device)
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "mtia"
-) -> None:
+def set_rng_state(new_state: Tensor, device: int | str | torch.device = "mtia") -> None:
     r"""Sets the random number generator state.
 
     Args:
