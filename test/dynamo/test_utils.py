@@ -366,7 +366,6 @@ class TestDynamoTimed(TestCase):
         {
             "bundle_triton_into_fx_graph_cache": False,
             "bundled_autotune_remote_cache": False,
-            "combo_kernels": False,
         }
     )
     # We can't easily test that timing is actually accurate. Mock time to always
@@ -407,6 +406,7 @@ class TestDynamoTimed(TestCase):
  'PythonWrapperCodegen.generate': [0.0, 0.0],
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.create_combo_kernel_nodes': [0.0, 0.0],
  'Scheduler.fused_nodes': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
  '_recursive_joint_graph_passes': [0.0],
@@ -438,6 +438,7 @@ class TestDynamoTimed(TestCase):
  'PythonWrapperCodegen.generate': [0.0, 0.0],
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.create_combo_kernel_nodes': [0.0, 0.0],
  'Scheduler.fused_nodes': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
  '_recursive_joint_graph_passes': [0.0],

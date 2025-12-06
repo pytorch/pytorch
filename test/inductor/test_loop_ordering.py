@@ -339,10 +339,7 @@ class LoopOrderingTest(TestCase):
 
         x = torch.randn(1024, 2048)
         self.do_acc_test(f, x)
-        if inductor_config.combo_kernels:
-            self.assertEqual(1, metrics.generated_kernel_count)
-        else:
-            self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(1, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
 
     def test_keep_fake_dep(self):
@@ -396,11 +393,7 @@ class LoopOrderingTest(TestCase):
         c = torch.randn(1024)
         self.do_acc_test(f, x, y, c)
 
-        # The two kernels are not fused due to c is broadcasted
-        if inductor_config.combo_kernels:
-            self.assertEqual(1, metrics.generated_kernel_count)
-        else:
-            self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(1, metrics.generated_kernel_count)
 
     def test_view(self):
         """

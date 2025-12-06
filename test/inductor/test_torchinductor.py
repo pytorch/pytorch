@@ -16036,6 +16036,8 @@ if RUN_GPU:
         # The inplace updating does not happen after we fused the
         # layernorm backward
         @torch._inductor.config.patch("triton.mix_order_reduction", False)
+        # combo_kernels not yet support the donated_buffer
+        @torch._inductor.config.patch("combo_kernels", False)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
