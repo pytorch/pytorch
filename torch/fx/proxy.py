@@ -119,6 +119,7 @@ _COPY_META_FIELDS = [
     "_numeric_debug_handle",  # TODO deprecated
     "custom",
     "partitioner_tag",
+    "original_dtensor",
 ]
 
 
@@ -183,6 +184,21 @@ class TracerBase:
         # Optionally set stack trace on the created Node for debugging purposes
         if fx_traceback.has_preserved_node_meta():
             current_meta: dict[str, Any] = fx_traceback.get_current_meta()
+
+            if "original_dtensor" not in current_meta:
+                # original dtensor is the output of the original node that the tracer is tracing
+                # not necessarily the output of the current node, as it can be decomposed to multiple nodes
+
+                original_val = None
+                if "val" in current_meta:
+                    original_val = current_meta["val"]
+                elif "example_value" in current_meta:
+                    original_val = current_meta["example_value"]
+
+                from torch.distributed.tensor._api import DTensor
+
+                if isinstance(original_val, DTensor):
+                    node.meta["original_dtensor"] = original_val
 
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
