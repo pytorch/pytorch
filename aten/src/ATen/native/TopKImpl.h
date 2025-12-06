@@ -10,6 +10,19 @@ inline namespace CPU_CAPABILITY {
 inline namespace DEFAULT {
 #endif
 
+template <typename scalar_t, bool largest>
+struct TopKComparator {
+  bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
+    if constexpr (largest) {
+      return (_isnan(lhs.first) && !_isnan(rhs.first)) ||
+          (lhs.first > rhs.first);
+    } else {
+      return (!_isnan(lhs.first) && _isnan(rhs.first)) ||
+          (lhs.first < rhs.first);
+    }
+  }
+};
+
 // Core topk loop, shared between CPU and QuantizedCPU
 template <typename scalar_t, typename accscalar_t>
 void topk_impl_loop(
@@ -57,10 +70,9 @@ void topk_impl_loop(
       auto queue_end = queue.begin() + k;
       auto& queue_front_ref = queue.front();
       auto& queue_back_ref = queue.back();
+
       if (largest) {
-        auto comp = [](elem_t const& a, elem_t const& b) {
-          return (_isnan(a.first) && !_isnan(b.first)) || (a.first > b.first);
-        };
+        auto comp = TopKComparator<elem_t, true>{};
         std::make_heap(queue_begin, queue_end, comp);
 
         for (auto idx = k; idx < dim_size; ++idx) {
@@ -76,9 +88,7 @@ void topk_impl_loop(
           std::sort_heap(queue_begin, queue_end, comp);
         }
       } else {
-        auto comp = [](elem_t const& a, elem_t const& b) {
-          return (!_isnan(a.first) && _isnan(b.first)) || (a.first < b.first);
-        };
+        auto comp = TopKComparator<elem_t, false>{};
         std::make_heap(queue_begin, queue_end, comp);
 
         for (auto idx = k; idx < dim_size; ++idx) {
@@ -96,48 +106,18 @@ void topk_impl_loop(
       }
     } else {
       if (largest) {
+        auto comp = TopKComparator<elem_t, true>{};
         std::nth_element(
-            queue.begin(),
-            queue.begin() + k - 1,
-            queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return (
-                  (_isnan<accscalar_t>(x.first) &&
-                   !_isnan<accscalar_t>(y.first)) ||
-                  (x.first > y.first));
-            });
+            queue.begin(), queue.begin() + k - 1, queue.end(), comp);
         if (sorted) {
-          std::sort(
-              queue.begin(),
-              queue.begin() + k - 1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return (
-                    (_isnan<accscalar_t>(x.first) &&
-                     !_isnan<accscalar_t>(y.first)) ||
-                    (x.first > y.first));
-              });
+          std::sort(queue.begin(), queue.begin() + k - 1, comp);
         }
       } else {
+        auto comp = TopKComparator<elem_t, false>{};
         std::nth_element(
-            queue.begin(),
-            queue.begin() + k - 1,
-            queue.end(),
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return (
-                  (!_isnan<accscalar_t>(x.first) &&
-                   _isnan<accscalar_t>(y.first)) ||
-                  (x.first < y.first));
-            });
+            queue.begin(), queue.begin() + k - 1, queue.end(), comp);
         if (sorted) {
-          std::sort(
-              queue.begin(),
-              queue.begin() + k - 1,
-              [](const elem_t& x, const elem_t& y) -> bool {
-                return (
-                    (!_isnan<accscalar_t>(x.first) &&
-                     _isnan<accscalar_t>(y.first)) ||
-                    (x.first < y.first));
-              });
+          std::sort(queue.begin(), queue.begin() + k - 1, comp);
         }
       }
     }
