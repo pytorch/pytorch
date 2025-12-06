@@ -5375,6 +5375,55 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
+    @onlyCPU
+    def test_native_batch_norm_empty_running_var_cpu(self, device):
+        """Test that native_batch_norm raises error for empty running_var instead of segfaulting.
+
+        Fixes #169208
+        """
+        input_data = torch.randn(10, 8, device=device)
+        weight = torch.ones(8, device=device)
+        bias = torch.zeros(8, device=device)
+        running_mean = torch.zeros(8, device=device)
+        running_var = torch.ones(0, device=device)  # empty tensor
+
+        with self.assertRaisesRegex(RuntimeError, r"running_var.*should contain"):
+            torch.native_batch_norm(
+                input=input_data,
+                weight=weight,
+                bias=bias,
+                running_mean=running_mean,
+                running_var=running_var,
+                training=True,
+                momentum=0.1,
+                eps=1e-5,
+            )
+
+    @onlyCPU
+    def test_native_batch_norm_zero_channels_ok(self, device):
+        """Test that native_batch_norm allows zero channels (empty tensor case).
+
+        This ensures the fix doesn't break valid zero-channel configurations.
+        """
+        input_data = torch.randn(2, 0, 4, 4, device=device)
+        weight = torch.ones(0, device=device)
+        bias = torch.zeros(0, device=device)
+        running_mean = torch.zeros(0, device=device)
+        running_var = torch.ones(0, device=device)
+
+        # Should not crash or raise
+        output, batch_mean, batch_var = torch.native_batch_norm(
+            input=input_data,
+            weight=weight,
+            bias=bias,
+            running_mean=running_mean,
+            running_var=running_var,
+            training=True,
+            momentum=0.1,
+            eps=1e-5,
+        )
+        self.assertEqual(output.shape, input_data.shape)
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
