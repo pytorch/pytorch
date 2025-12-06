@@ -2,6 +2,9 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/throughput_benchmark.h>
 
+#include <pybind11/functional.h>
+#include <torch/csrc/utils/pybind.h>
+
 namespace torch::throughput_benchmark {
 
 void initThroughputBenchmarkBindings(PyObject* module) {

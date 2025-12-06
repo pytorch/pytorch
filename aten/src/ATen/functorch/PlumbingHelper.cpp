@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/PlumbingHelper.h>

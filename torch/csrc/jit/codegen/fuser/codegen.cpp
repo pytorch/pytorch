@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 
+#include <ATen/ATen.h>
 #include <ATen/code_template.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_info.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -12,6 +15,7 @@
 #include <cstdint>
 #include <iostream>
 #include <sstream>
+#include <tuple>
 #include <vector>
 
 namespace torch::jit::fuser {

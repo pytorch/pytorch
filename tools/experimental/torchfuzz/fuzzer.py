@@ -4,6 +4,7 @@ import multiprocessing as mp
 import os
 import random
 import sys
+from typing import Optional
 
 
 # Add parent directory to path so we can import torchfuzz as a module
@@ -49,12 +50,12 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
 
 
 def fuzz_and_execute(
-    seed: int | None = None,
-    max_depth: int | None = None,
+    seed: Optional[int] = None,
+    max_depth: Optional[int] = None,
     log_at_faluire: bool = False,
     template: str = "default",
-    supported_ops: list[str] | None = None,
-    op_weights: dict[str, float] | None = None,
+    supported_ops: Optional[list[str]] = None,
+    op_weights: Optional[dict[str, float]] = None,
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -327,7 +328,7 @@ if __name__ == "__main__":
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
         # Parse supported ops and any inline weights from that flag
-        parsed_supported_ops: list[str] | None = None
+        parsed_supported_ops: Optional[list[str]] = None
         parsed_weights: dict[str, float] = {}
         if args.supported_ops:
             parsed_supported_ops, parsed_weights = _parse_supported_ops_with_weights(

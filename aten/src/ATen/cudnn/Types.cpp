@@ -1,5 +1,6 @@
 #include <ATen/cudnn/Types.h>
 
+#include <ATen/ATen.h>
 
 #include <c10/util/Exception.h>
 

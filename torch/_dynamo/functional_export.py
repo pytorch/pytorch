@@ -1,6 +1,5 @@
 import inspect
 import logging
-import sys
 import traceback
 from collections import namedtuple
 from collections.abc import Callable
@@ -53,10 +52,9 @@ def post_process_error_msg(
 
     orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
-    if constraint_violation_error.args:
-        constraint_violation_error.args = (
-            _replace_sources(constraint_violation_error.args[0], flat_input_paths),
-        )
+    constraint_violation_error.args = (
+        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+    )
     return constraint_violation_error
 
 
@@ -424,12 +422,9 @@ def _suggest_or_raise_constraint_violation(
             forced_specializations,
         )
         if constraint_violation_error:
-            if constraint_violation_error.args:
-                constraint_violation_error.args = (
-                    constraint_violation_error.args[0] + msg,
-                )
-            else:
-                constraint_violation_error.args = (msg,)
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
         else:
             if forced_specializations:
                 constraint_violation_error = ConstraintViolationError(msg)
@@ -656,12 +651,7 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
-            if sys.version_info >= (3, 14):
-                import annotationlib  # added in 3.14
-
-                annotations = annotationlib.get_annotations(torch.nn.Module)
-            else:
-                annotations = getattr(torch.nn.Module, "__annotations__", None)
+            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
             for name, value in pyt.root.__dict__.items():
                 if annotations and name not in annotations:
                     graph_module.__dict__[name] = value

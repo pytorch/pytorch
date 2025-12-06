@@ -7,8 +7,8 @@ from sklearn.tree import _tree  # type: ignore[import-untyped]
 class DecisionTreeNode:
     def __init__(
         self,
-        feature: str | None = None,
-        threshold: float | None = None,
+        feature: Optional[str] = None,
+        threshold: Optional[float] = None,
         left: Optional["DecisionTreeNode"] = None,
         right: Optional["DecisionTreeNode"] = None,
         class_probs: Any = None,

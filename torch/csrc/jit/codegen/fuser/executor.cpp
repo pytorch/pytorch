@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 
+#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
@@ -11,6 +13,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <optional>
 
+#include <algorithm>
 #include <vector>
 
 namespace torch::jit::fuser {

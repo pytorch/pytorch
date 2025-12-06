@@ -45,12 +45,7 @@ def has_triton_experimental_host_tma() -> bool:
                     create_2d_tma_descriptor,
                 )
 
-                try:
-                    from triton.tools.experimental_descriptor import enable_in_pytorch
-
-                    return enable_in_pytorch()
-                except ImportError:
-                    return True
+                return True
             except ImportError:
                 pass
 

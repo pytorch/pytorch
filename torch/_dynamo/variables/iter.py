@@ -14,7 +14,6 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
-import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, Union
 
@@ -263,7 +262,7 @@ class IteratorVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "ConstantVariable":
+    ) -> "VariableTracker":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
@@ -523,21 +522,12 @@ class MapVariable(ZipVariable):
         )
         codegen(self.fn)
         self.reconstruct_items(codegen)
-        codegen.append_output(create_build_tuple(len(self.iterables) + 1))
-        if self.strict:
-            assert sys.version_info >= (3, 14), (
-                "Unexpected bug: map(strict=True) requires Python 3.14+"
-            )
-            codegen.extend_output(
-                [
-                    codegen.create_load_const("strict"),
-                    codegen.create_load_const(self.strict),
-                    create_instruction("BUILD_MAP", arg=1),
-                    *create_call_function_ex(True, False),
-                ]
-            )
-        else:
-            codegen.extend_output(create_call_function_ex(False, False))
+        codegen.extend_output(
+            [
+                create_build_tuple(len(self.iterables) + 1),
+                *create_call_function_ex(False, False),
+            ]
+        )
 
 
 class FilterVariable(IteratorVariable):

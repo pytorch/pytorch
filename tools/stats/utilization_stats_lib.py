@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
 
 #  pyrefly: ignore [missing-import]
 from dataclasses_json import DataClassJsonMixin  # type: ignore[import-not-found]
@@ -11,9 +12,9 @@ _DATA_MODEL_VERSION = 1.5
 # data model for test log usage
 @dataclass
 class UtilizationStats:
-    avg: float | None = None
-    max: float | None = None
-    raw: list[float] | None = None
+    avg: Optional[float] = None
+    max: Optional[float] = None
+    raw: Optional[list[float]] = None
 
 
 @dataclass
@@ -26,38 +27,38 @@ class UtilizationMetadata(DataClassJsonMixin):  # type: ignore[misc, no-any-unim
     usage_collect_interval: float
     data_model_version: float
     start_at: int
-    gpu_count: int | None = None
-    cpu_count: int | None = None
-    gpu_type: str | None = None
-    error: str | None = None
+    gpu_count: Optional[int] = None
+    cpu_count: Optional[int] = None
+    gpu_type: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
 class GpuUsage(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
-    uuid: str | None = None
-    util_percent: UtilizationStats | None = None
-    mem_util_percent: UtilizationStats | None = None
-    allocated_mem_percent: UtilizationStats | None = None
-    allocated_mem_value: UtilizationStats | None = None
-    total_mem_value: float | None = None
+    uuid: Optional[str] = None
+    util_percent: Optional[UtilizationStats] = None
+    mem_util_percent: Optional[UtilizationStats] = None
+    allocated_mem_percent: Optional[UtilizationStats] = None
+    allocated_mem_value: Optional[UtilizationStats] = None
+    total_mem_value: Optional[float] = None
 
 
 @dataclass
 class RecordData(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
-    cpu: UtilizationStats | None = None
-    memory: UtilizationStats | None = None
-    gpu_usage: list[GpuUsage] | None = None
+    cpu: Optional[UtilizationStats] = None
+    memory: Optional[UtilizationStats] = None
+    gpu_usage: Optional[list[GpuUsage]] = None
 
 
 @dataclass
 class UtilizationRecord(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     level: str
     timestamp: int
-    data: RecordData | None = None
-    cmd_names: list[str] | None = None
-    error: str | None = None
-    log_duration: str | None = None
-    logs: list[str] | None = None
+    data: Optional[RecordData] = None
+    cmd_names: Optional[list[str]] = None
+    error: Optional[str] = None
+    log_duration: Optional[str] = None
+    logs: Optional[list[str]] = None
 
 
 # the db schema related to this is:

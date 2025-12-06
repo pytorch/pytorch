@@ -1414,7 +1414,7 @@ class MemPool(_MemPool):
         r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
-    def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
+    def use_count(self) -> int:
         r"""Returns the reference count of this pool."""
         return super().use_count()
 

@@ -4,6 +4,7 @@
 
 import math
 from collections.abc import MutableMapping
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -70,7 +71,9 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
+def _adjust_lr(
+    lr: float, adjust_lr_fn: Optional[str], param_shape: torch.Size
+) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
 
@@ -95,7 +98,7 @@ class Muon(Optimizer):
         ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
-        adjust_lr_fn: str | None = None,
+        adjust_lr_fn: Optional[str] = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -294,7 +297,7 @@ def _single_tensor_muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: str | None,
+    adjust_lr_fn: Optional[str],
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -324,7 +327,7 @@ def muon(
     grads: list[Tensor],
     muon_momentum_bufs: list[Tensor],
     *,
-    foreach: bool | None = None,
+    foreach: Optional[bool] = None,
     lr: float,
     weight_decay: float,
     momentum: float,
@@ -332,7 +335,7 @@ def muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: str | None,
+    adjust_lr_fn: Optional[str],
     has_complex: bool,
 ) -> None:
     r"""Functional API that performs Muon algorithm computation.

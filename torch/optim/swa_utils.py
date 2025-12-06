@@ -6,7 +6,7 @@ import math
 import warnings
 from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, cast, Literal, Union
+from typing import Any, cast, Literal, Optional, Union
 from typing_extensions import override
 
 import torch
@@ -65,7 +65,7 @@ def get_swa_multi_avg_fn():
     def swa_update(
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
-        num_averaged: Tensor | int,
+        num_averaged: Union[Tensor, int],
     ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
@@ -112,7 +112,7 @@ def get_swa_avg_fn():
 
     @torch.no_grad()
     def swa_update(
-        averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor | int
+        averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]
     ):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
@@ -223,10 +223,11 @@ class AveragedModel(Module):
     def __init__(
         self,
         model: Module,
-        device: int | torch.device | None = None,
-        avg_fn: Callable[[Tensor, Tensor, Tensor | int], Tensor] | None = None,
-        multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
-        | None = None,
+        device: Optional[Union[int, torch.device]] = None,
+        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]], Tensor]] = None,
+        multi_avg_fn: Optional[
+            Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
+        ] = None,
         use_buffers=False,
     ) -> None:  # noqa: D107
         super().__init__()
@@ -262,8 +263,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: list[Tensor | None] = []
-        model_param_detached: list[Tensor | None] = []
+        self_param_detached: list[Optional[Tensor]] = []
+        model_param_detached: list[Optional[Tensor]] = []
         copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
@@ -329,7 +330,7 @@ class AveragedModel(Module):
 def update_bn(
     loader: Iterable[Any],
     model: Module,
-    device: int | torch.device | None = None,
+    device: Optional[Union[int, torch.device]] = None,
 ) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 

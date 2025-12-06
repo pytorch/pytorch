@@ -110,8 +110,7 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
             e.save_source_string(
-                "m",
-                '__import__(these, unresolvable, "things", won, crash, me)',  # codespell:ignore
+                "m", '__import__(these, unresolvable, "things", wont, crash, me)'
             )
 
     def test_save_module_binary(self):

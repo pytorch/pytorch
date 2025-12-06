@@ -4,6 +4,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <ATen/Layout.h>
+
+#include <structmember.h>
 #include <cstring>
 #include <string>
 

@@ -1,4 +1,5 @@
 #include <include/openreg.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -282,9 +283,9 @@ orError_t orDeviceGetStreamPriorityRange(
     return orErrorUnknown;
   }
 
-  // OpenReg priority levels are 0 and 1
+  // OpenReg have only one priority now.
   *leastPriority = 0;
-  *greatestPriority = 1;
+  *greatestPriority = 0;
   return orSuccess;
 }
 

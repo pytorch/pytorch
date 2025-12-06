@@ -24,11 +24,11 @@ OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
 
 
 def local_map(
-    func: Callable | None = None,
+    func: Optional[Callable] = None,
     out_placements: OutputPlacements = None,
     in_placements: InputPlacements = None,
     in_grad_placements: InputPlacements = None,
-    device_mesh: DeviceMesh | None = None,
+    device_mesh: Optional[DeviceMesh] = None,
     *,
     redistribute_inputs: bool = False,
 ):
@@ -163,7 +163,7 @@ def _local_map_wrapped(
     out_placements: OutputPlacements,
     in_placements: InputPlacements,
     in_grad_placements: InputPlacements,
-    device_mesh: DeviceMesh | None,
+    device_mesh: Optional[DeviceMesh],
     redistribute_inputs: bool,
     *args,
     **kwargs,

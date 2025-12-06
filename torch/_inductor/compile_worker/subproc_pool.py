@@ -175,7 +175,7 @@ class SubprocPool:
 
         if log_path:
             # pyrefly: ignore [bad-assignment]
-            self.log_file = open(log_path, "w")  # noqa:SIM115
+            self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
             cmd,

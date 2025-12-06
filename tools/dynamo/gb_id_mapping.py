@@ -1,13 +1,12 @@
 import argparse
 import ast
 import json
-import random
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
-def get_source_segment(source: str, node: ast.AST) -> str | None:
+def get_source_segment(source: str, node: ast.AST) -> Optional[str]:
     return ast.get_source_segment(source, node)
 
 
@@ -24,23 +23,8 @@ def save_registry(reg: dict[str, Any], path: Path) -> None:
 
 
 def next_gb_id(reg: dict[str, Any]) -> str:
-    """Generate a random unused GB ID from GB0000-GB9999 range."""
-    used_ids = set(reg.keys())
-    max_attempts = 100
-
-    # Try random selection first
-    for _ in range(max_attempts):
-        candidate = f"GB{random.randint(0, 9999):04d}"
-        if candidate not in used_ids:
-            return candidate
-
-    # Fallback: find first available ID if random selection keeps colliding
-    for i in range(10000):
-        candidate = f"GB{i:04d}"
-        if candidate not in used_ids:
-            return candidate
-
-    raise RuntimeError("No available GB IDs in range GB0000-GB9999")
+    ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
+    return f"GB{(max(ids, default=-1) + 1):04d}"
 
 
 def clean_string(s: Any) -> Any:
@@ -64,7 +48,7 @@ def clean_string(s: Any) -> Any:
     return s
 
 
-def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
+def expand_hints(hints: list[str], dynamo_dir: Optional[str] = None) -> list[str]:
     """
     Expands hint references to their actual values from graph_break_hints.
     Uses exec() to avoid import dependencies.
@@ -132,7 +116,7 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
 
 
 def find_unimplemented_calls(
-    path: str, dynamo_dir: str | None = None
+    path: str, dynamo_dir: Optional[str] = None
 ) -> list[dict[str, Any]]:
     results = []
     path_obj = Path(path)
@@ -203,8 +187,7 @@ def create_registry(dynamo_dir: str, registry_path: str) -> None:
     for info in calls:
         gb_types[info["gb_type"]] = info
 
-    # Use sequential IDs for initial registry creation
-    GB_ID_INDEX = 0
+    GB_ID_INDEX = 0000
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
         gb_id = f"GB{i:04d}"
         hints = info["hints"]

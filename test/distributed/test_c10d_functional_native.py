@@ -24,7 +24,7 @@ from torch.distributed._functional_collectives import (
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
-    DistributedTestBase,
+    MultiProcessTestCase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
@@ -59,8 +59,12 @@ if not dist.is_available():
     sys.exit(0)
 
 
-@requires_accelerator_dist_backend()
-class TestWithNCCL(DistributedTestBase):
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestWithNCCL(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
     @property
     def world_size(self) -> int:
         return 2
@@ -74,7 +78,16 @@ class TestWithNCCL(DistributedTestBase):
         return torch.device(self.rank)
 
     def _init_process_group(self) -> None:
-        self.create_pg(self.device.type)
+        torch.accelerator.set_device_index(self.rank)
+        store = dist.FileStore(self.file_name, self.world_size)
+        backend = dist.get_default_backend_for_device(self.device.type)
+
+        dist.init_process_group(
+            backend=backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
         torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     @skip_if_lt_x_gpu(2)
@@ -328,22 +341,6 @@ class TestWithNCCL(DistributedTestBase):
         assert not output.completed
         assert output.eq(self.rank).all()
         assert output.completed
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_out(self) -> None:
-        self._init_process_group()
-
-        input = torch.tensor(self.ranks, device=self.device)
-        out = torch.tensor([-1], device=self.device)
-        w = torch.ops._c10d_functional.reduce_scatter_tensor_out(
-            input,
-            "avg",
-            self.world_size,
-            "default",
-            out=out,
-        )
-        torch.ops._c10d_functional.wait_tensor(w)
-        assert out.eq(self.rank).all()
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self) -> None:

@@ -10,6 +10,7 @@ import datetime
 import os
 import socket
 from contextlib import closing
+from typing import Optional
 
 import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
@@ -34,7 +35,7 @@ def create_c10d_store(
     timeout: float = (60 * 10),  # 10 min
     wait_for_workers: bool = True,
     retries=3,
-    use_libuv: bool | None = None,
+    use_libuv: Optional[bool] = None,
 ):
     if use_libuv is not None:
         logger.warning(

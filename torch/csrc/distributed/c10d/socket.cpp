@@ -7,6 +7,7 @@
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
+#include <cstring>
 #include <optional>
 #include <system_error>
 #include <utility>

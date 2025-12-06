@@ -3,6 +3,7 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
+from typing import Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -10,7 +11,7 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 
 __all__ = ["traverse", "traverse_dps"]
 
-DataPipe = IterDataPipe | MapDataPipe
+DataPipe = Union[IterDataPipe, MapDataPipe]
 DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 

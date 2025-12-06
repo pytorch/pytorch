@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <ATen/FunctionalTensorWrapper.h>
+
 namespace torch::inductor {
 using namespace at;
 

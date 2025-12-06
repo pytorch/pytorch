@@ -13,10 +13,9 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import sys
 import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, overload, TypeAlias, TypeVar
+from typing import Any, overload, TypeAlias, TypeVar, Union
 from typing_extensions import deprecated, Self, TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -267,20 +266,8 @@ def _private_register_pytree_node(
         )
 
 
-def _is_pytreespec_instance(
-    obj: Any,
-    /,
-) -> TypeIs[TreeSpec | python_pytree.PyTreeSpec]:
-    if isinstance(obj, (TreeSpec, python_pytree.PyTreeSpec)):
-        return True
-    if "torch._dynamo.polyfills.pytree" in sys.modules:
-        # The PyTorch Dynamo pytree module is not always available, so we check if it is loaded.
-        # If the PyTorch Dynamo pytree module is loaded, we can check if the treespec
-        # is an instance of the PyTorch Dynamo TreeSpec class.
-        import torch._dynamo.polyfills.pytree as dynamo_pytree
-
-        return isinstance(obj, dynamo_pytree.PyTreeSpec)
-    return False
+def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
+    return isinstance(obj, TreeSpec)
 
 
 def treespec_leaf() -> TreeSpec:
@@ -407,15 +394,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not _is_pytreespec_instance(treespec):
-        if not _is_pytreespec_instance(leaves):
-            raise TypeError(
-                f"Expected `treespec` to be an instance of "
-                f"PyTreeSpec but got item of type {type(treespec)}."
-            )
-        # Allow passing the PyTreeSpec instance as the first argument
-        leaves, treespec = treespec, leaves
-    return treespec.unflatten(leaves)
+    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
 def tree_iter(
@@ -612,7 +591,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
+TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
@@ -980,9 +959,8 @@ def _broadcast_to_and_flatten(
     is_leaf: Callable[[PyTree], bool] | None = None,
 ) -> list[Any] | None:
     if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"Expected `treespec` to be an instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
+        raise AssertionError(
+            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
         )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
@@ -995,7 +973,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: int | None = None) -> str:
     """Serialize a treespec to a JSON string."""
     if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"Expected `treespec` to be an instance of "
+            f"treespec_dumps(treespec): Expected `treespec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
 

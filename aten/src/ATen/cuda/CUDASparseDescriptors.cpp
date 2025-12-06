@@ -1,4 +1,6 @@
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -177,7 +179,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices
-      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col index
+      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
       value_type // data type of values
       ));
 

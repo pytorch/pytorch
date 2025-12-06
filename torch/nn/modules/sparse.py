@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -123,8 +124,8 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: int | None
-    max_norm: float | None
+    padding_idx: Optional[int]
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
@@ -135,12 +136,12 @@ class Embedding(Module):
         self,
         num_embeddings: int,
         embedding_dim: int,
-        padding_idx: int | None = None,
-        max_norm: float | None = None,
+        padding_idx: Optional[int] = None,
+        max_norm: Optional[float] = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         sparse: bool = False,
-        _weight: Tensor | None = None,
+        _weight: Optional[Tensor] = None,
         _freeze: bool = False,
         device=None,
         dtype=None,
@@ -303,10 +304,8 @@ class EmbeddingBag(Module):
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
-        include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-                                              The last element is the size of the input, or the ending index position
-                                              of the last bag (sequence). This matches the CSR format. Ignored when
-                                              input is 2D. Default ``False``.
+        include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+                                      is equivalent to the size of `indices`. This matches the CSR format.
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
                                      during training, i.e. it remains as a fixed "pad". For a newly constructed
@@ -361,27 +360,27 @@ class EmbeddingBag(Module):
 
     num_embeddings: int
     embedding_dim: int
-    max_norm: float | None
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
     mode: str
     sparse: bool
     include_last_offset: bool
-    padding_idx: int | None
+    padding_idx: Optional[int]
 
     def __init__(
         self,
         num_embeddings: int,
         embedding_dim: int,
-        max_norm: float | None = None,
+        max_norm: Optional[float] = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
-        _weight: Tensor | None = None,
+        _weight: Optional[Tensor] = None,
         include_last_offset: bool = False,
-        padding_idx: int | None = None,
+        padding_idx: Optional[int] = None,
         device=None,
         dtype=None,
     ) -> None:
@@ -430,8 +429,8 @@ class EmbeddingBag(Module):
     def forward(
         self,
         input: Tensor,
-        offsets: Tensor | None = None,
-        per_sample_weights: Tensor | None = None,
+        offsets: Optional[Tensor] = None,
+        per_sample_weights: Optional[Tensor] = None,
     ) -> Tensor:
         """Forward pass of EmbeddingBag.
 
@@ -495,13 +494,13 @@ class EmbeddingBag(Module):
         cls,
         embeddings: Tensor,
         freeze: bool = True,
-        max_norm: float | None = None,
+        max_norm: Optional[float] = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
         include_last_offset: bool = False,
-        padding_idx: int | None = None,
+        padding_idx: Optional[int] = None,
     ) -> "EmbeddingBag":
         r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 

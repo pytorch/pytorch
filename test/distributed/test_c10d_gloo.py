@@ -2356,8 +2356,7 @@ class ReducerModule(nn.Module):
 class ReducerTest(TestCase):
     def setUp(self):
         super().setUp()
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.file = f
+        self.file = tempfile.NamedTemporaryFile(delete=False)
         world_size = 1
         self.store = c10d.FileStore(self.file.name, world_size)
         c10d.init_process_group(

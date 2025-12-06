@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import typing
 from typing import Any, Optional, TYPE_CHECKING, Union
 
@@ -51,35 +50,6 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
-
-
-@dataclasses.dataclass
-class FusionScore:
-    template_score: int
-    node_type_score: bool
-    memory_score: int
-    proximity_score: int
-
-    def __lt__(self, other):
-        """
-        node_type_score has higher priority than memory_score unless
-        the memory_score differs too much
-        """
-        threshold = 16
-        if self.template_score != other.template_score:
-            return self.template_score < other.template_score
-
-        if (
-            max(self.memory_score, other.memory_score)
-            > min(self.memory_score, other.memory_score) * threshold
-        ):
-            return self.memory_score < other.memory_score
-
-        return (self.node_type_score, self.memory_score, self.proximity_score) < (
-            other.node_type_score,
-            other.memory_score,
-            other.proximity_score,
-        )
 
 
 class InductorChoices:
@@ -518,7 +488,9 @@ class InductorChoices:
             - config.triton.tiling_prevents_reduction_fusion
             - config.aggressive_fusion (will cause this function to be called more times)
         """
-        if shared_data_score == 0 and (
+        if (
+            shared_data_score == 0 and not MixOrderReduction.can_fuse(node1, node2)
+        ) and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -589,11 +561,9 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if MixOrderReduction.can_fuse(node1, node2):
-            # For mix order reduction, we disregard shared data or
-            # distance.
-            return True
-        if shared_data_score < config.score_fusion_memory_threshold:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+        ) and not MixOrderReduction.can_fuse(node1, node2):
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
@@ -619,13 +589,7 @@ class InductorChoices:
         - Estimate of the saved memory operations
         - Fusions closer together in original graph order
         """
-
-        memory_score, is_mix_order_reduction = typing.cast(
-            tuple[int, bool],
-            scheduler.score_fusion_memory(
-                node1, node2, return_is_mix_order_reduction=True
-            ),
-        )
+        memory_score = scheduler.score_fusion_memory(node1, node2)
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
@@ -640,12 +604,10 @@ class InductorChoices:
                 and memory_score > 0
             )
 
-        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
-
         # pyrefly: ignore [bad-return]
-        return FusionScore(
+        return (
             template_score,
-            type_score,
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
             proximity_score,
         )

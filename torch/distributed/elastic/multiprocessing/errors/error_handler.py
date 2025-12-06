@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 import warnings
-from typing import Any
+from typing import Any, Optional
 
 
 __all__ = ["ErrorHandler"]
@@ -33,7 +33,7 @@ class ErrorHandler:
     Subclasses should override ``initialize()`` and ``record_exception()``.
     """
 
-    def _get_error_file_path(self) -> str | None:
+    def _get_error_file_path(self) -> Optional[str]:
         """
         Return the error file path.
 

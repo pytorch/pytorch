@@ -427,5 +427,4 @@ __all__ = [
     "is_bf16_supported",
     "MTIAGraph",
     "graph",
-    "graph_pool_handle",
 ]

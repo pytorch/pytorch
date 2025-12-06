@@ -4,7 +4,6 @@ import inspect
 import logging
 import operator
 import types
-import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
@@ -45,7 +44,7 @@ BaseArgumentTypes = Union[
     torch.SymBool,
     torch.SymFloat,
 ]
-base_types = typing.get_args(BaseArgumentTypes)
+base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target: TypeAlias = Union[Callable[..., Any], str]
 
@@ -91,6 +90,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
 _side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
+    _ops.aten._async_error.default,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten._assert_tensor_metadata.default,
@@ -175,8 +175,6 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
-    if module == "torch.nn.functional" and name in ("_ScalingType", "_SwizzleType"):
-        name = name.removeprefix("_")
     return f"{module}.{name}"
 
 

@@ -253,14 +253,6 @@ class StoreTestBase:
         a.set("foo", "bar")
         self.assertEqual(b.get("foo"), b"bar")
 
-    def test_list_keys(self):
-        a = self._create_store()
-        a.set("foo", "bar")
-        a.set("baz", "qux")
-        keys = a.list_keys()
-        self.assertIn("foo", keys)
-        self.assertIn("baz", keys)
-
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -273,8 +265,7 @@ class StoreTestBase:
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.file = f
+        self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def _create_store(self):
         store = dist.FileStore(self.file.name, 1)
@@ -282,34 +273,34 @@ class FileStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_init_pg_and_rpc_with_same_file(self):
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            # Init RPC using file
-            rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-            rpc_backend_options.init_method = f"file://{file.name}"
-            rpc_backend_options._transports = tp_transports()
-            rpc.init_rpc(
-                "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
-            )
+        file = tempfile.NamedTemporaryFile(delete=False)
+        # Init RPC using file
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options.init_method = f"file://{file.name}"
+        rpc_backend_options._transports = tp_transports()
+        rpc.init_rpc(
+            "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
+        )
 
-            # Init PG using file
-            dist.init_process_group(
-                "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
-            )
-            dist.destroy_process_group()
-            assert os.path.exists(file.name)
+        # Init PG using file
+        dist.init_process_group(
+            "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
+        )
+        dist.destroy_process_group()
+        assert os.path.exists(file.name)
 
-            rpc.shutdown()
-            os.remove(file.name)
+        rpc.shutdown()
+        os.remove(file.name)
 
     def test_refcount(self):
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            store = dist.FileStore(file.name, 1)
-            store2 = dist.FileStore(file.name, 1)
+        file = tempfile.NamedTemporaryFile(delete=False)
+        store = dist.FileStore(file.name, 1)
+        store2 = dist.FileStore(file.name, 1)
 
-            del store
-            assert os.path.exists(file.name)
-            del store2
-            assert not os.path.exists(file.name)
+        del store
+        assert os.path.exists(file.name)
+        del store2
+        assert not os.path.exists(file.name)
 
     @property
     def num_keys_total(self):
@@ -328,8 +319,7 @@ class PrefixStoreTest(TestCase):
     def setUp(self):
         super().setUp()
         # delete is false as FileStore will automatically clean up the file
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.file = f
+        self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def test_get_underlying_store(self):
         tcp_store = dist.TCPStore(
@@ -350,8 +340,7 @@ class PrefixStoreTest(TestCase):
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.file = f
+        self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
@@ -980,7 +969,7 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
-    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)  # noqa: SIM115
+    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
     hash_store = dist.HashStore()
 
     tcp_store = create_tcp_store(use_libuv=False)
@@ -1061,7 +1050,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except BaseException as e:  # noqa: B036,E261
+            except Error as e:  # noqa: F821
                 rank_res[rank] = e
             time.sleep(1)
 

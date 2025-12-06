@@ -58,6 +58,7 @@
 #include <ATen/ops/view_as_complex.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>

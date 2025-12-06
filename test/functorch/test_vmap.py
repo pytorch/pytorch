@@ -6139,9 +6139,9 @@ class TestTransformFailure(TestCase):
         else:
             input = torch.randn(5)
 
-        if transform is vjp:
+        if transform == vjp:
             transform = functools.partial(transform, f)
-        elif transform is jvp:
+        elif transform == jvp:
             input = (input,)
             transform = functools.partial(transform, f, input)
         else:

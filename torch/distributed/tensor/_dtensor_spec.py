@@ -2,7 +2,7 @@ import itertools
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple
+from typing import Any, cast, NamedTuple, Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -71,7 +71,7 @@ class DTensorSpec:
     placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
-    tensor_meta: TensorMeta | None = None
+    tensor_meta: Optional[TensorMeta] = None
 
     # When a tensor dimension is sharded across multiple mesh axes,
     # `shard_order` specifies the sequence in which these shardings are applied.
@@ -206,7 +206,7 @@ class DTensorSpec:
     @staticmethod
     def _maybe_convert_StridedShard_to_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> ShardOrder | None:
+    ) -> Optional[ShardOrder]:
         """
         Try to convert _StridedShard placements to ShardOrder.
 
@@ -441,7 +441,7 @@ class DTensorSpec:
     @staticmethod
     def format_shard_order_str(
         placements: tuple[Placement, ...],
-        shard_order: ShardOrder | None = None,
+        shard_order: Optional[ShardOrder] = None,
     ) -> str:
         """
         Format DTensor sharding information as a human-readable string.
@@ -617,7 +617,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: list[int],
         sums: list[int],
-        tensor_meta: TensorMeta | None = None,
+        tensor_meta: Optional[TensorMeta] = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -669,7 +669,7 @@ class DTensorSpec:
         return any(placement.is_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
-        self, tensor_meta: TensorMeta | None
+        self, tensor_meta: Optional[TensorMeta]
     ) -> "DTensorSpec":
         """
         Shallow copy the DTensorSpec with a new tensor_meta.

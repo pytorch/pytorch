@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
@@ -375,13 +375,13 @@ class RMSNorm(Module):
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
-    eps: float | None
+    eps: Optional[float]
     elementwise_affine: bool
 
     def __init__(
         self,
         normalized_shape: _shape_t,
-        eps: float | None = None,
+        eps: Optional[float] = None,
         elementwise_affine: bool = True,
         device=None,
         dtype=None,

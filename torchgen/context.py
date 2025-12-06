@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torchgen.local as local
 from torchgen.model import (
@@ -26,15 +26,15 @@ F = TypeVar(
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
-    NativeFunction | NativeFunctionsGroup,
-    NativeFunction | NativeFunctionsViewGroup,
+    Union[NativeFunction, NativeFunctionsGroup],
+    Union[NativeFunction, NativeFunctionsViewGroup],
 )
 
 F2 = TypeVar(
     "F2",
     NativeFunction,
     NativeFunctionsGroup,
-    NativeFunction | None,
+    Optional[NativeFunction],
     bool,
     str,
 )

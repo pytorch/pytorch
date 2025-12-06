@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/functorch/PlumbingHelper.h>
 
 namespace at::functorch {
 
