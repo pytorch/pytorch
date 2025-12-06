@@ -1045,6 +1045,39 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
+    def test_gloo_set_pg_timeout_api(self):
+        """
+        Test _set_pg_timeout API for Gloo backend (issue #165422).
+        This test verifies that dynamically changing timeout via distributed_c10d._set_pg_timeout
+        actually affects subsequent operations.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+
+        backend = pg._get_backend(torch.device("cpu"))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=50))
+
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+        c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=23), pg)
+        self.assertEqual(backend.options._timeout, timedelta(seconds=23))
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+        c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=100), pg)
+        self.assertEqual(backend.options._timeout, timedelta(seconds=100))
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+        dist.destroy_process_group()
+
+    @requires_gloo()
     def test_scatter_stress(self):
         inputs = [
             [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
