@@ -2090,13 +2090,13 @@ def forward(self, child : torch.Tensor, const_unused : int):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch.cond",
         ):
             mod_for_eager(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch.cond",
         ):
             mod_for_compile(torch.ones(3, 4))
 
@@ -2302,13 +2302,13 @@ def forward(self):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch.cond",
         ):
             mod_for_eager(torch.tensor(True), torch.tensor(5))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch.cond",
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
@@ -2349,7 +2349,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            "Higher Order Operator: torch.ops.higher_order.map",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2379,7 +2379,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            "Higher Order Operator: torch.ops.higher_order.map",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -3191,7 +3191,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch.cond",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 

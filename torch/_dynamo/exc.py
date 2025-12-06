@@ -482,6 +482,7 @@ def format_graph_break_message(
     context: str,
     explanation: str,
     hints: list[str],
+    hop_context: Optional[str] = None,
 ) -> str:
     explanation = textwrap.indent(explanation, "    ").lstrip()
     hints_str = "\n".join(
@@ -489,10 +490,15 @@ def format_graph_break_message(
     )
     context = textwrap.indent(context, "    ").lstrip()
 
+    # Add HOP context if available
+    hop_str = ""
+    if hop_context:
+        hop_str = f"\n  Higher Order Operator: {hop_context}"
+
     msg = f"""\
 {gb_type}
   Explanation: {explanation}
-{hints_str}
+{hints_str}{hop_str}
 
   Developer debug context: {context}
 """
@@ -552,6 +558,26 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
 _NOTHING = object()
 
 
+def _get_current_hop_context() -> Optional[str]:
+    """
+    Extract HOP context from thread-local storage if currently tracing inside a HOP.
+    Returns the description of the current HOP, or None if not in a HOP.
+    """
+    try:
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if tx and tx.output:
+            tracer = tx.output.current_tracer
+            # Check if we're in a nested tracer (i.e., inside a HOP)
+            if tracer.parent is not None:
+                return tracer.description
+    except (AttributeError, ImportError):
+        # Not in a tracing context, or tls not set up
+        pass
+    return None
+
+
 def unimplemented(
     *,
     gb_type: str,
@@ -570,8 +596,10 @@ def unimplemented(
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
     """
+    # Automatically detect HOP context from thread-local storage
+    hop_context = _get_current_hop_context()
 
-    msg = format_graph_break_message(gb_type, context, explanation, hints)
+    msg = format_graph_break_message(gb_type, context, explanation, hints, hop_context)
 
     documentation_link = get_gbid_documentation_link(gb_type)
 
