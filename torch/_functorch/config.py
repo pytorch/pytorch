@@ -139,6 +139,9 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Without this flag all custom nodes are by default recomputed by the partitioner.
+# See the get_recomputable_banned_nodes function in the partitioner for more details.
+include_custom_and_triton_kernel_wrappers_in_knapsack_optimization = False
 
 # Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
 # This optimization minimizes activation checkpoint node lifetimes by computing them
