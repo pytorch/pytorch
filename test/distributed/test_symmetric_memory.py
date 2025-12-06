@@ -6,6 +6,9 @@ import random
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
+import triton
+import triton.language as tl
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -58,6 +61,17 @@ os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
+
+
+@triton.jit
+def barrier_test_kernel(
+    signal_pad_ptrs,
+    rank: tl.constexpr,
+    world_size: tl.constexpr,
+):
+    torch.ops.symm_mem.symm_mem_sync(
+        signal_pad_ptrs, rank, world_size, None, False, False
+    )
 
 
 @instantiate_parametrized_tests
@@ -1214,6 +1228,36 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         ref = torch.ops._c10d_functional.wait_tensor(ref)
 
         self.assertTrue(out.eq(ref).all())
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemBarrierTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+    @skip_if_rocm_multiprocess  # SIGIOT error
+    @skip_if_lt_x_gpu(2)
+    def test_torch_ops_symm_mem_sync_within_triton_kernel(self):
+        """Test using torch.ops.symm_mem.symm_mem_sync within Triton kernel"""
+        self._init_process()
+        t = symm_mem.empty(4096, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        barrier_test_kernel[(32, 1, 1)](
+            symm_mem_hdl.signal_pad_ptrs_dev,
+            rank=symm_mem_hdl.rank,
+            world_size=symm_mem_hdl.world_size,
+        )
+
+        signal_pad = symm_mem_hdl.get_signal_pad(symm_mem_hdl.rank)
+        assert signal_pad.eq(0).all().item()
 
 
 @instantiate_parametrized_tests
