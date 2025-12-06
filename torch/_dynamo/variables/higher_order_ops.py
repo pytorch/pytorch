@@ -4010,7 +4010,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "autograd.Function",
                 enable_grad=None,
                 set_subgraph_inputs="automatic",
-                allow_side_effects=False,
+                allow_side_effects=True,
                 tracer=fwd_tracer,
             )
         )
