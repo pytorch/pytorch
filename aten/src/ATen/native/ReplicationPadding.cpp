@@ -109,19 +109,26 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t nslices = input.size(dimslices);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
-
-  TORCH_CHECK(
-      pad_t <= INT64_MAX - iheight &&
-      pad_b <= INT64_MAX - iheight - pad_t,
-      "Padding values too large; integer overflow detected while computing output height."
-  );
-
-  TORCH_CHECK(
-      pad_l <= INT64_MAX - iwidth &&
-      pad_r <= INT64_MAX - iwidth - pad_l,
-      "Padding values too large; integer overflow detected while computing output width."
-  );
+  const int64_t INT64_MAX = std::numeric_limits<int64_t>::max();
   
+  int64_t safe_pad_t = std::max(pad_t, (int64_t)0);
+  int64_t safe_pad_b = std::max(pad_b, (int64_t)0);
+  int64_t safe_pad_l = std::max(pad_l, (int64_t)0);
+  int64_t safe_pad_r = std::max(pad_r, (int64_t)0);
+  
+  TORCH_CHECK(iheight <= INT64_MAX - safe_pad_t,
+    "Padding value ", pad_t, " for height is too large and would cause int64 overflow.");
+  int64_t temp_height = iheight + safe_pad_t;
+
+  TORCH_CHECK(temp_height <= INT64_MAX - safe_pad_b,
+    "Padding value ", pad_b, " for height is too large and would cause int64 overflow.");
+
+  TORCH_CHECK(iwidth <= INT64_MAX - safe_pad_l,
+    "Padding value ", pad_l, " for width is too large and would cause int64 overflow.");
+  int64_t temp_width = iwidth + safe_pad_l;
+
+  TORCH_CHECK(temp_width <= INT64_MAX - safe_pad_r,
+    "Padding value ", pad_r, " for width is too large and would cause int64 overflow.");
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
