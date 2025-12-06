@@ -79,6 +79,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Cached decomposition info for range-based dispatch (set via cache_decomposition)
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
+        # Cache compiled module to avoid recompiling on every benchmark call
+        self._compiled_module: Any = None
+        self._compiled_sym_inputs: list[Any] | None = None
 
     def cache_decomposition(
         self, decomposition: Callable[..., Any], kwargs: dict[str, Any]
@@ -86,10 +89,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         """Cache decomposition function and kwargs for range-based dispatch lookup."""
         self.decomposition = decomposition
         self.decomposition_kwargs = kwargs
-
-        # Cache compiled module to avoid recompiling on every benchmark call
-        self._compiled_module: Any = None
-        self._compiled_sym_inputs: list[Any] | None = None
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
