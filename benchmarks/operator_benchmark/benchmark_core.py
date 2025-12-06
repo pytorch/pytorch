@@ -292,6 +292,8 @@ class BenchmarkRunner:
             "latency unit": "us",
             "peak memory": results["peak_memory"],
             "memory unit": "KB",
+            "memory bandwidth": results.get("memory_bandwidth_gb_s"),
+            "memory bandwidth unit": "GB/s",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
