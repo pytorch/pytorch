@@ -181,6 +181,12 @@ class _SysImporter(Importer):
         return importlib.import_module(module_name)
 
     def whichmodule(self, obj: Any, name: str) -> str:
+        # In Python 3.14+, pickle.whichmodule tries to import the module,
+        # which fails for mangled package names like '<torch_package_0>'.
+        # Check __module__ first before calling pickle.whichmodule.
+        module_name = getattr(obj, "__module__", None)
+        if module_name is not None:
+            return module_name
         return _pickle_whichmodule(obj, name)
 
 

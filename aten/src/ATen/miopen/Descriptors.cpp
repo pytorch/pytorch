@@ -114,8 +114,8 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   // that is the common case, so we can catch most client errors with this test.
   TORCH_CHECK(t.is_contiguous(memory_format),
     "MIOpen filters (a.k.a. weights) must be contiguous in desired memory_format\n",
-    "Weight sizes: ", t.sizes(), "\n",
-    "Weight strides: ", t.strides(), "\n",
+    "Weight sizes: ", t.sizes(), '\n',
+    "Weight strides: ", t.strides(), '\n',
     "cuDNN suggested memory_format: ", memory_format);
 
   int size[MIOPEN_DIM_MAX];

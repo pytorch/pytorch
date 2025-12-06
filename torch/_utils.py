@@ -9,7 +9,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from types import ModuleType
-from typing import Any, Generic, Optional, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -856,7 +856,7 @@ def _get_device_index(
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int] = None
+    device_idx: int | None = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
             raise ValueError(f"Expected a non cpu device, but got: {device}")
@@ -1054,7 +1054,7 @@ class CallbackRegistry(Generic[P]):
                 )
 
 
-def try_import(module_name: str) -> Optional[ModuleType]:
+def try_import(module_name: str) -> ModuleType | None:
     # Implementation based on
     # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
     if (module := sys.modules.get(module_name, None)) is not None:

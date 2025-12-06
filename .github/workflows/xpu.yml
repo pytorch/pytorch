@@ -82,7 +82,7 @@ jobs:
       id-token: write
       contents: read
     with:
-      build-environment: linux-noble-xpu-n-py3.10
+      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
     secrets: inherit
@@ -95,7 +95,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.1'
+      xpu-version: '2025.2'
       vc-year: '2022'
     secrets: inherit
 
@@ -107,6 +107,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.2'
+      xpu-version: '2025.3'
       vc-year: '2022'
     secrets: inherit

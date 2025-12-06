@@ -172,7 +172,7 @@ class _CommModeModuleTracker(ModTracker):
                 self._fw_set_module_hook
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output):  # pylint: disable=useless-parent-delegation
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data

@@ -16,5 +16,5 @@ optree>=0.13.0
 psutil
 spin
 sympy>=1.13.3
-typing-extensions>=4.13.2
+typing-extensions>=4.15.0
 wheel

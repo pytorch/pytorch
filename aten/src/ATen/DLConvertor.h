@@ -13,6 +13,7 @@ namespace at {
 TORCH_API ScalarType toScalarType(const DLDataType& dtype);
 TORCH_API DLManagedTensor* toDLPack(const Tensor& src);
 TORCH_API struct DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src);
+TORCH_API void toDLPackNonOwning(const Tensor& src, DLTensor* out);
 TORCH_API Tensor
 fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter = {});
 TORCH_API Tensor fromDLPackVersioned(
@@ -30,6 +31,12 @@ TORCH_API Tensor maybeCopyTensor(
 
 // Converts the given at::Device into a DLDevice.
 TORCH_API DLDevice torchDeviceToDLDevice(at::Device device);
+
+// Converts the DLDevice to an ATen device.
+TORCH_API Device dlDeviceToTorchDevice(
+    DLDeviceType type,
+    c10::DeviceIndex index,
+    void* data = nullptr);
 
 // This trait class is used for retrieving different attributes, such as the
 // PyCapsule names and conversion functions for both DLPack tensor classes:

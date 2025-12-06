@@ -359,11 +359,14 @@ def checkpoint(
     r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
-    Instead of keeping tensors needed for backward alive until they are used in
-    gradient computation during backward, forward computation in checkpointed
-    regions omits saving tensors for backward and recomputes them during the
-    backward pass. Activation checkpointing can be applied to any part of a
-    model.
+    By default, tensors computed during the forward pass are kept alive until
+    they are used in gradient computations in the backward pass. To reduce this
+    memory usage, tensors produced in the passed :attr:`function` are not kept
+    alive until the backward pass. Instead, any passed tensors in :attr:`args`
+    are kept alive, and the unsaved tensors are recomputed by re-invoking
+    :attr:`function` in the backward pass as needed for gradient computation.
+    Activation checkpointing can be applied to any part of a model -- this is
+    sometimes described as "checkpointing" that part of the model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use

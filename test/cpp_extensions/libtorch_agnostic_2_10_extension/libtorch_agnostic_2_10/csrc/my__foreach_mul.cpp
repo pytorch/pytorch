@@ -5,7 +5,8 @@
 
 using torch::stable::Tensor;
 
-std::vector<Tensor> my__foreach_mul(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
+// This is used to test const torch::headeronly::HeaderOnlyArrayRef<Tensor>& with TORCH_BOX
+std::vector<Tensor> my__foreach_mul(const torch::headeronly::HeaderOnlyArrayRef<Tensor>& self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
   std::array<StableIValue, 2> stack = {torch::stable::detail::from(self), torch::stable::detail::from(other)};
   aoti_torch_call_dispatcher("aten::_foreach_mul", "List", stack.data());
   return torch::stable::detail::to<std::vector<Tensor>>(stack[0]);

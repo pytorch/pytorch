@@ -23,6 +23,7 @@ from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -507,6 +508,7 @@ class RedistributeTest(DTensorTestBase):
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):

@@ -3,7 +3,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
@@ -17,14 +16,12 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
 #include <iostream>

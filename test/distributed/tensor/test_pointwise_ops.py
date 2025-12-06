@@ -20,8 +20,11 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorOpTestBase,
+    LocalDTensorOpTestBase,
     skip_unless_torch_gpu,
+    with_comms,
 )
 
 
@@ -141,6 +144,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             kwargs=kwargs,
         )
 
+    @with_comms
     def test_partial_add(self):
         device_mesh = self.build_device_mesh()
         d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
@@ -148,6 +152,32 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         d_3 = d_1 + d_2
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
+    @with_comms
+    def test_partial_replicate_add(self):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        for reduce_op in ("sum", "avg"):
+            d_1 = DTensor.from_local(
+                torch.rand(2, 2),
+                device_mesh,
+                [Partial(reduce_op=reduce_op)],
+            )
+            d_2 = DTensor.from_local(
+                torch.rand(2, 1),
+                device_mesh,
+                [Replicate()],
+                run_check=True,
+            )
+
+            with comm_mode:
+                d_3 = d_1 + d_2
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(d_3.placements, (Partial(reduce_op=reduce_op),))
+            self.assertEqual(d_3.full_tensor(), d_1.full_tensor() + d_2.full_tensor())
+
+    @with_comms
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -187,6 +217,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             op=torch.sigmoid,
         )
 
+    @with_comms
     @skip(
         "testing RNG based ops is broken: https://github.com/pytorch/PiPPy/issues/494"
     )
@@ -215,6 +246,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             training=True,
         )
 
+    @with_comms
     @skip_unless_torch_gpu
     def test_dropout_backward(self):
         device_mesh = self.build_device_mesh()
@@ -247,6 +279,8 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ),
         )
 
+    @with_comms
+    @skip_unless_torch_gpu
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):
@@ -257,6 +291,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
                 op=torch.nn.functional.dropout,
             )
 
+    @with_comms
     def test_mul_out(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(self.rank)
@@ -275,6 +310,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(input_tensor, dtensor.to_local())
         self.assertEqual(expected, dt.to_local())
 
+    @with_comms
     def test_mul_partial(self):
         # we only test the partial behavior for mul op as other placement
         # behaviors should be well tested in test_dtensor_ops.py
@@ -331,6 +367,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.placements, (Replicate(),))
         self.assertEqual(z.to_local(), input)
 
+    @with_comms
     def test_inplace_op_partial_to_replicate(self):
         # test that in-place operations that require redistribution raise an error
         # to preserve aliasing semantics (issue #163374)
@@ -349,6 +386,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             "in-place operations that require placement changes are not supported",
         ):
             partial_dt.clamp_(max=10)
+
+
+DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
+)
 
 
 if __name__ == "__main__":

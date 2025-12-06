@@ -140,6 +140,14 @@ ban_recompute_reductions = True
 # Generally a good idea since views are free to recompute.
 recompute_views = False
 
+# Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
+# This optimization minimizes activation checkpoint node lifetimes by computing them
+# just-in-time. For AC nodes only used in backward, they are deferred to backward region
+# instead of being computed and saved in forward. This reduces peak memory usage.
+# Note: This only applies to forward+loss+backward graphs where torch.autograd.grad is allowed
+# in the graph. Joint graphs (standard AOTAutograd) use the partitioner instead.
+remat_using_tags_for_fwd_loss_bwd_graph = True
+
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
 # This knob controls the partitioner to make that tradeoff for you, choosing the
@@ -162,8 +170,9 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
-# (which has a scipy dependency).
+# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
+# used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
 # This dumps out a SVG visualization of the expected runtime vs. activation
@@ -182,6 +191,18 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
 aggressive_recomputation = False
+
+# activation offloading enablement (testing purpose)
+enable_activation_offloading = False
+
+# activation offloading with separate CUDA stream
+activation_offload_separate_stream = False
+
+# activation offloading wait sinking when using separate stream (fwd graph)
+activation_offload_sink_wait = False
+
+# activation reloading with prefetching when using separate streams (bwd graph)
+activation_reload_prefetch = False
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
