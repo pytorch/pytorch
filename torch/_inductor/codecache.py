@@ -3628,7 +3628,8 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
 
 def touch(filename: str) -> None:
-    open(filename, "a").close()
+    with open(filename, "a"):
+        pass
 
 
 @clear_on_fresh_cache
