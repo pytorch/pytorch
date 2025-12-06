@@ -13,7 +13,7 @@ __all__ = ["TensorPipeRpcBackendOptions"]
 
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
-    if device.type != "cuda":
+    if device.type != "cuda" and device.type != "xpu":
         raise ValueError(
             "`set_devices` expect a list of CUDA devices, but got "
             f"device type {device.type}."
