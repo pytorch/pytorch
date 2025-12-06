@@ -42,6 +42,7 @@ from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
@@ -259,6 +260,7 @@ def _call_function_with_auto_output_flattening(
     flat_example_value: Any,
     body_r: Optional[VariableTracker],
     graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
+    config: Optional[NestedCompileRegionOptions] = None,
 ) -> Optional[VariableTracker]:
     """
     Create HOP call node and reproxify output VTs for HOPs with auto output semantics.
@@ -285,14 +287,23 @@ def _call_function_with_auto_output_flattening(
     from .builder import wrap_fx_proxy
 
     # Store the invocation as a call
+    proxy = tx.output.create_proxy(
+        "call_function",
+        fn,
+        args=args,
+        kwargs=kwargs,
+    )
+
+    # Set backend metadata if provided
+    if config is not None:
+        if "custom" not in proxy.node.meta:
+            proxy.node.meta["custom"] = {}
+        proxy.node.meta["custom"]["nested_region_config"] = config
+        assert proxy.node.target == torch._higher_order_ops.invoke_subgraph
+
     flat_variable = wrap_fx_proxy(
         tx=tx,
-        proxy=tx.output.create_proxy(
-            "call_function",
-            fn,
-            args=args,
-            kwargs=kwargs,
-        ),
+        proxy=proxy,
         example_value=flat_example_value,
     )
 
@@ -4340,7 +4351,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             p_kwargs,
             example_value,
             body_r,
-            _,
+            body_gmod,
             body_name,
             body_graph_output_vts,
         ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
@@ -4355,6 +4366,25 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
+        # Extract nested compile config and store in node meta
+        # This will be used in regional_inductor_invoke_subgraph
+        config = None
+        fn_var = args[0]
+        if hasattr(fn_var, "get_function"):
+            try:
+                fn = fn_var.get_function()
+
+                if hasattr(fn, "__marked_compile_region_config__"):
+                    config = fn.__marked_compile_region_config__
+                    if config is not None:
+                        body_gmod.meta["nested_region_config"] = config
+            except Exception:
+                log.warning(
+                    "Failed to extract nested compile region config from InvokeSubgraphHigherOrderVariable. "
+                    "If you specified configs in nested_compile_region(), they may be ignored.",
+                    exc_info=True,
+                )
+
         p_args = (
             p_args[0],
             body_name,
@@ -4368,6 +4398,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             example_value,
             body_r,
             body_graph_output_vts,
+            config=config,
         )
 
 
