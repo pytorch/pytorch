@@ -1,4 +1,3 @@
-import pathlib
 import tempfile
 import time
 
@@ -16,7 +15,7 @@ def _torch_profile(req: _Request, resp: _Response) -> None:
 
     with tempfile.NamedTemporaryFile(prefix="torch_debug", suffix=".json") as f:
         prof.export_chrome_trace(f.name)
-        resp.set_content(pathlib.Path(f.name).read_bytes(), "application/json")
+        resp.set_content(open(f.name, "rb").read(), "application/json")
         resp.set_status(200)
 
 

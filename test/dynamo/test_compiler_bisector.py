@@ -108,6 +108,8 @@ class TestCompilerBisector(TestCase):
             args[1] = 2
             nodes[0].args = tuple(args)
 
+        config.pre_grad_custom_pass = pass_fn
+
         def foo(x):
             return x + 1
 
@@ -121,8 +123,7 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(pre_grad_custom_pass=pass_fn):
-            out = CompilerBisector.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_passes")
         self.assertEqual(out.bisect_number, 0)
@@ -140,6 +141,8 @@ class TestCompilerBisector(TestCase):
             args[1] = 2
             nodes[0].args = tuple(args)
 
+        config.joint_custom_post_pass = pass_fn
+
         def foo(x):
             return x + 1
 
@@ -153,8 +156,7 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(joint_custom_post_pass=pass_fn):
-            out = CompilerBisector.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "joint_graph_passes")
         self.assertEqual(out.bisect_number, 4)

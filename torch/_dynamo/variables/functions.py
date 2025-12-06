@@ -61,7 +61,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     ClosureSource,
-    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
@@ -98,8 +97,6 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
-        InliningGeneratorInstructionTranslator,
-        InliningInstructionTranslator,
         InstructionTranslator,
         InstructionTranslatorBase,
     )
@@ -116,8 +113,6 @@ if TYPE_CHECKING:
 _F = TypeVar("_F", bound=Callable[..., Any])
 CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
-_SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
-_TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
 
 # Module-level cache keyed by the function object
@@ -395,7 +390,7 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         result = False
 
         try:
@@ -423,15 +418,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "is_constant",
         *BaseUserFunctionVariable._nonvar_fields,
     }
-
-    _TREE_MAP_MODULES = frozenset(
-        {
-            "optree",
-            "optree.ops",
-            "torch.utils._pytree",
-            "torch.utils._cxx_pytree",
-        }
-    )
 
     @classmethod
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
@@ -568,7 +554,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -656,9 +642,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 return super().call_function(tx, args, kwargs)
 
         if (
-            getattr(tx.output.current_tracer, "description", None)
-            == "torch.utils.checkpoint.checkpoint"
-            and not tx.output.current_tracer.allow_side_effects_in_hop
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
                 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
@@ -668,200 +653,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
             ]:
-                with torch._dynamo.side_effects.allow_side_effects_in_hop(tx):
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
-
-        tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
-        if tree_map_result is not None:
-            return tree_map_result
-
         return super().call_function(tx, args, kwargs)
-
-    def _maybe_call_tree_map_fastpath(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> Optional[VariableTracker]:
-        rewrite = self._rewrite_tree_map_only_call(tx, args, kwargs)
-        if rewrite is not None:
-            tree_map_fn, tree_map_args, tree_map_kwargs = rewrite
-        else:
-            tree_map_fn = self
-            tree_map_args = args
-            tree_map_kwargs = kwargs
-
-        if not (
-            isinstance(tree_map_fn, UserFunctionVariable)
-            and tree_map_fn._is_tree_map_function()
-            and not ({*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS)
-            and len(tree_map_args) >= 2
-        ):
-            return None
-
-        map_fn = tree_map_args[0]
-        first_tree = tree_map_args[1]
-        rest = tree_map_args[2:]
-        return first_tree.call_tree_map(
-            tx,
-            tree_map_fn,
-            map_fn,
-            rest,
-            tree_map_kwargs,
-        )
-
-    def _is_tree_map_function(self) -> bool:
-        return (
-            getattr(self.fn, "__name__", None) == "tree_map"
-            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
-        )
-
-    def _is_tree_map_only_function(self) -> bool:
-        return (
-            getattr(self.fn, "__name__", None) == "tree_map_only"
-            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
-        )
-
-    def _rewrite_tree_map_only_call(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> Optional[
-        tuple[
-            "UserFunctionVariable",
-            Sequence[VariableTracker],
-            dict[str, VariableTracker],
-        ]
-    ]:
-        if not self._is_tree_map_only_function():
-            return None
-
-        if len(args) != 3:
-            return None
-        if {*kwargs} - _TREE_MAP_ONLY_SUPPORTED_KWARGS:
-            return None
-
-        type_selector, map_fn, tree_arg = args
-        allowed_types = self._extract_tree_map_only_types(type_selector)
-        if allowed_types is None:
-            return None
-
-        tree_map_callable = self._lookup_tree_map_function()
-        if tree_map_callable is None:
-            return None
-
-        wrapped_map_fn = TreeMapOnlyFunctionVariable(
-            allowed_types,
-            map_fn,
-            source=getattr(map_fn, "source", None),
-        )
-        tree_map_variable = variables.UserFunctionVariable(tree_map_callable)
-        return tree_map_variable, [wrapped_map_fn, tree_arg], dict(kwargs)
-
-    def _lookup_tree_map_function(self) -> Optional[types.FunctionType]:
-        module_name = getattr(self.fn, "__module__", None)
-        if not module_name:
-            return None
-        module = sys.modules.get(module_name)
-        if module is None:
-            return None
-        tree_map = getattr(module, "tree_map", None)
-        if isinstance(tree_map, types.FunctionType):
-            return tree_map
-        return None
-
-    def _extract_tree_map_only_types(
-        self, selector: VariableTracker
-    ) -> Optional[tuple[type, ...]]:
-        if not selector.is_python_constant():
-            return None
-        try:
-            raw_value = selector.as_python_constant()
-        except NotImplementedError:
-            return None
-
-        flattened = self._flatten_type_spec(raw_value)
-        if not flattened:
-            return None
-        if not all(isinstance(typ, type) for typ in flattened):
-            return None
-        return tuple(dict.fromkeys(flattened))
-
-    def _flatten_type_spec(self, value: Any) -> Optional[list[type]]:
-        if isinstance(value, type):
-            return [value]
-        if isinstance(value, tuple):
-            collected: list[type] = []
-            for entry in value:
-                flat = self._flatten_type_spec(entry)
-                if flat is None:
-                    return None
-                collected.extend(flat)
-            return collected
-        union_type = getattr(types, "UnionType", None)
-        if union_type is not None and isinstance(value, union_type):
-            collected = []
-            for entry in value.__args__:
-                flat = self._flatten_type_spec(entry)
-                if flat is None:
-                    return None
-                collected.extend(flat)
-            return collected
-        return None
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.fn)
-
-    def is_python_equal(self, other):
-        return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
-
-
-class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
-    _nonvar_fields = {
-        "allowed_types",
-        *BaseUserFunctionVariable._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        allowed_types: tuple[type, ...],
-        map_fn: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.allowed_types = allowed_types
-        self.map_fn = map_fn
-
-    def python_type(self) -> type:
-        return FunctionType
-
-    def _matches_allowed_type(self, node: VariableTracker) -> bool:
-        try:
-            node_type = node.python_type()
-        except NotImplementedError:
-            return False
-        return any(issubclass(node_type, allowed) for allowed in self.allowed_types)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args:
-            return self.map_fn.call_function(tx, args, kwargs)
-        leaf = args[0]
-        if self._matches_allowed_type(leaf):
-            return self.map_fn.call_function(tx, args, kwargs)
-        if len(args) != 1 or kwargs:
-            # Defer to the original map function so we fall back to normal
-            # tracing instead of triggering a graph break.
-            return self.map_fn.call_function(tx, args, kwargs)
-        return leaf
 
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
@@ -901,7 +695,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: "InliningGeneratorInstructionTranslator",
+        inline_tracer: Optional["InstructionTranslator"],
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -946,7 +740,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            tracer = self.inline_tracer
+            tracer = self._get_inline_tracer(tx)
             if not tracer.generator_exhausted:
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
@@ -965,8 +759,17 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
+    def _get_inline_tracer(self, tx: "InstructionTranslator") -> Any:
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        if self.inline_tracer is None:
+            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(  # type: ignore[assignment]
+                tx, self, [], {}
+            )
+        return self.inline_tracer
+
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        tracer = self.inline_tracer
+        tracer = self._get_inline_tracer(tx)
 
         if self._is_generator_exhausted():
             raise_observed_exception(StopIteration, tx)
@@ -988,7 +791,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
@@ -1023,7 +826,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        tracer = self.inline_tracer
+        tracer = self._get_inline_tracer(tx)
         try:
             tracer._raise_exception_variable(exc)
         except ObservedException as e:
@@ -1061,7 +864,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     for arg in args
                 ):
                     raise_observed_exception(TypeError, tx)
-            tracer = self.inline_tracer
+            tracer = self._get_inline_tracer(tx)
             tracer.push_many(args)
             return self.next_variable(tx)
         elif name == "close":
@@ -1078,7 +881,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            tracer = self.inline_tracer
+            tracer = self._get_inline_tracer(tx)
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
@@ -1138,7 +941,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # or raises a different exception, then that exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
-            tracer = self.inline_tracer
+            tracer = self._get_inline_tracer(tx)
             try:
                 # In Python 3.9, the exception is represented as a triple (typ, val, tb)
                 # In such cases, we re-raise the exception object given to avoid
@@ -1271,7 +1074,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InliningInstructionTranslator":
+    ) -> "InstructionTranslatorBase":
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
         return InliningInstructionTranslator.build_inline_tracer(
@@ -1333,7 +1136,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InliningGeneratorInstructionTranslator":
+    ) -> "InstructionTranslatorBase":
         # NOTE: This only exists to not break support for context manager when
         # config.enable_faithful_generator_behavior = False and
         # config.enable_trace_contextlib = True. In case the former is false,
@@ -1640,7 +1443,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         if name == "__code__":
             return variables.ConstantVariable.create(hasattr(self, "code"))
         if name == "__defaults__":
@@ -1957,7 +1760,7 @@ class SkipFunctionVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         return variables.ConstantVariable.create(hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -1965,15 +1768,6 @@ class SkipFunctionVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
 
         return fn_var_getattr(tx, self.value, self.source, name)
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.value)
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
@@ -2326,7 +2120,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> VariableTracker:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)
@@ -2359,34 +2153,6 @@ class FunctoolsPartialVariable(VariableTracker):
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
-        )
-
-    def is_python_hashable(self) -> bool:
-        return (
-            self.func.is_python_hashable()
-            and all(arg.is_python_hashable() for arg in self.args)
-            and all(value.is_python_hashable() for value in self.keywords.values())
-        )
-
-    def get_python_hash(self):
-        func_hash = self.func.get_python_hash()
-        args_hash = (arg.get_python_hash() for arg in self.args)
-        values_hash = (value.get_python_hash() for value in self.keywords.values())
-        return hash((func_hash, *args_hash, *values_hash))
-
-    def is_python_equal(self, other):
-        return (
-            self.func.is_python_equal(other.func)
-            and all(
-                arg_a.is_python_equal(arg_b)
-                for (arg_a, arg_b) in zip(self.args, other.args)
-            )
-            and all(
-                value_a.is_python_equal(value_b)
-                for (value_a, value_b) in zip(
-                    self.keywords.values(), other.keywords.values()
-                )
-            )
         )
 
 
@@ -2996,8 +2762,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(CollectionsSource(), "namedtuple")
-            return VariableTracker.build(tx, namedtuple, type_source)
+            return VariableTracker.build(tx, namedtuple)
         return VariableTracker.build(tx, python_type, source=type_source)
 
 

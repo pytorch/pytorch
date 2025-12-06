@@ -572,9 +572,9 @@ class _DeterministicCacheIntf(_CacheIntf):
             )
             fpath: Path = odc._cache_dir / "imc.save"
             with odc.lock():
-                w_fp = None
+                r_fp, w_fp = None, None
                 try:
-                    w_fp = open(fpath, "x")  # noqa:SIM115
+                    w_fp = open(fpath, "x")
                 except FileExistsError:
                     with open(fpath) as r_fp:
                         existing_dump = json.load(r_fp)
@@ -585,7 +585,7 @@ class _DeterministicCacheIntf(_CacheIntf):
                         elif to_dump[key] != value:
                             raise exceptions.DeterministicCachingIMCDumpConflictError from None
 
-                    w_fp = open(fpath, "w")  # noqa:SIM115
+                    w_fp = open(fpath, "w")
                 finally:
                     assert w_fp is not None
                     try:

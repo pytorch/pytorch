@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <tuple>
 
 namespace c10 {
 std::ostream& operator<<(std::ostream& out, Backend b) {

@@ -11,7 +11,7 @@ def get_world_size() -> int:
     return int(os.environ["WORLD_SIZE"])
 
 
-def tcpstore_client(prefix: str = "debug_server") -> dist.Store:
+def tcpstore_client() -> dist.Store:
     MASTER_ADDR = os.environ["MASTER_ADDR"]
     MASTER_PORT = int(os.environ["MASTER_PORT"])
 
@@ -20,6 +20,5 @@ def tcpstore_client(prefix: str = "debug_server") -> dist.Store:
         port=MASTER_PORT,
         is_master=False,
     )
-    if prefix:
-        store = dist.PrefixStore(prefix, store)
+    store = dist.PrefixStore("debug_server", store)
     return store

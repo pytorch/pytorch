@@ -10,6 +10,7 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Optional
 
 
 try:
@@ -83,7 +84,7 @@ def is_ignored_output(output: str) -> int:
 def run_fuzzer_with_seed(
     seed: int,
     template: str = "default",
-    supported_ops: str | None = None,
+    supported_ops: Optional[str] = None,
 ) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
@@ -207,12 +208,12 @@ def handle_result_output(
 
 
 def run_multi_process_fuzzer(
-    num_processes: int | None = None,
+    num_processes: Optional[int] = None,
     seed_start: int = 0,
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: str | None = None,
+    supported_ops: Optional[str] = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -503,10 +504,10 @@ def _print_operation_distribution(results: list[FuzzerResult]) -> None:
 
 
 def run_until_failure(
-    num_processes: int | None = None,
+    num_processes: Optional[int] = None,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: str | None = None,
+    supported_ops: Optional[str] = None,
 ) -> None:
     """
     Run the multi-process fuzzer with a random starting seed, iterating until a failure is found.

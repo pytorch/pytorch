@@ -38,10 +38,11 @@ class TestStaticCudaLauncher(TestCase):
             return
         # Just used by tests for now.
         # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as tmp_file:
+        tmp_file = tempfile.NamedTemporaryFile(mode="wb", delete=False)
+        with tmp_file:
             tmp_file.write(kernel.asm["cubin"])
-            self.tmp_files.append(tmp_file)
-            return tmp_file.name
+        self.tmp_files.append(tmp_file)
+        return tmp_file.name
 
     def _make_launcher(
         self,

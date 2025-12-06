@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/train/sequential.h>
+#include <torch/types.h>
 
 #include <algorithm>
 #include <cstddef>

@@ -1,6 +1,7 @@
 """Matrix multiplication operator implementations."""
 
 import random
+from typing import Optional
 
 import torch
 
@@ -51,7 +52,7 @@ class MMOperator(MatrixMultiplyOperator):
         self.weight = 5.0
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Return the torch operation name."""
         return "torch.mm"
 
@@ -136,7 +137,7 @@ class AddmmOperator(MatrixMultiplyOperator):
         self.weight = 5.0
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Return the torch operation name."""
         return "torch.addmm"
 
@@ -229,7 +230,7 @@ class BmmOperator(MatrixMultiplyOperator):
         self.weight = 5.0
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Return the torch operation name."""
         return "torch.bmm"
 
@@ -314,7 +315,7 @@ class MatmulOperator(MatrixMultiplyOperator):
         self.weight = 500.0
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Return the torch operation name."""
         return "torch.matmul"
 

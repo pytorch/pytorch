@@ -1,3 +1,4 @@
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>

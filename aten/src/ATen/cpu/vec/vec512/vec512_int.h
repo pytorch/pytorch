@@ -130,8 +130,7 @@ class Vectorized<int64_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask8 mask = (1ULL << count) - 1;
-      auto ones = _mm512_set1_epi64(1);
-      return _mm512_mask_loadu_epi64(ones, mask, ptr);
+      return _mm512_maskz_loadu_epi64(mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -333,8 +332,7 @@ class Vectorized<int32_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask16 mask = (1ULL << count) - 1;
-      auto ones = _mm512_set1_epi32(1);
-      return _mm512_mask_loadu_epi32(ones, mask, ptr);
+      return _mm512_maskz_loadu_epi32(mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -662,8 +660,7 @@ class Vectorized<int16_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask32 mask = (1ULL << count) - 1;
-      auto ones = _mm512_set1_epi16(1);
-      return _mm512_mask_loadu_epi16(ones, mask, ptr);
+      return _mm512_maskz_loadu_epi16(mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -1104,8 +1101,7 @@ class Vectorized8 : public Vectorizedi {
       return loadu_one_fourth(ptr);
     } else {
       __mmask64 mask = (1ULL << count) - 1;
-      auto ones = _mm512_set1_epi8(1);
-      return _mm512_mask_loadu_epi8(ones, mask, ptr);
+      return _mm512_maskz_loadu_epi8(mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {

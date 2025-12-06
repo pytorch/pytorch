@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 #include <iostream>
 

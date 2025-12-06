@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from typing import Any
@@ -33,7 +32,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
-    TemporaryFileName,
     TEST_HPU,
     TEST_XPU,
     TestCase,
@@ -149,25 +147,23 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace and kineto data.
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+        kt = tempfile.NamedTemporaryFile(
+            mode="w+t", suffix=".kineto.json", delete=False
+        )
+        kt.close()
 
-        with (
-            tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
-            tempfile.NamedTemporaryFile(
-                mode="w+t", suffix=".kineto.json", delete=False
-            ) as kt,
-            profile(
-                activities=supported_activities(),
-                schedule=torch.profiler.schedule(
-                    skip_first=3, wait=1, warmup=1, active=2, repeat=1
-                ),
-                on_trace_ready=trace_handler,
-                execution_trace_observer=(
-                    ExecutionTraceObserver().register_callback(fp.name)
-                ),
-            ) as p,
-        ):
-            trace_name = fp.name
-            kt_name = kt.name
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=3, wait=1, warmup=1, active=2, repeat=1
+            ),
+            on_trace_ready=trace_handler,
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback(fp.name)
+            ),
+        ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(device, use_device=use_device)
@@ -178,11 +174,10 @@ class TestExecutionTrace(TestCase):
         # print("Output kineto = ", kt.name)
         # print("Output ET = ", fp.name)
 
-        p.export_chrome_trace(kt_name)
+        p.export_chrome_trace(kt.name)
         self.assertEqual(trace_called_num, 1)
 
-        nodes = self.get_execution_trace_root(trace_name)
-        os.remove(trace_name)
+        nodes = self.get_execution_trace_root(fp.name)
         loop_count = 0
         found_root_node = False
         for n in nodes:
@@ -199,10 +194,9 @@ class TestExecutionTrace(TestCase):
         # in terms of record func ID (rf_id) and External IDs
         # both of these should match for the same trace window.
 
-        with open(kt_name) as f:
+        with open(kt.name) as f:
             kineto = json.load(f)
             events = kineto["traceEvents"]
-        os.remove(kt_name)
 
         # Look up rf_ids in both Execution and Kineto trace as two lists.
         rf_ids_et = self.get_execution_trace_rf_ids(nodes)
@@ -237,20 +231,18 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save kineto data.
+        kt = tempfile.NamedTemporaryFile(
+            mode="w+t", suffix=".kineto.json", delete=False
+        )
+        kt.close()
 
-        with (
-            tempfile.NamedTemporaryFile(
-                mode="w+t", suffix=".kineto.json", delete=False
-            ) as kt,
-            profile(
-                activities=supported_activities(),
-                schedule=torch.profiler.schedule(
-                    skip_first=3, wait=1, warmup=1, active=2, repeat=1
-                ),
-                on_trace_ready=trace_handler,
-            ) as p,
-        ):
-            kt_name = kt.name
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=3, wait=1, warmup=1, active=2, repeat=1
+            ),
+            on_trace_ready=trace_handler,
+        ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(device, use_device=use_device)
@@ -260,8 +252,7 @@ class TestExecutionTrace(TestCase):
         # print("Output kineto = ", kt.name)
         # print("Output ET = ", fp.name)
 
-        p.export_chrome_trace(kt_name)
-
+        p.export_chrome_trace(kt.name)
         self.assertEqual(trace_called_num, 1)
         et_path = p.execution_trace_observer.get_output_file_path()
         et_res_path = p.execution_trace_observer.get_resources_dir(et_path)
@@ -289,10 +280,9 @@ class TestExecutionTrace(TestCase):
         # in terms of record func ID (rf_id) and External IDs
         # both of these should match for the same trace window.
 
-        with open(kt_name) as f:
+        with open(kt.name) as f:
             kineto = json.load(f)
             events = kineto["traceEvents"]
-        os.remove(kt_name)
 
         # Look up rf_ids in both Execution and Kineto trace as two lists.
         rf_ids_et = self.get_execution_trace_rf_ids(nodes)
@@ -315,11 +305,11 @@ class TestExecutionTrace(TestCase):
         )
         # Create a temp file to save execution trace data.
         # Use a gzip file to test compression codepath
-        with tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False) as fp:
-            filename = fp.name
+        fp = tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False)
+        fp.close()
         expected_loop_events = 0
 
-        et = ExecutionTraceObserver().register_callback(filename)
+        et = ExecutionTraceObserver().register_callback(fp.name)
 
         et.start()
         for idx in range(5):
@@ -328,10 +318,9 @@ class TestExecutionTrace(TestCase):
                 self.payload(device, use_device=use_device)
         et.stop()
 
-        assert filename == et.get_output_file_path()
+        assert fp.name == et.get_output_file_path()
         et.unregister_callback()
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
+        nodes = self.get_execution_trace_root(fp.name)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
         # [tensor_id, storage_id, offset, numel, itemsize, device_str]
@@ -376,9 +365,6 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
     )
@@ -397,10 +383,10 @@ class TestExecutionTrace(TestCase):
             fn(*inputs)
 
         # Create a temp file to save execution trace data.
-        with tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False) as fp:
-            filename = fp.name
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
+        fp.close()
         et = ExecutionTraceObserver()
-        et.register_callback(filename)
+        et.register_callback(fp.name)
         et.set_extra_resource_collection(True)
 
         with profile(
@@ -416,8 +402,7 @@ class TestExecutionTrace(TestCase):
                     fn(*inputs)
                 p.step()
 
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
+        nodes = self.get_execution_trace_root(fp.name)
         found_captured_triton_kernel_node = False
         found_call_compiled_fx_graph = False
         for n in nodes:
@@ -434,9 +419,6 @@ class TestExecutionTrace(TestCase):
         assert found_call_compiled_fx_graph
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
@@ -530,11 +512,10 @@ class TestExecutionTrace(TestCase):
         ):
             fn(*inputs)
 
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="fx_graph_et.json", delete=False)
+        fp.close()
         et = ExecutionTraceObserver()
-        with tempfile.NamedTemporaryFile(
-            "w+t", suffix="fx_graph_et.json", delete=False
-        ) as fp:
-            et.register_callback(fp.name)
+        et.register_callback(fp.name)
         et.set_extra_resource_collection(True)
         with profile(
             activities=torch.profiler.supported_activities(),
@@ -603,7 +584,6 @@ class TestExecutionTrace(TestCase):
                             == '#   %cos : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {})'  # noqa: B950
                         )
                         assert fx_graph[7] == "#   return %cos"
-                os.remove(file_path)
 
     def test_execution_trace_start_stop(self, device):
         use_device = (
@@ -612,10 +592,10 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
-        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
-            filename = fp.name
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
         expected_loop_events = 0
-        et = ExecutionTraceObserver().register_callback(filename)
+        et = ExecutionTraceObserver().register_callback(fp.name)
         for idx in range(10):
             if idx == 3:
                 et.start()
@@ -630,10 +610,9 @@ class TestExecutionTrace(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(device, use_device=use_device)
 
-        assert filename == et.get_output_file_path()
+        assert fp.name == et.get_output_file_path()
         et.unregister_callback()
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
+        nodes = self.get_execution_trace_root(fp.name)
         loop_count = 0
         found_root_node = False
         for n in nodes:
@@ -657,11 +636,10 @@ class TestExecutionTrace(TestCase):
         for idx in range(10):
             if idx in iter_list:
                 # Create a temp file to save execution trace data.
-                with tempfile.NamedTemporaryFile(
-                    "w+t", suffix=".et.json", delete=False
-                ) as fp:
-                    output_files.append(fp.name)
-                    et = ExecutionTraceObserver().register_callback(fp.name)
+                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+                fp.close()
+                output_files.append(fp.name)
+                et = ExecutionTraceObserver().register_callback(fp.name)
                 et.start()
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(device, use_device=use_device)
@@ -684,27 +662,29 @@ class TestExecutionTrace(TestCase):
         assert event_count == expected_loop_events
 
     def test_execution_trace_no_capture(self):
-        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
-            et = ExecutionTraceObserver().register_callback(file_name)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+        et = ExecutionTraceObserver().register_callback(fp.name)
 
-            assert file_name == et.get_output_file_path()
-            et.unregister_callback()
-            nodes = self.get_execution_trace_root(file_name)
-            found_root_node = False
-            for n in nodes:
-                assert "name" in n
-                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                    found_root_node = True
-            assert found_root_node
+        assert fp.name == et.get_output_file_path()
+        et.unregister_callback()
+        nodes = self.get_execution_trace_root(fp.name)
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                found_root_node = True
+        assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
+        observer = ExecutionTraceObserver().register_callback(fp.name)
+
         def fn(nt):
             return nt.sin().cos()
 
-        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
-            observer = ExecutionTraceObserver().register_callback(fp.name)
-            filename = fp.name
         with torch.profiler.profile(execution_trace_observer=observer):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
@@ -712,8 +692,7 @@ class TestExecutionTrace(TestCase):
                 nt = torch.nested.nested_tensor_from_jagged(values, offsets)
                 fn(nt)
 
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
+        nodes = self.get_execution_trace_root(fp.name)
         found_cos = False
         for n in nodes:
             assert "name" in n
@@ -726,28 +705,26 @@ class TestExecutionTrace(TestCase):
         "need CUDA device availability to run",
     )
     def test_execution_trace_record_integral_tensor_range(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
         t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
         t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
-        with (
-            tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
-            profile(
-                activities=supported_activities(),
-                schedule=torch.profiler.schedule(
-                    skip_first=0, wait=0, warmup=0, active=1, repeat=1
-                ),
-                record_shapes=True,
-                execution_trace_observer=(
-                    ExecutionTraceObserver().register_callback(fp.name)
-                ),
-            ) as p,
-        ):
-            filename = fp.name
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=0, active=1, repeat=1
+            ),
+            record_shapes=True,
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback(fp.name)
+            ),
+        ) as p:
             torch.gather(t1, 1, t2)
             p.step()
 
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
+        nodes = self.get_execution_trace_root(fp.name)
         for n in nodes:
             assert "name" in n
             if "aten::gather" in n["name"]:

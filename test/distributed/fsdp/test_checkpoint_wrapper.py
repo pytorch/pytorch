@@ -73,7 +73,7 @@ class CheckpointWrapperTest(TestCase):
         ]:
             with self.subTest(wrapper=wrapper):
                 model = wrapper(MyModel())
-                if wrapper is offload_wrapper:
+                if wrapper == offload_wrapper:
                     self.assertTrue(isinstance(model, OffloadWrapper))
                 else:
                     self.assertTrue(isinstance(model, CheckpointWrapper))

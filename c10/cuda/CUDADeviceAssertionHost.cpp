@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <cuda_runtime.h>
 
 #include <memory>
 #include <string>

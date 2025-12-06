@@ -714,10 +714,8 @@ def broadcast_to(array: ArrayLike, shape, subok: NotImplementedType = False):
     return torch.broadcast_to(array, size=shape)
 
 
-# This is a function from tuples to tuples, so we just reuse it.  However,
-# dynamo expects its __module__ to be torch._numpy
-def broadcast_shapes(*args):
-    return torch.broadcast_shapes(*args)
+# This is a function from tuples to tuples, so we just reuse it
+from torch import broadcast_shapes
 
 
 def broadcast_arrays(*args: ArrayLike, subok: NotImplementedType = False):

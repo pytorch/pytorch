@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <utility>

@@ -6,8 +6,7 @@ from torch.distributed.tensor._op_schema import (
     OpStrategy,
     StrategyType,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import is_tensor_partial
+from torch.distributed.tensor._ops.utils import is_tensor_partial, register_op_strategy
 
 
 aten = torch.ops.aten

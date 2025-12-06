@@ -139,6 +139,8 @@ dtensor_fails = {
     xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
+    xfail("argmax"),
+    xfail("argmin"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_copy"),
@@ -251,6 +253,8 @@ dtensor_fails = {
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
+    xfail("masked.argmax"),
+    xfail("masked.argmin"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -721,7 +725,7 @@ class TestDTensorOps(TestCase):
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
 
             if is_evenly_shardable:
-                self.assertTrue("P(avg)->R" in debug_mode.debug_string())
+                self.assertTrue("P->R" in debug_mode.debug_string())
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 

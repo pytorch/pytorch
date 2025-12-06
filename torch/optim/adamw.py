@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
 
 from torch import Tensor
 
@@ -21,17 +22,17 @@ class AdamW(Adam):
     def __init__(
         self,
         params: ParamsT,
-        lr: float | Tensor = 1e-3,
-        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999),
+        lr: Union[float, Tensor] = 1e-3,
+        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
         *,
         maximize: bool = False,
-        foreach: bool | None = None,
+        foreach: Optional[bool] = None,
         capturable: bool = False,
         differentiable: bool = False,
-        fused: bool | None = None,
+        fused: Optional[bool] = None,
     ) -> None:
         super().__init__(
             params,
@@ -136,18 +137,18 @@ def adamw(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool | None = None,
+    foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
-    fused: bool | None = None,
-    grad_scale: Tensor | None = None,
-    found_inf: Tensor | None = None,
+    fused: Optional[bool] = None,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
     has_complex: bool = False,
     *,
     amsgrad: bool,
-    beta1: float | Tensor,
-    beta2: float | Tensor,
-    lr: float | Tensor,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
+    lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
     maximize: bool,

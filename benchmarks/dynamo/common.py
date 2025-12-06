@@ -1796,10 +1796,7 @@ class BenchmarkRunner:
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
-            if self.args.amp_dtype is None:
-                if self.args.only in self.amp_dtype_bfloat16:
-                    self.autocast_arg["dtype"] = torch.bfloat16
-            else:
+            if self.args.amp_dtype:
                 amp_dtype = (
                     torch.float16
                     if self.args.amp_dtype == "float16"
@@ -1882,10 +1879,6 @@ class BenchmarkRunner:
 
     @property
     def force_fp16_for_bf16_models(self):
-        return set()
-
-    @property
-    def amp_dtype_bfloat16(self):
         return set()
 
     @property
@@ -2479,7 +2472,7 @@ class BenchmarkRunner:
                     for refi, resi in zip(ref, res):
                         dump_max_mean_values(tol, refi, resi)
                 elif isinstance(ref, dict):
-                    for k in ref:
+                    for k in ref.keys():
                         dump_max_mean_values(tol, ref[k], res[k])
                 elif isinstance(ref, torch.Tensor):
                     res = res.to(base_device)
@@ -3884,7 +3877,6 @@ def run(runner, args, original_dir=None):
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
                     "llama",
                     "cm3leon_generate",
-                    "modded_nanogpt",
                 }
             )
 

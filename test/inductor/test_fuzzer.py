@@ -150,7 +150,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results.keys() for j in i}  # noqa: SIM118
+            {j for i in new_results.keys() for j in i}
             - set(MODULE_DEFAULTS["torch._inductor.config"].keys()),
         )
 
@@ -184,7 +184,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results for j in i}  # noqa: SIM118
+            {j for i in new_results.keys() for j in i}
             - set(MODULE_DEFAULTS["torch._dynamo.config"].keys()),
         )
 

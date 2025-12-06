@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 import torch
+import torch._dynamo.test_case
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -14,7 +15,6 @@ from torch._higher_order_ops.flat_apply import (
     is_graphable,
     to_graphable,
 )
-from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
 def distance(a, b, norm):
@@ -41,7 +41,7 @@ class Point:
 pytree.register_dataclass(Point)
 
 
-class FlatApplyTests(PytreeRegisteringTestCase):
+class FlatApplyTests(torch._dynamo.test_case.TestCase):
     def test_simple(self):
         tensor = torch.tensor
 
@@ -105,18 +105,16 @@ class FlatApplyTests(PytreeRegisteringTestCase):
                 self.p = p
                 self.t = t
 
-        self.register_pytree_node(
+        torch.utils._pytree.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.p, pt.t), ()),
             lambda pt, _: PointTensor(pt[0], pt[1]),
-            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
-        self.register_pytree_node(
+        torch.utils._pytree.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
-            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         def trace_point(p):

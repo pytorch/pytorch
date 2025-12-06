@@ -1,6 +1,7 @@
 """Scalar pointwise operator implementation."""
 
 import random
+from typing import Optional
 
 import torch
 
@@ -16,7 +17,7 @@ class ScalarPointwiseOperator(Operator):
         self.symbol = symbol
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Scalar operations don't have specific torch ops, they use Python operators."""
         return None
 

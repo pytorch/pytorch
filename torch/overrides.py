@@ -25,12 +25,11 @@ import __future__  # noqa: F404
 import collections
 import contextlib
 import functools
-import sys
 import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -120,7 +119,7 @@ def get_ignored_functions() -> set[Callable]:
     False
     """
     Tensor = torch.Tensor
-    functions = {
+    return {
         torch.typename,
         torch.is_tensor,
         torch.is_storage,
@@ -253,7 +252,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
-        torch.nn.functional.grouped_mm,
         torch.nn.functional.scaled_grouped_mm,
         torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
@@ -384,11 +382,6 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.to_padded_tensor,
         Tensor._use_count,
     }
-
-    if sys.version_info >= (3, 14):
-        functions.add(Tensor.__annotate__)
-
-    return functions
 
 
 @functools.cache
@@ -1609,7 +1602,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Callable[[Any], type] | None = None,
+    get_type_fn: Optional[Callable[[Any], type]] = None,
 ) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 

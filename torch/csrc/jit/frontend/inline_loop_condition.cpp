@@ -1,6 +1,8 @@
 #include <functional>
 #include <memory>
+#include <string>
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/inline_loop_condition.h>
 #include <torch/csrc/jit/ir/ir.h>
 

@@ -74,7 +74,7 @@ def mesh_scatter(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Work | None:
+) -> Optional[Work]:
     """
     scatter a list of tensors to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -135,7 +135,7 @@ def mesh_broadcast(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Work | None:
+) -> Optional[Work]:
     """
     broadcast the tensor to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e

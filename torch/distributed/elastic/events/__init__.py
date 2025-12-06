@@ -86,10 +86,10 @@ def construct_and_record_rdzv_event(
     node_state: NodeState,
     name: str = "",
     hostname: str = "",
-    pid: int | None = None,
+    pid: Optional[int] = None,
     master_endpoint: str = "",
-    local_id: int | None = None,
-    rank: int | None = None,
+    local_id: Optional[int] = None,
+    rank: Optional[int] = None,
 ) -> None:
     """
     Initialize rendezvous event object and record its operations.

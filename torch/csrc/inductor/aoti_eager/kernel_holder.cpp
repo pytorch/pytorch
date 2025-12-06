@@ -1,9 +1,12 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
+#include <ATen/ATen.h>
+
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -13,8 +16,11 @@
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
 #endif
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 namespace torch::inductor {
 

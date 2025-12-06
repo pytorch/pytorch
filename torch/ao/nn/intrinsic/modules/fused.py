@@ -271,7 +271,6 @@ class ConvAdd2d(_FusedModule):
         self.add = add
 
     def forward(self, x1, x2):  # type: ignore[override]
-        r"""Applies convolution to x1 and adds the result to x2."""
         return self.add(self[0](x1), x2)
 
 
@@ -285,5 +284,4 @@ class ConvAddReLU2d(_FusedModule):
         self.relu = relu
 
     def forward(self, x1, x2):  # type: ignore[override]
-        r"""Applies convolution to x1, adds the result to x2, and applies ReLU."""
         return self.relu(self.add(self[0](x1), x2))

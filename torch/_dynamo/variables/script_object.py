@@ -25,7 +25,7 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._guards import Source
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, OpaqueTypeStr
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
@@ -81,9 +81,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         "Dynamo cannot safely trace script object due to graph break."
     )
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if hasattr(self.value, "script_class_name") and is_opaque_type(
-            self.value.script_class_name
-        ):
+        if getattr(self.value, "script_class_name", "") == OpaqueTypeStr:
             unimplemented(
                 gb_type="Attempted to access attributes/methods on an OpaqueObject",
                 context=f"value={self.value}, attr={name}",

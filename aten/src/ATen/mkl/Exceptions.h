@@ -5,13 +5,16 @@
 #include <sstream>
 #include <mkl_dfti.h>
 #include <mkl_spblas.h>
-#include <c10/util/Exception.h>
 
 namespace at::native {
 
 static inline void MKL_DFTI_CHECK(MKL_INT status)
 {
-  TORCH_CHECK(!status || DftiErrorClass(status, DFTI_NO_ERROR), "MKL FFT error: ", DftiErrorMessage(status));
+  if (status && !DftiErrorClass(status, DFTI_NO_ERROR)) {
+    std::ostringstream ss;
+    ss << "MKL FFT error: " << DftiErrorMessage(status);
+    throw std::runtime_error(ss.str());
+  }
 }
 
 }  // namespace at::native

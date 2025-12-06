@@ -26,8 +26,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def setUp(self):
         self.rank = 0
         self.world_size = 1
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.file = f
+        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
 
     def tearDown(self):
         try:

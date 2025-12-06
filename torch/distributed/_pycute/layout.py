@@ -36,8 +36,8 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 """
 
 from itertools import chain
-from typing import TypeAlias
-from typing_extensions import Self, TypeIs
+from typing import Optional, TypeAlias, Union
+from typing_extensions import TypeIs
 
 from .int_tuple import (
     crd2idx,
@@ -53,9 +53,12 @@ from .int_tuple import (
 
 
 # Type aliases
-CoordinateType: TypeAlias = (
-    int | IntTuple | tuple[object, ...] | None
-)  # Input for slice_ and crd2idx functions
+LayoutOrIntTuple: TypeAlias = Union["Layout", IntTuple]
+LayoutProfile: TypeAlias = Optional[Union[tuple[object, ...], "Layout"]]
+LayoutInput: TypeAlias = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
+CoordinateType: TypeAlias = Optional[
+    Union[int, IntTuple, tuple[object, ...]]
+]  # Input for slice_ and crd2idx functions
 
 
 class LayoutBase:
@@ -67,7 +70,7 @@ def is_layout(x: object) -> TypeIs["Layout"]:
 
 
 class Layout(LayoutBase):
-    def __init__(self, _shape: IntTuple, _stride: IntTuple | None = None) -> None:
+    def __init__(self, _shape: IntTuple, _stride: Optional[IntTuple] = None) -> None:
         self.shape = _shape
         if _stride is None:
             self.stride = suffix_product(self.shape)
@@ -88,7 +91,7 @@ class Layout(LayoutBase):
             return 1
 
     # operator ()    (map coord to idx)
-    def __call__(self, *args: CoordinateType) -> Self | int:
+    def __call__(self, *args: CoordinateType) -> Union["Layout", int]:
         """
         Map a logical coordinate to a linear index (Coord has no Underscore slice operators)
         OR
@@ -108,7 +111,7 @@ class Layout(LayoutBase):
                 return crd2idx(args, self.shape, self.stride)  # type: ignore[arg-type]
 
     # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> Self:
+    def __getitem__(self, i: int) -> "Layout":
         if is_tuple(self.shape):
             return Layout(self.shape[i], self.stride[i])  # type: ignore[index]
         else:
@@ -132,14 +135,8 @@ class Layout(LayoutBase):
         return f"Layout({self.shape},{self.stride})"
 
 
-# Type aliases
-LayoutOrIntTuple: TypeAlias = Layout | IntTuple
-LayoutProfile: TypeAlias = tuple[object, ...] | Layout | None
-LayoutInput: TypeAlias = Layout | IntTuple | tuple[object, ...] | None
-
-
 # Make Layout from a list of layouts (each layout it's own mode in the result)
-def make_layout(*layouts: Layout | tuple[Layout, ...]) -> Layout:
+def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
         layouts = layouts[0]
 
@@ -324,7 +321,7 @@ def complement(layout: LayoutOrIntTuple, max_idx: int = 1) -> Layout:
 
 
 # Layout right inverse
-def right_inverse(layout: LayoutOrIntTuple | None) -> Layout | None:
+def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
     if layout is None:
         return None
     elif is_int(layout):
@@ -353,7 +350,7 @@ def right_inverse(layout: LayoutOrIntTuple | None) -> Layout | None:
 
 
 # Layout left inverse
-def left_inverse(layout: LayoutOrIntTuple | None) -> Layout | None:
+def left_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
     if layout is None:
         return None
     elif is_int(layout):

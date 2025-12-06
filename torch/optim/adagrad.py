@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast
+from typing import cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -28,16 +28,16 @@ class Adagrad(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float | Tensor = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         lr_decay: float = 0,
         weight_decay: float = 0,
         initial_accumulator_value: float = 0,
         eps: float = 1e-10,
-        foreach: bool | None = None,
+        foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
         differentiable: bool = False,
-        fused: bool | None = None,
+        fused: Optional[bool] = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -246,13 +246,13 @@ def adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    fused: bool | None = None,
-    grad_scale: Tensor | None = None,
-    found_inf: Tensor | None = None,
+    fused: Optional[bool] = None,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = False,
-    foreach: bool | None = None,
+    foreach: Optional[bool] = None,
     differentiable: bool = False,
     has_complex: bool = False,
     *,
@@ -325,8 +325,8 @@ def _single_tensor_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Tensor | None,
-    found_inf: Tensor | None,
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     lr: float,
     weight_decay: float,
@@ -393,8 +393,8 @@ def _multi_tensor_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Tensor | None,
-    found_inf: Tensor | None,
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     lr: float,
     weight_decay: float,
@@ -504,8 +504,8 @@ def _fused_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Tensor | None,
-    found_inf: Tensor | None,
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     lr: float,
     weight_decay: float,

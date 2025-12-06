@@ -39,11 +39,7 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         kHalf, kBFloat16, common_dtype, "div_true_cuda", [&]() {
           using opmath_t = at::opmath_type<scalar_t>;
-          using high_prec_t = std::conditional_t<
-              c10::is_complex<scalar_t>::value,
-              c10::complex<double>,
-              double>;
-          auto inv_b = static_cast<opmath_t>(high_prec_t(1.0) / iter.scalar_value<high_prec_t>(2));
+          auto inv_b = opmath_t(1.0) / iter.scalar_value<opmath_t>(2);
           iter.remove_operand(2);
           gpu_kernel(
               iter,

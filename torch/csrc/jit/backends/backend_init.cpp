@@ -2,8 +2,10 @@
 
 #include <pybind11/iostream.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch::jit {
 

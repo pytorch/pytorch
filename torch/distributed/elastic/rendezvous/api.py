@@ -9,7 +9,7 @@ import socket
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
 
 from torch.distributed import Store
 from torch.distributed.elastic.utils.distributed import get_free_port
@@ -72,8 +72,8 @@ class RendezvousStoreInfo:
     def build(
         rank: int,
         store: Store,
-        local_addr: str | None,
-        server_port: int | None = None,
+        local_addr: Optional[str],
+        server_port: Optional[int] = None,
     ) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
@@ -137,7 +137,7 @@ class RendezvousInfo:
         return self._world_size
 
     @property
-    def bootstrap_store_info(self) -> RendezvousStoreInfo | None:
+    def bootstrap_store_info(self) -> Optional[RendezvousStoreInfo]:
         """Store information that can used by trainer code to bootstrap distributed comms."""
         return self._bootstrap_store_info
 
@@ -265,7 +265,7 @@ class RendezvousParameters:
         run_id: str,
         min_nodes: int,
         max_nodes: int,
-        local_addr: str | None = None,
+        local_addr: Optional[str] = None,
         **kwargs,
     ):
         if not backend:
@@ -293,7 +293,7 @@ class RendezvousParameters:
         """Return the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 
-    def get_as_bool(self, key: str, default: bool | None = None) -> bool | None:
+    def get_as_bool(self, key: str, default: Optional[bool] = None) -> Optional[bool]:
         """Return the value for ``key`` as a ``bool``."""
         value = self.get(key, default)
         if value is None or isinstance(value, bool):
@@ -312,7 +312,7 @@ class RendezvousParameters:
             f"The rendezvous configuration option '{key}' does not represent a valid boolean value."
         )
 
-    def get_as_int(self, key: str, default: int | None = None) -> int | None:
+    def get_as_int(self, key: str, default: Optional[int] = None) -> Optional[int]:
         """Return the value for ``key`` as an ``int``."""
         value = self.get(key, default)
         if value is None:
@@ -350,7 +350,7 @@ class RendezvousHandlerRegistry:
         if not backend:
             raise ValueError("The rendezvous backend name must be a non-empty string.")
 
-        current_creator: RendezvousHandlerCreator | None
+        current_creator: Optional[RendezvousHandlerCreator]
         try:
             current_creator = self._registry[backend]
         except KeyError:

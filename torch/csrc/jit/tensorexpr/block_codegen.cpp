@@ -1,6 +1,10 @@
 #include <torch/csrc/jit/tensorexpr/block_codegen.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch::jit::tensorexpr {
 
@@ -347,7 +351,7 @@ void BlockCodeGen::Initialize() {
 
   stmt_v->accept(printer_.get());
 
-  GRAPH_DEBUG("Generated Block code: ", oss_.str(), '\n');
+  GRAPH_DEBUG("Generated Block code: ", oss_.str(), "\n");
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {

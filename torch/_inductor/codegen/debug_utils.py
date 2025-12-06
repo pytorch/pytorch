@@ -161,9 +161,7 @@ class DebugPrinterManager:
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
             args_to_print_or_save_extern = [
-                arg
-                for arg in args_to_print_or_save
-                if isinstance(arg, str) and arg.startswith(("buf", "arg"))
+                arg for arg in args_to_print_or_save if arg.startswith(("buf", "arg"))
             ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
@@ -174,7 +172,7 @@ class DebugPrinterManager:
                     else arg
                 )
                 for arg in args_to_print_or_save
-                if isinstance(arg, str) and arg.startswith(("buf", "arg"))
+                if arg.startswith(("buf", "arg"))
             ]
         else:
             self.args_to_print_or_save = args_to_print_or_save

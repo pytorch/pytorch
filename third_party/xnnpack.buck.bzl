@@ -144,9 +144,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("sse"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("sse"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("sse"),
-
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -162,6 +160,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("sse"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -204,8 +208,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("sse2"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("sse2"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("sse2"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -221,6 +224,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("sse2"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -263,8 +272,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("ssse3"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("ssse3"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("ssse3"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -280,6 +288,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("ssse3"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -322,8 +336,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("sse41"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("sse41"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("sse41"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -339,6 +352,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("sse41"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -381,8 +400,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -406,6 +424,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -449,8 +473,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx512vnnigfni"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx512vnnigfni"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx512vnnigfni"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -490,6 +513,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx512vnnigfni"),
+            ),
+        ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         visibility = ["PUBLIC"],
@@ -536,8 +565,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx512vnni"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx512vnni"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx512vnni"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -576,6 +604,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx512vnni"),
+            ),
+        ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         exported_preprocessor_flags = [
@@ -623,12 +657,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "ukernels_avxvnni",
-        srcs = select({
-            "DEFAULT": [],
-            "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avxvnni"),
-            "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avxvnni"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avxvnni"),
-        }),
+        srcs = prod_srcs_for_arch_wrapper("avxvnni") if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -650,6 +679,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avxvnni"),
+            ),
+        ] if not is_arvr_mode() else []),
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         visibility = ["PUBLIC"],
@@ -691,8 +726,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("f16c"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("f16c"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("f16c"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -716,6 +750,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("f16c"),
+            ),
+        ] if not is_arvr_mode() else []),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -761,9 +801,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("fma3"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("fma3"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("fma3"),
-
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -790,6 +828,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("fma3"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -847,8 +891,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx2"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx2"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx2"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -878,6 +921,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx2"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -942,8 +991,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx512f"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx512f"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx512f"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -967,6 +1015,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx512f"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -982,8 +1036,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx512vbmi"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx512vbmi"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx512vbmi"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1022,6 +1075,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx512vbmi"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1079,8 +1138,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:x86_32": prod_srcs_for_arch_wrapper("avx512skx"),
             "ovr_config//cpu:x86_64": prod_srcs_for_arch_wrapper("avx512skx"),
-            "ovr_config//runtime:fbcode": prod_srcs_for_arch_wrapper("avx512skx"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1116,6 +1174,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = ([
+            (
+                "x86|x86_64|platform009|platform010",
+                prod_srcs_for_arch_wrapper("avx512skx"),
+            ),
+        ] if not is_arvr_mode() else []),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1192,7 +1256,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("armsimd32"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1213,6 +1277,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("armsimd32"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1228,7 +1298,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neon"),
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neon"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1253,6 +1323,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("neon"),
+            ),
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("neon"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1266,14 +1346,20 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_neon_aarch64",
         srcs = select({
             "DEFAULT": [],
-            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neon_aarch64"),
-        }),
+            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neon_aarch64"), 
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
+        platform_srcs = [
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("neon_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1289,7 +1375,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neonfma"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1321,6 +1407,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("neonfma"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1335,7 +1427,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonfma") + prod_srcs_for_arch_wrapper("neonfma_aarch64"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1343,6 +1435,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-O2",
         ],
         labels = labels,
+        platform_srcs = [
+            (
+                "(arm64|aarch64)",
+                prod_srcs_for_arch_wrapper("neonfma") + prod_srcs_for_arch_wrapper("neonfma_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1358,8 +1456,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("fp16arith"),
-            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("fp16arith") + prod_srcs_for_arch_wrapper("fp16arith_aarch64"),
-        }),
+            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("fp16arith"),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1406,6 +1504,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             )
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("fp16arith"),
+            ),
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("fp16arith") + prod_srcs_for_arch_wrapper("fp16arith_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1421,7 +1529,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neonfp16"),
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonfp16"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1446,6 +1554,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)$",
+                prod_srcs_for_arch_wrapper("neonfp16"),
+            ),
+            (
+                "(arm64|aarch64)",
+                prod_srcs_for_arch_wrapper("neonfp16"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1461,7 +1579,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neonv8"),
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonv8"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1500,6 +1618,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)$",
+                prod_srcs_for_arch_wrapper("neonv8"),
+            ),
+            (
+                "(arm64|aarch64)",
+                prod_srcs_for_arch_wrapper("neonv8"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1514,7 +1642,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neondot"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1539,6 +1667,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("neondot"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1553,7 +1687,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neondot") + prod_srcs_for_arch_wrapper("neondot_aarch64"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1572,6 +1706,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("neondot") + prod_srcs_for_arch_wrapper("neondot_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1586,7 +1726,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neondotfp16arith"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1610,6 +1750,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("neondotfp16arith"),
+            ),
+        ] if not is_arvr_mode() else [],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1625,7 +1771,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neondotfp16arith") + prod_srcs_for_arch_wrapper("neondotfp16arith_aarch64"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1645,6 +1791,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("neondotfp16arith") + prod_srcs_for_arch_wrapper("neondotfp16arith_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1660,7 +1812,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neonfp16arith"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1685,6 +1837,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("neonfp16arith"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1699,7 +1857,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonfp16arith") + prod_srcs_for_arch_wrapper("neonfp16arith_aarch64"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1718,6 +1876,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("neonfp16arith") + prod_srcs_for_arch_wrapper("neonfp16arith_aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
@@ -1733,7 +1897,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("neonfma_i8mm"),
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neonfma_i8mm"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1767,6 +1931,16 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)$",
+                prod_srcs_for_arch_wrapper("neonfma_i8mm"),
+            ),
+            (
+                "(arm64|aarch64)",
+                prod_srcs_for_arch_wrapper("neonfma_i8mm"),
+            ),
+        ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1782,7 +1956,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neoni8mm"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX),
@@ -1803,6 +1977,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(arm64|aarch64)",
+                prod_srcs_for_arch_wrapper("neoni8mm"),
+            ),
+        ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1818,7 +1998,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": prod_srcs_for_arch_wrapper("aarch32"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = subdir_glob([
             ("XNNPACK/src", "xnnpack/assembly.h"),
             ("XNNPACK/src", "**/*.S"),
@@ -1846,6 +2026,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch32|arm32|armv7)",
+                prod_srcs_for_arch_wrapper("aarch32"),
+            ),
+        ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -1861,7 +2047,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("aarch64"),
-        }),
+        }) if is_arvr_mode() else [],
         headers = subdir_glob([
             ("XNNPACK/src", "xnnpack/assembly.h"),
             ("XNNPACK/src", "**/*.S"),
@@ -1885,6 +2071,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 ],
             ),
         ],
+        platform_srcs = [
+            (
+                "(aarch64|arm64)",
+                prod_srcs_for_arch_wrapper("aarch64"),
+            ),
+        ] if not is_arvr_mode() else [],
         fbandroid_link_whole = True,
         preferred_linkage = "static",
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
