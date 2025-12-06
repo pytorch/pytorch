@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import os
 import re
 import sys
 import unittest
@@ -15,6 +16,16 @@ from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
 from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
+
+
+# Load pallas expected failures from sentinel files
+_pallas_expected_failures_dir = os.path.join(
+    os.path.dirname(__file__), "pallas_expected_failures"
+)
+if os.path.isdir(_pallas_expected_failures_dir):
+    PALLAS_EXPECTED_FAILURES = set(os.listdir(_pallas_expected_failures_dir))
+else:
+    PALLAS_EXPECTED_FAILURES = set()
 
 
 if IS_WINDOWS and IS_CI:
@@ -39,6 +50,17 @@ def make_pallas(cls):
     """Create a test class variant that uses Pallas backend."""
     suffix = "_pallas"
     cls_prefix = "Pallas"
+
+    # Mark tests as expected failures based on sentinel files
+    # Sentinel file format: TestClassName.test_method_name
+    # Must set attribute on the underlying function object in __dict__
+    for name in cls.__dict__:
+        if name.startswith("test_"):
+            fn = cls.__dict__[name]
+            if callable(fn):
+                key = f"{cls.__name__}.{name}"
+                if key in PALLAS_EXPECTED_FAILURES:
+                    fn._expected_failure_pallas = True
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -827,7 +849,7 @@ class PallasTestsTPU(PallasTestsMixin, TestCase):
 
 if test_torchinductor.HAS_CPU and HAS_PALLAS:
     make_pallas(test_torchinductor.SweepInputsCpuTest)
-    # make_pallas(test_torchinductor.CpuTests)
+    make_pallas(test_torchinductor.CpuTests)
 
 
 if test_torchinductor.HAS_GPU and HAS_PALLAS:
