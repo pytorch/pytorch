@@ -432,7 +432,7 @@ def list(
     github,
     force_reload=False,
     skip_validation=False,
-    trust_repo=None,
+    trust_repo="Check",
     verbose=True,
 ):
     r"""
@@ -500,7 +500,7 @@ def list(
     return entrypoints
 
 
-def help(github, model, force_reload=False, skip_validation=False, trust_repo=None):
+def help(github, model, force_reload=False, skip_validation=False, trust_repo="Check"):
     r"""
     Show the docstring of entrypoint ``model``.
 
@@ -560,7 +560,7 @@ def load(
     model,
     *args,
     source="github",
-    trust_repo=None,
+    trust_repo="Check",
     force_reload=False,
     verbose=True,
     skip_validation=False,
