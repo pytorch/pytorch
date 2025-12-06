@@ -1394,15 +1394,17 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-
+        no_split(bool): a bool that indicates if this pool should not split a segment.
+            This is False by default.
     """
 
     def __init__(
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
+        no_split: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        super().__init__(allocator, True, use_on_oom, no_split)
 
     @property
     def id(self) -> tuple[int, int]:
