@@ -94,7 +94,7 @@ void normalize_last_dims(
 }  // namespace internal
 
 namespace {
-#if AT_BUILD_WITH_BLAS()
+#if AT_BUILD_WITH_BLAS() || AT_MKL_ENABLED()
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
