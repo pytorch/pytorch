@@ -35,7 +35,7 @@ might be used interchangeably in this documentation.
 :::
 
 :::{warning}
-`torch.compile` may not function correctly on newer major versions of Python.
+`torch.compile` may not support recently released major versions of Python.
 
 If you attempt to use `@torch.compile` in an unsupported Python
 environment, you may encounter an error similar to:
