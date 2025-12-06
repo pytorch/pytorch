@@ -61,7 +61,10 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-from .static_cuda_launcher import StaticallyLaunchedCudaKernel
+from .static_triton_launcher import (
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -1665,7 +1668,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 kernel._cubin_path = cubin_location
 
             try:
-                static_kernel = StaticallyLaunchedCudaKernel(kernel)
+                static_kernel = statically_launched_kernel_by_device(
+                    kernel, triton_meta.get("device_type")
+                )
             except NotImplementedError as e:
                 raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
 
