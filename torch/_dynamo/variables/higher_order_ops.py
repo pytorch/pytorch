@@ -3558,6 +3558,29 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class RunWithStartEndRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args = tuple(arg.as_proxy() for arg in args)
+        p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=None,
+        )
+
+
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
@@ -4654,6 +4677,7 @@ _hop_name_to_variable_class = {
     "trace_wrapped": TraceWrappedHigherOrderOperatorVariable,
     "strict_mode": StrictModeHigherOrderVariable,
     "run_with_rng_state": RunWithRNGStateHigherOrderVariable,
+    "run_with_start_end_rng_state": RunWithStartEndRNGStateHigherOrderVariable,
     "associative_scan": AssociativeScanHigherOrderVariable,
     "scan": ScanHigherOrderVariable,
     "call_torchbind": CallTorchbindHigherOrderVariable,

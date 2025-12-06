@@ -284,17 +284,19 @@ class OpDispatcher:
                 assert maybe_user_generator is None or isinstance(
                     maybe_user_generator, torch.Generator
                 )
-                # maybe_user_generator = None
-                rng_context = (
-                    random._rng_tracker._distribute_region(
+
+                # For DTensor random operator, get a wrapper function that handles RNG state
+                # using the run_with_start_end_rng_state higher-order op for tracing compatibility
+                if random._rng_tracker and not first_local_arg.is_meta:
+                    rng_wrapper = random._rng_tracker._distribute_region(
                         first_arg._spec, generator=maybe_user_generator
                     )
-                    if random._rng_tracker and not first_local_arg.is_meta
-                    else contextlib.nullcontext()
-                )
-                # For DTensor random operator, run it within a RNGTracker context to
-                # ensure the random number generator is properly distributed.
-                with rng_context:
+                    # Execute the random op through the wrapper
+                    local_results = rng_wrapper(
+                        op_call, *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    # No RNG tracker or meta tensor, just run the op directly
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
