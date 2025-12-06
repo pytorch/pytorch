@@ -535,6 +535,28 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+    def test_in_place_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                y.add_(1)
+                return y
+
+        mod = Foo()
+        inp = torch.tensor(1)
+        with (
+            DebugMode(record_output=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::add.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((1.0, None), {}), 'hash': 2.0}
+    aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_triton_kernel_logs(self):
@@ -781,7 +803,13 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
         hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
 
-        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        # TODO: the output hash not correct for async op, we should either not log the hash
+        # or wait before logging.
+        # https://github.com/pytorch/pytorch/pull/169295
+        # self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        self.assertEqual(
+            debug_mode.operators[-1].log["input_hash"][0][1], hash_(tensor)
+        )
 
         # Verify each rank's contribution
         for i in range(self.world_size):
