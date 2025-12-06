@@ -118,6 +118,9 @@ def from_dlpack(
         tensor([-9, -1,  2,  3])
 
     """
+
+    cross_device_transfer = False  # Will be set to True if device transfer is needed
+
     if hasattr(ext_tensor, '__dlpack__'):
         # Only populate kwargs if any of the optional arguments are, in fact, not None. Otherwise,
         # leave them out, since we might end up falling back to no-extra-kwargs __dlpack__ call.
@@ -130,14 +133,33 @@ def from_dlpack(
         # Parse the device parameter.
         # At this moment, it can either be a torch.device or a str representing
         # a torch.device, e.g. "cpu", "cuda", etc.
+        # Get source device first (we need it to detect cross-device transfers)
+        ext_device = ext_tensor.__dlpack_device__()
+
         if device is not None:
             if isinstance(device, str):
                 device = torch.device(device)
             if not isinstance(device, torch.device):
                 raise AssertionError(f"from_dlpack: unsupported device type: {type(device)}")
-            kwargs["dl_device"] = torch._C._torchDeviceToDLDevice(device)
 
-        ext_device = ext_tensor.__dlpack_device__()
+            # Convert target device to DLPack format
+            target_dl_device = torch._C._torchDeviceToDLDevice(device)
+
+            # Detect cross-device transfer by comparing source and target devices
+            # E.g. CPU->CUDA, cuda:0->cuda:1, etc.
+            cross_device_transfer = (ext_device != target_dl_device)
+
+            # Only pass dl_device to producer if NOT cross-device transfer
+            if not cross_device_transfer:
+                kwargs["dl_device"] = target_dl_device
+
+            # Cross-device transfer always requires a copy
+            if cross_device_transfer and copy is False:
+                raise ValueError(
+                    f"cannot move DLPack tensor from device {ext_device} to {target_dl_device} "
+                    "without copying. Set copy=None or copy=True."
+                )
+
         # ext_device is either CUDA or ROCm, we need to pass the current
         # stream
         if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
@@ -168,4 +190,10 @@ def from_dlpack(
             )
         # Old versions just call the converter
         dlpack = ext_tensor
-    return torch._C._from_dlpack(dlpack)
+    tensor = torch._C._from_dlpack(dlpack)
+
+    # Handle cross-device transfer by moving tensor to target device
+    if cross_device_transfer:
+        tensor = tensor.to(device)
+
+    return tensor
