@@ -6,6 +6,11 @@ set -ex -o pipefail
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+# Source ROCm environment for theRock nightly builds (needed for docker exec)
+if [[ -f /etc/rocm_env.sh ]]; then
+  source /etc/rocm_env.sh
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
