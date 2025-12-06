@@ -8,15 +8,7 @@ import logging
 import math
 import operator
 from collections.abc import Callable
-from typing import (
-    Generic,
-    overload,
-    SupportsFloat,
-    TYPE_CHECKING,
-    TypeGuard,
-    TypeVar,
-    Union,
-)
+from typing import Generic, overload, SupportsFloat, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
 import sympy
@@ -115,15 +107,15 @@ def is_sympy_integer(value) -> TypeIs[sympy.Integer]:
     return isinstance(value, sympy.Integer)
 
 
-ExprIn = Union[int, float, sympy.Expr]
-BoolIn = Union[bool, SympyBoolean]
-AllIn = Union[ExprIn, BoolIn]
+ExprIn = int | float | sympy.Expr
+BoolIn = bool | SympyBoolean
+AllIn = ExprIn | BoolIn
 ExprFn = Callable[[sympy.Expr], sympy.Expr]
 ExprFn2 = Callable[[sympy.Expr, sympy.Expr], sympy.Expr]
 BoolFn = Callable[[SympyBoolean], SympyBoolean]
 BoolFn2 = Callable[[SympyBoolean, SympyBoolean], SympyBoolean]
-AllFn = Union[ExprFn, BoolFn]
-AllFn2 = Union[ExprFn2, BoolFn2]
+AllFn = ExprFn | BoolFn
+AllFn2 = ExprFn2 | BoolFn2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -134,7 +126,7 @@ class ValueRanges(Generic[_T]):
         ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
         # pyrefly: ignore [unbound-name]
         BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
-        AllVR = Union[ExprVR, BoolVR]
+        AllVR = ExprVR | BoolVR
 
     # Although the type signature here suggests you can pass any
     # sympy expression, in practice the analysis here only works

@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <ATen/CachedTensorUtils.h>
 
 #include <c10/util/flat_hash_map.h>

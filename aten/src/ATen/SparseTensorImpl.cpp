@@ -1,5 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 

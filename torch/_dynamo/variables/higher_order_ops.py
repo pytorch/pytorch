@@ -276,8 +276,11 @@ def add_call_function(
 
 
 def overwrite_tensor_vt_requires_grad(graph_output_vts, flat_variable):
-    # this is required for faithfully representing the autograd.Function forward
-    # outputs.
+    # All outputs of autograd.Function have requires_grad=True. We turn off
+    # grad_mode in autograd.Function, so our outputs naively have
+    # requires_grad=False. So we hackily force them back on here. A better
+    # solution would be to write python code that Dynamo could trace but we
+    # decided that it wasn't worth it.
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
         if isinstance(orig_vt, variables.TensorVariable):
             assert isinstance(subgraph_vt, variables.TensorVariable)
@@ -3871,7 +3874,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         2. Speculate subgraph forward
         3. Speculate subgraph backward
         4. rewired_bwd_graph_inputs - Use the traced fwd graph as the anchor point, and rewire the backward graph outputs
-        5. handle_saved_tensors_wiring - Hhandle the saved tensors, as mentioned in (c)
+        5. handle_saved_tensors_wiring - Handle the saved tensors, as mentioned in (c)
         """
 
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
@@ -3949,6 +3952,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # The fwd outputs (tensor's example_value) need to be inferred from fake tensor prop to get the correct attributes
         # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
         # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
+        # TODO - revisit if we need the python dispatcher
         with enable_python_dispatcher():
             with tx.output.fake_mode:
                 fwd_freevars_args = [_get_fake_value(arg) for arg in fwd_freevars]
@@ -4091,6 +4095,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         bwd_args,
                         {},
                         "autograd.Function",
+                        # TODO - revisit if we need enable_grad
                         enable_grad=False,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         allow_side_effects=False,

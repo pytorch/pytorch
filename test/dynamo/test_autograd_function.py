@@ -1265,6 +1265,36 @@ class GraphModule(torch.nn.Module):
         foo(torch.randn(2, requires_grad=True)).sum().backward()
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_int_output(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                out1 = x.sin()
+                out2 = out1.to(dtype=torch.int)
+                return out1, out2
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1.cos(), grad1 * 0.0
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            return MyFunction.apply(x, y)
+
+        x = torch.tensor(10.0, requires_grad=True)
+        y = torch.tensor(20.0, requires_grad=True)
+        ref1, ref2 = MyFunction.apply(x, y)
+        res1, res2 = fn(x, y)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+        # Ensure out1 requires gradients, out2 does not.
+        self.assertTrue(ref1.requires_grad)
+        self.assertTrue(res1.requires_grad)
+        self.assertFalse(ref2.requires_grad)
+        self.assertFalse(res2.requires_grad)
+
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         from torch.autograd import Function
@@ -1782,6 +1812,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
         # Must have `view_as`
+        self.assertTrue(
+            "view_as" in backend.graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             torch._dynamo.testing.normalize_gm(
                 backend.graphs[0].print_readable(print_output=False)
@@ -1815,7 +1848,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_nn_module_pytrees_as_inputs(self):
+    def test_nn_module_dataclasses_as_inputs(self):
         @dataclass
         class InputData:
             count: int
@@ -1840,16 +1873,6 @@ class GraphModule(torch.nn.Module):
                 input_data: InputData,
                 x: torch.Tensor,
             ) -> tuple[torch.Tensor, torch.Tensor]:
-                """
-                Process an nn.Module with dataclass input and return tensor + dataclass output.
-
-                Args:
-                    module: A neural network module
-                    input_data: Dataclass containing an integer and a tensor
-
-                Returns:
-                    A tuple of (tensor, OutputData dataclass with two tensors)
-                """
                 # Extract inputs
                 count = input_data.count
                 values = input_data.values
@@ -1924,7 +1947,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_nn_module_pytrees_as_io(self):
+    def test_nn_module_dataclasses_as_io(self):
         @dataclass
         class InputData:
             count: int
@@ -1956,16 +1979,6 @@ class GraphModule(torch.nn.Module):
                 input_data: InputData,
                 x: torch.Tensor,
             ) -> tuple[torch.Tensor, OutputData]:
-                """
-                Process an nn.Module with dataclass input and return tensor + dataclass output.
-
-                Args:
-                    module: A neural network module
-                    input_data: Dataclass containing an integer and a tensor
-
-                Returns:
-                    A tuple of (tensor, OutputData dataclass with two tensors)
-                """
                 # Extract inputs
                 count = input_data.count
                 values = input_data.values
@@ -1983,7 +1996,6 @@ class GraphModule(torch.nn.Module):
                 return grad_output * 4, None, grad_output * 2
 
         def fn(input_data, x):
-            # x = torch.sin(input_data.values)
             y, y_data = Foo.apply(module, input_data, x)
             return x + y + y_data.result1 + y_data.result2
 
