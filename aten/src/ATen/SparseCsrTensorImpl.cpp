@@ -1,6 +1,10 @@
+#include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/SparseTensorImpl.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 

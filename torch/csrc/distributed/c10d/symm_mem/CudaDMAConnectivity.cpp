@@ -5,6 +5,7 @@
 #include <c10/cuda/driver_api.h>
 #include <fmt/printf.h>
 
+#include <cuda_runtime.h>
 #include <nvml.h>
 
 namespace {

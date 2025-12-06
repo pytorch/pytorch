@@ -7,10 +7,12 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
+#include <ATen/functorch/BatchRulesHelper.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
 #include <iostream>

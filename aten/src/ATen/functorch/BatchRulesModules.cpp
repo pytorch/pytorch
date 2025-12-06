@@ -5,6 +5,8 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/functorch/PlumbingHelper.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/DTensorState.h>
 
 #include <utility>

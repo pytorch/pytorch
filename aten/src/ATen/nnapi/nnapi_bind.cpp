@@ -1,6 +1,7 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/ATen.h>
 #include <ATen/nnapi/nnapi_bind.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
