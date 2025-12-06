@@ -1742,7 +1742,7 @@ class DebuggingVariable(VariableTracker):
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
-            return
+            return variables.ConstantVariable.create(None)
 
         if not self.can_reorder_logs(self.value, args, kwargs):
             unimplemented(
@@ -1756,6 +1756,7 @@ class DebuggingVariable(VariableTracker):
             )
 
         tx.debug_locals.append((self, list(args)))
+        return variables.ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen"):
         return self.source.reconstruct(codegen)
