@@ -704,6 +704,10 @@ __global__ void computeBlockwiseWithinKCounts(
   __shared__ Bitwise desired;
   uint32_t k_to_find = ks_to_find_in[slice_idx];
 
+  // Use hipCUB BlockScan for efficient inclusive scan
+  typedef ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<uint32_t, RADIX_DIGITS> BlockScan;
+  __shared__ typename BlockScan::TempStorage scan_storage;
+
   // Build per-slice digit totals in shared memory and compute inclusive cumsum
   __shared__ uint32_t digit_totals[RADIX_DIGITS];
   if (tidx < RADIX_DIGITS) {
@@ -734,16 +738,18 @@ __global__ void computeBlockwiseWithinKCounts(
   }
   __syncthreads();
 
-  // Inclusive scan over RADIX_DIGITS entries
-  for (int offset = 1; offset < RADIX_DIGITS; offset <<= 1) {
-    uint32_t v = (tidx >= offset) ? digit_totals[tidx - offset] : 0u;
-    __syncthreads();
-    if (tidx < RADIX_DIGITS) digit_totals[tidx] += v;
-    __syncthreads();
+  // Use hipCUB BlockScan for efficient inclusive scan (replaces manual scan)
+  uint32_t digit_total = (tidx < RADIX_DIGITS) ? digit_totals[tidx] : 0u;
+  uint32_t digit_count_cumsum;
+  BlockScan(scan_storage).InclusiveSum(digit_total, digit_count_cumsum);
+  __syncthreads();
+  if (tidx < RADIX_DIGITS) {
+    digit_totals[tidx] = digit_count_cumsum;
   }
+  __syncthreads();
 
   if (tidx < RADIX_DIGITS) {
-    uint32_t digit_count_cumsum = digit_totals[tidx];
+    // digit_count_cumsum already contains the correct value from BlockScan
     uint32_t digit_count_cumsum_left = (tidx == 0) ? 0 : digit_totals[tidx - 1];
 
     // if not the last pass: update desired and ks_to_find
@@ -1260,6 +1266,7 @@ void launch_gather_topk_kernel(
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));
 
+#if defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 #define RUN_MB(INDEX_T, DIM)                                              \
   if (should_use_warp_topk(sliceSize, k)) {                               \
     RUN_K(INDEX_T, DIM, warptopk::launch);                                \
@@ -1268,6 +1275,14 @@ void launch_gather_topk_kernel(
   } else {                                                                \
     RUN_K(INDEX_T, DIM, sbtopk::launch);                                  \
   }
+#else
+#define RUN_MB(INDEX_T, DIM)                                              \
+  if (should_use_multiblock(numInputSlices, sliceSize)) {                 \
+    RUN_K(INDEX_T, DIM, mbtopk::launch);                                  \
+  } else {                                                                \
+    RUN_K(INDEX_T, DIM, sbtopk::launch);                                  \
+  }
+#endif
 
 #define RUN_DIM(INDEX_T)                        \
   if (allDims == 1) {                           \
