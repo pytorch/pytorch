@@ -419,9 +419,9 @@ class PerChannelDetector(DetectorBase):
         per_channel_info = self._detect_per_channel_helper(model)
 
         # String to let the user know of further optimizations
-        further_optims_str = (
+        further_optims_str_parts = [
             f"Further Optimizations for backend {self.backend_chosen}: \n"
-        )
+        ]
 
         optimizations_possible = False
         for fqn in per_channel_info:
@@ -431,14 +431,20 @@ class PerChannelDetector(DetectorBase):
                 and not fqn_dict[self.PER_CHAN_USED_KEY]
             ):
                 optimizations_possible = True
-                further_optims_str += (
+                further_optims_str_parts.append(
                     f"Module {fqn} can be configured to use per_channel quantization.\n"
                 )
 
         if optimizations_possible:
-            further_optims_str += "To use per_channel quantization, make sure the qconfig has a per_channel weight observer."
+            further_optims_str_parts.append(
+                "To use per_channel quantization, make sure the qconfig has a per_channel weight observer."
+            )
         else:
-            further_optims_str += "No further per_channel optimizations possible."
+            further_optims_str_parts.append(
+                "No further per_channel optimizations possible."
+            )
+
+        further_optims_str = "".join(further_optims_str_parts)
 
         # return the string and the dictionary form of same information
         return (further_optims_str, per_channel_info)
@@ -726,7 +732,9 @@ class DynamicStaticDetector(DetectorBase):
         # get the dictionary of the information to format the string report
         module_dynamic_static_info = self._generate_dict_info(model)
 
-        dynamic_vs_static_string = "Dynamic vs. Static Quantization suggestions: \n"
+        dynamic_vs_static_string_parts = [
+            "Dynamic vs. Static Quantization suggestions: \n"
+        ]
 
         modules_added: bool = False  # check to make sure at least 1 module added.
 
@@ -804,10 +812,14 @@ class DynamicStaticDetector(DetectorBase):
             )
 
             # append to overall suggestion
-            dynamic_vs_static_string += module_suggestion_string
+            dynamic_vs_static_string_parts.append(module_suggestion_string)
 
         if not modules_added:
-            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear and conv are valid.\n"
+            dynamic_vs_static_string_parts.append(
+                "No applicable layers for suggestions. Only linear and conv are valid.\n"
+            )
+
+        dynamic_vs_static_string = "".join(dynamic_vs_static_string_parts)
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
@@ -1279,7 +1291,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         )
 
         # now we can generate report based on this information
-        input_weight_string = "Input-Weight Equalization suggestions: \n"
+        input_weight_string_parts = ["Input-Weight Equalization suggestions: \n"]
 
         # some strings to be formatted depending on module we are adding
         module_suggestion_str = "For Module {} looked at with axis {}: \n"
@@ -1302,8 +1314,8 @@ class InputWeightEqualizationDetector(DetectorBase):
             # we added at least 1 module
             added_module = True
             # add the module level description
-            input_weight_string += module_suggestion_str.format(
-                module_fqn, self.ch_axis
+            input_weight_string_parts.append(
+                module_suggestion_str.format(module_fqn, self.ch_axis)
             )
 
             mod_info: dict[str, Any] = input_weight_equalization_info[module_fqn]
@@ -1322,7 +1334,7 @@ class InputWeightEqualizationDetector(DetectorBase):
                 channel_str = channel_suggestion_str.format(
                     use_str, input_benefit_formatted
                 )
-                input_weight_string += channel_str
+                input_weight_string_parts.append(channel_str)
             else:
                 non_benefit_reason_formatted = (
                     input_weight_non_benefit_reasoning.format(
@@ -1333,13 +1345,15 @@ class InputWeightEqualizationDetector(DetectorBase):
                     non_benefit_reason_formatted
                 )
                 channel_str = channel_suggestion_str.format(no_use_str, non_benefit_str)
-                input_weight_string += channel_str
+                input_weight_string_parts.append(channel_str)
 
         # if no modules looked at, amend return string
         if not added_module:
-            input_weight_string += (
+            input_weight_string_parts.append(
                 "No applicable layers for suggestions. Only linear and conv valid.\n"
             )
+
+        input_weight_string = "".join(input_weight_string_parts)
 
         # return a tuple with the string explanation and the compiled dict info
         return (input_weight_string, input_weight_equalization_info)
@@ -1668,7 +1682,7 @@ class OutlierDetector(DetectorBase):
         info_dict = self._generate_info_dict(model)
 
         # now we can generate report based on this information
-        outlier_string = "Outlier detection report: \n"
+        outlier_string_parts = ["Outlier detection report: \n"]
 
         # added module check
         added_module: bool = False
@@ -1697,8 +1711,8 @@ class OutlierDetector(DetectorBase):
                     # we found at least 1 outlier
                     if not added_model_desc:
                         # add the module level description
-                        outlier_string += module_suggestion_str.format(
-                            module_fqn, self.ch_axis
+                        outlier_string_parts.append(
+                            module_suggestion_str.format(module_fqn, self.ch_axis)
                         )
                         added_model_desc = True
 
@@ -1710,15 +1724,15 @@ class OutlierDetector(DetectorBase):
                     channel_str = channel_suggestion_str.format(
                         index, max_value_found_str
                     )
-                    outlier_string += channel_str
+                    outlier_string_parts.append(channel_str)
 
                 # also check if we found constant batch
                 if mod_info[self.CONSTANT_COUNTS_KEY][index] != 0:
                     # make sure we add a module level highlight.
                     if not added_model_desc:
                         # add the module level description
-                        outlier_string += module_suggestion_str.format(
-                            module_fqn, self.ch_axis
+                        outlier_string_parts.append(
+                            module_suggestion_str.format(module_fqn, self.ch_axis)
                         )
                         added_model_desc = True
 
@@ -1728,7 +1742,7 @@ class OutlierDetector(DetectorBase):
                     formatted_str = constant_str.format(
                         index, constant_values_for_channel, constant_suggestion
                     )
-                    outlier_string += formatted_str
+                    outlier_string_parts.append(formatted_str)
                     # we also added at least one thing to description
                     added_module = True
 
@@ -1736,8 +1750,12 @@ class OutlierDetector(DetectorBase):
         if added_module:
             # compose the note string
             note_composed = note_string.format(note_distribution, note_rec)
-            outlier_string += note_composed
+            outlier_string_parts.append(note_composed)
         else:
-            outlier_string += "There were no outliers found in the activations.\n"
+            outlier_string_parts.append(
+                "There were no outliers found in the activations.\n"
+            )
+
+        outlier_string = "".join(outlier_string_parts)
 
         return (outlier_string, info_dict)
