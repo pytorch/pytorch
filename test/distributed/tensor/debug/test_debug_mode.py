@@ -435,6 +435,52 @@ class TestDTensorDebugMode(TestCase):
             cnt.frame_count, 1
         )  # check DebugMode doesn't trigger additional recompilations
 
+    def test_annotate(self):
+        x = torch.randn(8, 8)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                DebugMode._annotate("Foo")
+                return self.l1(x)
+
+        mod = Foo()
+        with DebugMode(record_nn_module=True) as debug_mode:
+            DebugMode._annotate("forward")
+            mod(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [annotate] forward
+  [nn.Mod] Foo
+    [annotate] Foo
+    [nn.Mod] Foo.l1
+        aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+        aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with DebugMode() as debug_mode:
+                torch.compile(mod, backend=backend, fullgraph=True)(x)
+
+            if backend == "inductor":
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """    aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+            else:
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """\
+  [annotate] Foo
+    aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+
     def test_nn_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -462,15 +508,15 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-    [nn.Mod] Bar
-      [nn.Mod] Bar.abc
-        [nn.Mod] Bar.abc.l1
+  [nn.Mod] Bar
+    [nn.Mod] Bar.abc
+      [nn.Mod] Bar.abc.l1
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-        [nn.Mod] Bar.abc.l2
+      [nn.Mod] Bar.abc.l2
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-      [nn.Mod] Bar.xyz
+    [nn.Mod] Bar.xyz
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
@@ -480,7 +526,9 @@ class TestDTensorDebugMode(TestCase):
             out.backward()
 
         sum_op = [
-            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+            op
+            for op in debug_mode.operators
+            if isinstance(op, _OpCall) and str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
         self.assertTrue(
