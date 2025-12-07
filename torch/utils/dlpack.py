@@ -207,11 +207,7 @@ def from_dlpack(
         # Attempt 4: Remove dl_device
         if dlpack is None:
             kwargs.pop("dl_device", None)
-            try:
-                dlpack = ext_tensor.__dlpack__(**kwargs)
-            except TypeError:
-                # All fallbacks already tried
-                raise
+            dlpack = ext_tensor.__dlpack__(**kwargs)
 
         tensor = torch._C._from_dlpack(dlpack)
 
