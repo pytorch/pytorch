@@ -358,6 +358,31 @@ jobs:
       ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     secrets: inherit
 
+  helion-lint:
+    name: Helion lint
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: [get-label-type, get-changed-files]
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, 'torch/fx/') ||
+        contains(needs.get-changed-files.outputs.changed-files, 'torch/_dynamo/') ||
+        contains(needs.get-changed-files.outputs.changed-files, 'torch/_inductor/')
+      )
+    with:
+      timeout: 30
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      fetch-depth: 1
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        set -eux
+        git clone --depth 1 https://github.com/pytorch/helion.git /tmp/helion
+        cd /tmp/helion
+        pip install pre-commit ruff==0.14.2 pyrefly==0.44.0
+        ./lint.sh fix
+        pre-commit run --all-files
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
