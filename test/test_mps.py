@@ -9227,10 +9227,10 @@ class TestLinalgMPS(TestCaseMPS):
                     return m
                 return m.t().clone(memory_format=torch.contiguous_format).t()
 
-            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
+        M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+        m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+        m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     def _test_addr(self, f, t, m, v, alpha=None, beta=None):
         dtype = t.dtype

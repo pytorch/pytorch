@@ -2081,11 +2081,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # Test gradient computation for both eager and compiled versions
         test_cases = [
-            (out_max, "eager mode"),
-            (out_compiled, "compiled mode"),
+            ("eager", out_max, "eager mode"),
+            ("compiled", out_compiled, "compiled mode"),
         ]
 
-        for output, description in test_cases:
+        for mode_name, output, description in test_cases:
             loss = output.sum()
             grads = torch.autograd.grad(loss, (query, key, value))
 
