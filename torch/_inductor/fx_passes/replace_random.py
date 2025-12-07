@@ -20,10 +20,9 @@ log = logging.getLogger(__name__)
 patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
-from torch.library import custom_op
 from torch._inductor.lowering import make_fallback
 from torch._utils import _get_device_index
-import torch._dynamo as dynamo
+from torch.library import custom_op
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
@@ -66,7 +65,11 @@ def _reserve_state(device: torch.device, used_offset: int) -> tuple[int, int]:
     return seed, base
 
 
-@custom_op("custom_op::rand_eager_offset", mutates_args={})
+@torch.library.custom_op(
+    "custom_op::rand_eager_offset",
+    mutates_args={},
+    tags=(torch._C.Tag.cudagraph_unsafe,),
+)
 def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
     seed, base = _reserve_state(device, int(offset))
     packed = (int(seed) << 32) | (int(base) & 0xFFFFFFFF)
@@ -74,13 +77,14 @@ def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
     return out
 
 
-@custom_op("custom_op::rand_eager_offsets", mutates_args={})
+@torch.library.custom_op(
+    "custom_op::rand_eager_offsets",
+    mutates_args={},
+    tags=(torch._C.Tag.cudagraph_unsafe,),
+)
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
     states = [_reserve_state(device, int(off)) for off in offsets]  # list[(seed, base)]
-    packed = [
-        (int(seed) << 32) | (int(base) & 0xFFFFFFFF)
-        for seed, base in states
-    ]
+    packed = [(int(seed) << 32) | (int(base) & 0xFFFFFFFF) for seed, base in states]
     cpu = torch.tensor(packed, dtype=torch.int64).pin_memory()
     out = torch.empty_like(cpu, device=device)
     out.copy_(cpu, non_blocking=True)
@@ -118,18 +122,6 @@ def replace_random_passes(gm: torch.fx.GraphModule):
     return count
 
 
-@custom_op("custom_op::cpu_barrier", mutates_args="unknown")
-@dynamo.disable
-def cpu_barrier(x: torch.Tensor) -> torch.Tensor:
-    return x.clone()
-
-@cpu_barrier.register_fake
-def _(x: torch.Tensor):
-    return x.clone()
-
-make_fallback(torch.ops.custom_op.cpu_barrier.default)
-
-
 def fuse_offset_creation_pass(graph: torch.fx.Graph):
     """
     Here offset node means seed << 32 + offset, will unpacked in lowering.py:inductor_random()
@@ -152,14 +144,11 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
 
     for device, offsets in device_offsets.items():
         with graph.inserting_before(offsets[0]):
-            cond = graph.call_function(torch.ops.aten.scalar_tensor, (True,))
-            with V.fake_mode:
-                cond.meta["val"] = torch.tensor(True)
-                cond.meta["tensor_meta"] = _extract_tensor_metadata(cond.meta["val"])
-            _ = graph.call_function(torch.ops.custom_op.cpu_barrier.default, (cond,))
-
             offs = [n.args[0] for n in offsets]
             combined = graph.call_function(torch.ops.custom_op.rand_eager_offsets.default, (offs, device))
+            combined = graph.call_function(
+                torch.ops.custom_op.rand_eager_offsets.default, (offs, device)
+            )
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
                     [len(offsets)], device=device, dtype=torch.int64
@@ -271,10 +260,10 @@ def replace_random(
         match.output_node().target.overloadpacket  # type: ignore[union-attr]
     ]  # type: ignore[union-attr]
     device = get_device(device)
+    replacement_fn = replacement
 
     if mode == "rand" and config.align_random_eager and device.type == "cuda":
-
-        def replacement(size):
+        def replacement_align(size):
             offset = _shape_to_offset(size, device)
 
             align_dtype = dtype
@@ -293,14 +282,10 @@ def replace_random(
             if dtype is not None:
                 result = result.to(dtype)
             return result
-
-        match.replace_by_example(replacement, [size])
-        return
-
-    # Fallback (e.g., randn) keeps existing inductor behavior
+        replacement_fn = replacement_align
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(replacement, [size])
+    match.replace_by_example(replacement_fn, [size])
 
 
 # pyrefly: ignore [bad-argument-type]

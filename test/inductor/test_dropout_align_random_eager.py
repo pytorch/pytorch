@@ -138,9 +138,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             with torch.no_grad():
                 y_comp = compiled(x)
 
-            torch.testing.assert_close(
-                y_eager, y_comp, rtol=1e-3, atol=1e-4
-            )
+            torch.testing.assert_close(y_eager, y_comp, rtol=1e-3, atol=1e-4)
 
     @requires_gpu()
     def test_linear_block_compile_parity_backward(self):
@@ -167,15 +165,11 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         (y_comp.square().mean()).backward()
 
         # outputs
-        torch.testing.assert_close(
-            y_eager.detach(), y_comp.detach(), rtol=1e-3, atol=1e-4
-        )
+        torch.testing.assert_close(y_eager.detach(), y_comp.detach(), rtol=1e-3, atol=1e-4)
         # grads
         for p_ref, p_new in zip(eager.parameters(), compiled.parameters()):
             assert p_ref.grad is not None and p_new.grad is not None
-            torch.testing.assert_close(
-                p_ref.grad, p_new.grad, rtol=1e-3, atol=1e-5
-            )
+            torch.testing.assert_close(p_ref.grad, p_new.grad, rtol=1e-3, atol=1e-5)
 
     @requires_gpu()
     def test_dropout_mask_parity_and_rng_offset_cuda(self):
@@ -207,9 +201,9 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             seed1_c, off1_c = _cuda_rng_u64_seed_off()
             delta_c = off1_c - off0_c
 
-            assert torch.equal(
-                mask_e, mask_c
-            ), "Dropout masks differ between eager and compiled"
+            assert torch.equal(mask_e, mask_c), (
+                "Dropout masks differ between eager and compiled"
+            )
             assert seed0_e == seed0_c == BASE_SEED
             assert delta_e == delta_c, (
                 f"RNG offset delta mismatch: eager={delta_e}, compiled={delta_c}"
@@ -241,9 +235,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             _set_seed(seed)
             y_comp = compiled(x)
 
-            torch.testing.assert_close(
-                y_eager, y_comp, rtol=1e-3, atol=1e-4
-            )
+            torch.testing.assert_close(y_eager, y_comp, rtol=1e-3, atol=1e-4)
 
     # ───────────────────────────────────────────────────────────
     # dynamic shapes test (a)
@@ -274,9 +266,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             _set_seed(BASE_SEED)
             y_comp = compiled(x)
 
-            torch.testing.assert_close(
-                y_eager, y_comp, rtol=1e-3, atol=1e-4
-            )
+            torch.testing.assert_close(y_eager, y_comp, rtol=1e-3, atol=1e-4)
 
     # ───────────────────────────────────────────────────────────
     # cudagraphs test via mode='reduce-overhead' (b)
@@ -301,9 +291,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         _set_seed(BASE_SEED)
         y_comp = compiled(x)
 
-        torch.testing.assert_close(
-            y_eager, y_comp, rtol=1e-3, atol=1e-4
-        )
+        torch.testing.assert_close(y_eager, y_comp, rtol=1e-3, atol=1e-4)
 
     # ───────────────────────────────────────────────────────────
     # Codegen sanity: run_and_get_code + FileCheck
@@ -380,12 +368,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         _set_seed(BASE_SEED)
         out_comp = compiled()
 
-        torch.testing.assert_close(
-            out_eager,
-            out_comp,
-            rtol=0.0,
-            atol=0.0,
-        )
+        torch.testing.assert_close(out_eager, out_comp, rtol=0.0, atol=0.0)
 
     # ───────────────────────────────────────────────────────────
     # Primitive random fns: rand / randn / randint -> mark as XFAIL
@@ -441,12 +424,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         _set_seed(BASE_SEED)
         out_comp = drop_compiled(x)
 
-        torch.testing.assert_close(
-            out_eager,
-            out_comp,
-            rtol=0.0,
-            atol=0.0,
-        )
+        torch.testing.assert_close(out_eager, out_comp, rtol=0.0, atol=0.0)
 
 
 if __name__ == "__main__":

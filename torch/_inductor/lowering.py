@@ -2484,7 +2484,7 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
 
         def inner_fn(index):
             packed = seed_loader([])  # scalar
-            mask_low = (1 << 32)
+            mask_low = 1 << 32
             rng_seed = packed // mask_low
             base_offset = packed % mask_low
             return ops.rand_eager(
