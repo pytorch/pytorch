@@ -13,11 +13,10 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_C
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
+     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings, slowTest)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
-     largeTensorTest)
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -36,7 +35,7 @@ if TEST_NUMPY:
     import numpy as np
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
@@ -136,7 +135,7 @@ class TestSparseCSRSampler(TestCase):
         index_dtype = torch.int32
         for n_rows in range(1, 10):
             for n_cols in range(1, 10):
-                for nnz in range(0, n_rows * n_cols + 1):
+                for nnz in range(n_rows * n_cols + 1):
                     crow_indices = self._make_crow_indices(
                         n_rows, n_cols, nnz,
                         device=device, dtype=index_dtype)
@@ -1492,8 +1491,6 @@ class TestSparseCSR(TestCase):
                 csr.matmul(bad_vec)
 
     @onlyCUDA
-    # hmm, the test passes ok on CUDA when Rocm is not available:
-    @skipCUDAIfRocmVersionLessThan((5, 2))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_baddbmm(self, device, dtype):
 
@@ -3851,6 +3848,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
     @onlyCUDA
+    @slowTest
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -4102,7 +4100,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             left_alpha = make_tensor(M, dtype=dtype, device=device, low=0.5, high=high) if has_left_alpha else None
             right_alpha = make_tensor(N, dtype=dtype, device=device, low=0.5, high=high) if has_right_alpha else None
 
-            if 0 and op == "bsr_dense_addmm":
+            if 0 and op == "bsr_dense_addmm":  # noqa: SIM223
                 # Find optimal kernel parameters, the speed-up is
                 # about 10x for running this test.
                 #
@@ -4254,9 +4252,9 @@ class TestSparseCompressedTritonKernels(TestCase):
         # Test warn_once when requesting non-existing tuned parameters multiple times
         f = io.StringIO()
         with redirect_stderr(f):
-            for i in range(5):
+            for _ in range(5):
                 get_meta(16, 16, 16)
-            for i in range(5):
+            for _ in range(5):
                 get_meta(16, 16, 32)
 
         msg = f.getvalue()

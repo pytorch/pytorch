@@ -30,10 +30,14 @@
 
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
+#include <thrust/distance.h>
+#include <thrust/for_each.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#include <thrust/system/cuda/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
+#include <thrust/transform.h>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -45,19 +49,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <c10/macros/Macros.h>
-#include <thrust/copy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/for_each.h>
-#include <thrust/functional.h>
-#include <thrust/gather.h>
-#include <thrust/generate.h>
-#include <thrust/iterator/discard_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/scan.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <thrust/transform.h>
-#include <thrust/unique.h>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -304,7 +295,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
 
   auto sorted_indices = at::empty({nnz}, indices.options());
-  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.data_ptr<int64_t>());
+  thrust_ptr sorted_indices_thrust_ptr(sorted_indices.template data_ptr<int64_t>());
   thrust::sequence(
       policy, sorted_indices_thrust_ptr, sorted_indices_thrust_ptr + nnz, 0);
 
@@ -323,17 +314,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       sorted_indices_thrust_ptr + nnz,
       thrust::make_constant_iterator(int64_t(1)),
       thrust::make_discard_iterator(),
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()),
+      thrust_ptr(pool_sizes.template data_ptr<int64_t>()),
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] == offsets_ptr[y];
       });
   auto new_sz = thrust::distance(
-      thrust_ptr(pool_sizes.data_ptr<int64_t>()), new_end.second);
+      thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
   pool_sizes.resize_({new_sz});
 
   auto pool_offsets = pool_sizes.clone();
   thrust_ptr pool_offsets_thrust_ptr(
-      pool_offsets.data_ptr<int64_t>());
+      pool_offsets.template data_ptr<int64_t>());
   thrust::exclusive_scan(
       policy,
       pool_offsets_thrust_ptr,
@@ -350,9 +341,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
-    auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
-    auto sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
-    auto pool_offsets_ptr = pool_offsets.data_ptr<int64_t>();
+    auto pool_sizes_ptr = pool_sizes.template data_ptr<int64_t>();
+    auto sorted_indices_ptr = sorted_indices.template data_ptr<int64_t>();
+    auto pool_offsets_ptr = pool_offsets.template data_ptr<int64_t>();
 
     thrust::for_each(
         policy,

@@ -6,7 +6,6 @@
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -22,18 +21,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
-#include <sys/types.h>
 
-#include <type_traits>
 #include <utility>
 
 #include <ATen/ThreadLocalState.h>
-#include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
@@ -708,7 +703,8 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     // TODO: We need to have numel of tensors for gloo as well.
     pgStatus_->lastCompletedNumelIn = 0;
     pgStatus_->lastCompletedNumelOut = 0;
-    FlightRecorder<c10::Event>::get()->retire_id(work->trace_id_, false);
+    FlightRecorder<c10::Event>::get()->retire_id(
+        work->trace_id_, work->trace_reset_epoch_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
@@ -780,7 +776,7 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   pgStatus_->lastEnqueuedNumelOut = 0;
   // using c10d::FlightRecorder;
   // TODO: We need to have a way to use c10::Event inside gloo as well.
-  work->trace_id_ = FlightRecorder<c10::Event>::get()->record(
+  auto traceId = FlightRecorder<c10::Event>::get()->recordWithResetEnabled(
       local_id_,
       std::make_tuple(pg_uid_, pg_desc_),
       collectiveCounter_,
@@ -795,6 +791,8 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
       work->getTimeout(),
       pgStatus_,
       false);
+  work->trace_id_ = traceId.id;
+  work->trace_reset_epoch_ = traceId.reset_epoch;
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
@@ -1381,8 +1379,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     // Use single flat output tensor.
     // The first dimension corresponds to the index into outputs[N],
     // so copying into the actual output later is easy.
-    at::Tensor flatOutputTensor =
-        newLikeFlat(outputs[0], /*preserve_strides*/ false);
+    at::Tensor flatOutputTensor = newLikeFlat(outputs[0]);
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     gloo::allgather(opts);
 
@@ -1399,7 +1396,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(outputs[0], /*preserve_strides*/ false)};
+    return {newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -1695,7 +1692,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(output_lists[0], /*preserve_strides*/ false)};
+    return {newLikeFlat(output_lists[0])};
   }
 
   void run() override {
@@ -1819,7 +1816,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     // This is later scattered to the separate output tensors.
     at::Tensor flatOutputTensor;
     if (context_->rank == root) {
-      flatOutputTensor = newLikeFlat(outputs[0], /*preserve_strides*/ false);
+      flatOutputTensor = newLikeFlat(outputs[0]);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     }
 
@@ -1842,8 +1839,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getOutputTensors() override {
     return outputs.empty() ? std::vector<at::Tensor>{}
-                           : std::vector<at::Tensor>{newLikeFlat(
-                                 outputs[0], /*preserve_strides*/ false)};
+                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -2059,8 +2055,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getInputTensors() override {
     return inputs.empty() ? std::vector<at::Tensor>{}
-                          : std::vector<at::Tensor>{newLikeFlat(
-                                inputs[0], /*preserve_strides*/ false)};
+                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
@@ -2476,7 +2471,7 @@ static at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
 
 static uint32_t checkTag(int32_t tag) {
   TORCH_CHECK(tag >= 0, "Tag must be nonnegative");
-  return (uint32_t)tag;
+  return static_cast<uint32_t>(tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::send(

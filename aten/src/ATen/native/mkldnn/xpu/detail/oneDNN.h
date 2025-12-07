@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -202,4 +203,16 @@ void sdpa_backward(
     Tensor& grad_query,
     Tensor& grad_key,
     Tensor& grad_value);
+
+sycl::event scaled_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    at::blas::ScalingType scaling_choice_a,
+    at::blas::ScalingType scaling_choice_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    bool use_fast_accum);
 } // namespace at::native::onednn

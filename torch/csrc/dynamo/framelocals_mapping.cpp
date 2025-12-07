@@ -1,6 +1,5 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
-#include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -29,7 +28,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
 #if IS_PYTHON_3_15_PLUS
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+  TORCH_CHECK(false, "Python 3.15+");
 #elif IS_PYTHON_3_14_PLUS
   if (!frame->stackpointer) {
     return;
@@ -64,10 +63,11 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
 #if IS_PYTHON_3_15_PLUS
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+  TORCH_CHECK(false, "Python 3.15+");
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
-    update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
+    update_framelocals(
+        i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
   for (int i = 0; i < offset; i++) {
@@ -78,7 +78,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   // Get references to closure variables
 #if IS_PYTHON_3_15_PLUS
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+  TORCH_CHECK(false, "Python 3.15+");
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif

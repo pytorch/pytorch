@@ -19,20 +19,14 @@ def set_rng_state(new_state: torch.Tensor) -> None:
     default_generator.set_state(new_state)
 
 
-def get_rng_state(device: torch.device = torch.device("cpu")) -> torch.Tensor:
+def get_rng_state() -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`.
 
-    Args:
-        device (torch.device, optional): The device to return the RNG state of.
-            Default: ``torch.device('cpu')``, the current CPU device.
+    .. note:: The returned state is for the default generator on CPU only.
 
     See also: :func:`torch.random.fork_rng`.
     """
-
-    if device.type == "cpu":
-        return default_generator.get_state()
-    else:
-        return torch.get_device_module(device).get_rng_state(device)
+    return default_generator.get_state()
 
 
 def manual_seed(seed) -> torch._C.Generator:
@@ -45,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
+    return _manual_seed_impl(seed)
+
+
+def _manual_seed_impl(seed) -> torch._C.Generator:
     seed = int(seed)
     import torch.cuda
 
@@ -190,7 +188,7 @@ def fork_rng(
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.{device_type}.device_count())`."
             )
-            warnings.warn(message)
+            warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:

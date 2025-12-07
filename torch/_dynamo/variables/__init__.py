@@ -29,6 +29,7 @@ from .ctx_manager import (
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
+    FxTracebackAnnotateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -36,8 +37,6 @@ from .ctx_manager import (
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
-    StreamContextVariable,
-    StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
@@ -65,6 +64,8 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
@@ -130,6 +131,7 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
