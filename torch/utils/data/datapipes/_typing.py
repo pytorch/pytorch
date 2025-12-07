@@ -272,52 +272,49 @@ class _DataPipeMeta(ABCMeta):
 
     type: _DataPipeType
 
-    def __new__(cls, name, bases, namespace, **kwargs):
-        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+    def __new__(metacls, name, bases, namespace, **kwargs):
+        return super().__new__(metacls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
         # pyrefly: ignore [no-access]
-        cls.__origin__ = None
+        metacls.__origin__ = None
         if "type" in namespace:
-            return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+            return super().__new__(metacls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace["__type_class__"] = False
         #  For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
-                return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+                return super().__new__(metacls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace.update(
             {"type": _DEFAULT_TYPE, "__init_subclass__": _dp_init_subclass}
         )
-        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
-
-    def __init__(self, name, bases, namespace, **kwargs) -> None:
-        super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        return super().__new__(metacls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     # TODO: Fix isinstance bug
     @_tp_cache
-    def _getitem_(self, params):
+    def _getitem_(cls, params):
         if params is None:
-            raise TypeError(f"{self.__name__}[t]: t can not be None")
+            raise TypeError(f"{cls.__name__}[t]: t can not be None")
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
             params = (params,)
 
-        msg = f"{self.__name__}[t]: t must be a type"
+        msg = f"{cls.__name__}[t]: t must be a type"
         params = tuple(_type_check(p, msg) for p in params)
 
-        if isinstance(self.type.param, _GenericAlias):
-            orig = getattr(self.type.param, "__origin__", None)
+        if isinstance(cls.type.param, _GenericAlias):
+            orig = getattr(cls.type.param, "__origin__", None)
             if isinstance(orig, type) and orig is not Generic:
-                p = self.type.param[params]  # type: ignore[index]
+                p = cls.type.param[params]  # type: ignore[index]
                 t = _DataPipeType(p)
-                l = len(str(self.type)) + 2
-                name = self.__name__[:-l]
+                l = len(str(cls.type)) + 2
+                name = cls.__name__[:-l]
                 name = name + "[" + str(t) + "]"
-                bases = (self,) + self.__bases__
-                return self.__class__(
+                bases = (cls,) + cls.__bases__
+                return cls.__class__(
                     name,
                     bases,
                     {
@@ -329,43 +326,43 @@ class _DataPipeMeta(ABCMeta):
 
         if len(params) > 1:
             raise TypeError(
-                f"Too many parameters for {self} actual {len(params)}, expected 1"
+                f"Too many parameters for {cls} actual {len(params)}, expected 1"
             )
 
         t = _DataPipeType(params[0])
 
-        if not t.issubtype(self.type):
+        if not t.issubtype(cls.type):
             raise TypeError(
-                f"Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]"
+                f"Can not subclass a DataPipe[{t}] from DataPipe[{cls.type}]"
             )
 
         # Types are equal, fast path for inheritance
-        if self.type == t:
-            return self
+        if cls.type == t:
+            return cls
 
-        name = self.__name__ + "[" + str(t) + "]"
-        bases = (self,) + self.__bases__
+        name = cls.__name__ + "[" + str(t) + "]"
+        bases = (cls,) + cls.__bases__
 
-        return self.__class__(
+        return cls.__class__(
             name,
             bases,
             {"__init_subclass__": _dp_init_subclass, "__type_class__": True, "type": t},
         )
 
     # TODO: Fix isinstance bug
-    def _eq_(self, other):
+    def _eq_(cls, other):
         if not isinstance(other, _DataPipeMeta):
             return NotImplemented
-        if self.__origin__ is None or other.__origin__ is None:  # type: ignore[has-type]
-            return self is other
+        if cls.__origin__ is None or other.__origin__ is None:  # type: ignore[has-type]
+            return cls is other
         return (
-            self.__origin__ == other.__origin__  # type: ignore[has-type]
-            and self.type == other.type
+            cls.__origin__ == other.__origin__  # type: ignore[has-type]
+            and cls.type == other.type
         )
 
     # TODO: Fix isinstance bug
-    def _hash_(self):
-        return hash((self.__name__, self.type))
+    def _hash_(cls):
+        return hash((cls.__name__, cls.type))
 
 
 class _IterDataPipeMeta(_DataPipeMeta):
