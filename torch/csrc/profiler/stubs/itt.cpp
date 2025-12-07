@@ -2,8 +2,6 @@
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/profiler/stubs/base.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
-
 namespace torch::profiler::impl {
 namespace {
 
@@ -50,4 +48,3 @@ RegisterITTMethods reg;
 
 } // namespace
 } // namespace torch::profiler::impl
-C10_DIAGNOSTIC_POP()
