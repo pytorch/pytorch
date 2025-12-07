@@ -378,7 +378,7 @@ class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
         kernel_name,
-        input_nodes: tuple[ir.IRNode],
+        input_nodes: tuple[ir.IRNode, ...],
         output_node,
         defines,
         num_stages,
@@ -1545,7 +1545,7 @@ class GenerateAndLoadResult(NamedTuple):
     extra: str
     input_call_args: tuple[str, ...]
     prologue_supported_inputs: OrderedSet[str]
-    kernel_args_sizevars_keys: tuple[sympy.Expr]
+    kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
 
 
@@ -1573,7 +1573,7 @@ class GeneratedCodeCache:
 
     def make_key(
         self,
-        input_nodes: tuple[ir.IRNode],
+        input_nodes: tuple[ir.IRNode, ...],
         num_stages: int,
         num_warps: int,
         call_sizes: Sequence[sympy.core.symbol.Symbol],
@@ -1739,7 +1739,7 @@ class TritonTemplate(KernelTemplate):
     # NOTE: MAKE SURE THAT ANY ARGUMENT ADDED TO THIS FUNCTION IS PROPERLY HANDLED IN _generated_code_cache.make_key.
     def generate_and_load(
         self,
-        input_nodes: tuple[ir.IRNode],
+        input_nodes: tuple[ir.IRNode, ...],
         num_stages: int,
         num_warps: int,
         call_sizes: Sequence[sympy.core.symbol.Symbol],
@@ -1935,14 +1935,13 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
-            # pyrefly: ignore [bad-argument-type]
             kernel_args_sizevars_keys,
             kernel_options,
         )
 
     def generate(  # type: ignore[override]
         self,
-        input_nodes: tuple[ir.IRNode],
+        input_nodes: tuple[ir.IRNode, ...],
         layout: ir.Layout,
         num_stages: int,
         num_warps: int,
