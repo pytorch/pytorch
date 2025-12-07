@@ -467,6 +467,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
     C10_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+    C10_CUDA_CHECK(cudaEventDestroy(event));
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
