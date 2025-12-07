@@ -45,12 +45,14 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 
+
 class _DictWithForward(nn.ModuleDict):
     def __init__(self, in_features=8, out_features=8):
         super().__init__({"lin": nn.Linear(in_features, out_features)})
 
     def forward(self, x):
         return self["lin"](x)
+
 
 class _ListWithForward(nn.ModuleList):
     def __init__(self, in_features=8, out_features=8):
@@ -170,6 +172,7 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=dp_mesh)
+
 
 class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
     """Tests that fully_shard accepts ModuleDict/ModuleList subclasses that implement forward()."""
