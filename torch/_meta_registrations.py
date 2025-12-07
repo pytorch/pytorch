@@ -5663,8 +5663,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
+    attention = torch.empty_like(query)
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -5717,8 +5716,7 @@ def alloc_with_matching_layout(
     res_shape: tuple[int, ...],
 ):
     if tuple(query.shape) == res_shape:
-        query_t = query.transpose(1, 2)
-        res = torch.empty_like(query_t).transpose(1, 2)
+        res = torch.empty_like(query)
     else:
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
@@ -5841,9 +5839,9 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
-    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
     return grad_q, grad_k, grad_v
 
 
