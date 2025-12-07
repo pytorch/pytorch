@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -21,6 +22,7 @@ def _allreduce_fut(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
 
     # Apply the division first to avoid overflow, especially for FP16.
+    # pyrefly: ignore [missing-attribute]
     tensor.div_(group_to_use.size())
 
     return (
@@ -58,6 +60,7 @@ def _compress_hook(
     bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     group_to_use = process_group if process_group is not None else dist.group.WORLD
+    # pyrefly: ignore [missing-attribute]
     world_size = group_to_use.size()
 
     buffer = (
@@ -77,7 +80,10 @@ def _compress_hook(
 
     if torch.compiler.is_compiling():
         grad = dist._functional_collectives.all_reduce(
-            compressed_tensor, "sum", group_to_use
+            compressed_tensor,
+            "sum",
+            # pyrefly: ignore [bad-argument-type]
+            group_to_use,
         )
         return decompress(grad)
     else:

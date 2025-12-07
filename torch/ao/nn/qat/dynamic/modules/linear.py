@@ -1,10 +1,10 @@
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
 
 if TYPE_CHECKING:
-    from torch.ao.quantization.qconfig import QConfig  # noqa: TC004
+    from torch.ao.quantization.qconfig import QConfig
 
 
 __all__ = ["Linear"]
@@ -29,8 +29,8 @@ class Linear(torch.ao.nn.qat.Linear):
         out_features: int,
         bias: bool = True,
         qconfig: Optional["QConfig"] = None,
-        device: Optional[Union[int, str, torch.device]] = None,
-        dtype: Optional[str] = None,
+        device: int | str | torch.device | None = None,
+        dtype: str | None = None,
     ) -> None:
         super().__init__(in_features, out_features, bias, qconfig, device, dtype)
         if not torch.ao.quantization.qconfig._activation_is_memoryless(qconfig):  # type: ignore[arg-type]

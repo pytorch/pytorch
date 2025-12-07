@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestAcLogging(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.graph: MagicMock = MagicMock(spec=Graph)
         self.node1: MagicMock = MagicMock(spec=Node)
         self.node2: MagicMock = MagicMock(spec=Node)
@@ -37,6 +38,7 @@ class TestAcLogging(TestCase):
         self.recomputable_node_idxs: list[int] = []
         self.expected_runtime: int = 100
         self.memories_banned_nodes: list[int] = [50]
+        self.normalized_memories_banned_nodes: list[float] = [0.10344827586206896]
         self.runtimes_banned_nodes: list[int] = [10]
         self.min_cut_saved_values: list[Node] = [self.node1]
 
@@ -93,21 +95,23 @@ class TestAcLogging(TestCase):
             "Expected Runtime": self.expected_runtime,
             "Knapsack Saved Nodes": self.saved_node_idxs,
             "Knapsack Recomputed Nodes": self.recomputable_node_idxs,
-            "Knapsack Input Memories": self.memories_banned_nodes,
+            "Knapsack Input Memories": self.normalized_memories_banned_nodes,
+            "Absolute Memories": self.memories_banned_nodes,
             "Knapsack Input Runtimes": self.runtimes_banned_nodes,
             "Min Cut Solution Saved Values": ["node1"],
         }
         result = create_activation_checkpointing_logging_structure_payload(
-            self.graph,
-            input_joint_graph_node_information,
-            joint_graph_edges,
-            self.all_recomputable_banned_nodes,
-            self.expected_runtime,
-            self.saved_node_idxs,
-            self.recomputable_node_idxs,
-            self.memories_banned_nodes,
-            self.runtimes_banned_nodes,
-            self.min_cut_saved_values,
+            joint_graph=self.graph,
+            joint_graph_node_information=input_joint_graph_node_information,
+            joint_graph_edges=joint_graph_edges,
+            all_recomputable_banned_nodes=self.all_recomputable_banned_nodes,
+            expected_runtime=self.expected_runtime,
+            saved_node_idxs=self.saved_node_idxs,
+            recomputable_node_idxs=self.recomputable_node_idxs,
+            memories_banned_nodes=self.memories_banned_nodes,
+            normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
+            runtimes_banned_nodes=self.runtimes_banned_nodes,
+            min_cut_saved_values=self.min_cut_saved_values,
         )
         self.assertEqual(result, expected_payload)
 
@@ -119,14 +123,15 @@ class TestAcLogging(TestCase):
         self, mock_json_dumps: MagicMock, mock_trace_structured: MagicMock
     ) -> None:
         create_structured_trace_for_min_cut_info(
-            self.graph,
-            self.all_recomputable_banned_nodes,
-            self.saved_node_idxs,
-            self.recomputable_node_idxs,
-            self.expected_runtime,
-            self.memories_banned_nodes,
-            self.runtimes_banned_nodes,
-            self.min_cut_saved_values,
+            joint_graph=self.graph,
+            all_recomputable_banned_nodes=self.all_recomputable_banned_nodes,
+            saved_node_idxs=self.saved_node_idxs,
+            recomputable_node_idxs=self.recomputable_node_idxs,
+            expected_runtime=self.expected_runtime,
+            memories_banned_nodes=self.memories_banned_nodes,
+            normalized_memories_banned_nodes=self.normalized_memories_banned_nodes,
+            runtimes_banned_nodes=self.runtimes_banned_nodes,
+            min_cut_saved_values=self.min_cut_saved_values,
         )
 
         self.assertEqual(mock_trace_structured.call_count, 1)

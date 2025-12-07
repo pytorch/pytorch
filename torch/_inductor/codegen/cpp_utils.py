@@ -5,8 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 from unittest.mock import patch
 
 import sympy
@@ -311,6 +311,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         return res
 
     def store_reduction(self, name, index, value):
+        # pyrefly: ignore [bad-argument-count]
         return self._inner.store_reduction(*self.localize(name, index), value)
 
 
@@ -429,7 +430,7 @@ class LocalBufferContext:
         `local_buf`. This helps the fused loops to work on smaller-sized local buffers
         for better data locality.
 
-        The the data access of `local_buf` is assumed to be contiguous with the
+        The data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
         assert len(nodes) > 0

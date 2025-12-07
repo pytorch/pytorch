@@ -10,9 +10,10 @@
 import logging
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Optional, TextIO, TYPE_CHECKING
+from typing import TextIO, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -24,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 def tail_logfile(
-    header: str, file: str, dst: TextIO, finished: Event, interval_sec: float
+    header: str,
+    file: str,
+    dst: TextIO,
+    finished: Event,
+    interval_sec: float,
+    log_line_filter: Callable[[str], bool] | None = None,
 ):
     while not os.path.exists(file):
         if finished.is_set():
@@ -36,7 +42,8 @@ def tail_logfile(
             line = fp.readline()
 
             if line:
-                dst.write(f"{header}{line}")
+                if log_line_filter and log_line_filter(line):
+                    dst.write(f"{header}{line}")
             else:  # reached EOF
                 if finished.is_set():
                     # log line producer is finished
@@ -91,12 +98,14 @@ class TailLog:
         name: str,
         log_files: dict[int, str],
         dst: TextIO,
-        log_line_prefixes: Optional[dict[int, str]] = None,
+        log_line_prefixes: dict[int, str] | None = None,
         interval_sec: float = 0.1,
+        log_line_filter: Callable[[str], bool] = (lambda _: True),
     ):
         n = len(log_files)
         self._threadpool = None
         if n > 0:
+            # pyrefly: ignore [bad-assignment]
             self._threadpool = ThreadPoolExecutor(
                 max_workers=n,
                 thread_name_prefix=f"{self.__class__.__qualname__}_{name}",
@@ -106,15 +115,16 @@ class TailLog:
         self._dst = dst
         self._log_files = log_files
         self._log_line_prefixes = log_line_prefixes
+        self._log_line_filter = log_line_filter
         self._finished_events: dict[int, Event] = {
-            local_rank: Event() for local_rank in log_files.keys()
+            local_rank: Event() for local_rank in log_files
         }
         self._futs: list[Future] = []
         self._interval_sec = interval_sec
         self._stopped = False
 
     def start(self) -> "TailLog":
-        if not self._threadpool:
+        if not self._threadpool or not self._dst:
             return self
 
         for local_rank, file in self._log_files.items():
@@ -129,6 +139,7 @@ class TailLog:
                     dst=self._dst,
                     finished=self._finished_events[local_rank],
                     interval_sec=self._interval_sec,
+                    log_line_filter=self._log_line_filter,
                 )
             )
         return self
@@ -141,12 +152,11 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                logger.error(
-                    "error in log tailor for %s%s. %s: %s",
+                logger.exception(
+                    "error in log tailor for %s%s. %s",
                     self._name,
                     local_rank,
                     e.__class__.__qualname__,
-                    e,
                 )
 
         if self._threadpool:

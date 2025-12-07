@@ -1,6 +1,4 @@
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -11,8 +9,6 @@ cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr) {
   // NOLINTNEXTLINE(*const-cast)
   return cusparseDestroyDnMat(const_cast<cusparseDnMatDescr*>(dnMatDescr));
 }
-
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 namespace {
 
@@ -181,7 +177,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices
-      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
+      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col index
       value_type // data type of values
       ));
 
@@ -209,7 +205,5 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
 
   descriptor_.reset(raw_descriptor);
 }
-
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace at::cuda::sparse

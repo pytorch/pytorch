@@ -12,6 +12,7 @@ BU
 contiguities
 contiguity
 coo
+DEPENDEES
 deser
 din
 dout
@@ -27,15 +28,16 @@ inp
 inps
 inpt
 inpts
-matA
-matB
-matC
+mata
+matb
+matc
 nd
 nin
 NotIn
 nout
 NowNs
 numer
+OffsetT
 oH
 optins
 ot

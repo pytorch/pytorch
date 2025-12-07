@@ -41,7 +41,6 @@ def sample_vllm_test_library():
                 "pytest -v -s basic_correctness/test_cumem.py",
                 "pytest -v -s basic_correctness/test_basic_correctness.py",
                 "pytest -v -s basic_correctness/test_cpu_offload.py",
-                "VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py",
             ],
         },
         "vllm_basic_models_test": {
@@ -68,15 +67,12 @@ def sample_vllm_test_library():
                         "-v",
                         "-s",
                         "entrypoints/llm",
-                        "--ignore=entrypoints/llm/test_lazy_outlines.py",
                         "--ignore=entrypoints/llm/test_generate.py",
-                        "--ignore=entrypoints/llm/test_generate_multiple_loras.py",
                         "--ignore=entrypoints/llm/test_collective_rpc.py",
                     ]
                 ),
-                "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
-                "pytest -v -s entrypoints/llm/test_generate.py ",
-                "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
+                "pytest -v -s entrypoints/llm/test_generate.py",
+                "pytest -v -s entrypoints/offline_mode",
             ],
         },
         "vllm_regression_test": {
@@ -141,13 +137,13 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_fusion.py",
                 "pytest -v -s compile/test_fusion_attn.py",
                 "pytest -v -s compile/test_silu_mul_quant_fusion.py",
-                "pytest -v -s compile/test_sequence_parallelism.py",
-                "pytest -v -s compile/test_async_tp.py",
-                "pytest -v -s compile/test_fusion_all_reduce.py",
+                "pytest -v -s compile/distributed/test_sequence_parallelism.py",
+                "pytest -v -s compile/distributed/test_async_tp.py",
+                "pytest -v -s compile/distributed/test_fusion_all_reduce.py",
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
-        "vllm_languagde_model_test_extended_generation_28_failure_test": {
+        "vllm_language_model_test_extended_generation_28_failure_test": {
             "title": "Language Models Test (Extended Generation) 2.8 release failure",
             "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
             "package_install": [
@@ -181,7 +177,13 @@ def sample_vllm_test_library():
                         "pytest -q --collect-only lora",
                         "--shard-id=$$BUILDKITE_PARALLEL_JOB",
                         "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
-                        "--ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py",
+                        "--ignore=lora/test_chatglm3_tp.py",
+                        "--ignore=lora/test_llama_tp.py",
+                        "--ignore=lora/test_llm_with_multi_loras.py",
+                        "--ignore=lora/test_olmoe_tp.py",
+                        "--ignore=lora/test_deepseekv2_tp.py",
+                        "--ignore=lora/test_gptoss_tp.py",
+                        "--ignore=lora/test_qwen3moe_tp.py",
                     ]
                 ),
                 "echo '[checking] Done. list lora tests'",
@@ -189,7 +191,13 @@ def sample_vllm_test_library():
                     [
                         "pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB",
                         "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
-                        "--ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py",
+                        "--ignore=lora/test_chatglm3_tp.py",
+                        "--ignore=lora/test_llama_tp.py",
+                        "--ignore=lora/test_llm_with_multi_loras.py",
+                        "--ignore=lora/test_olmoe_tp.py",
+                        "--ignore=lora/test_deepseekv2_tp.py",
+                        "--ignore=lora/test_gptoss_tp.py",
+                        "--ignore=lora/test_qwen3moe_tp.py",
                     ]
                 ),
             ],

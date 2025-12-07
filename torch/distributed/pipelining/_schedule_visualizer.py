@@ -10,13 +10,14 @@ visualize_schedule(ops, "test.png")
 """
 
 import collections
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple
 from unittest import mock
 
 from torch.distributed.pipelining.schedules import (
     _Action,
     _ComputationType,
     _PipelineSchedule,
+    _PipelineScheduleRuntime,
     get_schedule_class,
     PipelineScheduleMulti,
     PipelineScheduleSingle,
@@ -31,18 +32,21 @@ class OpKey(NamedTuple):
 
 
 def get_schedule_ops(
-    schedule: Union[str, type[_PipelineSchedule]],
+    schedule: str | type[_PipelineSchedule],
     pp_degree: int,
     num_microbatches: int,
-    num_stages_per_rank: Optional[int] = None,
+    num_stages_per_rank: int | None = None,
     add_spacing: bool = False,
-) -> list[list[Optional[_Action]]]:
+    with_comms: bool = False,
+) -> list[list[_Action | None]]:
     """
     Get all actions for a given schedule, pp_degree, and num_microbatches. The actions are returned in a list of lists
     where each inner list represents a rank and each element in the inner list represents an action.
 
     The schedule can be specified as a string which is passed into get_schedule_class() or a _PipelineSchedule instance.
     """
+    if add_spacing and with_comms:
+        raise ValueError("Cannot add spacing and view comms at the same time")
 
     if isinstance(schedule, str):
         schedule_class = get_schedule_class(schedule)
@@ -77,12 +81,20 @@ def get_schedule_ops(
         raise ValueError(f"Invalid schedule: {schedule_class}")
 
     # Instantiate the schedule class
+    # pyrefly: ignore [bad-instantiation, bad-argument-type]
     schedule_instance = schedule_class(stages, num_microbatches)
+    assert schedule_instance.pipeline_order is not None
 
     # Convert to List[List[_Action]]
-    all_actions = []
-    for rank in range(pp_degree):
-        all_actions.append(schedule_instance.pipeline_order[rank])
+    all_actions: list[list[_Action | None]] = []
+    if with_comms:
+        runtime = _PipelineScheduleRuntime(stages, num_microbatches)
+        runtime._prepare_schedule_with_comms(schedule_instance.pipeline_order)
+        for rank in range(pp_degree):
+            all_actions.append(list(runtime.pipeline_order_with_comms[rank]))
+    else:
+        for rank in range(pp_degree):
+            all_actions.append(schedule_instance.pipeline_order[rank])
 
     # Add spacing
     if add_spacing:
@@ -124,8 +136,8 @@ action_type_to_color_mapping = {
 
 
 def add_schedule_op_spacing(
-    schedule: list[list[Optional[_Action]]],
-) -> list[list[Optional[_Action]]]:
+    schedule: list[list[_Action | None]],
+) -> list[list[_Action | None]]:
     """
     Add spacing to the schedule based on dependencies between ranks.
 
@@ -157,7 +169,7 @@ def add_schedule_op_spacing(
     )
 
     num_ranks = len(schedule)
-    spaced_schedule: list[list[Optional[_Action]]] = [[] for _ in range(num_ranks)]
+    spaced_schedule: list[list[_Action | None]] = [[] for _ in range(num_ranks)]
     rank_ops = [collections.deque(ops) for ops in schedule]
 
     # Track completion times: (stage_index, action_type, microbatch_index) -> completion_time
@@ -319,8 +331,8 @@ def add_schedule_op_spacing(
 
 
 def visualize_schedule(
-    schedule: list[list[Optional[_Action]]],
-    filename: Optional[str] = None,
+    schedule: list[list[_Action | None]],
+    filename: str | None = None,
 ) -> None:
     """
     Visualize the schedule using matplotlib.

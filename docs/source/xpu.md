@@ -12,6 +12,7 @@
     :nosignatures:
 
     StreamContext
+    can_device_access_peer
     current_device
     current_stream
     device
@@ -25,7 +26,9 @@
     get_stream_from_external
     init
     is_available
+    is_bf16_supported
     is_initialized
+    is_tf32_supported
     set_device
     set_stream
     stream
@@ -72,7 +75,10 @@
     :toctree: generated
     :nosignatures:
 
+     XPUPluggableAllocator
+     change_current_allocator
      empty_cache
+     get_per_process_memory_fraction
      max_memory_allocated
      max_memory_reserved
      mem_get_info
@@ -82,11 +88,12 @@
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+     set_per_process_memory_fraction
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime
-for tracking purposes -->
 ```{eval-rst}
-.. py:module:: torch.xpu.random
-.. py:module:: torch.xpu.streams
+.. toctree::
+    :hidden:
+
+    xpu.aliases.md
 ```

@@ -15,8 +15,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
 from unittest.mock import patch, call
+
+
+if TEST_WITH_ROCM:
+    import os
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 
 class TestModule(TestCase):
@@ -322,7 +328,7 @@ class TestModule(TestCase):
 
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when
-        # non-leafs are present in the graph.
+        # non-leaves are present in the graph.
         def inner_retain_grad(obj):
             if obj.requires_grad:
                 obj.retain_grad()
