@@ -9,7 +9,7 @@ JAX_VERSION=$(get_pinned_commit /ci_commit_pins/jax)
 
 function install_jax_cpu() {
   echo "Installing JAX ${JAX_VERSION} (CPU only)"
-  pip_install "jax==${JAX_VERSION}"
+  pip_install "jax[cpu]==${JAX_VERSION}"
 
   # Verify installation
   python -c "import jax"  # check for errors

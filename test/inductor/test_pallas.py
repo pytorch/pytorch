@@ -13,8 +13,7 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_PALLAS
-from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
+from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
 
 
@@ -814,18 +813,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-print("oulgen test")
-print(test_torchinductor.RUN_CPU)
-print(HAS_PALLAS)
-print(test_torchinductor.RUN_GPU)
-print(has_cuda_pallas())
-print(test_torchinductor.RUN_TPU)
-print(has_jax_tpu_backend())
 
+if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
-if test_torchinductor.RUN_CPU and HAS_PALLAS:
-
-    @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
     class PallasTestsCPU(PallasTestsMixin, TestCase):
         DEVICE = "cpu"
 
@@ -833,18 +823,16 @@ if test_torchinductor.RUN_CPU and HAS_PALLAS:
     make_pallas(test_torchinductor.CpuTests)
 
 
-if test_torchinductor.RUN_GPU and HAS_PALLAS:
+if test_torchinductor.RUN_GPU and has_cuda_pallas():
 
-    @unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
     class PallasTestsCUDA(PallasTestsMixin, TestCase):
         DEVICE = "cuda"
 
     # make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
 
-if test_torchinductor.RUN_TPU and HAS_PALLAS:
+if test_torchinductor.RUN_TPU and has_tpu_pallas():
 
-    @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
     @config.patch({"_debug_cpu_to_tpu_pallas": True})
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         DEVICE = "cpu"
@@ -867,5 +855,4 @@ if test_torchinductor.RUN_TPU and HAS_PALLAS:
 
 
 if __name__ == "__main__":
-    if HAS_PALLAS:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
