@@ -375,6 +375,13 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
