@@ -868,6 +868,10 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
+  # Set TPU target for TPU tests
+  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
+    export PALLAS_TARGET_TPU=1
+  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
