@@ -1307,8 +1307,6 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_functional_reduce_scatter_tensor(*args, **kwargs)
             elif func is torch.ops._c10d_functional.all_to_all_single.default:
                 return _c10d._local_functional_all_to_all_single(*args, **kwargs)
-            elif func is torch.ops._c10d_functional.wait_tensor.default:
-                return _c10d._local_functional_wait_tensor(*args, **kwargs)
             else:
                 with LocalTensorMode(self.ranks):
                     return func._op_dk(

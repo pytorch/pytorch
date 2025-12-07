@@ -94,7 +94,7 @@ void normalize_last_dims(
 }  // namespace internal
 
 namespace {
-#if AT_BUILD_WITH_BLAS()
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunneeded-internal-declaration")
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
@@ -108,7 +108,7 @@ bool use_blas_gemm(
       (ldb >= std::max(int64_t{1}, (transb_ ? n : k))) &&
       (ldc >= std::max(int64_t{1}, m)));
 }
-#endif
+C10_DIAGNOSTIC_POP()
 
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
