@@ -11,5 +11,5 @@ ln -s /usr/bin/python${PYTHON_VERSION} /usr/bin/python
 python -m venv /var/lib/jenkins/ci_env
 source /var/lib/jenkins/ci_env/bin/activate
 
-python -mpip install --upgrade pip
-python -mpip install -r /opt/requirements-ci.txt
+python -m pip install --upgrade pip
+python -m pip install -r /opt/requirements-ci.txt

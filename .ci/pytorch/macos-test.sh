@@ -190,7 +190,7 @@ checkout_install_torchbench() {
   pip uninstall -y torchao
 
   echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
+  python -m pip freeze
 }
 
 torchbench_setup_macos() {
@@ -219,7 +219,7 @@ torchbench_setup_macos() {
 }
 
 pip_benchmark_deps() {
-  python -mpip install --no-input requests cython scikit-learn six
+  python -m pip install --no-input requests cython scikit-learn six
 }
 
 

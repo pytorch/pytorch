@@ -126,13 +126,13 @@ jobs:
             "${MANYLINUX_IMAGE}"
           )
 
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip install \
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
           # I wonder if there is a command to both download and install the wheels
           # in one go
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip download \
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip download \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
