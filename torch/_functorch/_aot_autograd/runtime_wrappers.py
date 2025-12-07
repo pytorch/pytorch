@@ -253,12 +253,6 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
-blocklisted_ops = [
-    torch.ops._c10d_functional.wait_tensor.default,
-    torch.ops._c10d_functional.all_reduce_.default,
-]
-
-
 class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
     """
     Checks if inp/out of custom ops alias each other
@@ -281,12 +275,10 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             return NotImplementedError
 
         res = func(*args, **kwargs)
-        # Only check aliasing for custom ops (non-aten/prim)
-        if (
-            not isinstance(func, torch._ops.HigherOrderOperator)
-            and func.namespace not in ["aten", "prim"]
-            and func not in blocklisted_ops
-        ):
+        # Only check aliasing for custom ops (non-aten/prim/_c10d_functional)
+        if not isinstance(
+            func, torch._ops.HigherOrderOperator
+        ) and func.namespace not in ["aten", "prim", "_c10d_functional"]:
             torch._library.utils._c_check_aliasing_constraint(
                 func.name,
                 args,
