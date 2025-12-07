@@ -43,7 +43,7 @@ void topk_impl_loop(
   }
   using elem_t = std::pair<accscalar_t, int64_t>;
 
-  auto use_partial_sort = k * 64 <= dim_size;
+  const auto use_partial_sort = k * 64 <= dim_size;
   std::vector<elem_t> queue(use_partial_sort ? k : dim_size);
   for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
