@@ -17,6 +17,19 @@ aten = torch.ops.aten
 
 
 class TestRegisterSharding(DTensorTestBase):
+    def tearDown(self):
+        super().tearDown()
+        # Clean up any custom ops registered during tests to avoid test pollution
+        # This addresses the concern about proper deregistration of custom ops
+        import torch._custom_op
+
+        keys = list(torch._custom_op.impl.global_registry.keys())
+        for key in keys:
+            if key.startswith("test_dtensor::"):
+                torch._custom_op.impl.global_registry[key]._destroy()
+        if hasattr(torch.ops, "test_dtensor"):
+            delattr(torch.ops, "test_dtensor")
+
     @with_comms
     def test_softmax_fwd(self):
         # After registering the custom softmax sharding strategy,

@@ -536,11 +536,14 @@ class OpSchema:
                 mesh = arg.mesh
                 break
             elif isinstance(arg, (list, tuple, TupleStrategy)):
-                first_elem = (
-                    arg.children[0] if isinstance(arg, TupleStrategy) else arg[0]
-                )
-                if isinstance(first_elem, (DTensorSpec, OpStrategy)):
-                    mesh = first_elem.mesh
+                # Scan all elements in the list/tuple, not just the first one,
+                # to handle cases like List[Optional[Tensor]] where first elem may be None
+                elems = arg.children if isinstance(arg, TupleStrategy) else arg
+                for elem in elems:
+                    if isinstance(elem, (DTensorSpec, OpStrategy)):
+                        mesh = elem.mesh
+                        break
+                if mesh is not None:
                     break
         if mesh is None:
             raise ValueError(f"Cannot find device mesh from args for op : {self.op}.")
