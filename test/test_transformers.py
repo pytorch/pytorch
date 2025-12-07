@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     make_tensor,
     NOTEST_CPU,
-    IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
 )
@@ -4811,7 +4810,6 @@ class TestAttnBias(NNTestCase):
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")

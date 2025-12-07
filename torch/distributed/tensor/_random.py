@@ -6,6 +6,7 @@ from logging import getLogger
 from typing import Optional
 
 import torch
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import Shard
@@ -469,4 +470,9 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_handle = _get_device_handle(device_type)
     assert device_handle is not None
     device_idx = device_mesh.get_rank() % device_handle.device_count()
-    return torch.device(f"{device_type}:{device_idx:d}")
+
+    @maybe_run_for_local_tensor
+    def get_device(device_idx):
+        return torch.device(f"{device_type}:{device_idx:d}")
+
+    return get_device(device_idx)

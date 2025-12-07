@@ -452,27 +452,27 @@ if __name__ == "__main__":
 
     results = []
     for M, G, N, K in [
-        # [5, 2, 16, 16],
-        # [13, 3, 16, 32],
-        # [128, 8, 16, 16],
-        # [253, 7, 24, 24],
-        # [512, 8, 32, 64],
-        # [1024, 16, 256, 1024],
-        # [2048, 32, 512, 256],
-        # [2048, 32, 512, 2048],
-        # [4834, 24, 5120, 1536],
-        # [8257, 32, 5120, 1536],
-        # [32768, 24, 6144, 2048],
-        # [32768, 48, 6144, 2048],
-        # [32768, 64, 6144, 2048],
-        # [65536, 24, 6144, 2048],
-        [65536, 32, 6144, 2048],
-        # [65536, 48, 6144, 2048],
-        # [65536, 64, 6144, 2048],
-        # [131072, 24, 6144, 2048],
-        # [131072, 32, 6144, 2048],
-        # [131072, 48, 6144, 2048],
-        # [131072, 64, 6144, 2048],
+        [5, 2, 16, 16],
+        [13, 3, 16, 32],
+        [128, 8, 16, 16],
+        [253, 7, 24, 24],
+        [512, 8, 32, 64],
+        [1024, 16, 256, 1024],
+        [2048, 32, 512, 256],
+        [2048, 32, 512, 2048],
+        [4834, 24, 5120, 1536],
+        [8257, 32, 5120, 1536],
+        [32768, 24, 6144, 2048],
+        [32768, 48, 6144, 2048],
+        [32768, 64, 6144, 2048],  # fixme: crash
+        [65536, 24, 6144, 2048],
+        [65536, 32, 6144, 2048],  ##
+        [65536, 48, 6144, 2048],
+        [65536, 64, 6144, 2048],
+        [131072, 24, 6144, 2048],  # fixme: crash
+        [131072, 32, 6144, 2048],
+        [131072, 48, 6144, 2048],
+        [131072, 64, 6144, 2048],
     ]:
         N_align = (N + align - 1) // align * align
         K_align = (K + align - 1) // align * align
@@ -517,12 +517,15 @@ if __name__ == "__main__":
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        fn = lambda: grouped_mm_triton(A, B.transpose(-2, -1), offs)
-        us_triton = triton.testing.do_bench(fn, warmup=2, rep=20) * 1e3
-        tflops_per_sec = flops * 1e-12 / (us_triton * 1e-6)
-        print(
-            f"{"Triton compiled torch._grouped_mm":<36} {us_triton:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
-        )
+        try:
+            fn = lambda: grouped_mm_triton(A, B.transpose(-2, -1), offs)
+            us_triton = triton.testing.do_bench(fn, warmup=2, rep=20) * 1e3
+            tflops_per_sec = flops * 1e-12 / (us_triton * 1e-6)
+            print(
+                f"{"Triton compiled torch._grouped_mm":<36} {us_triton:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
+            )
+        except:
+            us_triton = None
 
         # Benchmark compiled torch._grouped_mm
         try:
@@ -531,8 +534,9 @@ if __name__ == "__main__":
                 torch._grouped_mm,
                 options={
                     "max_autotune": True,
-                    "max_autotune_gemm_backends": "CUTE",
+                    "max_autotune_gemm_backends": "CUTEDSL",
                 },
+                dynamic=False,
             )
             fn = lambda: grouped_mm_cute(A, B.transpose(-2, -1), offs)
             us_cute = triton.testing.do_bench(fn, warmup=2, rep=20) * 1e3
@@ -699,6 +703,7 @@ if __name__ == "__main__":
                     )
                 proton.finalize(sid)
         else:
+            us_gluon = None
             print(f"{"Gluon grouped_mm":<36} No valid config found")
 
         print()
@@ -716,13 +721,17 @@ if __name__ == "__main__":
             "CUTLASS latency (us)": us_cutlass,
         }
         if us_cute is not None:
-            result["CuTe latency (us)"] = us_cutlass
-        result["Triton latency (us)"] = us_triton
-        result["Gluon latency (us)"] = us_gluon
+            result["CuTe latency (us)"] = us_cute
+        if us_triton is not None:
+            result["Triton latency (us)"] = us_triton
+        if us_gluon is not None:
+            result["Gluon latency (us)"] = us_gluon
         if us_cute is not None:
             result["CuTe speedup"] = us_cutlass / us_cute
-        result["Triton speedup"] = us_cutlass / us_triton
-        result["Gluon speedup"] = us_cutlass / us_gluon
+        if us_triton is not None:
+            result["Triton speedup"] = us_cutlass / us_triton
+        if us_gluon is not None:
+            result["Gluon speedup"] = us_cutlass / us_gluon
         results.append(result)
 
     df = pd.DataFrame(results)
