@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #ifdef USE_CUDA
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 
 #include <c10/core/Device.h>

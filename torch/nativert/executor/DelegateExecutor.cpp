@@ -1,12 +1,7 @@
 #include <torch/nativert/executor/DelegateExecutor.h>
 
 #ifndef _WIN32
-#include <unistd.h>
 #endif
-
-#include <sys/stat.h>
-
-#include <c10/util/Logging.h>
 
 #include <torch/nativert/common/FileUtil.h>
 #include <string>
