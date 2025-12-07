@@ -46,6 +46,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
     UserError,
@@ -1018,6 +1019,15 @@ class TensorVariable(VariableTracker):
                 explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
                 hints=[*graph_break_hints.FUNDAMENTAL],
             )
+
+        # Match eager error for tensors that don't require grad
+        example_value = self.as_proxy().node.meta.get("example_value")
+        if example_value is not None and isinstance(example_value, torch.Tensor):
+            if not example_value.requires_grad and example_value.grad_fn is None:
+                raise TorchRuntimeError(
+                    "element 0 of tensors does not require grad and does not have a grad_fn"
+                )
+
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()

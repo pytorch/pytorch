@@ -615,6 +615,24 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    def test_backward_on_no_grad_tensor(self):
+        """Test that backward on tensor without requires_grad raises error."""
+        x = torch.ones(5, 5, requires_grad=True)
+        y = torch.ones(5, 5) * 4
+        with torch.no_grad():
+            w = x + y
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(w):
+            w.backward(torch.ones(5, 5))
+
+        self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "element 0 of tensors does not require grad",
+            fn,
+            w,
+        )
+
 
 if __name__ == "__main__":
     run_tests()

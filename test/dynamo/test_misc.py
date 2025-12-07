@@ -6180,7 +6180,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
