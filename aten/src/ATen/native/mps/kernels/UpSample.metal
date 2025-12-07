@@ -614,7 +614,7 @@ kernel void upsample_2d_aa(
       }
       outputData
           [n * output_strides.x + c * output_strides.y +
-          output_y * output_strides.z + output_x * output_strides.w] =
+           output_y * output_strides.z + output_x * output_strides.w] =
               static_cast<T>(res / ws);
     }
   }
@@ -851,6 +851,19 @@ kernel void upsample_bicubic2d_backward(
           constant DTYPE * gradOutputData [[buffer(1)]],                    \
           constant ulong4 & input_strides [[buffer(2)]],                    \
           constant ulong4 & output_strides [[buffer(3)]],                   \
+          constant long4 & input_sizes [[buffer(4)]],                       \
+          constant long4 & output_sizes [[buffer(5)]],                      \
+          constant float2 & scales [[buffer(6)]],                           \
+          constant bool& align_corners [[buffer(7)]],                       \
+          uint thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)       \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+  upsample_2d_aa_backward<DTYPE, FUNCTOR>(                              \
+      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],         \
+      constant DTYPE * gradOutputData [[buffer(1)]],                    \
+      constant ulong4 & input_strides [[buffer(2)]],                    \
+      constant ulong4 & output_strides [[buffer(3)]],                   \
       constant long4 & input_sizes [[buffer(4)]],                       \
       constant long4 & output_sizes [[buffer(5)]],                      \
       constant float2 & scales [[buffer(6)]],                           \
