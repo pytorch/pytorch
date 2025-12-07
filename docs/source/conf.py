@@ -1204,7 +1204,6 @@ coverage_ignore_classes = [
     "PropModule",
     # torch.backends.cuda
     "cuBLASModule",
-    "MathSDPModule",
     "cuFFTPlanCache",
     "cuFFTPlanCacheAttrContextProp",
     "cuFFTPlanCacheManager",
