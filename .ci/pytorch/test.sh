@@ -372,6 +372,14 @@ test_h100_symm_mem() {
   # symmetric memory test
   # Install Helion for distributed kernel tests
   pip install helion
+  # Clone helion repo to get examples (not included in pip package)
+  HELION_REPO_DIR="/tmp/helion"
+  if [[ ! -d "$HELION_REPO_DIR" ]]; then
+    git clone --depth 1 https://github.com/pytorch/helion.git "$HELION_REPO_DIR"
+  fi
+  # Copy examples to helion package location where EXAMPLES_DIR points
+  HELION_SITE_PACKAGES=$(python -c "import helion; import os; print(os.path.dirname(helion.__file__))")
+  cp -r "$HELION_REPO_DIR/examples" "$HELION_SITE_PACKAGES/../"
   # time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
