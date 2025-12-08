@@ -5563,7 +5563,6 @@
   dispatch:
     CompositeExplicitAutograd: detach
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: detach
-  tags: view
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -8346,7 +8345,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: view_dtype
-  tags: view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
@@ -10454,7 +10452,6 @@
   dispatch:
     CPU, CUDA, Meta, MPS, MTIA: unfold
     QuantizedCPU, QuantizedCUDA: unfold
-  tags: view
 
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
   variants: function
