@@ -603,7 +603,7 @@ class DeviceCachingAllocator {
       // segments in this statistic would significantly complicate the
       // bookkeeping logic, so we intentionally exclude expandable segments from
       // the `inactive_split` metric.
-      if (!block->expandable_segment_) {
+      if (!block->expandable_segment) {
         if (net_change_inactive_split_blocks > 0) {
           stats.inactive_split[stat_type].increase(
               static_cast<size_t>(net_change_inactive_split_blocks));
@@ -1223,12 +1223,12 @@ class DeviceCachingAllocator {
       bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-      if (already_split && !block->expandable_segment_) {
+      if (already_split && !block->expandable_segment) {
         // Allocate from an existing inactive split block: decrease inactive
         // split bytes.
         decrease_stat_array(
             stats.inactive_split_bytes, block->size, params.stat_types);
-      } else if (!block->expandable_segment_) {
+      } else if (!block->expandable_segment) {
         // First time split a non-expandable block: create a new inactive
         // split block (the remaining part), so increase the inactive split
         // count and bytes.
@@ -1237,7 +1237,7 @@ class DeviceCachingAllocator {
           stats.inactive_split_bytes[stat_type].increase(remaining->size);
         });
       }
-    } else if (already_split && !block->expandable_segment_) {
+    } else if (already_split && !block->expandable_segment) {
       // Allocate the whole inactive split block: decrease both count and bytes.
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
         stats.inactive_split[stat_type].decrease(1);
