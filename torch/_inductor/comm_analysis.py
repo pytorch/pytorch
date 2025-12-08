@@ -44,6 +44,8 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
         return NVIDIA_GPU_TYPE.AMPERE
     elif "H100" in gpu_info:
         return NVIDIA_GPU_TYPE.HOPPER
+    elif any(gpu in gpu_info for gpu in ("B100", "B200", "B300")):
+        NVIDIA_GPU_TYPE.BLACKWELL
     else:
         # for other gpu types, assume Ampere
         return NVIDIA_GPU_TYPE.AMPERE
