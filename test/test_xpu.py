@@ -736,7 +736,7 @@ if __name__ == "__main__":
             # exercise the history trimming code
             torch.rand(128 * 5, device="xpu")
 
-            ss = torch.xpu.memory._snapshot()
+            ss = torch.xpu.memory.memory_snapshot()
             found_it = False
             for seg in ss["segments"]:
                 self.assertTrue("frames" in seg)
@@ -751,7 +751,7 @@ if __name__ == "__main__":
             del x
             gc.collect()
             torch.xpu.empty_cache()
-            ss = torch.xpu.memory._snapshot()
+            ss = torch.xpu.memory.memory_snapshot()
             self.assertTrue(
                 ss["device_traces"][0][-1]["action"]
                 in ("segment_free", "segment_unmap")
@@ -763,11 +763,12 @@ if __name__ == "__main__":
     @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
     def test_memory_snapshot_with_cpp(self):
         try:
+            gc.collect()
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="all")
-            x = torch.rand(311, 411, device="xpu")  # noqa: F841
+            _ = torch.rand(311, 411, device="xpu")
 
-            ss = torch.xpu.memory._snapshot()["segments"]
+            ss = torch.xpu.memory.memory_snapshot()
             found_it = False
             for seg in ss:
                 for b in seg["blocks"]:
@@ -783,6 +784,7 @@ if __name__ == "__main__":
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
+                gc.collect()
                 torch.xpu.memory.empty_cache()
                 torch.xpu.memory._record_memory_history(context=context)
                 x = None
@@ -797,7 +799,7 @@ if __name__ == "__main__":
 
                 thealloc()
                 thefree()
-                ss = json.dumps(torch.xpu.memory._snapshot())
+                ss = torch.xpu.memory_snapshot()
                 self.assertEqual(("thefree" in ss), (context == "all"))
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
@@ -805,6 +807,7 @@ if __name__ == "__main__":
 
     def test_memory_snapshot_script(self):
         try:
+            gc.collect()
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
 
@@ -812,7 +815,7 @@ if __name__ == "__main__":
             def foo():
                 return torch.rand(311, 411, device="xpu")
 
-            x = foo()  # noqa: F841
+            _ = foo()
 
             ss = torch.xpu.memory.memory_snapshot()
             found_it = False
