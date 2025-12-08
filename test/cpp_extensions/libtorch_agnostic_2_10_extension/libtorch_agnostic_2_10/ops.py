@@ -580,3 +580,61 @@ def my_new_zeros(
     return torch.ops.libtorch_agnostic_2_10.my_new_zeros.default(
         self, size, dtype, layout, device, pin_memory
     )
+
+
+def my_sum(self, dim=None, keepdim=False, dtype=None) -> Tensor:
+    """
+    Returns the sum of the tensor along the specified dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the sum of the tensor along the specified dimensions
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum.default(self, dim, keepdim, dtype)
+
+
+def my_sum_out(out, self, dim=None, keepdim=False, dtype=None) -> Tensor:
+    """
+    Computes the sum of the tensor along the specified dimensions and writes
+    the result to the output tensor.
+
+    Args:
+        out: Tensor - output tensor (modified in-place)
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the output tensor (same as out parameter)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_out.default(
+        out, self, dim, keepdim, dtype
+    )
+
+
+def my_sum_all(self) -> Tensor:
+    """
+    Returns the sum of all elements in the tensor (reduces to a scalar).
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - scalar tensor containing the sum of all elements
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_all.default(self)
+
+
+def my_sum_dim1(self) -> Tensor:
+    """
+    Returns the sum of the tensor along dimension 1.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - the sum of the tensor along dimension 1
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_dim1.default(self)
