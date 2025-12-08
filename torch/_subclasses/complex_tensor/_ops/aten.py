@@ -57,11 +57,13 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
 
     return register_complex(op, impl)
 
+
 def register_binary_linear_inplace(op: OpType, out_of_place_impl: Callable):
     def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
+
     return register_complex(op, impl)
 
 
@@ -93,7 +95,6 @@ SIMPLE_OPS_LIST = [
     aten.mean,
     aten.sum,
     aten.clone,
-    aten.neg,
     aten.flip,
     aten.permute,
     aten.repeat,
@@ -121,7 +122,6 @@ SIMPLE_FORCE_TESTED_OPS = [
     aten.lift_fresh,
     aten._unsafe_view,
     aten.index,
-    aten._neg_view,
     aten.avg_pool2d,
     aten.avg_pool3d,
     aten.avg_pool2d_backward,
@@ -791,11 +791,47 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(re, -im)
 
 
-# TODO (hameerabbasi): Not being tested
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
-    re, im = split_complex_tensor(self)
-    return ComplexTensor(re, torch._neg_view(im))
+    return ComplexTensor(
+        self._data, neg_flag=self._neg_flag, conj_flag=not self._conj_flag
+    )
+
+
+@register_complex(aten._neg_view)
+@register_complex(aten.neg)
+def _neg_impl(self: ComplexTensor) -> ComplexTensor:
+    return ComplexTensor(
+        self._data, neg_flag=not self._neg_flag, conj_flag=self._conj_flag
+    )
+
+
+@register_complex(aten.resolve_conj)
+def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
+    if not self._conj_flag:
+        return self
+    return ComplexTensor(
+        self._data[..., 0], -self._data[..., 1], neg_flag=self._neg_flag
+    )
+
+
+@register_complex(aten.is_conj)
+def is_conj_impl(self: ComplexTensor) -> bool:
+    return self._conj_flag
+
+
+@register_complex(aten.is_neg)
+def is_neg_impl(self: ComplexTensor) -> bool:
+    return self._neg_flag
+
+
+@register_complex(aten.resolve_neg)
+def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
+    if not self._neg_flag:
+        return self
+    return ComplexTensor(
+        -self._data[..., 0], -self._data[..., 1], conj_flag=self._conj_flag
+    )
 
 
 @register_complex(aten.index_add)
