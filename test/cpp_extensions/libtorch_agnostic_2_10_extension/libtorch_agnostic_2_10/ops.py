@@ -368,3 +368,65 @@ def test_std_cuda_kernel_launch_check_error() -> None:
     This should raise a RuntimeError with the CUDA kernel launch error message.
     """
     torch.ops.libtorch_agnostic_2_10.test_std_cuda_kernel_launch_check_error.default()
+
+
+def my__foreach_mul_vec(tensors, others) -> list[Tensor]:
+    """
+    Returns a list of tensors that are the results of pointwise multiplying
+    tensors and others. This variant tests const std::vector<Tensor>& parameters.
+
+    Args:
+        tensors: list of tensors
+        others: list of tensors (with the same corresponding shapes as tensors)
+
+    Returns: list of multiplied tensors
+    """
+    return torch.ops.libtorch_agnostic_2_10.my__foreach_mul_vec.default(tensors, others)
+
+
+def my_string_op_const_string_ref(t, accessor, passthru) -> tuple[list[str], int]:
+    """
+    Tests TORCH_BOX with const std::string& parameters.
+
+    Args:
+        t: Tensor - input tensor to query
+        accessor: str - which property to access ("dim", "size", or "stride")
+        passthru: str - a string that gets returned as the last element of the list
+
+    Returns: tuple - (list of [accessor, value, passthru] as strings, value)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_string_op_const_string_ref.default(
+        t, accessor, passthru
+    )
+
+
+def my_string_op_const_string_view_ref(t, accessor, passthru) -> tuple[list[str], int]:
+    """
+    Tests TORCH_BOX with const std::string_view& parameters.
+
+    Args:
+        t: Tensor - input tensor to query
+        accessor: str - which property to access ("dim", "size", or "stride")
+        passthru: str - a string that gets returned as the last element of the list
+
+    Returns: tuple - (list of [accessor, value, passthru] as strings, value)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_string_op_const_string_view_ref.default(
+        t, accessor, passthru
+    )
+
+
+def my_string_op_string_ref(t, accessor, passthru) -> tuple[list[str], int]:
+    """
+    Tests TORCH_BOX with std::string& (non-const) parameters.
+
+    Args:
+        t: Tensor - input tensor to query
+        accessor: str - which property to access ("dim", "size", or "stride")
+        passthru: str - a string that gets returned as the last element of the list
+
+    Returns: tuple - (list of [accessor, value, passthru] as strings, value)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_string_op_string_ref.default(
+        t, accessor, passthru
+    )
