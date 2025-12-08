@@ -7,7 +7,9 @@ from typing import cast
 import torch
 import torch._C
 import torch.distributed._functional_collectives as funcol
+from torch import sym_min
 from torch._C._distributed import Placement
+from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
@@ -93,8 +95,8 @@ class Shard(torch._C._distributed.Shard):
     def local_shard_size_and_offset(
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
-    ) -> tuple[int, int]:
+        rank: RankType,
+    ) -> tuple[int, RankType]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
@@ -109,17 +111,20 @@ class Shard(torch._C._distributed.Shard):
         # Compute the chunk size inline with ``torch.chunk``
         if curr_local_size % num_chunks == 0:
             full_chunk_size = curr_local_size // num_chunks
-            return full_chunk_size, full_chunk_size * rank
+            # pyrefly: ignore[bad-assignment] # pyrefly bug?
+            shard_starting_idx: RankType = full_chunk_size * rank
+            return full_chunk_size, shard_starting_idx
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-        shard_starting_idx = full_chunk_size * rank
+        # pyrefly: ignore[bad-assignment] # pyrefly bug?
+        shard_starting_idx: RankType = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
             return 0, curr_local_size
         else:
             local_shard_size = (
-                min(curr_local_size, shard_starting_idx + full_chunk_size)
+                sym_min(curr_local_size, shard_starting_idx + full_chunk_size)
                 - shard_starting_idx
             )
             return local_shard_size, shard_starting_idx
@@ -128,7 +133,7 @@ class Shard(torch._C._distributed.Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
     ) -> tuple[int, int | None]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
@@ -218,14 +223,12 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        if my_coordinate is None:
+        if not mesh.is_current_rank_part_of_mesh():
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return tensor
 
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
         is_padded = tensor.size(self.dim) % num_chunks != 0
         pad_sizes = None
         if is_padded:
@@ -243,7 +246,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             assert pad_sizes is not None
             output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
+                self.dim, output, pad_sizes, mesh.sym_get_coordinate(mesh_dim), False
             )
         return output
 
@@ -681,7 +684,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
         return len(sharded_indices[rank])
 
     # delete pyre-ignore once separating _StridedShard from Shard
@@ -689,7 +692,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
         return _StridedShard.local_shard_size_and_offset(
@@ -702,7 +705,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, list[int] | int]:
         """
@@ -749,8 +752,10 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         else:
             offsets = []
 
-        if return_first_offset and len(offsets) > 0:
-            offsets = offsets[0]
+        if return_first_offset:
+            # Always return an int for consistency across ranks.
+            # For empty shards, return -1 as an invalid offset indicator.
+            offsets = offsets[0] if len(offsets) > 0 else -1
 
         return local_shard_size, offsets
 
@@ -944,8 +949,7 @@ class MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        my_coordinate = mesh.get_coordinate()
-        assert my_coordinate is not None, "my_coordinate should not be None"
+        assert mesh.is_current_rank_part_of_mesh(), "rank is not part of mesh"
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
@@ -955,7 +959,7 @@ class MaskPartial(Partial):
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
-            my_coordinate[mesh_dim],
+            mesh.sym_get_coordinate(mesh_dim),
         )
         mask, masked_tensor = MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size

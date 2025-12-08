@@ -16,7 +16,7 @@ import functools
 import sys
 import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, overload, TypeAlias, TypeVar, Union
+from typing import Any, overload, TypeAlias, TypeVar
 from typing_extensions import deprecated, Self, TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -270,7 +270,7 @@ def _private_register_pytree_node(
 def _is_pytreespec_instance(
     obj: Any,
     /,
-) -> TypeIs[Union[TreeSpec, python_pytree.PyTreeSpec]]:
+) -> TypeIs[TreeSpec | python_pytree.PyTreeSpec]:
     if isinstance(obj, (TreeSpec, python_pytree.PyTreeSpec)):
         return True
     if "torch._dynamo.polyfills.pytree" in sys.modules:
@@ -612,7 +612,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
