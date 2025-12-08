@@ -19,8 +19,4 @@ C10_EXPORT void unregister_process_group(const std::string& group_name);
 
 C10_EXPORT void unregister_all_process_groups();
 
-C10_EXPORT void register_process_group_alias(
-    const std::string& alias_name,
-    const std::string& canonical_name);
-
 } // namespace c10d

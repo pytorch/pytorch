@@ -749,8 +749,10 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         else:
             offsets = []
 
-        if return_first_offset and len(offsets) > 0:
-            offsets = offsets[0]
+        if return_first_offset:
+            # Always return an int for consistency across ranks.
+            # For empty shards, return -1 as an invalid offset indicator.
+            offsets = offsets[0] if len(offsets) > 0 else -1
 
         return local_shard_size, offsets
 

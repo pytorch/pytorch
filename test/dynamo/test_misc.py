@@ -1225,30 +1225,29 @@ graph():
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
             lambda line: "id" not in line and "lookup_backend" not in line,
-            sorted(guard_code),
+            guard_code,
         )
         guard_code_str = "\n".join(guard_code)
 
-        for line in """\
-2 <= L['x'].size()[0]
-L['x'] is L['y']
-L['x'].ndimension() == 2
-L['x'].requires_grad == False
+        # Make sure that the dict_contains are present in the order of added
+        self.assertExpectedInline(
+            guard_code_str,
+            """\
 L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
-___dict_contains('operator', G['sys'].modules)
-___dict_contains('operator', G['sys'].modules)
+2 <= L['x'].size()[0]
+utils_device.CURRENT_DEVICE == None
+str(L['x'].dtype) == 'torch.float32'
+str(L['x'].device) == 'cpu'
+L['x'].requires_grad == False
+L['x'].ndimension() == 2
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
+L['x'] is L['y']
 not ___dict_contains('aaaaaaaa', G['sys'].modules)
 not ___dict_contains('bbbbbbbb', G['sys'].modules)
-not ___dict_contains('cccccccc', G['sys'].modules)
-str(L['x'].device) == 'cpu'
-str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split("\n"):
-            self.assertIn(
-                line,
-                guard_code_str,
-            )
+___dict_contains('operator', G['sys'].modules)
+not ___dict_contains('cccccccc', G['sys'].modules)""",
+        )
 
     def test_fold(self):
         def fn(a):
@@ -10116,11 +10115,6 @@ def ___make_guard_fn():
 
         fn(torch.ones(2, 2, device="cpu"))
 
-    # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
-    # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
-    # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
-    # until we have a proper fix.
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
         class SillyCat(torch.autograd.Function):
