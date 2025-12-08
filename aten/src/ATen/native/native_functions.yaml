@@ -6880,6 +6880,7 @@
   dispatch:
     SparseCPU: _sparse_sum_backward_cpu
     SparseCUDA: _sparse_sum_backward_cuda
+    SparseMPS: _sparse_sum_backward_mps
   autogen: _sparse_sum_backward.out
 
 - func: _sparse_csr_sum.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
