@@ -1503,10 +1503,17 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
             if isinstance(args[0], ConstantVariable):
                 try:
-                    fn = getattr(float, name)
+                    fn = getattr(self.fn, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:

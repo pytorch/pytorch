@@ -745,6 +745,7 @@ if not IS_WINDOWS:
             self.assertEqual(result_none, expected_zeros)
             self.assertEqual(result_none.shape, (7,))
 
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_storage_offset(self, device):
             """Test storage_offset method on Tensor."""
             import libtorch_agnostic_2_9 as libtorch_agnostic
