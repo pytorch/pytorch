@@ -814,7 +814,7 @@ if __name__ == "__main__":
 
             x = foo()  # noqa: F841
 
-            ss = torch.xpu.memory._snapshot()["segments"]
+            ss = torch.xpu.memory.memory_snapshot()
             found_it = False
             for seg in ss:
                 for b in seg["blocks"]:
