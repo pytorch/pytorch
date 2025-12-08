@@ -3722,5 +3722,15 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0368": [
+    {
+      "Gb_type": "Frozen dataclass with missing field",
+      "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
+      "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

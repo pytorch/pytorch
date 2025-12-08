@@ -1881,9 +1881,13 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
                 continue
             field_vt = self.fields.get(field.name)
             if field_vt is None:
-                # Field not set - this shouldn't happen for a properly constructed
-                # frozen dataclass, but skip if it does
-                continue
+                unimplemented(
+                    gb_type="Frozen dataclass with missing field",
+                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
+                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
+                    "was not tracked during tracing.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             if getattr(field, "kw_only", False):
                 kw_args.append((field.name, field_vt))
             else:
