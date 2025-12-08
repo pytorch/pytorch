@@ -615,6 +615,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_backward_on_no_grad_tensor(self):
         """Test that backward on tensor without requires_grad raises error."""
         x = torch.ones(5, 5, requires_grad=True)

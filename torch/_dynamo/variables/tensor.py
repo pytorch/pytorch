@@ -1021,12 +1021,10 @@ class TensorVariable(VariableTracker):
             )
 
         # Match eager error for tensors that don't require grad
-        example_value = self.as_proxy().node.meta.get("example_value")
-        if example_value is not None and isinstance(example_value, torch.Tensor):
-            if not example_value.requires_grad and example_value.grad_fn is None:
-                raise TorchRuntimeError(
-                    "element 0 of tensors does not require grad and does not have a grad_fn"
-                )
+        if not self.requires_grad and not self.has_grad_fn:
+            raise TorchRuntimeError(
+                "element 0 of tensors does not require grad and does not have a grad_fn"
+            )
 
         from ..symbolic_convert import InstructionTranslator
 
@@ -1037,16 +1035,8 @@ class TensorVariable(VariableTracker):
             # Collect all TensorVariables that are graph inputs with requires_grad=True
             input_vars = []
             for var in tx.output.input_source_to_var.values():
-                if isinstance(var, TensorVariable):
-                    if hasattr(var, "proxy") and hasattr(var.proxy, "node"):
-                        node = var.proxy.node
-                        if "example_value" in node.meta:
-                            example = node.meta["example_value"]
-                            if (
-                                isinstance(example, torch.Tensor)
-                                and example.requires_grad
-                            ):
-                                input_vars.append(var)
+                if isinstance(var, TensorVariable) and var.requires_grad:
+                    input_vars.append(var)
 
             if not input_vars:
                 # No tensors require grad - backward is a no-op
