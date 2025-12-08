@@ -88,7 +88,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  thrust::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  auto newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );

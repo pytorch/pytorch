@@ -170,12 +170,12 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         with:
           driver-version: ${{ matrix.config == 'legacy_nvidia_driver' && '525.105.17' || '580.82.07' }}
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && !contains(matrix.runner, 'b200') }}
+        if: ${{ !contains(matrix.runner, 'b200') }}
 
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
+        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
 
       - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
         id: setup-sscache-port-flag
@@ -325,7 +325,7 @@ jobs:
           # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
-          SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
+          SHM_SIZE: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -534,7 +534,7 @@ jobs:
       # As both the root cause and recovery path are unclear, let's take the runner out of
       # service so that it doesn't get any more jobs
       - name: Check NVIDIA driver installation step
-        if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
+        if: failure() && steps.install-nvidia-driver.outputs.has-nvidia == 'true' && !contains(matrix.runner, 'b200')
         shell: bash
         run: |
           set +e

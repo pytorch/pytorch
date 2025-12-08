@@ -171,6 +171,10 @@ void initModule(PyObject* module) {
     at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
   });
 
+  m.def("_mtia_graphPoolHandle", []() {
+    return at::detail::getMTIAHooks().graphPoolHandle();
+  });
+
   py::class_<_MTIAGraph>(m, "_MTIAGraph")
       .def(py::init<bool>(), py::arg("keep_graph") = false)
       .def("capture_begin", &_MTIAGraph::capture_begin)

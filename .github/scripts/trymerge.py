@@ -1789,6 +1789,7 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
         headers={
             "Authorization": os.getenv("DRCI_BOT_KEY", ""),
             "Accept": "application/vnd.github.v3+json",
+            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
         },
         method="POST",
         reader=json.load,
