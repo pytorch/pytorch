@@ -4847,8 +4847,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
+                    num_stages = ", num_stages = 2" if torch.version.hip else ""
                     self.body.writeline(
-                        f"for {prefix}offset in range({loop_start}, {loop_end}, {prefix.upper()}BLOCK):"
+                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
                     )
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
