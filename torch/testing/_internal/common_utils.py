@@ -1709,12 +1709,12 @@ def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
 
 
-def xfailIfPy314Plus(func):
-    return unittest.expectedFailure(func) if sys.version_info >= (3, 14) else func
-
-
 def xfailIfLinux(func):
     return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM and not IS_FBCODE else func
+
+
+def xfailIfWindows(func):
+    return unittest.expectedFailure(func) if IS_WINDOWS else func
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -4598,13 +4598,14 @@ class TestCase(expecttest.TestCase):
     def run_process_no_exception(code, env=None):
         import subprocess
 
-        popen = subprocess.Popen(
-            [sys.executable, '-c', code],
+        with subprocess.Popen(
+            [sys.executable, "-c", code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env)
-        (stdout, stderr) = popen.communicate()
-        return (stdout, stderr)
+            env=env,
+        ) as p:
+            (stdout, stderr) = p.communicate()
+            return (stdout, stderr)
 
     # returns captured stderr
     @staticmethod
@@ -4671,9 +4672,9 @@ def download_file(url, binary=True):
     if os.path.exists(path):
         return path
     try:
-        data = request.urlopen(url, timeout=15).read()
-        with open(path, 'wb' if binary else 'w') as f:
-            f.write(data)
+        with request.urlopen(url, timeout=15) as f1, open(path, 'wb' if binary else 'w') as f2:
+            data = f1.read()
+            f2.write(data)
         return path
     except error.URLError as e:
         msg = f"could not download test file '{url}'"
