@@ -27,7 +27,7 @@ FROM dev-base as uv
 ARG PYTHON_VERSION=3.11
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.cargo/bin/uv /usr/local/bin/uv
+    mv /root/.local/bin/uv /usr/local/bin/uv
 COPY requirements.txt requirements-build.txt .
 # Create virtual environment and install packages
 RUN uv venv /opt/uv --python ${PYTHON_VERSION} && \
