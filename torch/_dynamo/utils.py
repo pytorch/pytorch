@@ -3411,7 +3411,7 @@ def get_concrete_sizes_from_symints(
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
 
-    Example: "size (s94)" -> "size (10)" if s94's value is 10.
+    Example: "size (s94)" -> "size (s94: hint= 10)" if s94's value is 10.
     """
     import re
 
