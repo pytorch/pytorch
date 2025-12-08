@@ -951,8 +951,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual const std::string& getGroupName() const;
   virtual void setGroupName(const std::string& name);
-  virtual const std::optional<std::string>& getGroupNameAlias() const;
-  virtual void setGroupNameAlias(const std::string& name);
   virtual const std::string& getGroupDesc() const;
   virtual void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
@@ -1025,7 +1023,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       backendTypeToBackend_;
 
   std::optional<at::Device> bound_device_id_;
-  std::optional<std::string> groupNameAlias_;
 };
 
 // Thread local functions for managing the currently active process group.
