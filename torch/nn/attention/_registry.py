@@ -20,6 +20,7 @@ _FLASH_ATTENTION_IMPLS: dict[str, _RegisterFn] = {}
 
 _FLASH_ATTENTION_ACTIVE: str | None = None
 _FLASH_ATTENTION_HANDLES: dict[str, FlashAttentionHandle] = {}
+_FLASH_ATTENTION_PREVIOUS: str | None = None
 
 
 def register_flash_attention_impl(
@@ -77,7 +78,8 @@ def activate_flash_attention_impl(
     Example:
         >>> activate_flash_attention_impl("FA4")  # doctest: +SKIP
     """
-    global _FLASH_ATTENTION_ACTIVE
+    global _FLASH_ATTENTION_ACTIVE, _FLASH_ATTENTION_PREVIOUS
+
     register_fn = _FLASH_ATTENTION_IMPLS.get(impl)
     if register_fn is None:
         raise ValueError(
@@ -88,6 +90,8 @@ def activate_flash_attention_impl(
     # reinstall the default impl and then register the new impl
     if _FLASH_ATTENTION_ACTIVE == impl:
         return
+
+    _FLASH_ATTENTION_PREVIOUS = _FLASH_ATTENTION_ACTIVE
 
     handle = register_fn()
     if handle is not None:
@@ -107,3 +111,37 @@ def current_flash_attention_impl() -> str | None:
     ``None`` indicates that no custom impl has been activated.
     """
     return _FLASH_ATTENTION_ACTIVE
+
+
+def previous_flash_attention_impl() -> str | None:
+    """
+    Return the previously activated flash attention impl name
+
+    None indicates default FA2
+    """
+    return _FLASH_ATTENTION_PREVIOUS
+
+
+def restore_flash_attention_impl() -> None:
+    """
+    Restore the previous flash attention implementation before the last
+    call to activate_flash_attention_impl()
+
+    If the previous implementation is None (implies default FA2), we
+    deactivate the current custom implementation to fall back to default FA2
+    """
+    global _FLASH_ATTENTION_ACTIVE, _FLASH_ATTENTION_PREVIOUS, _FLASH_ATTENTION_HANDLES
+
+    previous = _FLASH_ATTENTION_PREVIOUS
+    current = _FLASH_ATTENTION_ACTIVE
+
+    _FLASH_ATTENTION_PREVIOUS = current
+
+    if previous is None:  # previous was default FA2
+        if current is not None and current in _FLASH_ATTENTION_HANDLES:
+            handle = _FLASH_ATTENTION_HANDLES[current]
+            if handle is not None:
+                handle.remove()
+        _FLASH_ATTENTION_ACTIVE = None
+    else:
+        activate_flash_attention_impl(previous)
