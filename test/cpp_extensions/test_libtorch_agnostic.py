@@ -745,6 +745,7 @@ if not IS_WINDOWS:
             self.assertEqual(result_none, expected_zeros)
             self.assertEqual(result_none.shape, (7,))
 
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_storage_offset(self, device):
             """Test storage_offset method on Tensor."""
             import libtorch_agnostic_2_9 as libtorch_agnostic
@@ -1194,6 +1195,7 @@ except RuntimeError as e:
                 self.assertNotIn("C++ CapturedTraceback:", error_message)
 
         @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
         def test_my_to_device(self, device):
             """Test to(device) convenience overload."""
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -1224,6 +1226,7 @@ except RuntimeError as e:
             self.assertEqual(result2, expected2, exact_device=True)
 
         @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
         def test_my_to_dtype_layout(self, device):
             """Test the full to.dtype_layout op with various parameter combinations."""
             import libtorch_agnostic_2_10 as libtorch_agnostic

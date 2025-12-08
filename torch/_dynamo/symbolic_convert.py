@@ -858,6 +858,10 @@ def break_graph_if_unsupported(
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.active_generic_context_managers:
+                    # raise original graph break if fullgraph/error_on_graph_break=True
+                    if self.one_graph or self.error_on_graph_break:
+                        raise
+
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
@@ -1016,7 +1020,7 @@ class ExceptionStack:
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
     #
-    # The lifetime of an exception in Python 3.11+ is:
+    # The lifetime of an exception is (Python 3.11+):
     #  + tx._raise_exception_variable(...) := sets the current_exception variable
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
