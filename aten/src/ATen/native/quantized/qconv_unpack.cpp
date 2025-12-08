@@ -82,33 +82,23 @@ class QConv1dUnpackWeightsInt8 final {
   static std::tuple<at::Tensor, std::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight) {
     auto& ctx = at::globalContext();
+    if (
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    ctx.qEngine() == at::QEngine::FBGEMM ||
+    ctx.qEngine() == at::QEngine::X86
+#elif defined( USE_PYTORCH_QNNPACK)
+    ctx.qEngine() == at::QEngine::QNNPACK
+#elif AT_MKLDNN_ENABLED()
+    ctx.qEngine() == at::QEngine::ONEDNN
+#else
+    false
+#endif
+  ) {
       auto result = packed_weight->unpack();
       auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      weight = weight.squeeze(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
-#endif
-
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      auto result = packed_weight->unpack();
-      auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return result;
-    }
-#endif
-
-#if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
-      auto result = packed_weight->unpack();
-      auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return result;
-    }
-#endif
 
     TORCH_CHECK(
         false,
