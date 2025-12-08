@@ -578,6 +578,66 @@ inline torch::stable::Tensor& sum_out(
   return out;
 }
 
+// We expect this to be the stable version of the full.default op.
+// Note: fill_value is typed as double because the underlying C shim API
+// uses double for the Scalar parameter. We don't use torch_call_dispatcher
+// as the stableivalue conversion for Scalar is not yet available as of
+// 2.10
+inline torch::stable::Tensor full(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    double fill_value,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  int32_t* dtype_ptr = nullptr;
+  int32_t dtype_val;
+  if (dtype.has_value()) {
+    dtype_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(dtype.value()));
+    dtype_ptr = &dtype_val;
+  }
+
+  int32_t* layout_ptr = nullptr;
+  int32_t layout_val;
+  if (layout.has_value()) {
+    layout_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(layout.value()));
+    layout_ptr = &layout_val;
+  }
+
+  int32_t* device_type_ptr = nullptr;
+  int32_t device_type_val;
+  int32_t device_index = 0;
+  if (device.has_value()) {
+    device_type_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(device.value().type()));
+    device_type_ptr = &device_type_val;
+    device_index = device.value().index();
+  }
+
+  int32_t* pin_memory_ptr = nullptr;
+  int32_t pin_memory_val;
+  if (pin_memory.has_value()) {
+    pin_memory_val = pin_memory.value() ? 1 : 0;
+    pin_memory_ptr = &pin_memory_val;
+  }
+
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_full(
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      fill_value,
+      dtype_ptr,
+      layout_ptr,
+      device_type_ptr,
+      device_index,
+      pin_memory_ptr,
+      &ret0));
+
+  return torch::stable::Tensor(ret0);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

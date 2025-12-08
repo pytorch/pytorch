@@ -900,6 +900,34 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertEqual(result.shape, torch.Size([3, 5]))
 
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_full(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Test basic full with default parameters
+            result = libtorch_agnostic.ops.my_full([2, 3], 3.14)
+            expected = torch.full([2, 3], 3.14)
+            self.assertEqual(result, expected)
+
+            # Test with dtype
+            result_dtype = libtorch_agnostic.ops.my_full(
+                [3, 4], 42.0, dtype=torch.int64
+            )
+            expected_dtype = torch.full([3, 4], 42, dtype=torch.int64)
+            self.assertEqual(result_dtype, expected_dtype)
+
+            # Test with device
+            result_device = libtorch_agnostic.ops.my_full([2, 2], 1.5, device=device)
+            expected_device = torch.full([2, 2], 1.5, device=device)
+            self.assertEqual(result_device, expected_device, exact_device=True)
+
+            # Test with dtype and device
+            result_both = libtorch_agnostic.ops.my_full(
+                [4, 5], 2.5, dtype=torch.float64, device=device
+            )
+            expected_both = torch.full([4, 5], 2.5, dtype=torch.float64, device=device)
+            self.assertEqual(result_both, expected_both, exact_device=True)
+
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic_2_9 as libtorch_agnostic
 
