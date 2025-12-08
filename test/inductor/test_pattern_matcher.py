@@ -2026,6 +2026,48 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(fn_result, fn_replaced_result)
 
+    def test_empty_like_pattern_matching(self):
+        def pattern(x):
+            y = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+            z = y * 2
+            return x + z
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+            return count
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            z = y * 2
+            return x + z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+        )
+
+        result = compiled_fn(x)
+        self.assertEqual(result, x * 3)
+        self.assertEqual(count, 1)
+
 
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
