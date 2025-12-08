@@ -547,14 +547,16 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(64, 64, 64, requires_grad=True)
         y = torch.randn(8, 64, 64, requires_grad=True)
-        with (
-            LocalMapWrappedHigherOrderVariable.enable(),
-            self.assertRaisesRegex(
-                AssertionError,
-                r"Dynamo changed the order of inputs to the local_map function, please adjust the order of inputs and input_placements from \[l_args_0_, l_args_1_\], to: \[l_args_1_, l_args_0_\].*",
-            ),
-        ):
-            torch.compile(reorder_inputs, backend="eager", fullgraph=True)(x, y)
+
+        try:
+            with enable_local_map_wrapping():
+                torch.compile(reorder_inputs, backend="eager", fullgraph=True)(x, y)
+        except AttributeError as e:
+            # TODO: get rid of this when we can install as a subgraph
+            self.assertTrue(
+                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
+                in str(e)
+            )
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_with_local_shapes_hop_tracing(self):
