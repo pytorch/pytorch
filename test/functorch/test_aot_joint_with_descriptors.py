@@ -6,6 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
+import tempfile
 from contextlib import ExitStack
 
 import torch
@@ -13,6 +15,7 @@ import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
+from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
@@ -1142,6 +1145,59 @@ class inner_f(torch.nn.Module):
 ('call_function', 'view_1', {'test': 1})
 ('call_function', 't_9', {'test': 1})""",
         )
+
+    @torch._dynamo.config.patch("enable_aot_compile", True)
+    def test_serialize_deserialize_compiler_toolkit(self):
+        """Test serialization and deserialization of compiler toolkit workflow"""
+
+        class BasicNN(nn.Module):
+            def __init__(self, input_dim, hidden_dim, output_dim):
+                super().__init__()
+                self.fc1 = nn.Linear(input_dim, hidden_dim)
+                self.fc2 = nn.Linear(hidden_dim, output_dim)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.fc2(x)
+                return x
+
+        input_tensor = torch.randn(32, 32)
+        model = BasicNN(32, 32, 32)
+
+        with ExitStack() as stack:
+            jd = aot_export_joint_with_descriptors(
+                stack,
+                model,
+                (input_tensor,),
+            )
+            compiled_wrapper = aot_compile_joint_with_descriptors(jd)
+
+        serialized_bytes = (
+            BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
+                compiled_wrapper
+            )
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
+            temp_path = f.name
+            f.write(serialized_bytes)
+
+        try:
+            with open(temp_path, "rb") as f:
+                loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
+                    f.read()
+                )
+
+            loaded_result = loaded_fn(
+                *model.parameters(), *model.buffers(), input_tensor
+            )
+            self.assertIsInstance(loaded_result, list)
+            expected_output = model(input_tensor)
+            self.assertEqual(expected_output, loaded_result[0])
+        finally:
+            os.unlink(temp_path)
 
 
 if __name__ == "__main__":

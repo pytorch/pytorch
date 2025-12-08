@@ -396,6 +396,60 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
 
 
 @dataclasses.dataclass
+class BoxedNopPreserveNodeMeta(OutputCode):
+    """
+    Minimal OutputCode that interprets an FX graph with node metadata preserved.
+    Uses GraphPickler to serialize/deserialize the FX graph module safely.
+    """
+    # Serialized FX graph bytes (via GraphPickler); populated during serialization.
+    _serialized_graph_module: Optional[bytes] = dataclasses.field(default=None, init=False)
+    # The FX graph/module to interpret (cleared during serialization).
+    fx_g: Optional[torch.fx.GraphModule] = None
+
+    _boxed_call: bool = True
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        if self.fx_g is None:
+            raise RuntimeError(
+                "BoxedNopPreserveNodeMeta has no graph module loaded. "
+                "Did you forget to call post_compile()?"
+            )
+        with torch.fx.traceback.preserve_node_meta():
+            return torch.fx.Interpreter(self.fx_g).boxed_run(inputs)
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
+    ) -> None:
+        # If fx_g is already present, nothing to do.
+        if self.fx_g is not None:
+            return
+        # If we serialized earlier, we must deserialize using fake_mode.
+        assert self._serialized_graph_module is not None
+        from torch._guards import detect_fake_mode
+        fake_mode = detect_fake_mode(example_inputs)
+        if fake_mode is None:
+            raise RuntimeError(
+                "Could not detect fake mode from example inputs. "
+                "GraphPickler deserialization requires fake mode."
+            )
+        from torch.fx._graph_pickler import GraphPickler
+        gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
+        assert isinstance(gm, torch.fx.GraphModule)
+        gm.recompile()
+        self.fx_g = gm
+
+    def prepare_for_serialization(self) -> None:
+        # Serialize the FX graph via GraphPickler and clear fx_g to avoid std pickle issues.
+        if self.fx_g is not None:
+            from torch.fx._graph_pickler import GraphPickler
+            self._serialized_graph_module = GraphPickler.dumps(self.fx_g)
+            self.fx_g = None
+
+
+@dataclasses.dataclass
 class CompiledFxGraph(OutputCode):
     """
     Class holding a compiled FX graph. This is the object serialized on disk

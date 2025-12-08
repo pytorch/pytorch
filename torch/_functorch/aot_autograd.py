@@ -2,6 +2,8 @@
 
 import contextlib
 import itertools
+import random
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
@@ -17,14 +19,20 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
+from torch._dynamo.aot_compile_types import (
+    BundledAOTAutogradSerializableCallable,
+    SerializableCallable,
+)
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
     preserve_rng_state,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+from torch._inductor.output_code import BoxedNopPreserveNodeMeta, OutputCode
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
@@ -1165,13 +1173,10 @@ def aot_module_simplified(
     return forward
 
 
-def boxed_nop_preserve_node_meta(fx_g, example_inputs):
-    def run(args):
-        with torch.fx.traceback.preserve_node_meta():
-            return torch.fx.Interpreter(fx_g).boxed_run(args)
-
-    run._boxed_call = True
-    return run
+def boxed_nop_preserve_node_meta(fx_g, _example_inputs):
+    return BoxedNopPreserveNodeMeta(
+        fx_g=fx_g,
+    )
 
 
 def aot_export_joint_with_descriptors(
@@ -1324,13 +1329,37 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
-    )
+
+    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
+
+
+    cache_ctx = nullcontext()
+    if torch._dynamo.config.enable_aot_compile:
+        # For AOT Precompile we need to set the cache info here so that
+        # we still generate an entry that we can then save to disk.
+        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
+            str(random.random()),
+            time.time_ns(),
+            forward_symints=[],
+        )
+        cache_ctx = torch._functorch.config.patch({
+            "bundled_autograd_cache": True,
+            "force_non_lazy_backward_lowering": True,
+        })
+
+    with cache_ctx:
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
+
+    if not isinstance(compiled_fn, SerializableCallable) and hasattr(
+        compiled_fn, "serialize"
+    ):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
