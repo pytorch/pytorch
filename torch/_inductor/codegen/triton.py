@@ -1284,11 +1284,17 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"triton_helpers.minimum({a}, {b})"
+        if torch.version.hip:
+            return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
+        else:
+            return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"triton_helpers.maximum({a}, {b})"
+        if torch.version.hip:
+            return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+        else:
+            return f"triton_helpers.maximum({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -1661,7 +1667,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def rsqrt(x):
-        return f"libdevice.rsqrt({x})"
+        if torch.version.hip:
+            return f"tl.rsqrt({x})"
+        else:
+            return f"libdevice.rsqrt({x})"
 
     @staticmethod
     @maybe_upcast_float32()
