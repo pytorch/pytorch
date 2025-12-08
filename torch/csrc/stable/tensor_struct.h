@@ -105,8 +105,9 @@ class Tensor {
   template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
 
-  void set_requires_grad(bool requires_grad) const {
+  const Tensor& set_requires_grad(bool requires_grad) const {
     TORCH_ERROR_CODE_CHECK(torch_set_requires_grad(ath_.get(), requires_grad));
+    return *this;
   }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
