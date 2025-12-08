@@ -104,7 +104,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_cos_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, gpu_reload_cos_1);  gpu_reload_cos_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
-    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
     def test_inductor_offload(self):
