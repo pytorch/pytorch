@@ -2844,6 +2844,7 @@ class GraphModule(torch.nn.Module):
 
 
 class InvokeSubgraphNoRetracingTests(TestCase):
+    # TODO - Needs some check the Dynamo does not retrace
     def test_module_no_retracing(self):
         class Block(torch.nn.Module):
             def __init__(self):
@@ -2851,23 +2852,103 @@ class InvokeSubgraphNoRetracingTests(TestCase):
 
             @nested_compile_region(is_pure=True)
             def forward(self, x):
-                return torch.sin(x)
+                return (torch.sin(x),)
 
         class LLM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.mod1 = Block()
                 self.mod2 = Block()
+                self.mod3 = Block()
 
             def forward(self, x):
-                return self.mod1(self.mod2(x))
+                return self.mod3(self.mod2(self.mod1(x)[0])[0])[0]
 
         x = torch.randn(8, requires_grad=True)
 
         mod = LLM()
         opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
 
-        opt_mod(x)
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    def test_distinct_layers(self):
+        class SinBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @nested_compile_region(is_pure=True)
+            def forward(self, x):
+                return (torch.sin(x),)
+
+        class CosBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @nested_compile_region(is_pure=True)
+            def forward(self, x):
+                return (torch.cos(x),)
+
+        class LLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [
+                    SinBlock(),
+                    SinBlock(),
+                    CosBlock(),
+                    SinBlock(),
+                    SinBlock(),
+                    CosBlock(),
+                ]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)[0]
+                return x
+
+        x = torch.randn(8, requires_grad=True)
+
+        mod = LLM()
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    def test_different_inputs(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @nested_compile_region(is_pure=True)
+            def forward(self, x, y):
+                return (x + y,)
+
+        class LLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = Block()
+                self.mod2 = Block()
+                self.mod3 = Block()
+
+            def forward(self, x, y):
+                y1 = torch.sin(y)
+                x = self.mod1(x, y1)[0]
+                y2 = torch.cos(y)
+                x = self.mod2(x, y2)[0]
+                y3 = torch.tan(y)
+                return self.mod3(x, y3)[0]
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        mod = LLM()
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        ref = mod(x, y)
+        res = opt_mod(x, y)
+        self.assertEqual(ref, res)
 
 
 class NegativeTesting(TestCase):
