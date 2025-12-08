@@ -5,6 +5,7 @@ import torch
 import torch.distributed.tensor.placement_utils as putils
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
