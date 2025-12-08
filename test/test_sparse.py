@@ -144,6 +144,8 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
     gradcheck_masked = functools.partial(gradcheck, masked=True)
+    gradcheck_sparse = _make_lowp_aware_gradcheck(gradcheck_sparse)
+    gradcheck_masked = _make_lowp_aware_gradcheck(gradcheck_masked)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -1942,7 +1944,6 @@ class TestSparse(TestSparseBase):
                 x.norm(**kwargs)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
