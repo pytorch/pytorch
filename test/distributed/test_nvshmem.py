@@ -30,6 +30,22 @@ def requires_nvshmem():
     )
 
 
+def requires_nvls():
+    """Skip test if NVLS (NVLink Switch) is not available.
+
+    Kernels like tile_reduce use NVLS algorithms which require NVSwitch hardware.
+    When NVSHMEM_DISABLE_NVLS=1 is set (to allow NVSHMEM to initialize on machines
+    without NVSwitch, e.g., AWS H100), these operations will fail with illegal
+    memory access errors.
+    """
+    import os
+    nvls_disabled = os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1"
+    return skip_but_pass_in_sandcastle_if(
+        nvls_disabled,
+        "Test requires NVLS which is disabled via NVSHMEM_DISABLE_NVLS=1",
+    )
+
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -755,6 +771,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     @skipIfRocm
+    @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
     def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
@@ -789,6 +806,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         torch.testing.assert_close(full_out, expected)
 
     @skipIfRocm
+    @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize(
         "root_ratio", [1, 2]
