@@ -12,13 +12,15 @@ log = logging.getLogger(__name__)
 @clear_on_fresh_cache
 @functools.lru_cache(1)
 def get_xpu_arch() -> Optional[str]:
-    arch_name2code = {"pvc": "Xe12", "bmg": "Xe20"}
+    arch_code2name = {
+        13136561920: "Xe12",
+        21479031808: "Xe20",
+    }
     try:
-        assert len(torch.xpu.get_arch_list()) == 1
-        arch_name = torch.xpu.get_arch_list()[0]
-        return arch_name2code[arch_name]
+        arch_code = torch.xpu.get_device_capability()["architecture"]
+        return arch_code2name[arch_code]
     except Exception:
-        log.exception("Error getting xpu arch")
+        log.exception("Error in getting xpu arch.")
         return None
 
 

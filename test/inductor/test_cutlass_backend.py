@@ -544,7 +544,7 @@ class TestCutlassBackend(TestCase):
 
             torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(msg="XPU has not supported fp8 yet")
+    @skipIfXpu(msg="XPU SYCL-TLA has not supported fp8 yet")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
@@ -1535,9 +1535,9 @@ class TestCutlassBackend(TestCase):
             assert len(sources) >= 1
 
             # Get names for temporary source and executable files.
-            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)
+            cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)  # noqa: SIM115
             cu_file.close()
-            exe_file = NamedTemporaryFile("w", suffix="", delete=False)
+            exe_file = NamedTemporaryFile("w", suffix="", delete=False)  # noqa: SIM115
             exe_file.close()
 
             # Save the generated code into the .cu file.
@@ -1909,7 +1909,12 @@ class TestCutlassBackend(TestCase):
             }
         ):
             _ = torch.compile(model)(B)
-        self.assertTrue(time.time() - start_time < 60)
+
+        if GPU_TYPE == "xpu":
+            time_limit = 100
+        else:
+            time_limit = 60
+        self.assertTrue(time.time() - start_time < time_limit)
 
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -2189,7 +2194,11 @@ class TestCutlassBackend(TestCase):
     def test_gemm_operation_serialization_xpu(self, arch: str, xpu_version: str):
         self._test_gemm_operation_serialization(arch, xpu_version, min_ops=40)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @skipIfXpu(msg="XPU SYCL-TLA has not supported fp8 yet")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2263,7 +2272,11 @@ class TestCutlassBackend(TestCase):
         self.assertEqual(y_compiled.dtype, output_dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @skipIfXpu(msg="XPU SYCL-TLA has not supported fp8 yet")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2357,7 +2370,11 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @skipIfXpu(msg="XPU SYCL-TLA has not supported fp8 yet")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
