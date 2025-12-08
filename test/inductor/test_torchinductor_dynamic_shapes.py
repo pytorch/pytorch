@@ -1206,7 +1206,7 @@ class TestInductorDynamic(TestCase):
 
     def test_coalescing_analysis_sympy_is_constant(self, device):
         # Regression test for issue where sympy's is_constant() would trigger
-        # numerical evaluation that caused assertion errors in our custom Mod function
+        # numerical evaluation that caused errors in our custom Mod function
         def fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6):
             t3 = torch.nn.functional.scaled_dot_product_attention(arg0, arg1, arg2)
             t4 = t3.min(dim=3).values
