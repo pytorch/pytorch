@@ -111,7 +111,7 @@ class ComplexTensor(Tensor):
         return res
 
     def __init__(self, *a, **kw) -> None:
-        super().__init__(*a, **kw)
+        super().__init__()
 
     @property
     def re(self) -> Tensor:
