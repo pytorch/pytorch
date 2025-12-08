@@ -356,7 +356,7 @@ def is_decorateinfo_skip_or_xfail(decorateinfo):
     actual_decorator = decorateinfo.decorators[0]
     if isinstance(actual_decorator, toleranceOverride):
         return False
-    if actual_decorator == unittest.expectedFailure:
+    if actual_decorator is unittest.expectedFailure:
         return True
     # Assume the rest are skips
     return True
