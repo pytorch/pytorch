@@ -83,11 +83,11 @@ at::Tensor mkldnn_tensor_from_data_ptr(
   std::vector<uint8_t> vector_serialized_md{
       opaque_metadata, opaque_metadata + opaque_metadata_size};
   ideep::tensor::desc deserialized_ideep_desc;
-#if IDEEP_PREREQ(3, 4, 1, 2)
+#if DNNL_PREREQ(3, 4, 1)
   // groups is needed for grouped conv
   deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);
 #else
-  TORCH_CHECK(false, "Unexpected IDeep version to do weight deserialization.");
+  TORCH_CHECK(false, "Unexpected oneDNN version to do weight deserialization.");
 #endif
 
   auto a = ideep::tensor(deserialized_ideep_desc, data_ptr);
