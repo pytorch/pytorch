@@ -34,8 +34,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         return fn
 
     def distort(
-        ms: list[float] | tuple[float] | float,
-    ) -> list[float] | tuple[float] | float:
+        ms: list[float] | tuple[float, ...] | float,
+    ) -> list[float] | tuple[float, ...] | float:
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
@@ -53,7 +53,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     @functools.wraps(fn)
     def wrapper(
         *args: list[Any], **kwargs: dict[str, Any]
-    ) -> list[float] | tuple[float] | float:
+    ) -> list[float] | tuple[float, ...] | float:
         ms = fn(*args, **kwargs)
 
         return distort(ms)

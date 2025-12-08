@@ -1,6 +1,7 @@
 # Owner(s): ["module: sdpa"]
 
 import importlib
+import itertools
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
@@ -417,6 +418,44 @@ class TestFlashAttentionFA4(TestCase):
                 f"{name}: Compiled error {compiled_error:.2e} exceeds "
                 f"{rtol}x Math-low error {math_low_error:.2e} + {atol:.2e}",
             )
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    def test_attention_preserves_query_layout(self, device):
+        """Test that FA4 output has the same layout as the query tensor."""
+
+        def test_attention(permute_order: list[int]):
+            BHSqD = [4, 16, 256, 64]
+            BHSkvD = [4, 16, 512, 64]
+
+            shape_q = [BHSqD[idx] for idx in permute_order]
+            shape_kv = [BHSkvD[idx] for idx in permute_order]
+            reverse = [permute_order.index(idx) for idx in range(4)]
+            q = torch.randn(
+                *shape_q, dtype=torch.bfloat16, device=device, requires_grad=False
+            ).permute(reverse)
+            k = torch.randn(
+                *shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False
+            ).permute(reverse)
+            v = torch.randn(
+                *shape_kv, dtype=torch.bfloat16, device=device, requires_grad=False
+            ).permute(reverse)
+            self.assertEqual(q.shape, BHSqD)
+            self.assertEqual(k.shape, BHSkvD)
+            self.assertEqual(v.shape, BHSkvD)
+
+            with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                out = F.scaled_dot_product_attention(q, k, v)
+            self.assertTrue(
+                out.permute(permute_order).is_contiguous(),
+                f"Output layout mismatch for permute_order={permute_order}, "
+                f"q.stride()={q.stride()}, out.stride()={out.stride()}",
+            )
+
+        permutable = [0, 1, 2]
+        permute_orders = itertools.permutations(permutable)
+
+        for permute_order in permute_orders:
+            test_attention(list(permute_order) + [3])
 
 
 instantiate_device_type_tests(TestFlashAttentionFA4, globals(), only_for="cuda")
