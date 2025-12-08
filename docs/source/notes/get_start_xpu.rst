@@ -26,8 +26,8 @@ For Intel Client GPU
 +=======================================+=====================================================================================================+
 | Windows 11 & Ubuntu 24.04/25.04       | Intel® Arc A-Series Graphics (CodeName: Alchemist)                                                  |
 |                                       | Intel® Arc B-Series Graphics (CodeName: Battlemage)                                                 |
-|                                       | Intel® Core™ Ultra Mobile Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                   |
-|                                       | Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H) |
+|                                       | Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                   |
+|                                       | Intel® Core™ Ultra Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)         |
 |                                       | Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake)    |
 +---------------------------------------+-----------------------------------------------------------------------------------------------------+
 | Windows 11 & Ubuntu 25.10             | Intel® Core™ Ultra Mobile Processors (Series 3) with Intel® Arc™ Graphics (CodeName: Panther Lake)  |
@@ -166,7 +166,7 @@ Inference with ``torch.compile``
 """"""""""""""""""""""""""""""""
 
 .. code-block:: python
-    
+
     import torch
     import torchvision.models as models
     import time
