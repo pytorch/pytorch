@@ -433,7 +433,7 @@ def kernel_many_args(out_tensor, {decl}):
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
-    {"use_static_cuda_launcher": True, "strict_static_cuda_launcher": True}
+    {"use_static_triton_launcher": True, "strict_static_triton_launcher": True}
 )
 class TestStaticTritonCompileResult(TestCase):
     """
@@ -528,13 +528,13 @@ class TestStaticTritonCompileResult(TestCase):
         self.assertEqual(eager_result, compiled_result)
 
     @skipIfRocm
-    def test_disable_static_cuda_launcher(self):
+    def test_disable_static_triton_launcher(self):
         @torch.compile
         def fn(x, y):
             return torch.cat(((x * 4), y + 10))
 
         # Test that static cuda launcher is in fact disabled
-        with torch._inductor.config.patch("use_static_cuda_launcher", False):
+        with torch._inductor.config.patch("use_static_triton_launcher", False):
             x = torch.rand(20, device=GPU_TYPE)
             y = torch.rand(20, device=GPU_TYPE)
             with mock.patch(
