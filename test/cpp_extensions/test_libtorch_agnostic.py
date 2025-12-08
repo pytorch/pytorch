@@ -7,10 +7,12 @@ from pathlib import Path
 import torch
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
 )
+from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
@@ -743,6 +745,38 @@ if not IS_WINDOWS:
             self.assertEqual(result_none, expected_zeros)
             self.assertEqual(result_none.shape, (7,))
 
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_my_storage_offset(self, device):
+            """Test storage_offset method on Tensor."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            # Test with a regular tensor (storage_offset should be 0)
+            t = torch.randn(3, 4, device=device)
+            result = libtorch_agnostic.ops.my_storage_offset(t)
+            self.assertEqual(result, t.storage_offset())
+            self.assertEqual(result, 0)
+
+            # Test with a sliced tensor (storage_offset should be non-zero)
+            t_sliced = t[1:]
+            result_sliced = libtorch_agnostic.ops.my_storage_offset(t_sliced)
+            self.assertEqual(result_sliced, t_sliced.storage_offset())
+            self.assertEqual(result_sliced, 4)  # 1 row * 4 columns
+
+            # Test with a view with offset
+            t_view = t.view(-1)[2:]
+            result_view = libtorch_agnostic.ops.my_storage_offset(t_view)
+            self.assertEqual(result_view, t_view.storage_offset())
+            self.assertEqual(result_view, 2)
+
+        @dtypes(*all_types_and(torch.float16, torch.bool))
+        def test_my_element_size(self, device, dtype):
+            """Test element_size method on Tensor."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            t = torch.zeros(2, 3, device=device, dtype=dtype)
+            result = libtorch_agnostic.ops.my_element_size(t)
+            self.assertEqual(result, t.element_size())
+
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_reshape(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -952,6 +986,28 @@ if not IS_WINDOWS:
             )
             self.assertEqual(size_vec, ["size", str(t.size(0)), "ref2"])
             self.assertEqual(result_size, t.size(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCPU
+        def test_my_set_requires_grad(self, device):
+            """Test set_requires_grad method on Tensor."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Use torch.no_grad() to prevent autograd from wrapping the output
+            # tensor with a grad_fn. When a tensor with requires_grad=True goes
+            # through a custom op, PyTorch wraps the output with a grad_fn
+            # (e.g., WarnNotImplemented), making requires_grad computed based on
+            # inputs rather than directly settable.
+            t = torch.randn(3, 4, device=device)
+            self.assertFalse(t.requires_grad)
+
+            with torch.no_grad():
+                libtorch_agnostic.ops.my_set_requires_grad(t, True)
+            self.assertTrue(t.requires_grad)
+
+            with torch.no_grad():
+                libtorch_agnostic.ops.my_set_requires_grad(t, False)
+            self.assertFalse(t.requires_grad)
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
