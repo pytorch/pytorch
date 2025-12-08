@@ -47,6 +47,10 @@ from torch.testing._internal.common_dtype import (
 )
 
 from torch.utils.dlpack import to_dlpack
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1941,6 +1945,9 @@ class TestTensorCreation(TestCase):
         if device_type == 'cuda':
             do_test_empty_full(self, dtypes, torch.strided, None)
             do_test_empty_full(self, dtypes, torch.strided, torch_device)
+        if device_type == 'xpu':
+            do_test_empty_full(self, dtypes, torch.strided, None)
+            do_test_empty_full(self, dtypes, torch.strided, torch_device)
 
     # TODO: this test should be updated
     @suppress_warnings
@@ -1993,6 +2000,42 @@ class TestTensorCreation(TestCase):
 
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(np.random.randn(2, 3), device='cuda:1').device))
+        if device_type == 'xpu':
+            self.assertEqual('xpu:0', str(torch.tensor(5).xpu(0).device))
+            self.assertEqual('xpu:0', str(torch.tensor(5).xpu('xpu:0').device))
+            self.assertEqual('xpu:0',
+                             str(torch.tensor(5, dtype=torch.int64, device=0).device))
+            self.assertEqual('xpu:0',
+                             str(torch.tensor(5, dtype=torch.int64, device='xpu:0').device))
+            self.assertEqual('xpu:0',
+                             str(torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='xpu:0').device))
+
+            self.assertEqual('xpu:0', str(torch.tensor(np.random.randn(2, 3), device='xpu:0').device))
+
+            for device in devices:
+                with torch.xpu.device(device):
+                    device_string = 'xpu:' + str(torch.xpu.current_device())
+                    self.assertEqual(device_string,
+                                     str(torch.tensor(5, dtype=torch.int64, device='xpu').device))
+
+            with self.assertRaises(RuntimeError):
+                torch.tensor(5).xpu('cpu')
+            with self.assertRaises(RuntimeError):
+                torch.tensor(5).xpu('cpu:0')
+
+            if len(devices) > 1:
+                self.assertEqual('xpu:1', str(torch.tensor(5).xpu(1).device))
+                self.assertEqual('xpu:1', str(torch.tensor(5).xpu('xpu:1').device))
+                self.assertEqual('xpu:1',
+                                 str(torch.tensor(5, dtype=torch.int64, device=1).device))
+                self.assertEqual('xpu:1',
+                                 str(torch.tensor(5, dtype=torch.int64, device='xpu:1').device))
+                self.assertEqual('xpu:1',
+                                 str(torch.tensor(torch.ones((2, 3), dtype=torch.float32),
+                                     device='xpu:1').device))
+
+                self.assertEqual('xpu:1',
+                                 str(torch.tensor(np.random.randn(2, 3), device='xpu:1').device))
 
     # TODO: this test should be updated
     @onlyNativeDeviceTypes
@@ -2807,6 +2850,10 @@ class TestTensorCreation(TestCase):
                     with torch.cuda.device(device):
                         self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
 
+                if self.device_type == 'xpu':
+                    with torch.xpu.device(device):
+                        self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
+
         # Tests sparse ctor
         indices = torch.tensor([[0, 1, 1],
                                 [2, 0, 1],
@@ -2824,6 +2871,13 @@ class TestTensorCreation(TestCase):
                 sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
+
+        if self.device_type == 'xpu':
+            with torch.xpu.device(device):
+                sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
+                                                            sparse_size, dtype=torch.float64)
+                self.assertEqual(sparse_with_dtype.device, torch.device('xpu'))
+
 
     @onlyCUDA
     @onlyNativeDeviceTypes
@@ -3698,6 +3752,7 @@ class TestRandomTensorCreation(TestCase):
 
     @largeTensorTest("10GB", "cpu")
     @largeTensorTest("40GB", "cuda")
+    @largeTensorTest("40GB", "xpu")
     @slowTest
     def test_randperm_large(self, device):
         # Test even distribution where rand32 might produce skewed "uniform" distribution
@@ -4121,6 +4176,9 @@ class TestBufferProtocol(TestCase):
 def get_another_device(device):
     return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
+def get_another_xpu_device(device):
+    return "xpu" if torch.device(device).type == "cpu" else "cpu"
+
 def identity(tensor):
     return tensor
 def to_numpy(tensor):
@@ -4308,6 +4366,13 @@ class TestAsArray(TestCase):
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
+
+        if torch.xpu.is_available():
+            other_device = get_another_xpu_device(device)
+            with self.assertRaisesRegex(ValueError,
+                                        f"from device '{device}' to '{other_device}'"):
+                torch.asarray(original, device=other_device, copy=False)
+
 
         with self.assertRaisesRegex(ValueError,
                                     "with dtype '.*' into dtype '.*'"):
