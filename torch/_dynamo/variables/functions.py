@@ -810,6 +810,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.fn)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
+
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
@@ -1957,6 +1966,15 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -2341,6 +2359,34 @@ class FunctoolsPartialVariable(VariableTracker):
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
+        )
+
+    def is_python_hashable(self) -> bool:
+        return (
+            self.func.is_python_hashable()
+            and all(arg.is_python_hashable() for arg in self.args)
+            and all(value.is_python_hashable() for value in self.keywords.values())
+        )
+
+    def get_python_hash(self):
+        func_hash = self.func.get_python_hash()
+        args_hash = (arg.get_python_hash() for arg in self.args)
+        values_hash = (value.get_python_hash() for value in self.keywords.values())
+        return hash((func_hash, *args_hash, *values_hash))
+
+    def is_python_equal(self, other):
+        return (
+            self.func.is_python_equal(other.func)
+            and all(
+                arg_a.is_python_equal(arg_b)
+                for (arg_a, arg_b) in zip(self.args, other.args)
+            )
+            and all(
+                value_a.is_python_equal(value_b)
+                for (value_a, value_b) in zip(
+                    self.keywords.values(), other.keywords.values()
+                )
+            )
         )
 
 

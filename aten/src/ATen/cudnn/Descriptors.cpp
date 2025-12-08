@@ -1,6 +1,5 @@
 #include <ATen/cudnn/Descriptors.h>
 
-#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <array>
