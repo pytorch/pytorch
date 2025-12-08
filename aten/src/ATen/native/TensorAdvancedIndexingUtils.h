@@ -77,7 +77,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     TORCH_CHECK_INDEX(
         false,
         "shape mismatch: indexing tensors could not be broadcast together"

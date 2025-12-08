@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <c10/util/Flags.h>
+#include <c10/util/logging_common.h>
 
 const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
 
@@ -24,61 +25,40 @@ const int GLOG_ERROR = 2;
 const int GLOG_WARNING = 1;
 const int GLOG_INFO = 0;
 
-class C10_API MessageLogger {
- public:
-  MessageLogger(const char* file, int line, int severity);
-  ~MessageLogger();
-  // Return the stream associated with the logger object.
-  std::stringstream& stream() {
-    return stream_;
-  }
-
- private:
-  // When there is a fatal log, we simply abort.
-  void DealWithFatal() {
-    abort();
-  }
-
-  const char* tag_;
-  std::stringstream stream_;
-  int severity_;
-};
-
-// This class is used to explicitly ignore values in the conditional
-// logging macros.  This avoids compiler warnings like "value computed
-// is not used" and "statement has no effect".
-class C10_API LoggerVoidify {
- public:
-  LoggerVoidify() = default;
-  // This has to be an operator with a precedence lower than << but
-  // higher than ?:
-  void operator&(const std::ostream& s [[maybe_unused]]) {}
-};
-
-// Log a message and terminate.
-template <class T>
-void LogMessageFatal(const char* file, int line, const T& message) {
-  MessageLogger(file, line, GLOG_FATAL).stream() << message;
-}
-
 // Helpers for TORCH_CHECK_NOTNULL(). Two are necessary to support both raw
 // pointers and smart pointers.
 template <typename T>
-T& CheckNotNullCommon(const char* file, int line, const char* names, T& t) {
+T& CheckNotNullCommon(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
   if (t == nullptr) {
-    LogMessageFatal(file, line, std::string(names));
+    MessageLogger(file, line, GLOG_FATAL, fatal).stream()
+        << "Check failed: '" << names << "' must be non NULL. ";
   }
   return t;
 }
 
 template <typename T>
-T* CheckNotNull(const char* file, int line, const char* names, T* t) {
-  return CheckNotNullCommon(file, line, names, t);
+T* CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T* t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
 }
 
 template <typename T>
-T& CheckNotNull(const char* file, int line, const char* names, T& t) {
-  return CheckNotNullCommon(file, line, names, t);
+T& CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
 }
 } // namespace c10
 
@@ -134,65 +114,6 @@ static_assert(
   true ? (void)0                  \
        : ::c10::LoggerVoidify() & \
           ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_##n).stream()
-#endif // NDEBUG
-
-#define TORCH_CHECK_OP(val1, val2, op)                                        \
-  FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
-                             << (val1) << " vs. " << (val2) << ") "
-
-// TORCH_CHECK_OP macro definitions
-#define TORCH_CHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
-#define TORCH_CHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
-#define TORCH_CHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
-#define TORCH_CHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
-#define TORCH_CHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
-#define TORCH_CHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
-
-#ifndef NDEBUG
-// Debug only versions of TORCH_CHECK_OP macros.
-#define TORCH_DCHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
-#define TORCH_DCHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
-#define TORCH_DCHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
-#define TORCH_DCHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
-#define TORCH_DCHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
-#define TORCH_DCHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
-#else // !NDEBUG
-// These versions generate no code in optimized mode.
-#define TORCH_DCHECK_EQ(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, ==)
-#define TORCH_DCHECK_NE(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, !=)
-#define TORCH_DCHECK_LE(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, <=)
-#define TORCH_DCHECK_LT(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, <)
-#define TORCH_DCHECK_GE(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, >=)
-#define TORCH_DCHECK_GT(val1, val2) \
-  while (false)                     \
-  TORCH_CHECK_OP(val1, val2, >)
-#endif // NDEBUG
-
-// Check that a pointer is not null.
-#define TORCH_CHECK_NOTNULL(val) \
-  ::c10::CheckNotNull(           \
-      __FILE__, __LINE__, "Check failed: '" #val "' Must be non NULL", (val))
-
-#ifndef NDEBUG
-// Debug only version of TORCH_CHECK_NOTNULL
-#define TORCH_DCHECK_NOTNULL(val) \
-  ::c10::CheckNotNull(            \
-      __FILE__, __LINE__, "Check failed: '" #val "' Must be non NULL", (val))
-#else // !NDEBUG
-// Optimized version - generates no code.
-#define TORCH_DCHECK_NOTNULL(val) \
-  while (false)                   \
-  TORCH_CHECK_NOTNULL(val)
 #endif // NDEBUG
 
 // ---------------------- Support for std objects --------------------------

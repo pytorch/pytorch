@@ -19,6 +19,7 @@ import numpy as np
 import yaml
 
 import torch._custom_ops as custom_ops
+import torch.distributed
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
@@ -34,7 +35,6 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
-from torch._library.opaque_object import make_opaque, OpaqueType
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -893,6 +893,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [True]
         if typ is str:
             return ["foo"]
+        if torch.distributed.is_available():
+            from torch.distributed.distributed_c10d import GroupName
+
+            if typ is GroupName:
+                return ["group"]
         if typ is torch.dtype:
             return [torch.float32]
         if typ is torch.device:
@@ -903,8 +908,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.tensor(3)]
         if typ == Optional[torch.types.Number]:
             return [None, 2.718]
-        if typ == OpaqueType:
-            return [make_opaque("moo")]
         origin = typing.get_origin(typ)
         if origin is Union:
             args = typing.get_args(typ)
@@ -1069,6 +1072,16 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
+        # Define a named tuple for a Point with x and y coordinates
+        Point = collections.namedtuple("Point", ["x", "y"])
+        with self.assertRaisesRegex(ValueError, "unsupported type"):
+
+            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            def foo(x: Tensor, y: Point) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+
     def test_supported_schemas(self):
         # All of these should already be tested by PyTorch codegen
         # (we share the same mechanism), but here's a sanity check.
@@ -1217,7 +1230,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY:
             # Smoke test: should not raise error
             custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)(
                 foo_impl

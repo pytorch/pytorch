@@ -52,6 +52,9 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
+# Set environment variable to disable multicast for all tests in this module
+os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -94,6 +97,75 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(len(connectivity.matrix), torch.cuda.device_count())
         for row in connectivity.matrix:
             self.assertEqual(len(row), torch.cuda.device_count())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad_size(self) -> None:
+        # Test that get_signal_pad_size returns a positive integer
+        signal_pad_size = symm_mem.get_signal_pad_size()
+        self.assertIsInstance(signal_pad_size, int)
+        self.assertGreater(signal_pad_size, 0)
+
+        # Test that the C++ API returns the same value
+        cpp_signal_pad_size = _SymmetricMemory.signal_pad_size
+        self.assertEqual(signal_pad_size, cpp_signal_pad_size)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_set_signal_pad_size(self) -> None:
+        # Save the original signal pad size
+        original_size = symm_mem.get_signal_pad_size()
+
+        # Test setting a new signal pad size
+        new_size = 1024 * 1024  # 1MB
+        symm_mem.set_signal_pad_size(new_size)
+        self.assertEqual(symm_mem.get_signal_pad_size(), new_size)
+
+        # Test that the C++ API reflects the change
+        self.assertEqual(_SymmetricMemory.signal_pad_size, new_size)
+
+        # Restore original size for other tests
+        symm_mem.set_signal_pad_size(original_size)
+        self.assertEqual(symm_mem.get_signal_pad_size(), original_size)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_set_signal_pad_size_with_allocation(self) -> None:
+        """Test that custom signal pad size is actually used in allocations."""
+        self._init_process()
+
+        # Save the original signal pad size
+        original_size = symm_mem.get_signal_pad_size()
+
+        # Test with a custom signal pad size (2x the default)
+        custom_size = original_size * 2
+        symm_mem.set_signal_pad_size(custom_size)
+
+        # Allocate symmetric memory and verify the signal pad size
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # Verify the allocated symmetric memory uses the custom signal pad size
+        self.assertEqual(symm_mem_hdl.signal_pad_size, custom_size)
+
+        # Test that signal pad operations work with the custom size
+        signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
+        expected_numel = custom_size // 4  # uint32_t
+        self.assertEqual(signal_pad.numel(), expected_numel)
+
+        # Verify we can use the full custom signal pad
+        signal_pad.fill_(0)
+        signal_pad[0] = 42
+        self.assertEqual(signal_pad[0].item(), 42)
+
+        # Restore original settings
+        symm_mem.set_signal_pad_size(original_size)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -271,11 +343,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-# We move AsyncTP tests to a seperate test suite because 1) Async TP ops are not
+# We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
+@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -294,7 +367,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @parametrize("gather_dim", [0, 1])
+    @parametrize("gather_dim", [0, 1, 2])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
@@ -306,7 +379,10 @@ class AsyncTPTest(MultiProcContinuousTest):
         rank = self.rank
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
+        A_shard_shape = [BATCH, M, K]
+        A_shard_shape[gather_dim] //= self.world_size
+
+        A_shard = torch.rand(A_shard_shape, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
@@ -523,7 +599,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         BATCH = 8
         M = 64
         N = 16
-        K = 32
+        K = 1024
         group = dist.group.WORLD
         rank = self.rank
 
@@ -546,6 +622,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
+    @skipIf(
+        SM100OrLater,
+        "https://github.com/pytorch/pytorch/issues/162940",
+    )
     def test_fused_scaled_matmul_reduce_scatter(
         self, scatter_dim: int, rowwise: bool
     ) -> None:
@@ -610,7 +690,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
 # [READ ME FIRST]
 # The `SymmMemEmptySetDeviceTest` suite parameterizes whether user sets the
-# device before calling symm_mem.emtpy.  Either way should work.
+# device before calling symm_mem.empty.  Either way should work.
 # However, since `set_device` is persistent, we cannot use the
 # `MultiProcContinuousTest` template because the next function will be
 # "contaminated", leading to flaky tests (e.g. hang). Therefore, we use

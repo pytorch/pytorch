@@ -190,6 +190,7 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(n.node is not None for n in nodes), (
             "All epilogue nodes should have an IRNode"
         )
+        # pyrefly: ignore [redundant-cast]
         return cast(
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
@@ -256,7 +257,7 @@ size: {cuda_template_buffer.get_size()}"
             )
             return False
         elif (
-            not config.cuda.cutlass_epilogue_fusion_enabled
+            not config.cutlass.cutlass_epilogue_fusion_enabled
             or not config.epilogue_fusion
         ):
             why("cutlass epilogue fusion is not enabled")

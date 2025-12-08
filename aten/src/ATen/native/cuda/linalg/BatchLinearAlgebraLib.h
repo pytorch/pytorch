@@ -73,6 +73,11 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors);
+
+void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors);
+
+
+
 void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose);
 
 void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
@@ -82,7 +87,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace cuda { namespace detail {
 // This is only used for an old-style dispatches
-// Please do not add any new entires to it
+// Please do not add any new entries to it
 struct LinalgDispatch {
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
 };

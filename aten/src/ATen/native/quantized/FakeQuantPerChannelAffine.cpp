@@ -178,24 +178,30 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
           0 & \text{ else }
         \end{cases}
   */
-  auto zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max);
+  bool is_bfloat16 = (X.scalar_type() == at::kBFloat16);
+  at::Tensor X_ = is_bfloat16 ? X.to(ScalarType::Float) : X;
+  at::Tensor dY_ = is_bfloat16 ? dY.to(ScalarType::Float) : dY;
+  at::Tensor scale_ = is_bfloat16 ? scale.to(ScalarType::Float) : scale;
+  at::Tensor zero_point_ = is_bfloat16 ? zero_point.to(ScalarType::Float) : zero_point;
 
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float);
+  auto zero_point_rounded = _get_rounded_zero_point(zero_point_, quant_min, quant_max);
 
-  TORCH_CHECK(X.sizes() == dY.sizes(), "`X` and `dY` are not the same size");
+  TORCH_CHECK(dY_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(X_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(scale_.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(zero_point_.scalar_type() == ScalarType::Float);
+
+  TORCH_CHECK(X_.sizes() == dY_.sizes(), "`X` and `dY` are not the same size");
   TORCH_CHECK(
       quant_min <= 0 && quant_max >= 0,
       "Expecting `quant_min` <= 0 and `quant_max` >= 0");
-  TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
-  TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
+  TORCH_CHECK(scale_.dim() == 1, "scale should be a 1-D tensor");
+  TORCH_CHECK(zero_point_.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
-      scale.numel() == zero_point.numel(),
+      scale_.numel() == zero_point_.numel(),
       "scale and zero-point need to have the same dimensions");
   TORCH_CHECK(
-      scale.numel() == X.size(axis),
+      scale_.numel() == X_.size(axis),
       "dimensions of scale and zero-point are not consistent with input tensor")
 
   TORCH_CHECK(
@@ -204,42 +210,42 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
-      axis >= 0 && axis < X.dim(),
+      axis >= 0 && axis < X_.dim(),
       "`axis` must be between 0 and number of dimensions of input");
 
-  if (X.numel() <= 0) {
+  if (X_.numel() <= 0) {
     return std::make_tuple(X, scale, zero_point);
   }
 
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  auto numDimensions = X.ndimension();
+  auto dX = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
+  auto dScale_vec = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
+  auto dZeroPoint_vec = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
+  auto numDimensions = X_.ndimension();
 
   // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
   // into the same shapes as X along the channel axis.
   c10::DimVector axis_mask(numDimensions);
   for (const auto i : c10::irange(numDimensions)) {
-    axis_mask[i] = (i == axis) ? X.size(axis) : 1;
+    axis_mask[i] = (i == axis) ? X_.size(axis) : 1;
   }
-  auto X_shape = X.sizes();
-  auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask.data(), numDimensions)).expand(X_shape);
+  auto X_shape = X_.sizes();
+  auto scale_vectorized = scale_.reshape(at::IntArrayRef(axis_mask.data(), numDimensions)).expand(X_shape);
   auto zero_point_vectorized = zero_point_rounded.reshape(at::IntArrayRef(axis_mask.data(), numDimensions)).expand(X_shape);
 
   auto iter = TensorIteratorConfig()
     .add_output(dX)
     .add_output(dScale_vec)
     .add_output(dZeroPoint_vec)
-    .add_input(X)
-    .add_input(dY)
+    .add_input(X_)
+    .add_input(dY_)
     .add_input(scale_vectorized)
     .add_input(zero_point_vectorized)
     .build();
 
   fake_quant_grad_learnable_channel_stub(
-    X.device().type(), iter, quant_min, quant_max, grad_factor);
+    X_.device().type(), iter, quant_min, quant_max, grad_factor);
 
-  auto numElements = X.ndimension() - 1;
+  auto numElements = X_.ndimension() - 1;
 
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.

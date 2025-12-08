@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 import ctypes
 
 import torch
@@ -32,6 +33,9 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
+        # Check CUDA availability
+        if not torch.backends.cuda.is_built():
+            raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
