@@ -4077,7 +4077,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # at torch._functorch.autograd_function.AutogradFunctionApply.
         args_tensor_mask = [False] * len(args)
         for i, arg in enumerate(args):
-            if arg.is_tensor() or isinstance(arg, SymNodeVariable):
+            # Use is_symnode_like() with maybe_fx_node() check instead of
+            # isinstance(arg, SymNodeVariable) to handle LazyConstantVariable
+            # that wraps SymNodeVariable after graph breaks. The maybe_fx_node()
+            # check ensures we don't include plain constants (whose as_proxy()
+            # returns the raw value, not an FX Proxy).
+            if arg.is_tensor() or (
+                arg.is_symnode_like() and arg.maybe_fx_node() is not None
+            ):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
 
