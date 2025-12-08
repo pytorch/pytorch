@@ -5707,6 +5707,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         r"attempting to trace CALL_FUNCTION:.*$",
         "attempting to trace CALL: a function call, e.g. f(x, y)",
         s,
+        flags=re.MULTILINE,
     )
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)

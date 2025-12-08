@@ -2572,7 +2572,8 @@ class InstructionTranslatorBase(
 
     @break_graph_if_unsupported(
         push=True,
-        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_KW: a function call with keyword arguments, e.g. f(x=True)",
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_KW: "
+        "a function call with keyword arguments, e.g. f(x=True)",
     )
     def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
         argnames = self.pop()
@@ -3969,7 +3970,8 @@ class InstructionTranslatorBase(
     # are broken down.
     @break_graph_if_unsupported(
         push=True,
-        msg_prefix="Encountered graph break when attempting to trace CALL_KW: a function call with keyword arguments, e.g. f(x=True)",
+        msg_prefix="Encountered graph break when attempting to trace CALL_KW: "
+        "a function call with keyword arguments, e.g. f(x=True)",
     )
     def CALL_KW(self, inst: Instruction) -> None:
         self._call(inst, call_kw=True)
