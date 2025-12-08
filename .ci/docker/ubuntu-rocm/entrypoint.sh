@@ -21,9 +21,9 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     # Disable FBGEMM_GENAI for theRock nightly (not yet supported)
     export USE_FBGEMM_GENAI=0
     
-    # Add roctracer include path for kineto (theRock has it in include/roctracer/)
-    export CPLUS_INCLUDE_PATH="${ROCM_PATH}/include/roctracer:${CPLUS_INCLUDE_PATH:-}"
-    export C_INCLUDE_PATH="${ROCM_PATH}/include/roctracer:${C_INCLUDE_PATH:-}"
+    # Set ROCM_SOURCE_DIR for Kineto's CMake to find roctracer headers correctly
+    # Kineto uses: ROCTRACER_INCLUDE_DIR = "${ROCM_SOURCE_DIR}/include/roctracer"
+    export ROCM_SOURCE_DIR="${ROCM_PATH}"
     
     echo "TheRock ROCm environment configured:"
     echo "  ROCM_PATH=$ROCM_PATH"
