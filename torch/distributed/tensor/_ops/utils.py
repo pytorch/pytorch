@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import cast, Optional, Union
 
 import torch
+from torch._ops import OpOverload
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -62,6 +63,7 @@ def _args_schema_with_tensor_meta(
     return args_op_strategy, kwargs_op_strategy
 
 
+# TODO delete mesh arg?
 def _fill_single_dim_strategy_placeholders(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -84,8 +86,10 @@ def _fill_single_dim_strategy_placeholders(
     ]
     """
     shard_builders: dict[str, Callable[[int], Placement]] = {}
-    for spec in op_schema.args_spec:
-        for p in spec.placements:
+    for strategy in op_schema.args_strategy:
+        assert len(strategy.strategies) == 1
+        assert isinstance(strategy.strategies[0], OpSpec)
+        for p in strategy.strategies[0].output_spec.placements:
             if isinstance(p, _StridedShard):
                 key = f"StridedShard(sf={p.split_factor})"
                 if key not in shard_builders:
@@ -117,8 +121,9 @@ def _fill_single_dim_strategy_placeholders(
             expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
 
     # implicitly allow replicating output, all inputs
+    # TODO: op_schema.args_spec is empty in this case, but op_schema.args_schema isn't.  What's the difference?
     expanded_strategies_over_one_mesh_dim.append(
-        [Replicate()] * (1 + len(op_schema.args_spec))
+        [Replicate()] * (1 + len(op_schema.args_schema))
     )
 
     return expanded_strategies_over_one_mesh_dim
@@ -128,54 +133,58 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: Callable[
-        [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+        [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
-) -> Callable[[ArgsType, KwargsType], StrategyType]:
+) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
     sharding types used by inputs.
 
     This supports functional correctness but will generate all possible combinations, which is prohibitively expensive
     for larger numbers of mesh dimensions.
+
+    The expanded_strategy function accesses both the args_schema/kwargs_schema, which contains TensorMeta in place of
+    tensor arguments, but also the op_schema which contains OpStrategy in place of Tensor args.
     """
 
     def expanded_strategy(
-        args_schema: ArgsType, kwargs_schema: KwargsType
+        op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
     ) -> StrategyType:
-        strategies_over_one_mesh_dim = single_dim_strategy(args_schema, kwargs_schema)
+        strategies_over_one_mesh_dim = single_dim_strategy(
+            op, args_schema, kwargs_schema
+        )
         expanded_strategies_over_one_mesh_dim = _fill_single_dim_strategy_placeholders(
             mesh, op_schema, strategies_over_one_mesh_dim
         )
 
         # TODO: identify differences between this and 'expand_' util
         all_mesh_dim_strategies = [expanded_strategies_over_one_mesh_dim] * mesh.ndim
-        strategy_combs = itertools.product(*all_mesh_dim_strategies)
+
+        all_combinations = itertools.product(*all_mesh_dim_strategies)
         all_strategies = []
-        for strategy_comb in strategy_combs:
+        for nd_placements in all_combinations:
+            # nd_placements is ([placements mesh_dim 0], [placements mesh_dim 1], ...)
+            # where placements is [out, in0, in1, ...]
+            # spec_list is inverted, [DTensorSpec0, 1, ...] where each spec has placements for all mesh dims
             spec_list = [
-                DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
+                DTensorSpec(mesh, tuple(placements))
+                for placements in zip(*nd_placements)
             ]
             arg_specs = spec_list[1:]
-            # Sad.. i am wrapping the DTensorSpec back into an OpStrategy to make it compatible with gen_redistribute_costs
-            # but I want to avoid having OpStrategy at all in here
-            src_strategies = [
-                OpStrategy([OpSpec(s)])
-                for s in op_schema.args_schema
-                if isinstance(s, DTensorSpec)
-            ]
-            if any(
-                not is_tensor_shardable(src_strat.shape, arg_spec)
-                for src_strat, arg_spec in zip(src_strategies, arg_specs)
-            ):
-                # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are 'shardable'
-                # instead, we filter out unshardable strategies after mesh expansion
-                # TODO: make this more robust after adding _ShardingPlaceholder, allowing us to say inside a single_dim_strategy
-                # whether we care about even-sharding or other specific properties
-                continue
+            src_strategies = list(op_schema.args_strategy)
+            assert len(src_strategies) == len(arg_specs)
 
-            assert len(arg_specs) == len(src_strategies), (
-                "expected one src strategy per arg spec"
-            )
+            # TODO replace isinstance with inheritance or util
+            # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are
+            # 'shardable' instead, we filter out unshardable strategies after mesh expansion.
+            # TODO: make this more robust after adding _ShardingPlaceholder, allowing us to say inside a single_dim_strategy
+            # whether we care about even-sharding or other specific properties
+            for src_strategy, arg_spec in zip(src_strategies, arg_specs):
+                if any(
+                    isinstance(p, (Shard, _StridedShard)) for p in arg_spec.placements
+                ):
+                    if not is_tensor_shardable(src_strategy.shape, arg_spec):
+                        continue
             all_strategies.append(
                 OpSpec(
                     output_specs=spec_list[0],
@@ -254,11 +263,33 @@ def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
 
 
-def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the spec matches these criteria:
-    * any Shard placements in spec refer to valid tensor dims
-    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+def is_tensor_shardable(
+    shape: Sequence[int],
+    spec: DTensorSpec,
+    allow_unbacked_sharding: Optional[bool] = None,
+) -> bool:
     """
+    Check if the shape is shardable according to the spec.
+
+    allow_unbacked_sharding: determines the fallback value if unbacked shapes are involved,
+    and the queried shape properties are not statically known.
+
+    e.g. when asking if u0 is shardable on num_shards, and u0 has generic bounds [0, inf],
+    the behavior of allow_unbacked_sharding is:
+
+        None: will data-dependent error
+        True: assumes shardability; we return True, allowing zero-size shards at runtime when u0 < num_shards.
+        False: returns False, and lower-bounding u0, e.g. torch._check(u0 >= num_shards), is needed to enable sharding.
+    """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    assert allow_unbacked_sharding in [None, True, False]
+    guard_fn = {
+        None: bool,
+        True: guard_or_false,
+        False: guard_or_true,
+    }[allow_unbacked_sharding]
+
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -271,7 +302,7 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, dim_size in enumerate(shape):
         # TODO: maybe we should determine is_shardable based on
         #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and dim_size < shards_map[i]:
+        if shards_map[i] > 1 and guard_fn(dim_size < shards_map[i]):
             return False
 
     return True
