@@ -806,23 +806,16 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
                 # Format full stack trace with proper indentation
                 if len(stack_frames) == 1:
                     extra = f"  # {stack_frames[0]}"
-                else:
-                    extra = "\n  # Full stack trace:\n" + "\n".join(
-                        f"  #   {i}: {frame}"
-                            for i, frame in enumerate(stack_frames)
+                elif is_recompiles_enabled():
+                    extra = "\n  # Full recompile user stack trace:\n" + "\n".join(
+                        f"  #   {i}: {frame}" for i, frame in enumerate(stack_frames)
                     )
+                else:
+                    extra = f"  # {stack_frames[0]}"
         elif guard.stack:
             summary = guard.stack.summary()
             if len(summary) > 0:
-                # Show full stack trace for CapturedTraceback as well
-                stack_frames = [format_frame(fs) for fs in summary]
-                if len(stack_frames) == 1:
-                    extra = f"  # {format_frame(summary[-1])}"
-                else:
-                    extra = "\n  # Full stack trace:\n" + "\n".join(
-                        f"  #   {i}: {frame}"
-                            for i, frame in enumerate(stack_frames)
-                    )
+                extra = f"  # {format_frame(summary[-1])}"
             else:
                 extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
@@ -4445,6 +4438,23 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
+                # For recompiles verbose mode, regenerate with full stack trace
+                if is_recompiles_verbose_enabled():
+                    # Extract raw code part (strip formatting added by get_verbose_code_part)
+                    raw_code_part = (
+                        fail_reason.split("#")[0].rstrip()
+                        if "#" in fail_reason
+                        else fail_reason.rstrip()
+                    )
+                    # Look up the guard using the raw code part
+                    guard = code_to_guard.get(raw_code_part)
+                    if guard:
+                        if is_recompiles_enabled():
+                            fail_reason = get_verbose_code_part(
+                                raw_code_part, guard
+                            )
+                        else:
+                            fail_reason = get_verbose_code_part(raw_code_part, guard)
                 reasons.append(fail_reason)
 
                 if not is_recompiles_verbose_enabled():
