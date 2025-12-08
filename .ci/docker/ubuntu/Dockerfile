@@ -145,11 +145,11 @@ RUN rm install_halide.sh common_utils.sh halide.txt
 
 ARG PALLAS
 ARG CUDA_VERSION
-# Install JAX with CUDA support (for Pallas)
+# Install JAX (for Pallas) - with CUDA support if CUDA_VERSION is set, otherwise CPU-only
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
-RUN if [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION}; fi
+RUN if [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION:-cpu}; fi
 RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX
