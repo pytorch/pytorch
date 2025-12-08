@@ -9326,7 +9326,7 @@ class GraphModule(torch.nn.Module):
 
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s94, s17, s17, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s17, s94, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s17 = s94 = l_z_ = None
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
@@ -9338,21 +9338,23 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
+        def forward(self, l_x_: "f32[s17, s94]", s17: "Sym(s17)", s94: "Sym(s94)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
+            s17_1 = s17
             s94_1 = s94
 
-            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
+            add: "f32[s17, s94]" = l_x__1 + s17_1;  l_x__1 = s17_1 = None
             getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
             clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
+        def forward(self, l_x_: "f32[s17, s94]", s17: "Sym(s17)", s94: "Sym(s94)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
+            s17_1 = s17
             s94_1 = s94
 
-            mul: "f32[s17, s94]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            mul: "f32[s17, s94]" = s17_1 * l_z__false_branch;  s17_1 = l_z__false_branch = None
             add: "f32[s17, s94]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s94]" = add[slice(None, 2, None)];  add = None
             clone: "f32[2, s94]" = getitem.clone();  getitem = None
