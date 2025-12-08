@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import itertools
 import logging
@@ -1185,7 +1186,20 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             #     it started, so that we do not call .join() if program dies
             #     before it starts, and __del__ tries to join but will get:
             #     AssertionError: can only join a started process.
-            w.start()
+            from pickle import PicklingError
+
+            try:
+                w.start()
+            except (TypeError, AttributeError, PicklingError):
+                warnings.warn(
+                    "Got pickle error when attempting to start a worker Process. "
+                    "This might be because the worker Process arguments are not picklable. "
+                    "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
+                    "to 'forkserver', which requires the worker Process arguments to be picklable. "
+                    "You can also try multiprocessing.set_start_method('fork').",
+                    stacklevel=2,
+                )
+                raise
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
@@ -1321,7 +1335,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # test.
                 # See NOTE [ DataLoader on Linux and open files limit ]
                 fds_limit_margin = 10
-                [tempfile.NamedTemporaryFile() for _ in range(fds_limit_margin)]  # noqa: SIM115
+                with contextlib.ExitStack() as stack:
+                    for _ in range(fds_limit_margin):
+                        stack.enter_context(
+                            tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
+                        )
             except OSError as e:
                 if e.errno == errno.EMFILE:
                     raise RuntimeError(

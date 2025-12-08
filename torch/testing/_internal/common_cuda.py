@@ -89,7 +89,7 @@ def evaluate_platform_supports_green_context():
     driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
     if driver_version is None:
         return False
-    return int(driver_version.split('.')[0]) >= 550
+    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
@@ -366,6 +366,12 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM89PreCUDA13(func):
+    """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
+    if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+        return unittest.expectedFailure(func)
+    return func
 
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)
