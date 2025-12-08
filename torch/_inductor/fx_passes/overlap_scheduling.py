@@ -1006,7 +1006,12 @@ class OverlapScheduler:
         candidates.sort(
             key=lambda n: (
                 # Off-path nodes past current idx get priority (0), others get (1)
-                0 if (self.off_compute_path(n) and self.node_idx[n] <= self.last_on_path_node_idx) else 1,
+                0
+                if (
+                    self.off_compute_path(n)
+                    and self.node_idx[n] <= self.last_on_path_node_idx
+                )
+                else 1,
                 self.compute_index_domination[n],
                 self.node_idx[n],
             ),
