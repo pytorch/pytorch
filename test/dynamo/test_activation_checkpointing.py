@@ -15,11 +15,11 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-<<<<<<< HEAD
-from functorch.compile import default_partition, min_cut_rematerialization_partition
-=======
-from functorch.compile import min_cut_rematerialization_partition, nop
->>>>>>> 67758dddfbc (add recompute tags (from AC) into GraphModule.print_readable() by default)
+from functorch.compile import (
+    default_partition,
+    min_cut_rematerialization_partition,
+    nop,
+)
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
