@@ -915,9 +915,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].synchronize();
     }
   }
 
@@ -1268,9 +1266,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].synchronize();
     }
   }
 
@@ -1463,9 +1459,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].synchronize();
     }
   }
 
@@ -1910,9 +1904,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].synchronize();
     }
   }
 
@@ -2123,9 +2115,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      outputEvents[i].synchronize();
     }
   }
 

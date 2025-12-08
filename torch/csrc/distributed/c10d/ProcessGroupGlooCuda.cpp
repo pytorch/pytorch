@@ -119,9 +119,7 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].synchronize();
     }
   }
 
