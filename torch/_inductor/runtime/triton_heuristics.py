@@ -3339,26 +3339,34 @@ def _persistent_reduction_configs(
     # TODO(jansel): we should be able to improve these heuristics
     elif not max_autotune_enabled:  # Do not filter configs when tuning
         if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
+            if (
+                rnumel > 1024
+                or xnumel // 8 < 128
+                or inductor_meta.get("RSPLIT_SIZE")
+                or torch.xpu.is_available()
+            ):
                 configs = configs[:1]
-            else:
-                num_warps, min_num_warps = 1, 1
-                x_block = min(1024 // rnumel, 8)
                 # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
-                # XPU will get register spill if using the same condition,
-                # so we apply different configurations from #168335 and set num_warps = None for now.
-                # A better cost model can help disable shared memory in Triton or inductor,
-                # i.e., #5477 in intel-xpu-backend-for-triton
-                if not torch.cuda.is_available():
+                # We apply different configurations from #168335.
+                # We currently let cost model in Triton to decide whether to use shared memory.
+                if torch.xpu.is_available() and rnumel <= 1024:
                     loads_and_stores = inductor_meta.get(
                         "num_load", 0
                     ) + inductor_meta.get("num_store", 0)
                     x_block = 8
                     if xnumel // x_block < 128 or loads_and_stores >= 5:
                         x_block = 1
-                    num_warps = None
-                    min_num_warps = None
-                    reduction_hint = None
+                    configs = [
+                        triton_config_reduction(
+                            size_hints,
+                            x_block,
+                            rnumel,
+                            register_intensive=True,
+                        )
+                    ]
+            else:
+                num_warps, min_num_warps = 1, 1
+                x_block = min(1024 // rnumel, 8)
 
                 configs = [
                     triton_config_reduction(
