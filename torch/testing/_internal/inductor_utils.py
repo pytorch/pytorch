@@ -34,7 +34,7 @@ from torch._inductor.utils import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas, has_tpu_pallas
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
 from torch.utils._triton import has_triton
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -68,7 +68,7 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-HAS_PALLAS = has_pallas()
+HAS_PALLAS = has_pallas_package()
 
 HAS_HELION = has_helion()
 
@@ -106,6 +106,7 @@ RUN_CPU = HAS_CPU and any(
 )
 
 HAS_TPU = has_tpu_pallas()
+RUN_TPU = HAS_TPU
 
 
 def _check_has_dynamic_shape(

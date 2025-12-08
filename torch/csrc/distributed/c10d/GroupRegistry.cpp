@@ -23,13 +23,7 @@ class GroupRegistry {
   c10::intrusive_ptr<c10d::ProcessGroup> resolve_group(
       const std::string& group_name) {
     std::shared_lock read_lock(lock_);
-
-    // Check if group_name has an alias and resolve to canonical name
-    auto alias_it = group_name_aliases_.find(group_name);
-    const std::string& lookup_key =
-        (alias_it != group_name_aliases_.end()) ? alias_it->second : group_name;
-
-    auto it = registry_.find(lookup_key);
+    auto it = registry_.find(group_name);
     TORCH_CHECK(
         it != registry_.end(),
         "Could not resolve the process group registered under the name ",
@@ -54,36 +48,9 @@ class GroupRegistry {
     registry_.clear();
   }
 
-  void register_alias(
-      const std::string& alias_name,
-      const std::string& canonical_name) {
-    std::unique_lock write_lock(lock_);
-
-    // Verify that the canonical name exists in the registry
-    auto canonical_it = registry_.find(canonical_name);
-    TORCH_CHECK(
-        canonical_it != registry_.end(),
-        "Cannot create alias '",
-        alias_name,
-        "': canonical group name '",
-        canonical_name,
-        "' is not registered");
-
-    {
-      auto group = canonical_it->second.lock();
-      group->setGroupNameAlias(alias_name);
-    }
-
-    auto [_, inserted] =
-        group_name_aliases_.try_emplace(alias_name, canonical_name);
-    TORCH_CHECK(
-        inserted, "An alias is already registered under the name ", alias_name);
-  }
-
  private:
   std::map<std::string, c10::weak_intrusive_ptr<c10d::ProcessGroup>> registry_;
   std::shared_mutex lock_;
-  std::unordered_map<std::string, std::string> group_name_aliases_;
 };
 
 } // namespace
@@ -133,17 +100,6 @@ void unregister_all_process_groups() {
     RankLocal<::GroupRegistry>::get().unregister_all_groups();
   } else {
     process_registry.unregister_all_groups();
-  }
-}
-
-void register_process_group_alias(
-    const std::string& alias_name,
-    const std::string& canonical_name) {
-  if (thread_isolation_mode) {
-    RankLocal<::GroupRegistry>::get().register_alias(
-        alias_name, canonical_name);
-  } else {
-    process_registry.register_alias(alias_name, canonical_name);
   }
 }
 
