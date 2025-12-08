@@ -3527,8 +3527,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self.allow_side_effects = (
             torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
-        # Checkpoint gets desugared/inlined in AOTDispatcher, so aliasing is OK
-        self.filter_aliased_intermediates = False
 
     def _call_function(
         self,
