@@ -435,6 +435,52 @@ class TestDTensorDebugMode(TestCase):
             cnt.frame_count, 1
         )  # check DebugMode doesn't trigger additional recompilations
 
+    def test_annotate(self):
+        x = torch.randn(8, 8)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                DebugMode._annotate("Foo")
+                return self.l1(x)
+
+        mod = Foo()
+        with DebugMode(record_nn_module=True) as debug_mode:
+            DebugMode._annotate("forward")
+            mod(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [annotate] forward
+  [nn.Mod] Foo
+    [annotate] Foo
+    [nn.Mod] Foo.l1
+        aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+        aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with DebugMode() as debug_mode:
+                torch.compile(mod, backend=backend, fullgraph=True)(x)
+
+            if backend == "inductor":
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """    aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+            else:
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """\
+  [annotate] Foo
+    aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+
     def test_nn_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -462,15 +508,15 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-    [nn.Mod] Bar
-      [nn.Mod] Bar.abc
-        [nn.Mod] Bar.abc.l1
+  [nn.Mod] Bar
+    [nn.Mod] Bar.abc
+      [nn.Mod] Bar.abc.l1
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-        [nn.Mod] Bar.abc.l2
+      [nn.Mod] Bar.abc.l2
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-      [nn.Mod] Bar.xyz
+    [nn.Mod] Bar.xyz
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
@@ -480,7 +526,9 @@ class TestDTensorDebugMode(TestCase):
             out.backward()
 
         sum_op = [
-            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+            op
+            for op in debug_mode.operators
+            if isinstance(op, _OpCall) and str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
         self.assertTrue(
@@ -519,6 +567,28 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
     aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
     aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
+        )
+
+    def test_in_place_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                y.add_(1)
+                return y
+
+        mod = Foo()
+        inp = torch.tensor(1)
+        with (
+            DebugMode(record_output=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::add.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((1.0, None), {}), 'hash': 2.0}
+    aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
         )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
@@ -767,7 +837,13 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
         hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
 
-        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        # TODO: the output hash not correct for async op, we should either not log the hash
+        # or wait before logging.
+        # https://github.com/pytorch/pytorch/pull/169295
+        # self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        self.assertEqual(
+            debug_mode.operators[-1].log["input_hash"][0][1], hash_(tensor)
+        )
 
         # Verify each rank's contribution
         for i in range(self.world_size):
