@@ -21,6 +21,10 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     # Disable FBGEMM_GENAI for theRock nightly (not yet supported)
     export USE_FBGEMM_GENAI=0
     
+    # Add roctracer include path for kineto (theRock has it in include/roctracer/)
+    export CPLUS_INCLUDE_PATH="${ROCM_PATH}/include/roctracer:${CPLUS_INCLUDE_PATH:-}"
+    export C_INCLUDE_PATH="${ROCM_PATH}/include/roctracer:${C_INCLUDE_PATH:-}"
+    
     echo "TheRock ROCm environment configured:"
     echo "  ROCM_PATH=$ROCM_PATH"
     echo "  ROCM_HOME=$ROCM_HOME"
