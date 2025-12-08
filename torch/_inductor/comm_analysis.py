@@ -32,6 +32,7 @@ class NVIDIA_GPU_TYPE(IntEnum):
     VOLTA = 0
     AMPERE = 1
     HOPPER = 2
+    BLACKWELL = 3
 
 
 @functools.lru_cache
@@ -180,6 +181,12 @@ llMaxBws = [
         87.7,
         22.5,  # avg of ring & tree
         19.0,
+    ],
+    # Blackwell-N1/AMD-N2/AMD-N4
+    [
+        282.0,
+        90.0,  # avg of ring & tree
+        70.0,
     ],
 ]
 
