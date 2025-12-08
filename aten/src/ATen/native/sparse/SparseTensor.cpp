@@ -471,13 +471,19 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
   if (indices.numel() > 0) {
     Tensor min_indices =
         std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    Tensor max_indices =
+        std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices;
+    Tensor cpu_max_indices;
     if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+      cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {
       cpu_min_indices = min_indices;
+      cpu_max_indices = max_indices;
     }
     auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
+    auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
     for (const auto d : c10::irange(indices.size(0))) {
       int64_t min_index_in_dim = cpu_min_indices_accessor[d];
       TORCH_CHECK(
@@ -486,6 +492,16 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
           min_index_in_dim,
           " for dim ",
           d);
+      int64_t max_index_in_dim = cpu_max_indices_accessor[d];
+      int64_t dim_size = size[static_cast<size_t>(d)];
+      TORCH_CHECK(
+        max_index_in_dim < dim_size,
+        "size is inconsistent with indices: for dim ",
+        d,
+        ", size is ",
+        dim_size,
+        " but found index ",
+        max_index_in_dim);
     }
   }
 

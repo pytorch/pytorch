@@ -284,6 +284,15 @@ class TestSparse(TestSparseBase):
         shape = torch.Size([3, 3])
         self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
 
+    def test_out_of_bounds_indices(self):
+        indices = torch.tensor([[0, 10000], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([1.0, 2.0])
+        shape = torch.Size([1000, 1000])
+        self.assertRaisesRegex(
+            RuntimeError, "size is inconsistent with indices",
+            lambda: torch.sparse_coo_tensor(indices, values, shape)
+        )
+
     def randn(self, *args, **kwargs):
         """
         Variant of torch.randn that also works in the TEST_CUDA case.
