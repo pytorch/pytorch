@@ -1192,6 +1192,38 @@ def _free_unbacked_symbols_with_path(
     if pending is None:
         pending = set()
     r = {}
+
+    def match_tensor(a: torch.Tensor, real_tensor: Optional[torch.Tensor] = None):
+        r.update(
+            go(
+                a.size(),
+                path + (CallMethodKey("size"),),
+                real=real_tensor.size() if real_tensor is not None else None,
+            )
+        )
+        if a.layout not in [
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            r.update(
+                go(
+                    a.stride(),
+                    path + (CallMethodKey("stride"),),
+                    real=real_tensor.stride() if real_tensor is not None else None,
+                )
+            )
+        r.update(
+            go(
+                a.storage_offset(),
+                path + (CallMethodKey("storage_offset"),),
+                real=(
+                    real_tensor.storage_offset() if real_tensor is not None else None
+                ),
+            )
+        )
+
     if isinstance(a, (tuple, list)):
         # NB: real is apparently not always a tuple/list here
         # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
@@ -1209,6 +1241,12 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
+
+        # match DTensor outer shapes
+        if torch.distributed.is_available() and isinstance(
+            a, torch.distributed.tensor.DTensor
+        ):
+            match_tensor(a)
     elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
         unwrapped_tensor = get_unwrapped(a)
         r.update(go(unwrapped_tensor, path))
@@ -1216,38 +1254,7 @@ def _free_unbacked_symbols_with_path(
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
-        r.update(
-            go(
-                a.size(),
-                path + (CallMethodKey("size"),),
-                real=a.real_tensor.size() if a.real_tensor is not None else None,
-            )
-        )
-        if a.layout not in [
-            torch.sparse_csr,
-            torch.sparse_csc,
-            torch.sparse_bsr,
-            torch.sparse_bsc,
-        ]:
-            r.update(
-                go(
-                    a.stride(),
-                    path + (CallMethodKey("stride"),),
-                    real=a.real_tensor.stride() if a.real_tensor is not None else None,
-                )
-            )
-        r.update(
-            go(
-                a.storage_offset(),
-                path + (CallMethodKey("storage_offset"),),
-                real=(
-                    a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None
-                ),
-            )
-        )
-
+        match_tensor(a, a.real_tensor)
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)

@@ -354,7 +354,7 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(
             BufferError, r"Can't export tensors on a different CUDA device"
         ):
-            with torch.device(dev1):
+            with torch.cuda.device(dev1):
                 x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required

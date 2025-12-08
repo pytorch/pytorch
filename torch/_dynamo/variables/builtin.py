@@ -1500,10 +1500,17 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
             if args[0].is_python_constant():
                 try:
-                    fn = getattr(float, name)
+                    fn = getattr(self.fn, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:
@@ -3256,6 +3263,15 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.fn)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
 @contextlib.contextmanager
