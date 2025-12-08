@@ -945,6 +945,8 @@ class aten_distributed_optimizations:
         None
     )
 
+    compute_overlap_multipler : Optional[float] = None
+
     # Method for estimating collective runtime
     # "analytical": Use bandwidth formulas (default)
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation

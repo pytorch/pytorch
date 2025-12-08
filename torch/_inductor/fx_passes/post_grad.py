@@ -305,6 +305,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "collective_estimator",
             "max_memory_increase_gb",
             "max_memory_increase_ratio",
+            "compute_overlap_multipler",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
