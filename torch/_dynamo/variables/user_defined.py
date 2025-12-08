@@ -2540,13 +2540,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(
-        self,
-        value,
-        tuple_vt: Optional["TupleVariable"] = None,
-        init_args=None,
-        **kwargs,
-    ):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
             assert self.source is None, (
