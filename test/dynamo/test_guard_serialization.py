@@ -1805,7 +1805,7 @@ class SimpleModule(torch.nn.Module):
         return z
 
 
-if not IS_MACOS:
+if torch.distributed.is_available() and not IS_MACOS:
     from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 
     @torch._dynamo.config.patch({"strict_precompile": True})
