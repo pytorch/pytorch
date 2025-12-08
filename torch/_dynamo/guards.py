@@ -228,7 +228,6 @@ recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
-recompile_stack_log = torch._logging.getArtifactLogger(__name__, "recompile_stack")
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
@@ -809,7 +808,8 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
                     extra = f"  # {stack_frames[0]}"
                 else:
                     extra = "\n  # Full stack trace:\n" + "\n".join(
-                        f"  #   {i}: {frame}" for i, frame in enumerate(stack_frames)
+                        f"  #   {i}: {frame}"
+                            for i, frame in enumerate(stack_frames)
                     )
         elif guard.stack:
             summary = guard.stack.summary()
@@ -820,7 +820,8 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
                     extra = f"  # {format_frame(summary[-1])}"
                 else:
                     extra = "\n  # Full stack trace:\n" + "\n".join(
-                        f"  #   {i}: {frame}" for i, frame in enumerate(stack_frames)
+                        f"  #   {i}: {frame}"
+                            for i, frame in enumerate(stack_frames)
                     )
             else:
                 extra = "  # <unknown>"
@@ -1977,7 +1978,7 @@ class GuardBuilder(GuardBuilderBase):
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = repr(t)
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -2079,7 +2080,13 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         id_val = self.id_ref(val, guard.name)
-        code = f"___check_obj_id({ref}, {id_val})"
+        try:
+            type_repr = repr(val)
+        except Exception:
+            # During deepcopy reconstruction or other state transitions,
+            # objects may be in an incomplete state where repr() fails
+            type_repr = f"<{type(val).__name__}>"
+        code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
             id_val, get_verbose_code_parts(code, guard, recompile_hint)
@@ -3906,7 +3913,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                {
+                OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3914,7 +3921,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                }
+                )
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
@@ -4287,10 +4294,6 @@ def is_recompiles_verbose_enabled() -> bool:
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
 
 
-def is_recompile_stack_enabled() -> bool:
-    return torch._logging._internal.log_state.is_artifact_enabled("recompile_stack")
-
-
 # this will only be used if cpp guards are disabled
 def make_torch_function_mode_stack_guard(
     initial_stack: list[torch.overrides.TorchFunctionMode],
@@ -4415,11 +4418,10 @@ def get_guard_fail_reason_helper(
         )
     else:
         # Build a mapping from code parts to guards for stack trace lookup
-        # This is used when recompile_stack is enabled to show full stack traces
         code_to_guard: dict[str, Guard] = {}
-        if (
-            is_recompiles_verbose_enabled() or is_recompile_stack_enabled()
-        ) and hasattr(guard_manager, "guards_with_stack"):
+        if is_recompiles_verbose_enabled() and hasattr(
+            guard_manager, "guards_with_stack"
+        ):
             for guard in guard_manager.guards_with_stack:
                 if guard.code_list:
                     for code_part in guard.code_list:
@@ -4433,7 +4435,7 @@ def get_guard_fail_reason_helper(
                 try:
                     fail_reason = eval(part, global_scope, scope)
                 except Exception:
-                    if is_recompiles_verbose_enabled() or is_recompile_stack_enabled():
+                    if is_recompiles_verbose_enabled():
                         continue
                     else:
                         raise
@@ -4443,24 +4445,9 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
-                # For recompile_stack mode, enhance the reason with stack trace information
-                # Look up the guard using the original code part, not the evaluated fail_reason
-                if is_recompile_stack_enabled() and code_to_guard:
-                    # Try to find the guard associated with this code part
-                    guard = code_to_guard.get(part)
-                    if guard and (guard.user_stack or guard.stack):
-                        # Format with full stack trace
-                        formatted_reason = get_verbose_code_part(fail_reason, guard)
-                        reasons.append(formatted_reason)
-                    else:
-                        reasons.append(fail_reason)
-                else:
-                    reasons.append(fail_reason)
+                reasons.append(fail_reason)
 
-                if (
-                    not is_recompiles_verbose_enabled()
-                    and not is_recompile_stack_enabled()
-                ):
+                if not is_recompiles_verbose_enabled():
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
@@ -4526,15 +4513,11 @@ def get_and_maybe_log_recompilation_reasons(
 
     if skip_logging:
         return reasons
-    # at least one of "recompiles", "recompiles_verbose", or "recompile_stack" is enabled
-    do_recompiles_log = (
-        is_recompiles_enabled()
-        or is_recompiles_verbose_enabled()
-        or is_recompile_stack_enabled()
-    )
+    # at least one of "recompiles" or "recompiles_verbose" is enabled
+    do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
 
     if do_recompiles_log or config.error_on_recompile:
-        if is_recompiles_verbose_enabled() or is_recompile_stack_enabled():
+        if is_recompiles_verbose_enabled():
             failures = "\n\n".join(
                 f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
                 for i, reason in enumerate(reasons)
@@ -4549,9 +4532,7 @@ def get_and_maybe_log_recompilation_reasons(
             f"{textwrap.indent(guard_failure_details, '    ')}"
         )
         if do_recompiles_log:
-            if is_recompile_stack_enabled():
-                recompile_stack_log.debug(message)
-            elif is_recompiles_verbose_enabled():
+            if is_recompiles_verbose_enabled():
                 recompiles_verbose_log.debug(message)
             else:
                 recompiles_log.debug(message)

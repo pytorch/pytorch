@@ -256,7 +256,6 @@ def set_logs(
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
     compute_dependencies: bool = False,
-    recompile_stack: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -544,7 +543,6 @@ def set_logs(
         guards=guards,
         recompiles=recompiles,
         recompiles_verbose=recompiles_verbose,
-        recompile_stack=recompile_stack,
         trace_source=trace_source,
         trace_call=trace_call,
         trace_bytecode=trace_bytecode,
