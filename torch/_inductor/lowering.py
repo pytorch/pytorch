@@ -12,17 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Sequence
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Optional,
-    TYPE_CHECKING,
-    TypeGuard,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
