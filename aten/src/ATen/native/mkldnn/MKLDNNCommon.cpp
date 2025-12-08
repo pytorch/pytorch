@@ -68,6 +68,9 @@ dnnl::memory::data_type get_mkldnn_dtype(ScalarType type) {
 }
 
 dnnl::memory::desc get_mkldnn_memory_desc(const Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+      return itensor_from_tensor(tensor).get_desc();
+  }
   TORCH_CHECK(
       tensor.device().is_cpu(),
       "get_mkldnn_memory_desc expects CPU tensor input");
