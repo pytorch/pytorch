@@ -21,6 +21,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
+    IS_FBCODE,
 )
 
 
@@ -114,6 +115,7 @@ class DeterministicTest(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
