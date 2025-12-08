@@ -609,7 +609,7 @@ else:
             ``mesh_dim_names``
 
             Args:
-                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh_dim_names (Union[str, tuple[str, ...]]): the name or the tuple of names of the
                 mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
@@ -981,7 +981,7 @@ else:
                 mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
                     integer tensor describing the layout of devices, where the IDs are global IDs
                     of the default process group. Default is None.
-                mesh_dim_names (tuple[str], optional): A tuple of mesh dimension names to assign
+                mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign
                     to each dimension of the multi-dimensional array describing the layout of devices.
                     Its length must match the length of `mesh_shape`. Each string in `mesh_dim_names`
                     must be unique. Default is None.
@@ -1010,7 +1010,7 @@ else:
                     mesh_dim_names=mesh_dim_names,
                     _init_backend=False,
                 )
-                device_mesh._dim_group_names = [group._group_name_alias or group.group_name]
+                device_mesh._dim_group_names = [group.group_name_or_alias]
                 return device_mesh
 
             # nD scenario
@@ -1040,7 +1040,9 @@ else:
             device_mesh = DeviceMesh(
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
-            device_mesh._dim_group_names = [group._group_name_alias or group.group_name for group in groups]
+            device_mesh._dim_group_names = [
+                group.group_name_or_alias for group in groups
+            ]
             return device_mesh
 
         def size(self, mesh_dim: int | None = None) -> int:
@@ -1106,11 +1108,10 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
-        def is_part_of_mesh(self) -> bool:
+        def is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
             """
-            # TODO: rename is_current_rank_part_of_mesh?
             # TODO: Do we need to patch dynamo?
             return self._coordinate_on_dim is not None
 
@@ -1123,6 +1124,7 @@ else:
 
         def sym_get_coordinate(self, index: int) -> int:
             if not _in_fake_mode():
+                # This is only valid when the current rank is part of the mesh.
                 assert self._coordinate_on_dim is not None
                 return self._coordinate_on_dim[index]
 
@@ -1387,7 +1389,7 @@ else:
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
-            mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
+            mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign to each dimension
                 of the multi-dimensional array describing the layout of devices. Its length must match the length
                 of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
             backend_override (Dict[int | str, tuple[str, Options] | str | Options], optional): Overrides for some or all of
