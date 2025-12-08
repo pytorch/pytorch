@@ -527,6 +527,35 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         )
 
 
+class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
+    def test_top_level_torch_exp_compiles_through_dynamo(self):
+        x = torch.randn(4)
+
+        # Sanity: lambda version should go through Dynamo
+        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
+        opt_lambda = torch.compile(lambda t: torch.exp(t), backend="eager")
+        y_lambda = opt_lambda(x)
+        frame_count_mid = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertTrue(
+            frame_count_mid > frame_count_before,
+            "Sanity check failed: lambda version did not produce a Dynamo graph",
+        )
+
+        # Regression target: torch.compile(torch.exp)
+        opt_exp = torch.compile(torch.exp, backend="eager")
+        y_exp = opt_exp(x)
+        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
+
+        # We expect an additional frame to be converted when compiling torch.exp
+        self.assertTrue(
+            frame_count_after > frame_count_mid,
+            "torch.compile(torch.exp) did not go through Dynamo (no new frame was converted)",
+        )
+
+        # And the numerical result should match the lambda-based version
+        self.assertTrue(torch.allclose(y_lambda, y_exp))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
