@@ -1195,6 +1195,113 @@ except RuntimeError as e:
                 self.assertNotIn("C++ CapturedTraceback:", error_message)
 
         @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
+        def test_my_to_device(self, device):
+            """Test to(device) convenience overload."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device="cpu")
+
+            # Move to current device
+            result = libtorch_agnostic.ops.my_to_device(t, device)
+            expected = t.to(device)
+            self.assertEqual(result, expected, exact_device=True)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_to_dtype(self, device):
+            """Test to(dtype) via the main to function."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device, dtype=torch.float32)
+
+            # Convert to float64
+            result = libtorch_agnostic.ops.my_to_dtype(t, torch.float64)
+            expected = t.to(torch.float64)
+            self.assertEqual(result, expected, exact_device=True)
+
+            # Convert to int32
+            t2 = torch.randn(2, 3, device=device, dtype=torch.float32)
+            result2 = libtorch_agnostic.ops.my_to_dtype(t2, torch.int32)
+            expected2 = t2.to(torch.int32)
+            self.assertEqual(result2, expected2, exact_device=True)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
+        def test_my_to_dtype_layout(self, device):
+            """Test the full to.dtype_layout op with various parameter combinations."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Test dtype conversion
+            t = torch.randn(3, 4, device=device, dtype=torch.float32)
+            result = libtorch_agnostic.ops.my_to_dtype_layout(t, dtype=torch.float64)
+            expected = t.to(dtype=torch.float64)
+            self.assertEqual(result, expected, exact_device=True)
+
+            # Test device conversion (move to CPU if on CUDA, or stay on CPU)
+            result_cpu = libtorch_agnostic.ops.my_to_dtype_layout(t, device="cpu")
+            expected_cpu = t.to(device="cpu")
+            self.assertEqual(result_cpu, expected_cpu, exact_device=True)
+
+            # Test copy=True (should always create a copy)
+            t_copy = torch.randn(2, 3, device=device)
+            result_copy = libtorch_agnostic.ops.my_to_dtype_layout(t_copy, copy=True)
+            expected_copy = t_copy.to(copy=True)
+            self.assertEqual(result_copy, expected_copy, exact_device=True)
+            self.assertNotEqual(result_copy.data_ptr(), t_copy.data_ptr())
+
+            # Test dtype + device together
+            t3 = torch.randn(2, 2, device=device, dtype=torch.float32)
+            result_both = libtorch_agnostic.ops.my_to_dtype_layout(
+                t3, dtype=torch.float64, device="cpu"
+            )
+            expected_both = t3.to(dtype=torch.float64, device="cpu")
+            self.assertEqual(result_both, expected_both, exact_device=True)
+
+            # Test memory_format (channels_last for 4D tensor)
+            t4d = torch.randn(2, 3, 4, 5, device=device)
+            result_channels_last = libtorch_agnostic.ops.my_to_dtype_layout(
+                t4d, memory_format=torch.channels_last
+            )
+            expected_channels_last = t4d.to(memory_format=torch.channels_last)
+            self.assertEqual(
+                result_channels_last, expected_channels_last, exact_device=True
+            )
+            self.assertTrue(
+                result_channels_last.is_contiguous(memory_format=torch.channels_last)
+            )
+
+            # Test with all None (should return equivalent tensor)
+            t_none = torch.randn(2, 3, device=device)
+            result_none = libtorch_agnostic.ops.my_to_dtype_layout(t_none)
+            expected_none = t_none.to()
+            self.assertEqual(result_none, expected_none, exact_device=True)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_contiguous(self, device):
+            """Test contiguous with default memory format."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device).t()
+            self.assertFalse(t.is_contiguous())
+
+            result = libtorch_agnostic.ops.my_contiguous(t)
+            self.assertTrue(result.is_contiguous())
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_contiguous_memory_format(self, device):
+            """Test contiguous with specified memory format."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Create a 4D tensor (N, C, H, W)
+            t = torch.randn(2, 3, 4, 5, device=device)
+
+            # Convert to channels_last format
+            result = libtorch_agnostic.ops.my_contiguous_memory_format(
+                t, torch.channels_last
+            )
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_std_cuda_kernel_launch_check_success(self, device):
             """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
