@@ -47,6 +47,7 @@ from . import config
 from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
+    dp_knapsack_sliding_hirschberg,
     greedy_knapsack,
     ilp_knapsack,
 )
@@ -171,6 +172,11 @@ def sym_node_size(node: fx.Node) -> int:
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
+
+
+# Run DCE while overriding the definition of is_impure_node
+def is_not_collective(node):
+    return getattr(node.target, "namespace", None) != "_c10d_functional"
 
 
 InvalidNode = InvalidNodeBase()
@@ -1109,6 +1115,10 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
+        if node.op == "get_attr" and node.name in (
+            k for k, v in joint_module.named_modules()
+        ):
+            continue
         if node.target is torch.ops.aten._assert_scalar.default:
             continue
         if is_sym_node(node):
@@ -1165,15 +1175,6 @@ def default_partition(
     )
 
     # Run DCE while overriding the definition of is_impure_node
-    def is_not_collective(node):
-        if not distributed_enabled:
-            return True
-        if node.target is torch.ops._c10d_functional.wait_tensor.default:
-            return False
-        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
-            return False
-        return True
-
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
@@ -2365,6 +2366,8 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp_knapsack_sliding_hirschberg":
+        return dp_knapsack_sliding_hirschberg(memory, runtimes, max_memory)
     elif SOLVER == "dynamic_memory_budget_dp":
         log.warning(
             "dynamic_memory_budget_dp is an experimental solver. "
@@ -3022,6 +3025,19 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
+        )
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
