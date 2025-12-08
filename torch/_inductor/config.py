@@ -963,6 +963,13 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
+# Enable/disable partitioned scatter optimization for atomic add kernels
+# this will improve kernel performance at cost of memory usage.:wq
+partitioned_scatter_enabled = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+)
+
+
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024

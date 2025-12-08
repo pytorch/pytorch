@@ -621,6 +621,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    @config.patch("partitioned_scatter_enabled", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.
