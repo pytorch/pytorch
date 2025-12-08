@@ -36,7 +36,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
   // `CUDAPeerAllocInfo` which corresponds to the base Block. The
   // CUDASymmetricMemory handle is specified by the offset to the base ptr.
   CUDASymmetricMemory(
-      c10::intrusive_ptr<CUDAPeerAllocInfo>& pai,
+      const c10::intrusive_ptr<CUDAPeerAllocInfo>& pai,
       size_t offset);
 
   ~CUDASymmetricMemory() override {};

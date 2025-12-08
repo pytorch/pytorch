@@ -119,14 +119,14 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
 // This is mostly a shallow copy that shares the pointer to `CUDAPeerAllocInfo`
 // which corresponds to the base Block. The CUDASymmetricMemory handle is
 // specified by the offset to the base ptr.
-CUDASymmetricMemory::CUDASymmetricMemory(c10::intrusive_ptr<CUDAPeerAllocInfo>& pai, size_t offset)
+CUDASymmetricMemory::CUDASymmetricMemory(const c10::intrusive_ptr<CUDAPeerAllocInfo>& pai, size_t offset)
     : local_device_idx_(pai->local_device_idx_),
       rank_(pai->rank_),
-      world_size_(pai->world_size_) {
+      world_size_(pai->world_size_),
+      pai_(pai),
+      offset_(offset) {
   // offset is specific per symm_mem handle
-  TORCH_INTERNAL_ASSERT(offset < pai->buffer_size_, "offset out of range");
-  offset_ = offset;
-  pai_ = pai;
+  TORCH_INTERNAL_ASSERT(offset_ < pai_->buffer_size_, "offset out of range");
 }
 
 std::vector<void*> CUDASymmetricMemory::get_buffer_ptrs() {
