@@ -3900,7 +3900,6 @@ def forward(self, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -3914,7 +3913,8 @@ def forward(self, tangents_1):
         )
 
         def bn(x):
-            return torch.ops.aten.cudnn_batch_norm(
+            fn = torch.ops.aten.cudnn_batch_norm if torch.version.hip is None else torch.ops.aten.miopen_batch_norm
+            return fn(
                 x,
                 weight,
                 bias,

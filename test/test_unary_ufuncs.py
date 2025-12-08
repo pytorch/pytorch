@@ -1613,7 +1613,6 @@ class TestUnaryUfuncs(TestCase):
     @onlyCUDA
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
-    @skipIfRocm(msg="ROCM tries to allocate 60GB")
     def test_nonzero_large(self, device, dtype):
         indices = (
             torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
