@@ -759,9 +759,11 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     input_tuple_strategy = args_schema[0]
     if not isinstance(input_tuple_strategy, TupleStrategy):
         raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
-    first_input_strategy = input_tuple_strategy.children[0]
-    if not isinstance(first_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {first_input_strategy}")
+    input_strategies: list[OpStrategy] = []
+    for child in input_tuple_strategy.children:
+        assert isinstance(child, OpStrategy), f"Expected OpStrategy, got {child}"
+        input_strategies.append(child)
+    first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     # normalize the dim to be within the common input ndim
@@ -784,22 +786,18 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
     # be normalized with the new Shard placement
     follow_placements = shift_shard_dims_after_insert(follow_placements, dim)
-
-    for strategy in input_tuple_strategy.children:
-        if not isinstance(strategy, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
-        output_spec = DTensorSpec(mesh, tuple(follow_placements))
-        redistribute_cost = []
-        for input_spec in input_specs:
-            cost = generate_redistribute_costs(strategy, input_spec)
-            redistribute_cost.append(cost)
-        op_strategy.strategies.append(
-            OpSpec(
-                output_specs=output_spec,
-                input_specs=input_specs,
-                redistribute_cost=redistribute_cost,
-            )
+    output_spec = DTensorSpec(mesh, tuple(follow_placements))
+    redistribute_cost = [
+        generate_redistribute_costs(input_strategies[i], input_specs[i])
+        for i in range(len(input_specs))
+    ]
+    op_strategy.strategies.append(
+        OpSpec(
+            output_specs=output_spec,
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
+    )
     return op_strategy
 
 

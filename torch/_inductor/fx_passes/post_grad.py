@@ -289,30 +289,22 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
-        from torch._inductor.config import aten_distributed_optimizations as dist_opts
         from torch._inductor.fx_passes.overlap_scheduling import (
-            schedule_overlap_bucketing,
+            schedule_overlap_bucketing_from_inductor_configs,
         )
+
+        overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
 
         # by default, insert overlap deps within inductor
-        kwargs: dict[str, object] = {"insert_overlap_deps": True}
-
-        config_keys = (
-            "collective_bucketing",
-            "max_compute_pre_fetch",
-            "custom_runtime_estimation",
-            "insert_overlap_deps",
-            "collective_estimator",
-            "max_memory_increase_gb",
-            "max_memory_increase_ratio",
-        )
-        for key in config_keys:
-            if (val := getattr(dist_opts, key)) is not None:
-                kwargs[key] = val
-
-        GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
-            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)  # type: ignore[arg-type]
-        )
+        with config.patch(
+            "aten_distributed_optimizations.insert_overlap_deps",
+            True if overlap_deps is None else overlap_deps,
+        ):
+            GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+                lambda graph: schedule_overlap_bucketing_from_inductor_configs(
+                    graph.owning_module
+                )
+            )
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
