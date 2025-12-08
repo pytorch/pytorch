@@ -607,6 +607,12 @@ if(USE_CUDA)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
+  if(NOT WIN32)
+    set_source_files_properties(
+      ${TORCH_ROOT}/aten/src/ATen/cuda/CUDAGreenContext.cpp
+      PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+    )
+  endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
     PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
@@ -1301,7 +1307,7 @@ endif()
 
 if(USE_MKLDNN_ACL)
   find_package(ACL REQUIRED)
-  target_include_directories(torch_cpu PRIVATE ${ACL_INCLUDE_DIRS})
+  target_include_directories(torch_cpu SYSTEM PRIVATE ${ACL_INCLUDE_DIRS})
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1352,9 +1358,15 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
     # NativeRT is disabled
     # add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    if(BUILD_AOT_INDUCTOR_TEST)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_inference ${CMAKE_BINARY_DIR}/test_aoti_inference)
+    endif()
+
     if(USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
       if(NOT WIN32)
@@ -1372,16 +1384,6 @@ if(BUILD_TEST)
         ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
     endif()
-    add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
-                     ${CMAKE_BINARY_DIR}/test_lazy)
-  endif()
-  if(BUILD_AOT_INDUCTOR_TEST)
-    add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aoti_abi_check
-      ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
-    add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aoti_inference
-      ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
 endif()
 
@@ -1939,6 +1941,7 @@ if(BUILD_TEST)
     foreach(test_src ${Caffe2_XPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
+      torch_compile_options(${test_name})
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})

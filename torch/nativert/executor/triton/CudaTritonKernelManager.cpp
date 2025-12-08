@@ -29,7 +29,11 @@ namespace torch::nativert {
 class CudaKernelInputs final : public KernelInputs {
  public:
   CudaKernelInputs(size_t num_args, size_t num_attrs)
-      : KernelInputs(num_args, num_attrs), arg_ptrs_(num_args) {}
+      : KernelInputs(num_args, num_attrs),
+        arg_ptrs_(num_args),
+        global_scratch_(0) {
+    inputs_.push_back(&global_scratch_);
+  }
   ~CudaKernelInputs() final = default;
 
   void add_arg(void* arg) override {
@@ -41,6 +45,7 @@ class CudaKernelInputs final : public KernelInputs {
 
  private:
   std::vector<void*> arg_ptrs_;
+  CUdeviceptr global_scratch_;
 };
 
 class CudaTritonKernelManager final : public TritonKernelManager {

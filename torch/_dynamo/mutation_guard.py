@@ -117,21 +117,6 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         return True
     if hasattr(obj, "torchdynamo_force_dynamic"):
         return obj.torchdynamo_force_dynamic
-
-    # TODO - Executorch uses a delegate mechanism to lower nn.Module to a
-    # backend. This today requires Dynamo to not look inside the
-    # LoweredBackendModule. We should perhaps revisit this to understand
-    # why Dynamo is tracing this module.
-    if isinstance(obj, torch.nn.Module):
-        try:
-            cls = type(obj)
-            if cls.__module__.startswith("executorch") and cls.__name__.endswith(
-                "LoweredBackendModule"
-            ):
-                return False
-        except Exception:
-            pass
-
     if (
         isinstance(obj, torch.nn.Module)
         and config.inline_inbuilt_nn_modules

@@ -24,6 +24,7 @@ def parse(graph):
         print(node.name)
         shapeproto = TensorShapeProto(
             dim=[
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=d.dim_value)
                 for d in node.type.tensor_type.shape.dim
             ]

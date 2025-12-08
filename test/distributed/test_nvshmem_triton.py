@@ -4,6 +4,16 @@
 
 import sys
 
+# Import TEST_WITH_ROCM first to check for ROCm before importing NVSHMEM modules
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
+
+
+# Skip entire module on ROCm before importing NVSHMEM-specific modules
+# NVSHMEM is NVIDIA-specific and can cause crashes during import on ROCm
+if TEST_WITH_ROCM:
+    print("NVSHMEM not available on ROCm, skipping tests")
+    sys.exit(0)
+
 import triton.language as tl
 
 import torch
@@ -1136,9 +1146,8 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         vals[0, ::2] = 1
         vals[0, 1::2] = 2
         vals[1] = 1
-        vals2 = vals[2].view(-1, 2, 2)
-        vals2[:, 0] = 1
-        vals2[:, 1] = 2
+        for rank in range(world_size):
+            vals[2, rank] = 1 if (rank // 2) % 2 == 0 else 2
         expected = vals.prod(-1).tolist()
 
         # Synchronize before reduction
