@@ -728,7 +728,6 @@ class TestViewOps(DTensorTestBase):
             expected_placements = (
                 _StridedShard(dim=flatten_start, split_factor=split_factor),
             )
-        print(f"{expected_placements=}", flush=True)
         expected_local_tensor = (
             distribute_tensor(
                 global_inps.view(viewed_tensor_dims), mesh, (Replicate(),)
