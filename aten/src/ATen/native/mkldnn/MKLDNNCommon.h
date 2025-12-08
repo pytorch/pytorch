@@ -5,6 +5,7 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
+#include <dnnl.hpp>
 
 #ifndef IDEEP_PREREQ
 // Please find definitions of version numbers in ideep.hpp
@@ -22,9 +23,9 @@
 
 namespace at::native {
 
-// Mapping ScalarType to ideep tensor data_type
-TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
-static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
+// Mapping ScalarType to oneDNN memory data_type
+TORCH_API dnnl::memory::data_type get_mkldnn_dtype(ScalarType type);
+static inline dnnl::memory::data_type get_mkldnn_dtype(const Tensor& t) {
   return get_mkldnn_dtype(t.scalar_type());
 }
 
