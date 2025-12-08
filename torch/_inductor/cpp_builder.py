@@ -5,6 +5,7 @@ import copy
 import ctypes
 import errno
 import functools
+import glob
 import json
 import locale
 import logging
@@ -19,7 +20,6 @@ import sysconfig
 import tempfile
 import textwrap
 import warnings
-import glob
 from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
@@ -1300,8 +1300,8 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     for lib_name in preload_list:
         _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
 
-def preload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
 
+def preload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
     torch_root = Path(torch.__file__).resolve().parent
     for d in [torch_root / "lib", torch_root.parent / "torch.libs"]:
         torch_libgomp = glob.glob(str(d / "libgomp-*.so*"))
@@ -1313,12 +1313,14 @@ def preload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
         ldflags.append(f"Wl,-rpath,{path.parent}")
         libs.append(f":{path.name}")
 
-        print(f"[DEBUG] Prioritizing TORCH libgomp: {path}")
+        log.debug("Prioritizing TORCH libgomp: %s", path)
         break
+
     else:
         # fallback to system gomp
         libs.append("gomp")
-        print("[WARN] Falling back to system libgomp")
+        log.warning("Falling back to system libgomp")
+
 
 def _get_openmp_args(
     cpp_compiler: str,
