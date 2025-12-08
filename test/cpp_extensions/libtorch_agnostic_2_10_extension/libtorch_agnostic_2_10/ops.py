@@ -640,7 +640,9 @@ def my_sum_dim1(self) -> Tensor:
     return torch.ops.libtorch_agnostic_2_10.my_sum_dim1.default(self)
 
 
-def my_full(size, fill_value, dtype=None, device=None, pin_memory=None) -> Tensor:
+def my_full(
+    size, fill_value, dtype=None, layout=None, device=None, pin_memory=None
+) -> Tensor:
     """
     Creates a tensor filled with a scalar value.
 
@@ -648,11 +650,28 @@ def my_full(size, fill_value, dtype=None, device=None, pin_memory=None) -> Tenso
         size: list[int] - size of the tensor to create
         fill_value: float - value to fill the tensor with
         dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
         device: Device or None - device on which to create the tensor
         pin_memory: bool or None - whether to use pinned memory
 
     Returns: Tensor - a tensor filled with fill_value
     """
     return torch.ops.libtorch_agnostic_2_10.my_full.default(
-        size, fill_value, dtype, device, pin_memory
+        size, fill_value, dtype, layout, device, pin_memory
     )
+
+
+def my_subtract(self, other, alpha=1.0) -> Tensor:
+    """
+    Subtracts other from self, scaled by alpha.
+
+    Computes: self - alpha * other
+
+    Args:
+        self: Tensor - input tensor
+        other: Tensor - tensor to subtract
+        alpha: float - scaling factor for other (default: 1.0)
+
+    Returns: Tensor - result of subtraction
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_subtract.default(self, other, alpha)
