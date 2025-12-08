@@ -5997,7 +5997,7 @@ def meta__scaled_dot_product_fused_attention_overrideable_backward(
     is_causal: bool,
     philox_seed: Tensor,
     philox_offset: Tensor,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ):
     grad_q = torch.empty_like(query)
     grad_k = torch.empty_like(key)

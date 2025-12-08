@@ -56,14 +56,6 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
           params.query, params.key, params.value, params.attn_mask))
     return true;
 
-  auto q_num_heads = params.query.sym_size(-3);
-  auto k_num_heads = params.key.sym_size(-3);
-  auto v_num_heads = params.value.sym_size(-3);
-  bool is_gqa = q_num_heads != k_num_heads || q_num_heads != v_num_heads;
-  if (debug && is_gqa)
-    TORCH_WARN(
-        "scale_dot_product_attention with gqa is not supported for gradient computation on xpu.");
-
   bool attn_mask_needs_grad =
       params.attn_mask.has_value() && params.attn_mask.value().requires_grad();
   if (debug && attn_mask_needs_grad) {
@@ -71,7 +63,7 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
         "scale_dot_product_attention on xpu is not supported when attn_mask.requires_grad() == True.");
   }
 
-  return !is_gqa && !attn_mask_needs_grad;
+  return !attn_mask_needs_grad;
 }
 
 bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
@@ -430,9 +422,6 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   TORCH_INTERNAL_ASSERT(
       value.size(3) == grad_out.size(3),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: V should have the same head_dim as grad_out");
-  TORCH_INTERNAL_ASSERT(
-      query.size(1) == key.size(1),
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: number of heads in K/V must equal to number of heads in Q");
   TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Currently do not support dropout > 0");

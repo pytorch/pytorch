@@ -4516,97 +4516,64 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @parametrize("dtype", [torch.half, torch.bfloat16])
-    @parametrize("batch_size,n_head,n_head_kv,q_size,kv_size,head_dim", [
-        (2, 64, 16, 9216, 77, 64),
-        (2, 32, 4, 2304, 2304, 64),
-        (2, 32, 2, 2304, 77, 64),
-        (2, 20, 2, 576, 576, 64),
-        (2, 20, 2, 576, 77, 64),
-        (2, 20, 2, 144, 144, 64),
-        (2, 20, 2, 144, 77, 64),
-        (1, 32, 2, 1, 32, 128),
-        (4, 32, 4, 1, 32, 128),
-        (1, 32, 2, 32, 32, 128),
-        (4, 32, 4, 32, 32, 128),
-        (1, 32, 2, 2016, 2016, 128),
-        (4, 32, 4, 2016, 2016, 128),
-    ])
-    @parametrize("is_causal", [True, False])
-    def test_onednn_attention_gqa_vs_math(self, device, dtype, batch_size, n_head, n_head_kv, q_size, kv_size, head_dim, is_causal):
-        tol = Tolerances(1e-5, 5e-6)
-        if dtype is torch.bfloat16:
-            tol = Tolerances(5e-2, 5e-2)
-        if dtype is torch.float16:
-            tol = Tolerances(1e-2, 1e-2)
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
-        q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
-        k_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
-        v_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
-        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
-
-        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
-            actual = F.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)
-
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = F.scaled_dot_product_attention(
-                query.float(), key.float(), value.float(), attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)
-
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=tol.atol, rtol=tol.rtol)
-
     @parametrize("fused_kernel", [SDPBackend.OVERRIDEABLE])
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
-    @parametrize("batch_size,n_head,q_size,kv_size,head_dim", [
-        (2, 5, 9216, 9216, 64),
-        (2, 5, 9216, 77, 64),
-        (2, 10, 2304, 2304, 64),
-        (2, 10, 2304, 77, 64),
-        (2, 20, 576, 576, 64),
-        (2, 20, 576, 77, 64),
-        (2, 20, 144, 144, 64),
-        (2, 20, 144, 77, 64),
-        (1, 32, 1, 32, 128),
-        (4, 32, 1, 32, 128),
-        (1, 32, 32, 32, 128),
-        (4, 32, 32, 32, 128),
-        (1, 32, 2016, 2016, 128),
-        (4, 32, 2016, 2016, 128),
-    ])
-    @parametrize("mask_type", ["float", "causal"])
-    @parametrize("train", [False, False])
-    def test_onednn_attention_mask_vs_math(
+    @parametrize("batch_size", [1, 4])
+    @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
+    @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
+    @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
+    @parametrize("head_dim", [64, 96, 128])
+    @parametrize("mask_type", [None, "causal", "float"])
+    @parametrize("train", [True, False])
+    @parametrize("layout", ["bshd", "bhsd"])
+    @parametrize("enable_gqa", [True, False])
+    def test_onednn_attention_vs_math(
         self,
         device,
         fused_kernel,
         dtype,
         batch_size,
+        n_head,
         q_size,
         kv_size,
-        n_head,
         head_dim,
         mask_type,
         train,
+        layout,
+        enable_gqa,
     ):
-        # Migrate from TestSDPACpuOnly
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        mask_shape = [batch_size, 1, q_size, kv_size]
+        
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-        q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
-        kv_shape = SdpaShape(batch_size, n_head, kv_size, head_dim)
+
+        if enable_gqa:
+            n_head_q, n_head_kv = n_head[0], n_head[1]
+        else:
+            n_head_q = n_head_kv = n_head[0]
+
+        q_shape = SdpaShape(batch_size, n_head_q, q_size, head_dim)
+        kv_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
         q = make_tensor(q_shape)
         k = make_tensor(kv_shape)
         v = make_tensor(kv_shape)
-        q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
-        # (B, nh, T, hs)
-        q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
-        k = k.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
-        v = v.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+        # (B, S, H, D) by default
+        q = q.view(batch_size, q_size, n_head_q, head_dim).transpose(1, 2)
+        k = k.view(batch_size, kv_size, n_head_kv, head_dim).transpose(1, 2)
+        v = v.view(batch_size, kv_size, n_head_kv, head_dim).transpose(1, 2)
+        if layout == "bhsd":
+            q = q.contiguous()
+            k = k.contiguous()
+            v = v.contiguous()
+        
+        q2, k2, v2 = q.clone(), k.clone(), v.clone()
+        q2, k2, v2 = q2.float(), k2.float(), v2.float()
+
+        mask_shape = [batch_size, 1, q_size, kv_size]
         attn_mask = None
         is_causal = False
         if mask_type == "bool":
@@ -4616,10 +4583,6 @@ class TestSDPAXpuOnly(NNTestCase):
         elif mask_type == "causal":
             is_causal = True
 
-        q2, k2, v2 = q2.float(), k2.float(), v2.float()
-        q2 = q2.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
-        k2 = k2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
-        v2 = v2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
         attn_mask2 = attn_mask.float() if attn_mask is not None else None
 
         if train:
@@ -4632,11 +4595,11 @@ class TestSDPAXpuOnly(NNTestCase):
 
         with sdpa_kernel(backends=[fused_kernel]):
             actual = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal)
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa)
 
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = F.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)
+                q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa)
 
         if dtype in [torch.float16, torch.bfloat16]:
             math_ref = math_ref.to(dtype)
