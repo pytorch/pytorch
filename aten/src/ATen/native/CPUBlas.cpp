@@ -20,7 +20,8 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
-#ifdef BLAS_HAS_BGEMM
+//#ifdef BLAS_HAS_BGEMM
+#if defined(BLAS_HAS_BGEMM)
 extern "C" void bgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 const at::BFloat16 *alpha,
                 const at::BFloat16 *a, int *lda,
@@ -358,22 +359,22 @@ void gemm(
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
 #endif
    if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
-     return;
+    std::printf("[MKLDNN_BF16] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
+    std::fflush(stdout);
+    return;
    }
 #endif
 #if AT_BUILD_WITH_BLAS() && (defined(BLAS_HAS_SBGEMM) || defined(BLAS_HAS_BGEMM))
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       // ADD PRINTF HERE
-      std::printf(">>> HIT BLAS GEMM bfloat16 path: m=%ld n=%ld k=%ld\n",
-                  (long)m, (long)n, (long)k);
+      std::printf("[GEMM_STUB] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
       std::fflush(stdout);
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
-#if defined(BLAS_HAS_BGEMM)
+#ifdef BLAS_HAS_BGEMM
       // ADD PRINTF HERE
-      std::printf(">>> Using OpenBLAS BGEMM (bfloat16) m=%d n=%d k=%d\n",
-                  m_, n_, k_);
+      std::printf("[BGEMM] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
       std::fflush(stdout);
       at::BFloat16 alpha_ = c10::convert<at::BFloat16>(alpha);
       at::BFloat16 beta_ = c10::convert<at::BFloat16>(beta);
@@ -386,8 +387,7 @@ void gemm(
              c, &ldc_);
 #else
       // ADD PRINTF HERE
-      std::printf(">>> Using OpenBLAS SBGEMM (fallback float buffer) m=%d n=%d k=%d\n",
-                  m_, n_, k_);
+      std::printf("[SBGEMM] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
       std::fflush(stdout);
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       int c_size = n_ * m_;
