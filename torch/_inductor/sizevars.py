@@ -74,6 +74,8 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
+        # var_to_hint_override may not exist in older PyTorch versions
+        self.var_to_hint_override = getattr(self.shape_env, "var_to_hint_override", {})
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -573,7 +575,10 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
-        out = self.symbolic_hint(expr, hint_override=hint_override)
+        out = self.symbolic_hint(
+            expr,
+            hint_override=hint_override,
+        )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
@@ -581,6 +586,29 @@ class SizeVarAllocator:
             }
             if all(vr is not None for vr in unbacked_sym_vrs.values()):
                 hint_vr = bound_sympy(out, unbacked_sym_vrs)  # type: ignore[arg-type]
+                # For expressions like `768*u0`, we need to substitute unbacked symints
+                # with their hinted values (upper bound clamped by fallback) and evaluate,
+                # rather than just returning the clamped fallback directly.
+                # This ensures strides like `768*u0` evaluate to `768*128=98304` rather than `8192`.
+                unbacked_hints = {}
+                for s, vr in unbacked_sym_vrs.items():
+                    if vr is not None:
+                        sym_fallback = fallback
+                        if isinstance(vr.lower, (int, sympy.Integer)):
+                            sym_fallback = max(sym_fallback, int(vr.lower))
+                        if isinstance(vr.upper, (int, sympy.Integer)):
+                            sym_fallback = min(sym_fallback, int(vr.upper))
+                        unbacked_hints[s] = sym_fallback
+
+                if unbacked_hints:
+                    # Substitute unbacked symints with their hinted values and evaluate
+                    substituted = sympy_subs(out, unbacked_hints)
+                    try:
+                        return int(substituted)
+                    except (TypeError, ValueError):
+                        pass  # Fall through to old behavior if substitution didn't work
+
+                # Fallback to old behavior: clamp fallback to expression bounds
                 if isinstance(hint_vr.lower, (int, sympy.Integer)):
                     fallback = max(fallback, int(hint_vr.lower))
                 if isinstance(hint_vr.upper, (int, sympy.Integer)):

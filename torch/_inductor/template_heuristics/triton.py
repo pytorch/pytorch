@@ -565,15 +565,39 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         If the device does not report available shared memory, returns None.
         """
+        sm_available = 0
 
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
-            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
-                return None
-            sm_available = int(props.shared_memory_per_block_optin)
+
+            if hasattr(props, "shared_memory_per_block_optin"):
+                sm_available = int(props.shared_memory_per_block_optin)
+
+            # AMD/HIP path
+            elif torch.version.hip:
+                from ..utils import get_gpu_shared_memory
+
+                # Try Triton's driver API first for AMD
+                try:
+                    sm_available = get_gpu_shared_memory()
+                except Exception:
+                    pass
+
+                # If Triton API fails, fallback to architecture-based detection
+                # (same logic as torch/cuda/_utils.py)
+                # TODO : Can expose shared_memory through device props and use it instead of hardcoding
+                if sm_available <= 0:
+                    # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
+                    # CDNA4 (gfx950) allows a max of 160KB shared memory
+                    gcn_arch = getattr(props, "gcnArchName", "")
+                    sm_available = 65536 if gcn_arch != "gfx950" else 160 * 1024
+
         except Exception:
             # If CUDA is not available or properties cannot be queried, return None
+            return None
+
+        if sm_available <= 0:
             return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
@@ -582,6 +606,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 gemm_config.block_m * gemm_config.block_k
                 + gemm_config.block_n * gemm_config.block_k
             )
+            assert sm_available is not None
             return shared_mem_accum * gemm_config.num_stages > sm_available
 
         return exceeds
