@@ -118,8 +118,6 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
-    if torch.xpu.is_available():
-        return True
     return False
 
 def evaluate_platform_supports_fp8_grouped_gemm():
@@ -368,6 +366,12 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM89PreCUDA13(func):
+    """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
+    if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+        return unittest.expectedFailure(func)
+    return func
 
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)
