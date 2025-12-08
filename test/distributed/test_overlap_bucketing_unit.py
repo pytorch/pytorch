@@ -797,7 +797,7 @@ class TestCrossPGOverlap(InductorTestCase):
 
         def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
             if "all_gather" in str(node.target):
-                return 10.0
+                return 10.0  # Long collective to ensure exposed wait
             return 0.0
 
         # Run overlap scheduler
@@ -866,24 +866,18 @@ class TestCrossPGOverlap(InductorTestCase):
             b = torch.ones(4, 4, device=self.device)
             traced = make_fx(func)(a, b)
 
-        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
 
         def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
             if "all_gather" in str(node.target) or "reduce_scatter" in str(node.target):
                 return 1.0
-            return None
+            return 0.0
 
-        out = OverlapScheduler(
-            traced,
-            max_in_flight_gb=5.0,
-            max_compute_pre_fetch=200,
-            collective_bucketing=False,
-            insert_overlap_deps=False,
-            compute_overlap_multipler=1.0,
-            max_coll_distance=200,
-            custom_runtime_estimation=custom_runtime,
-            collective_estimator="analytical",
-        ).run()
+        out = schedule_overlap_bucketing(
+            traced, custom_runtime_estimation=custom_runtime
+        )
 
         # Get scheduled order
         node_names = [n.name for n in out.graph.nodes if n.op == "call_function"]

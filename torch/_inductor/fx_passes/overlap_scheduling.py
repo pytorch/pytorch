@@ -663,7 +663,7 @@ class OverlapScheduler:
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
-    def _get_next_node(self) -> fx.Node | None:
+    def _get_next_node(self) -> fx.Node:
         """Get next node: off-path nodes scheduled near original position, exposed waits deferred."""
         if self.off_path_ready:
             _, node = self.off_path_ready[0]
@@ -687,10 +687,7 @@ class OverlapScheduler:
                 heapq.heappop(self.off_path_ready)
                 return node
 
-        if self.on_path_ready:
-            return heapq.heappop(self.on_path_ready)[1]
-
-        return None
+        return heapq.heappop(self.on_path_ready)[1]
 
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
