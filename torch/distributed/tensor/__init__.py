@@ -14,6 +14,7 @@ from torch.distributed.tensor._api import (
     randn,
     zeros,
 )
+from torch.distributed.tensor._ltensor import LTensor
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -33,6 +34,7 @@ __all__ = [
     "DTensor",
     "distribute_tensor",
     "distribute_module",
+    "LTensor",
     "Shard",
     "Replicate",
     "Partial",

@@ -4,7 +4,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed.tensor.ltensor import _varying_collectives as vcols
+from torch.distributed.tensor import _varying_collectives as vcols
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
