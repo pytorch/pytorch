@@ -15,7 +15,6 @@
 #include <windows.h>
 #include <functional> // std::function
 #else // !_WIN32
-#include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif // _WIN32
