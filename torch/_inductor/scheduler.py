@@ -225,6 +225,10 @@ class MixOrderReduction:
         if not config.triton.mix_order_reduction:
             return False
 
+        # TODO: Mix order reduction is not supported with cpp_wrapper yet
+        if V.graph.cpp_wrapper:
+            return False
+
         if not node1.is_gpu() or not node2.is_gpu():
             return False
         device_type = node1.get_device().type  # type: ignore[union-attr]

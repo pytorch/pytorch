@@ -1722,7 +1722,7 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
-        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
+        V.graph.wrapper_code.make_comment("Call mix order reduction kernel")
         self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
