@@ -655,7 +655,9 @@ if __name__ == "__main__":
                     expected[f"segment.{pool_str}.current"] += 1
 
                 expected["allocated_bytes.all.current"] += segment["allocated_size"]
-                expected[f"allocated_bytes.{pool_str}.current"] += segment["allocated_size"]
+                expected[f"allocated_bytes.{pool_str}.current"] += segment[
+                    "allocated_size"
+                ]
 
                 expected["reserved_bytes.all.current"] += segment["total_size"]
                 expected[f"reserved_bytes.{pool_str}.current"] += segment["total_size"]
@@ -664,7 +666,9 @@ if __name__ == "__main__":
                 expected[f"active_bytes.{pool_str}.current"] += segment["active_size"]
 
                 expected["requested_bytes.all.current"] += segment["requested_size"]
-                expected[f"requested_bytes.{pool_str}.current"] += segment["requested_size"]
+                expected[f"requested_bytes.{pool_str}.current"] += segment[
+                    "requested_size"
+                ]
 
                 sum_requested = 0
                 is_split = len(segment["blocks"]) > 1
@@ -682,7 +686,9 @@ if __name__ == "__main__":
                         expected["inactive_split.all.current"] += 1
                         expected[f"inactive_split.{pool_str}.current"] += 1
                         expected["inactive_split_bytes.all.current"] += block["size"]
-                        expected[f"inactive_split_bytes.{pool_str}.current"] += (block["size"])
+                        expected[f"inactive_split_bytes.{pool_str}.current"] += block[
+                            "size"
+                        ]
 
                 self.assertEqual(sum_requested, segment["requested_size"])
 
