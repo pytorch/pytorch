@@ -1569,35 +1569,38 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
+Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .build();
+
+  ldexp_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
   TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
               "ldexp can't be cast to the desired output type ", result.scalar_type());
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type())) {
-
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .add_input(other)
-      .build();
-
-    ldexp_stub(iter.device_type(), iter);
-    return result;
+    return _ldexp_int_exponent(self, other, result);
   }
 
   return at::mul_out(result, self, _pow2(self, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  ScalarType out_type = c10::promoteTypes(self.scalar_type(), other.scalar_type());
-  if (isIntegralType(out_type, /*includeBool=*/true)) {
-    // All integral types are promoted to float32
-    out_type = ScalarType::Float;
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+    Tensor result = at::empty(self.sizes(), self.options().dtype(self.scalar_type()));
+    return _ldexp_int_exponent(self, other, result);
   }
-  Tensor result = at::empty(self.sizes(), self.options().dtype(out_type));
-  return at::ldexp_out(result, self, other);
+
+  return at::mul(self, _pow2(self, other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {

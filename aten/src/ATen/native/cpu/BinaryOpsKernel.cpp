@@ -1498,7 +1498,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel)
-REGISTER_DISPATCH(ldexp_stub, ldexp_kernel);
+REGISTER_DISPATCH(ldexp_stub, ldexp_kernel)
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel)
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel)
