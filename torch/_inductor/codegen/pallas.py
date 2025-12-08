@@ -1699,7 +1699,9 @@ class PallasKernel(SIMDKernel):
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
                     else:
-                        code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach())")
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach())"
+                        )
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
