@@ -21,28 +21,3 @@ TEST(TestMemoryFormat, get_contiguous_memory_format) {
 
   EXPECT_EQ(get_contiguous_memory_format(), MemoryFormat::Contiguous);
 }
-
-TEST(TestMemoryFormat, operator_left_shift) {
-  using torch::headeronly::MemoryFormat;
-
-  {
-    std::stringstream ss;
-    ss << MemoryFormat::Preserve;
-    EXPECT_EQ(ss.str(), "Preserve");
-  }
-  {
-    std::stringstream ss;
-    ss << MemoryFormat::Contiguous;
-    EXPECT_EQ(ss.str(), "Contiguous");
-  }
-  {
-    std::stringstream ss;
-    ss << MemoryFormat::ChannelsLast;
-    EXPECT_EQ(ss.str(), "ChannelsLast");
-  }
-  {
-    std::stringstream ss;
-    ss << MemoryFormat::ChannelsLast3d;
-    EXPECT_EQ(ss.str(), "ChannelsLast3d");
-  }
-}

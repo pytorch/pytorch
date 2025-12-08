@@ -15,6 +15,24 @@ namespace c10 {
 // behaviour of contiguous
 #define LEGACY_CONTIGUOUS_MEMORY_FORMAT c10::get_contiguous_memory_format()
 
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    at::MemoryFormat memory_format) {
+  switch (memory_format) {
+    case MemoryFormat::Preserve:
+      return stream << "Preserve";
+    case MemoryFormat::Contiguous:
+      return stream << "Contiguous";
+    case MemoryFormat::ChannelsLast:
+      return stream << "ChannelsLast";
+    case MemoryFormat::ChannelsLast3d:
+      return stream << "ChannelsLast3d";
+    case MemoryFormat::NumOptions:
+    default:
+      TORCH_CHECK(false, "Unknown memory format ", memory_format);
+  }
+}
+
 // Note: Hardcoded the channel last stride indices here to get better
 // performance
 template <typename T>
