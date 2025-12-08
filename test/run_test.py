@@ -1787,7 +1787,7 @@ def get_selected_tests(options) -> list[str]:
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(
-            [test for test in selected_tests if test.startswith("cpython/3_13/")]
+            [test for test in selected_tests if test.startswith("cpython/v3_13/") or test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
