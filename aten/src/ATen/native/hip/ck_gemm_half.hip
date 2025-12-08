@@ -13,7 +13,7 @@ namespace at::native {
 
 void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #if 0
-  // If any of the shapes cant be tiled, we must use padding.
+  // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
@@ -299,7 +299,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #endif
 }
 void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  // If any of the shapes cant be tiled, we must use padding.
+  // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
