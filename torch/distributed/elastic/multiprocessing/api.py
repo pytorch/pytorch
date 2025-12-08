@@ -498,7 +498,7 @@ class PContext(abc.ABC):
         ]
 
         if duplicate_stdout_filters:
-            self.filtered_stdout = open(
+            self.filtered_stdout = open(  # noqa: SIM115
                 logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
             )
             self._tail_logs.append(
@@ -514,7 +514,7 @@ class PContext(abc.ABC):
             )
 
         if duplicate_stderr_filters:
-            self.filtered_stderr = open(
+            self.filtered_stderr = open(  # noqa: SIM115
                 logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
             )
             self._tail_logs.append(
@@ -836,7 +836,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -846,7 +846,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )
