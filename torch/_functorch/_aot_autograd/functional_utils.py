@@ -472,9 +472,9 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[Optional[str], int]:
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
-                # if "set_buffer_donor_" not in str(n.args[0]):
-                #     if n.args[0] not in placeholders:
-                #         error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                if "set_buffer_donor_" not in str(n.args[0]):
+                    if n.args[0] not in placeholders:
+                        error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
                 if n.target._schema.is_mutable:
