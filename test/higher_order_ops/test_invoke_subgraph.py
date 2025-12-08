@@ -275,17 +275,17 @@ class GraphModule(torch.nn.Module):
         l_mod_buffers_buf_ = L_mod_buffers_buf_
 
         subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_, l_mod_buffers_buf_);  subgraph_0 = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_1 = l_mod_buffers_buf_ = l_x_ = l_y_ = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_, l_y_, l_mod_buffers_buf_);  subgraph_1 = l_x_ = l_y_ = l_mod_buffers_buf_ = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
         add: "f32[8]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, l_mod_buffers_buf_: "f32[8]", l_x_: "f32[8]", l_y_: "f32[8]"):
+        def forward(self, l_x_: "f32[8]", l_y_: "f32[8]", l_mod_buffers_buf_: "f32[8]"):
             add_: "f32[8]" = l_mod_buffers_buf_.add_(1);  add_ = None
 
             mul: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
@@ -297,11 +297,11 @@ class GraphModule(torch.nn.Module):
             )
         self.assertExpectedInline(
             str(fw_schema[0]),
-            """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor arg1, Tensor arg2) -> ((Tensor))""",
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1, Tensor(a4!) arg2) -> ((Tensor))""",
         )
         self.assertExpectedInline(
             str(fw_schema[1]),
-            """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor arg1, Tensor arg2) -> ((Tensor))""",
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1, Tensor(a4!) arg2) -> ((Tensor))""",
         )
         self.assertEqual(res, ref)
         self.assertEqual(mod.buf, mod_ref.buf)
