@@ -146,6 +146,7 @@ class MetalShaderLibrary {
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
 
   template <typename T>
   void exec_unary_kernel_with_params(

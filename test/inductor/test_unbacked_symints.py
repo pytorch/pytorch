@@ -650,7 +650,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipIfXpu(
-        msg="Invalid SPIR-V modul,https://github.com/intel/torch-xpu-ops/issues/2329"
+        msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
     )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
@@ -670,6 +670,18 @@ class TestUnbackedSymints(InductorTestCase):
             torch.randn((128, 64), dtype=torch.bfloat16, device=device),
             torch.tensor(128, device=device),
         )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_fmod_with_out_arg(self, device):
+        def fn(x):
+            nz = torch.nonzero(x).float()
+            return torch.fmod(nz, 2.0, out=nz)
+
+        example_inputs = (torch.randn(32, device=device),)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

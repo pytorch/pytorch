@@ -4,20 +4,17 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, TypeAlias, TypeVar, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
-from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    OutputSharding,
     PlacementList,
-    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -27,77 +24,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-
-
-# convenient wrapper to register sharding propagation rules
-def register_prop_rule(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
-]:
-    def wrapper(
-        impl: Callable[[OpSchema], OutputSharding],
-    ) -> Callable[[OpSchema], OutputSharding]:
-        overloads = op if isinstance(op, list) else [op]
-        for overload in overloads:
-            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
-                overload, impl, schema_info
-            )
-        return impl
-
-    return wrapper
-
-
-# Note:
-# using TypeVar here allows the registration decorator to preserve the specific type info of the wrapped strategy,
-# while hardcoding the typing on the wrapper (e.g. Callable[[OpSchema], StrategyType]) would mean mypy would treat
-# the return value of the wrapped strategy as always being a `StrategyType` even if it were a derived class like
-# MyStrategyType(StrategyType).
-_OpSchemaT = TypeVar("_OpSchemaT", bound=OpSchema)
-_StrategyTypeT = TypeVar("_StrategyTypeT", bound=StrategyType)
-_ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
-
-
-def register_op_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
-    # For every ATen op that accepts any args in this list,
-    # the arg itself can impact the strides (and potentially the sharding strategy)
-    # of the output tensor.
-    # thus, we will detect ATen schemas with any of these args and ensure
-    # that they get specialized here.
-    arg_names_that_require_specializing_cache_strategy = [
-        "memory_format",
-    ]
-
-    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
-
-        for overload in overloads:
-            curr_schema_info = None
-            if schema_info is None:
-                specialized_args = [
-                    a.name
-                    for a in overload._schema.arguments
-                    if a.name in arg_names_that_require_specializing_cache_strategy
-                ]
-                if any(specialized_args):
-                    curr_schema_info = RuntimeSchemaInfo(
-                        static_kwargkey=specialized_args
-                    )
-            else:
-                curr_schema_info = schema_info
-            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
-                overload, impl, curr_schema_info
-            )
-        return impl
-
-    return wrapper
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
@@ -163,11 +89,33 @@ def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
 
 
-def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the spec matches these criteria:
-    * any Shard placements in spec refer to valid tensor dims
-    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+def is_tensor_shardable(
+    shape: Sequence[int],
+    spec: DTensorSpec,
+    allow_unbacked_sharding: Optional[bool] = None,
+) -> bool:
     """
+    Check if the shape is shardable according to the spec.
+
+    allow_unbacked_sharding: determines the fallback value if unbacked shapes are involved,
+    and the queried shape properties are not statically known.
+
+    e.g. when asking if u0 is shardable on num_shards, and u0 has generic bounds [0, inf],
+    the behavior of allow_unbacked_sharding is:
+
+        None: will data-dependent error
+        True: assumes shardability; we return True, allowing zero-size shards at runtime when u0 < num_shards.
+        False: returns False, and lower-bounding u0, e.g. torch._check(u0 >= num_shards), is needed to enable sharding.
+    """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    assert allow_unbacked_sharding in [None, True, False]
+    guard_fn = {
+        None: bool,
+        True: guard_or_false,
+        False: guard_or_true,
+    }[allow_unbacked_sharding]
+
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -180,7 +128,7 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, dim_size in enumerate(shape):
         # TODO: maybe we should determine is_shardable based on
         #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and dim_size < shards_map[i]:
+        if shards_map[i] > 1 and guard_fn(dim_size < shards_map[i]):
             return False
 
     return True
