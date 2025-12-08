@@ -420,7 +420,7 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     # Ordered as: input shape, kwargs for training, momentum, eps
-    cases: tuple[tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], dict] = (
         ((S, S, S), {'training': True, 'momentum': 0.5, 'eps': 0.6}),
         ((3, 2, 4), {'training': False, 'momentum': -1.2}),
         ((3, 1), {'training': True, 'momentum': 0.0}),
@@ -3847,15 +3847,15 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases: tuple[tuple[int], dict] = (  # type: ignore[assignment]
-                                     ((2, 1, 4, 5), {'p': 1., 'dim': 2}),
-                                     ((2, 3, 4, 5), {'p': 2., 'dim': 1}),
-                                     ((1, 2, 4, 5), {'p': 0.5, 'dim': 0}),
-                                     ((1, 3, 4, 5), {'p': -1., 'dim': 1}),
-                                     ((1, 3, 4, 5), {'p': 0., 'dim': -1}),
-                                     ((), {'p': 1.2, 'dim': 0}),
-                                     ((2, 3, 4, 5), {}),
-                                     ((2, 3, 4, 5), {'eps': 1e-4}))
+    cases: tuple[tuple[int, ...], dict] = (
+        ((2, 1, 4, 5), {'p': 1., 'dim': 2}),
+        ((2, 3, 4, 5), {'p': 2., 'dim': 1}),
+        ((1, 2, 4, 5), {'p': 0.5, 'dim': 0}),
+        ((1, 3, 4, 5), {'p': -1., 'dim': 1}),
+        ((1, 3, 4, 5), {'p': 0., 'dim': -1}),
+        ((), {'p': 1.2, 'dim': 0}),
+        ((2, 3, 4, 5), {}),
+        ((2, 3, 4, 5), {'eps': 1e-4}))
 
     for input_shape, kwargs in cases:
         yield SampleInput(make_arg(input_shape), kwargs=kwargs)
@@ -3937,7 +3937,7 @@ def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwar
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, output_padding, groups, dilation)
-    cases: tuple[tuple[int], tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 3, 4), (3, 3, 3), (3,),
          {'stride': (2,), 'padding': 2, 'output_padding': (1,), 'groups': 1}),
         ((2, 2, 4), (2, 2, 4), (4,),
@@ -3968,7 +3968,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, output_padding, groups, dilation)
-    cases: tuple[tuple[int], tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
          {'stride': (2, 2), 'padding': 2, 'output_padding': (1, 1), 'groups': 1}),
         ((2, 2, 4, 4), (2, 2, 4, 5), (4,),
@@ -3998,7 +3998,7 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, output_padding, groups, dilation)
-    cases: tuple[tuple[int], tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 3, 4, 4, 4), (3, 3, 3, 3, 3), (3,),
          {'stride': (2, 2, 2), 'padding': 2, 'output_padding': (1, 1, 1), 'groups': 1}),
         ((2, 2, 4, 4, 4), (2, 2, 4, 5, 6), (4,),
@@ -4317,7 +4317,7 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, num groups, and kwargs for eps
-    cases: tuple[tuple[int], int, float] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], int, float] = (
         ((1, 6, 3), 2, {'eps' : 0.5}),
         ((2, 6, 3), 2, {'eps' : -0.5}),
         ((1, 3), 1, {'eps' : 1e-5}),
@@ -4353,7 +4353,7 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, num groups, and kwargs for eps
-    cases: tuple[tuple[int], int, float] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], int, float] = (
         ((20, 6, 10, 10), 3, {'eps' : 1e-5}),
         # equivalent with InstanceNorm
         # GroupNorm(C, num_groups=C) == InstanceNorm(num_features=C)
@@ -4388,7 +4388,7 @@ def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     # Ordered as: input shape, kwargs for momentum, eps
-    cases: tuple[tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], dict] = (
         ((S, S, S), {'momentum': 0.5, 'eps': 0.6}),
         ((S, S, S), {'momentum': 0.5, 'eps': 0.6, 'use_input_stats': True}),
         ((3, 2, 4), {'momentum': -1.2}),
@@ -4509,7 +4509,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
-    cases: tuple[tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
         ((2, 2, 3), (2, 3), {'eps': -0.5}),
         ((1,), (1,), {}),
@@ -4543,7 +4543,7 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, normalized_shape, eps
-    cases: tuple[tuple[int], tuple[int], float] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], float] = (
         ((1, 2, 3), (1, 2, 3), 0.5),
         ((2, 2, 3), (2, 3), -0.5),
         ((1,), (1,), 1e-5),
@@ -4576,7 +4576,7 @@ def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, high=1000)
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
-    cases: tuple[tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 2, 3), (1, 2, 3), {'eps': 0.5}),
         ((2, 2, 3), (2, 3), {'eps': -0.5}),
         ((1,), (1,), {}),
@@ -4669,7 +4669,7 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, size and a kwarg dict for alpha, beta, and k
-    cases: tuple[tuple[int], tuple[int], dict] = (  # type: ignore[assignment]
+    cases: tuple[tuple[int, ...], tuple[int, ...], dict] = (
         ((1, 6, 3), 2, {'alpha': 3e-05, 'beta': 0.5, 'k': 1.25}),
         ((1, 6, 3), 2, {'beta': 0.5, 'k': 1.25}),
         ((1, 6, 3), 2, {'alpha': 3e-05, 'k': 1.25}),

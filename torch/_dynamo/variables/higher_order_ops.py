@@ -848,6 +848,25 @@ def validate_args_and_maybe_create_graph_inputs(
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
+            elif set_subgraph_inputs == "automatic_with_forced_inputs":
+                if isinstance(a, variables.TensorVariable):
+                    node = a.maybe_fx_node()
+                    example_value = node.meta["example_value"]
+                    arg_name = (
+                        a.as_proxy().node.name
+                        if sub_args_names is None
+                        else sub_args_names[idx]
+                    )
+                    new_proxy = tracer.create_graph_input(
+                        arg_name, a.python_type(), example_value
+                    )
+                    example_value = node.meta.get("example_value", None)
+                    a = wrap_fx_proxy_cls(
+                        target_cls=type(a),
+                        tx=tx,
+                        proxy=new_proxy,
+                        example_value=example_value,
+                    )
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
                     example_value = a.as_proxy().node.meta["example_value"]
