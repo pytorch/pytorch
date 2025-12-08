@@ -766,8 +766,15 @@ class VariableBuilder:
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
             result = NamedTupleVariable(
-                output, tuple_cls=type(value), source=self.source
+                output,
+                tuple_cls=type(value),
+                source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):

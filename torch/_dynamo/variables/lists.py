@@ -1391,30 +1391,28 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         items: list[VariableTracker],
         tuple_cls: type[tuple],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
+        tuple_vt: Optional[TupleVariable] = None,
         **kwargs: Any,
     ) -> None:
-        tuple_vt = variables.TupleVariable(
-            items, mutation_type=kwargs.get("mutation_type", ValueMutationNew())
-        )
+        if tuple_vt is None:
+            assert getattr(kwargs, "source", None) is None
+            tuple_vt = variables.TupleVariable(
+                items, mutation_type=kwargs.get("mutation_type", ValueMutationNew())
+            )
 
-        # Create a dummy instance for method resolution
-        # This allows _maybe_get_baseclass_method to work correctly
-        fields = namedtuple_fields(tuple_cls)
-        num_fields = len(fields)
         if tuple_cls.__module__ == "torch.return_types":
             # Structseq: single iterable argument
-            dummy_value = tuple_cls([None] * num_fields)
+            dummy_value = tuple_cls(items)
         else:
             # Namedtuple: positional arguments
-            dummy_value = tuple_cls(*([None] * num_fields))  # type: ignore[arg-type]
+            dummy_value = tuple_cls(*items)  # type: ignore[arg-type]
 
         super().__init__(
             value=dummy_value,
             tuple_vt=tuple_vt,
-            init_args=None,
+            init_args=items,
             **kwargs,
         )
-
         self.tuple_cls = tuple_cls
         if len(self.tuple_cls.__mro__) < 3:
             raise ValueError("NamedTuple should inherit from Tuple and Object.")
