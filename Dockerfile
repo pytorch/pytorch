@@ -5,7 +5,7 @@
 # For reference:
 # - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
 
-ARG BASE_IMAGE=ubuntu:22.04
+ARG BASE_IMAGE=ubuntu:24.04
 ARG PYTHON_VERSION=3.11
 
 FROM ${BASE_IMAGE} as dev-base
@@ -17,29 +17,31 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         curl \
         git \
         libjpeg-dev \
-        libpng-dev && \
+        libpng-dev \
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev && \
     rm -rf /var/lib/apt/lists/*
 RUN /usr/sbin/update-ccache-symlinks
 RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
-ENV PATH /opt/uv/bin:$PATH
+ENV PATH /opt/pytorch-venv/bin:$PATH
 
-FROM dev-base as uv
-ARG PYTHON_VERSION=3.11
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv
+FROM dev-base as python-venv
+# Update pip in the system Python
+RUN python3 -m pip install --break-system-packages --upgrade pip setuptools wheel
 COPY requirements.txt requirements-build.txt .
 # Create virtual environment and install packages
-RUN uv venv /opt/uv --python ${PYTHON_VERSION} && \
-    uv pip install --python /opt/uv/bin/python cmake pyyaml numpy ipython -r requirements.txt
+RUN python3 -m venv /opt/pytorch-venv && \
+    /opt/pytorch-venv/bin/pip install --upgrade pip && \
+    /opt/pytorch-venv/bin/pip install cmake pyyaml numpy ipython -r requirements.txt
 
 FROM dev-base as submodule-update
 WORKDIR /opt/pytorch
 COPY . .
 RUN git submodule update --init --recursive
 
-FROM uv as uv-installs
-ARG PYTHON_VERSION=3.11
+FROM python-venv as pytorch-installs
 ARG CUDA_PATH=cu121
 ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
@@ -47,10 +49,10 @@ ARG TARGETPLATFORM
 
 # INSTALL_CHANNEL whl - release, whl/nightly - nightly, whl/test - test channels
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  uv pip install --python /opt/uv/bin/python --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              uv pip install --python /opt/uv/bin/python --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
+         "linux/arm64")  /opt/pytorch-venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
+         *)              /opt/pytorch-venv/bin/pip install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
     esac
-RUN /opt/uv/bin/pip install torchelastic
+RUN /opt/pytorch-venv/bin/pip install torchelastic
 RUN IS_CUDA=$(python -c 'import torch ; print(torch.cuda._is_compiled())'); \
     echo "Is torch compiled with cuda: ${IS_CUDA}"; \
     if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
@@ -68,12 +70,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libjpeg-dev \
         libpng-dev \
         && rm -rf /var/lib/apt/lists/*
-COPY --from=uv-installs /opt/uv /opt/uv
+COPY --from=pytorch-installs /opt/pytorch-venv /opt/pytorch-venv
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc; \
         rm -rf /var/lib/apt/lists/*; \
     fi
-ENV PATH /opt/uv/bin:$PATH
+ENV PATH /opt/pytorch-venv/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
@@ -83,5 +85,5 @@ WORKDIR /workspace
 
 FROM official as dev
 # Should override the already installed version from the official-image stage
-COPY --from=uv /opt/uv /opt/uv
+COPY --from=python-venv /opt/pytorch-venv /opt/pytorch-venv
 COPY --from=submodule-update /opt/pytorch /opt/pytorch
