@@ -192,8 +192,6 @@ class BaseListVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__getitem__":
-            from .tensor import TensorVariable
-
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -202,7 +200,7 @@ class BaseListVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if isinstance(args[0], TensorVariable):
+            if args[0].is_tensor():
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
@@ -1635,17 +1633,17 @@ class SliceVariable(VariableTracker):
 
         # Convert TensorVariable to SymIntVariable by calling .item()
         # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
-        if isinstance(start, variables.TensorVariable):
+        if start.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )
             start = start.call_method(tx, "item", [], {})
-        if isinstance(stop, variables.TensorVariable):
+        if stop.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )
             stop = stop.call_method(tx, "item", [], {})
-        if isinstance(step, variables.TensorVariable):
+        if step.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )

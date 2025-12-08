@@ -174,7 +174,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -680,7 +680,7 @@ def generic_jump(
             # assert related instructions as we don't need them anymore.
 
             # if we see Tensor as assert statement, no need to call scalar_tensor
-            if isinstance(value, TensorVariable):
+            if value.is_tensor():
                 self.output.create_proxy(
                     "call_function",
                     torch._assert_async,
@@ -735,9 +735,7 @@ def generic_jump(
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
+        elif value.is_tensor() and self.should_compile_partial_graph():
             jump_graph_break(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
@@ -792,9 +790,7 @@ def generic_jump(
                     if push:
                         self.push(value)
                     self.jump(inst)
-        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
-            self
-        ):
+        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 if push:
                     self.push(value)
@@ -3401,9 +3397,9 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if isinstance(seq, TensorVariable):
+        if seq.is_tensor():
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
+        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
