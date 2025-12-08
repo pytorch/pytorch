@@ -519,6 +519,11 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 }
 
 
+def _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
+    tensor_dim = placements[mesh_dim].dim
+    return not any(isinstance(p, (Shard, _StridedShard)) and p.dim >= tensor_dim for p in placements[mesh_dim + 1:])
+
+
 def propagate_shape_and_sharding(
     input_src_spec,
     global_input_shape: Shape,
@@ -722,6 +727,8 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
+    
+
 
     def _rewrite_shard_dim(p: Shard, mesh, local_tensor_shapes, rule, mesh_dim, placements):
         """
@@ -764,11 +771,11 @@ def propagate_shape_and_sharding(
             else:
                 split_factor = math.prod(local_tensor_shapes[input_start_idx:p.dim])
                 output_placement = _StridedShard(tgt_shard_dim, split_factor=split_factor)
-            
-            assert False, "throw error if there are future shards that are on the uneven dim and it leads to non spmd split facot"
-            local_tensor_shapes[p.dim] = math.ceil(
-                local_tensor_shapes[p.dim] * 1.0 / mesh.size(mesh_dim)
-            )
+
+            if local_tensor_shapes[p.dim] % mesh.size(mesh_dim) != 0 and not _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
+                raise RuntimeError("cannot further shard on uneven sharded dims")
+            else:
+                local_tensor_shapes[p.dim] = local_tensor_shapes[p.dim] // mesh.size(mesh_dim)
             return output_placement
 
     local_tensor_shapes = list(input_src_spec.shape)
