@@ -59,11 +59,10 @@ class NonLinearReductionsBase:
         self,
         local_idx: torch.Tensor,
         local_tensor: torch.Tensor,
-        input_dtensor: "dtensor.DTensor",
+        global_shape: torch.Size,
         device_mesh: torch.distributed.device_mesh.DeviceMesh,
         placements: tuple[Placement, ...],
     ) -> tuple[int, torch.Tensor]:
-        global_shape = input_dtensor.shape
         _, global_offset = compute_local_shape_and_global_offset(
             global_shape, device_mesh, placements
         )
@@ -85,14 +84,13 @@ class NonLinearReductionsBase:
             gathered_idxs = local_idx + global_offset[self._dim]
         return gather_dim, gathered_idxs
 
-    def _set_arguments(
+    def _prep_arguments(
         self, args: tuple[object, ...], kwargs: dict[str, object] | None
     ):
         input_dtensor = cast(dtensor.DTensor, args[0])
         self._dim = None
         self._keepdim = False
         self._shard_mesh_dims = []
-        self._expected_shape = torch.Size([])
         if not isinstance(input_dtensor, dtensor.DTensor):
             raise NotImplementedError
         if len(args) > 1:
@@ -117,8 +115,9 @@ class NonLinearReductionsBase:
             )
             placements = input_dtensor.placements
         local_tensor = input_dtensor.to_local()
+        global_shape = input_dtensor.shape
 
-        return input_dtensor, local_tensor, device_mesh, placements
+        return local_tensor, global_shape, device_mesh, placements
 
     def _get_expected_shape(self, local_tensor: torch.Tensor) -> torch.Size:
         input_shape = list(local_tensor.shape)
@@ -178,7 +177,7 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
         if op_call not in self._REDUCTION_OPS:
             raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
-        input_dtensor, local_tensor, device_mesh, placements = self._set_arguments(
+        local_tensor, global_shape, device_mesh, placements = self._prep_arguments(
             args, kwargs
         )
         output_sharding = self._get_output_sharding(op_call, args, kwargs)
@@ -193,7 +192,7 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
             )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(
-            local_idx, local_tensor, input_dtensor, device_mesh, placements
+            local_idx, local_tensor, global_shape, device_mesh, placements
         )
         gathered_redux, gather_idxs = self._gather_tensors(
             gather_dim, gathered_idxs, local_redux, device_mesh
@@ -227,7 +226,7 @@ class MinMaxDimHandler(NonLinearReductionsBase):
         args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
         kwargs: dict[str, object],
     ):
-        input_dtensor, local_tensor, device_mesh, placements = self._set_arguments(
+        local_tensor, global_shape, device_mesh, placements = self._prep_arguments(
             args, kwargs
         )
         output_sharding = self._get_output_sharding(op_call, args, kwargs)
@@ -246,7 +245,7 @@ class MinMaxDimHandler(NonLinearReductionsBase):
             )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(
-            local_idx, local_tensor, input_dtensor, device_mesh, placements
+            local_idx, local_tensor, global_shape, device_mesh, placements
         )
 
         gathered_redux, gather_idxs = self._gather_tensors(
