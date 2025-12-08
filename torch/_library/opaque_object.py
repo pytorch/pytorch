@@ -201,7 +201,9 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
         if _obj is None:
             return
 
-        if isinstance(_obj, (list, tuple)):
+        if is_opaque_value_type(type(_obj)):
+            _add_type(_obj)
+        elif isinstance(_obj, (list, tuple)):
             for item in _obj:
                 add_nested_opaque_types(item)
             return
@@ -209,15 +211,13 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
             for value in _obj.values():
                 add_nested_opaque_types(value)
             return
-        elif is_opaque_value_type(type(_obj)):
-            _add_type(_obj)
 
-        if hasattr(_obj, "__dict__"):
-            for attr_value in _obj.__dict__.values():
-                add_nested_opaque_types(attr_value)
-        elif hasattr(_obj, "__dataclass_fields__"):
+        if hasattr(_obj, "__dataclass_fields__"):
             for field in dataclasses.fields(_obj):
                 attr_value = getattr(_obj, field.name)
+                add_nested_opaque_types(attr_value)
+        elif hasattr(_obj, "__dict__"):
+            for attr_value in _obj.__dict__.values():
                 add_nested_opaque_types(attr_value)
 
     obj_repr = _add_type(obj)
