@@ -18,6 +18,9 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     # Set for PyTorch build
     export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx942}"
     
+    # Disable FBGEMM_GENAI for theRock nightly (not yet supported)
+    export USE_FBGEMM_GENAI=0
+    
     echo "TheRock ROCm environment configured:"
     echo "  ROCM_PATH=$ROCM_PATH"
     echo "  ROCM_HOME=$ROCM_HOME"
