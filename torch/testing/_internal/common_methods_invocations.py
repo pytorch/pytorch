@@ -11705,7 +11705,7 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
                 device_type="cuda",
                 dtypes=integral_types_and(torch.bool),
             ),
-             DecorateInfo(
+            DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_foreach_reduce_large_input",
