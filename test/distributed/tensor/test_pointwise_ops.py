@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -465,6 +466,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm + 1
 
         self.assertEqual(norm, 11)
@@ -514,12 +516,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         norm = dt.norm()
 
         res = aten.mul.Scalar(norm, 2)
-        self.assertTrue(res._spec.placements[0].is_partial())
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         self.assertEqual(res, 20)
 
         res = aten.div.Scalar(norm, 2)
-        self.assertTrue(res._spec.placements[0].is_partial())
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         self.assertEqual(res, 5)
 
