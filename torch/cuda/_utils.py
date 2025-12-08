@@ -9,10 +9,16 @@ from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_hip_runtime_library() -> ctypes.CDLL:
-    if sys.platform == "win32":
-        lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
-    else:  # Unix-based systems
-        lib = ctypes.CDLL("libamdhip64.so")
+    try:
+        import rocm_sdk
+
+        lib = rocm_sdk._ALL_CDLLS["amdhip64"]
+    except (ImportError, KeyError):
+        if sys.platform == "win32":
+            lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
+        else:  # Unix-based systems
+            lib = ctypes.CDLL("libamdhip64.so")
+
     lib.cuGetErrorString = lib.hipGetErrorString  # type: ignore[attr-defined]
     lib.cuModuleLoadData = lib.hipModuleLoadData  # type: ignore[attr-defined]
     lib.cuModuleGetFunction = lib.hipModuleGetFunction  # type: ignore[attr-defined]
@@ -50,11 +56,18 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_hiprtc_library() -> ctypes.CDLL:
-    if sys.platform == "win32":
-        version_str = "".join(["0", torch.version.hip[0], "0", torch.version.hip[2]])
-        lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
-    else:
-        lib = ctypes.CDLL("libhiprtc.so")
+    try:
+        import rocm_sdk
+
+        lib = rocm_sdk._ALL_CDLLS["hiprtc"]
+    except (ImportError, KeyError):
+        if sys.platform == "win32":
+            version_str = "".join(
+                ["0", torch.version.hip[0], "0", torch.version.hip[2]]
+            )
+            lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
+        else:
+            lib = ctypes.CDLL("libhiprtc.so")
 
     # Provide aliases for HIP RTC functions to match NVRTC API
     lib.nvrtcGetErrorString = lib.hiprtcGetErrorString  # type: ignore[attr-defined]
