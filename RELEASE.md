@@ -498,12 +498,12 @@ In nightly builds for conda and wheels pytorch depend on Triton build by this wo
 
 In Nightly builds we have following configuration:
 * Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
-* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/
 
 However for release we have following :
 * Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
 * Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/triton/ for test and https://download.pytorch.org/whl/triton/ for release
 
 Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .
