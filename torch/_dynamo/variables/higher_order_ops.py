@@ -440,13 +440,13 @@ class StorageAliasingTracker:
     """
 
     def __init__(self):
-        self._excluded_storages: set = set()
+        self.excluded_storages: set = set()
 
     def _collect_storages_from_tensor(self, example_value):
         """
         Collect storage references from a tensor and add them to excluded storages.
         """
-        self._excluded_storages.update(get_tensor_storages(example_value))
+        self.excluded_storages.update(get_tensor_storages(example_value))
 
     def collect_from_inputs(self, tx):
         """Collect storages from graph input placeholders."""
@@ -488,13 +488,13 @@ class StorageAliasingTracker:
 
         # Check if any storage aliases with existing inputs/outputs
         tensor_storages = get_tensor_storages(example_value)
-        if tensor_storages & self._excluded_storages:
+        if tensor_storages & self.excluded_storages:
             return False
 
         # Track this tensor's storage (for wrapper subclasses, inner storages were already checked)
         if not is_traceable_wrapper_subclass(example_value):
             if not (example_value.is_sparse or example_value.is_sparse_csr):
-                self._excluded_storages.add(
+                self.excluded_storages.add(
                     StorageWeakRef(example_value._typed_storage())
                 )
 
@@ -1717,7 +1717,6 @@ def speculate_subgraph(
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
     set_subgraph_inputs="automatic",
     restore_side_effects=True,
-    filter_aliased_intermediates=False,
     should_flatten_outputs=False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
     # const outputs from the subgraph output.
