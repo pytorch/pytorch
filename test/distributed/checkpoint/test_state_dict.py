@@ -1120,7 +1120,7 @@ class TestNoComm(MultiProcessTestCase):
             model.weight.data.copy_(mat)
             opt = torch.optim.AdamW(model.parameters(), lr=0.1)
             if get_state_dict:
-                state_dict = get_optimizer_state_dict(
+                get_optimizer_state_dict(
                     model, opt, options=StateDictOptions(full_state_dict=True)
                 )
                 for param in opt.state.values():
