@@ -233,6 +233,7 @@ manual_torch_name_rule_map: dict[
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
+    "torch.autograd.backward": SkipFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
