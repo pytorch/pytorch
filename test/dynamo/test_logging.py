@@ -180,8 +180,8 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
-    @make_logging_test(recompiles_verbose=True)
-    def test_recompiles_verbose(self, records):
+    @make_logging_test(recompiles=True)
+    def test_recompiles(self, records):
         def fn(x, y):
             return torch.add(x, y)
 
@@ -213,18 +213,60 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch.compile(outmost_fn, backend="eager")
         fn_opt(x, ys, zs)
         fn_opt(x, ys[:1], zs)
-        fn_opt(x, ys[:2], zs)
 
         record_str = "\n".join(r.getMessage() for r in records)
 
-        # self.assertIn(
-        #     """L['zs'][0] == 3.0""",
-        #     record_str,
-        # )
-        # self.assertIn(
-        #     "len(L['ys']) == 2",
-        #     record_str,
-        # )
+        self.assertIn(
+            """Full recompile user stack trace:""",
+            record_str,
+        )
+        self.assertIn(
+            "0: for y, z in zip(ys, zs)",
+            record_str,
+        )
+        self.assertIn(
+            "1: return inner(x, ys, zs)",
+            record_str,
+        )
+        self.assertIn(
+            "2: return fn(x, ys, zs)",
+            record_str,
+        )
+        self.assertIn(
+            "3: return outer_fn(x, ys, zs)",
+            record_str,
+        )
+
+    @make_logging_test(guards=True)
+    def test_recompiles_guards(self, records):
+        def outmost_fn(x, ys, zs):
+            return outer_fn(x, ys, zs)
+
+        def outer_fn(x, ys, zs):
+            return fn(x, ys, zs)
+
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0, 3.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch.compile(outmost_fn, backend="eager")
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertNotIn(
+            """Full recompile user stack trace:""",
+            record_str,
+        )
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -771,36 +813,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
                    ~~^~~""",
         )
 
+
     @make_logging_test(guards=True)
-    def test_guards_recompiles_stack(self, records):
-        def fn(x, ys, zs):
-            return inner(x, ys, zs)
-
-        def inner(x, ys, zs):
-            for y, z in zip(ys, zs):
-                x += y * z
-            return x
-
-        ys = [1.0, 2.0]
-        zs = [3.0]
-        x = torch.tensor([1.0])
-
-        fn_opt = torch.compile(fn, backend="eager")
-        fn_opt(x, ys, zs)
-        fn_opt(x, ys[:1], zs)
-
-        record_str = "\n".join(r.getMessage() for r in records)
-
-        self.assertIn(
-            """L['zs'][0] == 3.0""",
-            record_str,
-        )
-        self.assertIn(
-            "len(L['ys']) == 2",
-            record_str,
-        )
-
-    @make_logging_test(guards=True, recompiles=True)
     def test_guards_recompiles(self, records):
         def fn(x, ys, zs):
             return inner(x, ys, zs)
