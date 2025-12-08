@@ -206,6 +206,16 @@ else:
                     )
                 if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                     raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
+
+                # Store concrete mesh to be used for __repr__
+                if isinstance(mesh, torch.Tensor):
+                    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+                    with unset_fake_temporarily():
+                        self._concrete_mesh = mesh.detach().cpu().tolist()
+                else:
+                    self._concrete_mesh = mesh  # pyrefly: ignore[bad-assignment]
+
                 mesh_tensor = (
                     mesh.detach().to(dtype=torch.int).contiguous()
                     if isinstance(mesh, torch.Tensor)
@@ -218,6 +228,13 @@ else:
                     raise TypeError(
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
+
+                # Store concrete mesh to be used for __repr__
+                from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+                with unset_fake_temporarily():
+                    full_mesh = _layout.remap_to_tensor(_rank_map)
+                    self._concrete_mesh = full_mesh.tolist()
 
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
@@ -506,7 +523,7 @@ else:
             # pop this mesh from mesh env
             _mesh_resources.mesh_stack.pop()
 
-        def __repr__(self) -> str:
+        def __str__(self) -> str:
             device_mesh_repr = (
                 f"({', '.join(f'{k}={v}' for k, v in zip(self._mesh_dim_names, self._layout.top_level_sizes))})"
                 if self._mesh_dim_names
@@ -517,6 +534,17 @@ else:
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
+
+        def __repr__(self) -> str:
+            device_mesh_repr = (
+                f"DeviceMesh('{self.device_type}', {self._concrete_mesh!r}"
+            )
+
+            if self._mesh_dim_names:
+                device_mesh_repr += f", mesh_dim_names={self._mesh_dim_names!r}"
+
+            device_mesh_repr += ")"
+            return device_mesh_repr
 
         def __hash__(self):
             # lazily compute hash

@@ -225,14 +225,33 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
                 )
                 return inter.to_local()
 
-        torch.utils._pytree.register_constant(
-            torch.distributed.tensor._dtensor_spec.DTensorSpec
+        torch._library.opaque_object.register_opaque_type(DeviceMesh, value_type=True)
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor._dtensor_spec.DTensorSpec, value_type=True
         )
-        torch.utils._pytree.register_constant(DeviceMesh)
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor.placement_types.Shard, value_type=True
+        )
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor.placement_types.Replicate, value_type=True
+        )
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor.placement_types.Partial, value_type=True
+        )
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor._dtensor_spec.TensorMeta, value_type=True
+        )
+        torch._library.opaque_object.register_opaque_type(
+            torch.distributed.tensor._dtensor_spec.ShardOrderEntry, value_type=True
+        )
 
+        m = Foo()
         ep = torch.export.export(
-            Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
+            m, (torch.randn(4, 4, dtype=torch.float64),), strict=False
         )
+
+        inp = torch.randn(4, 4, dtype=torch.float64)
+        self.assertEqual(ep.module()(inp), m(inp))
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
             f"""\
@@ -242,7 +261,7 @@ def forward(self, b_buffer, x):
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0
     dtensor_const_func_spec0 = self.dtensor_const_func_spec0
-    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, DTensorSpec(mesh=DeviceMesh('{self.device_type}', [0, 1]), placements=(Shard(dim=0),), tensor_meta=TensorMeta(shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float64), shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0,)),)), False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
     add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
     access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
     view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
