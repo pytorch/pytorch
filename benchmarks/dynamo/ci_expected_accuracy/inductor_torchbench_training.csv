@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -178,19 +174,7 @@ soft_actor_critic,pass,6
 
 
 
-speech_transformer,pass,16
-
-
-
 squeezenet1_1,pass,6
-
-
-
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
 
 
 
@@ -206,7 +190,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,37
+vision_maskrcnn,fail_to_run,37
 
 
 
