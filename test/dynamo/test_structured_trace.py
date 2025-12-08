@@ -222,7 +222,7 @@ class StructuredTraceTest(TestCase):
         self.handler.addFilter(chrome_event_filter)
         trace_log.addHandler(self.handler)
 
-        self.raw_file = tempfile.NamedTemporaryFile(
+        self.raw_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w", delete=True
         )  # set this to False to keep temporary files
         self.raw_handler = logging.StreamHandler(self.raw_file)
