@@ -69,8 +69,11 @@ recompile_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_recompile_limit = 256
 
-# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
-skip_code_recursive_on_recompile_limit_hit = True
+skip_code_recursive_on_recompile_limit_hit: bool = Config(
+    default=True,
+    deprecated=True,
+    deprecation_message="does not do anything"
+)
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
@@ -84,10 +87,12 @@ accumulated_cache_size_limit: int = Config(
     alias="torch._dynamo.config.accumulated_recompile_limit"
 )
 
-# (deprecated: does not do anything)
 skip_code_recursive_on_cache_limit_hit: bool = Config(
-    alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit"
+    alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit",
+    deprecated=True,
+    deprecation_message="does not do anything"
 )
+
 fail_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.fail_on_recompile_limit_hit"
 )
