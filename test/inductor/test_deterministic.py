@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -14,12 +15,17 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
+    IS_FBCODE,
 )
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 @instantiate_parametrized_tests
@@ -42,6 +48,7 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -108,6 +115,7 @@ class DeterministicTest(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
@@ -118,9 +126,6 @@ class DeterministicTest(TestCase):
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
-
-        if not os.path.exists("benchmarks/dynamo/huggingface.py"):
-            self.skipTest("Skip due to benchmarks/dynamo/huggingface.py not found.")
 
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
@@ -135,7 +140,7 @@ class DeterministicTest(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
-                f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -151,7 +156,7 @@ class DeterministicTest(TestCase):
             # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
-                f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
@@ -168,5 +173,5 @@ class DeterministicTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()

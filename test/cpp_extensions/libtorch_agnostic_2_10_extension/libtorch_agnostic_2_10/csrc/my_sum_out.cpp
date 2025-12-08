@@ -7,18 +7,14 @@ using torch::stable::Tensor;
 Tensor my_sum_out(
     Tensor out,
     Tensor self,
-    torch::headeronly::HeaderOnlyArrayRef<int64_t> dim,
+    std::optional<torch::headeronly::HeaderOnlyArrayRef<int64_t>> dim,
     bool keepdim = false,
     std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
-  // Check if dim is empty to determine if we should sum all dimensions
-  if (dim.size() == 0) {
-    return sum_out(out, self, std::nullopt, keepdim, dtype);
-  }
   return sum_out(out, self, dim, keepdim, dtype);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
-  m.def("my_sum_out(Tensor(a!) out, Tensor self, int[] dim, bool keepdim=False, ScalarType? dtype=None) -> Tensor(a!)");
+  m.def("my_sum_out(Tensor(a!) out, Tensor self, int[]? dim=None, bool keepdim=False, ScalarType? dtype=None) -> Tensor(a!)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(

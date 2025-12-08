@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <cstdint>
 #include <ostream>
@@ -37,30 +38,9 @@ inline MemoryFormat get_contiguous_memory_format() {
   return MemoryFormat::Contiguous;
 }
 
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    MemoryFormat memory_format) {
-  switch (memory_format) {
-    case MemoryFormat::Preserve:
-      return stream << "Preserve";
-    case MemoryFormat::Contiguous:
-      return stream << "Contiguous";
-    case MemoryFormat::ChannelsLast:
-      return stream << "ChannelsLast";
-    case MemoryFormat::ChannelsLast3d:
-      return stream << "ChannelsLast3d";
-    case MemoryFormat::NumOptions:
-    default:
-      // Note: We can't use TORCH_CHECK here as it's not header-only
-      // Callers should ensure valid memory format values
-      return stream << "Unknown";
-  }
-}
-
 } // namespace c10
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::get_contiguous_memory_format;
 using c10::MemoryFormat;
-using c10::operator<<;
 HIDDEN_NAMESPACE_END(torch, headeronly)

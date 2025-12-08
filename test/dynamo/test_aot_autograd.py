@@ -1165,9 +1165,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_forward", "(Tensor x) -> Tensor", lib=lib
+            )
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_forward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 x.data_ptr()
                 return x.clone()
@@ -1175,12 +1179,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             x = torch.randn(3)
 
             def data_ptr_graph_input(x):
-                r0 = torch.ops.mylib.foo(x)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(x)
                 return r0
 
             def data_ptr_graph_intermediate(x):
                 y = x.clone()
-                r0 = torch.ops.mylib.foo(y)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(y)
                 return r0
 
             tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
@@ -1200,7 +1204,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_backward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_backward", "(Tensor x) -> Tensor", lib=lib
+            )
 
             backward_called = False
 
@@ -1216,12 +1222,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     grad.data_ptr()
                     return grad.clone()
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_backward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 return Foo.apply(x)
 
             def f(x):
-                return torch.ops.mylib.foo(x)
+                return torch.ops.mylib.foo_data_ptr_backward(x)
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):

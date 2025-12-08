@@ -145,6 +145,10 @@ static StableIValue from_ivalue(
           list_pointer_to_list_handle(stableivalue_list.release()),
           extension_build_version);
     }
+    case c10::TypeKind::StringType: {
+      return torch::stable::detail::_from(
+          ivalue.toStringRef(), extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -250,6 +254,10 @@ static c10::IValue to_ivalue(
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return ivalue_list;
+    }
+    case c10::TypeKind::StringType: {
+      return c10::IValue(torch::stable::detail::_to<std::string>(
+          stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(
@@ -576,5 +584,45 @@ torch_get_mutable_data_ptr(AtenTensorHandle tensor, void** ret_data_ptr) {
     at::Tensor* t =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     *ret_data_ptr = t->mutable_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_string_handle(const char* data, size_t length, StringHandle* handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = new std::string(data, length);
+    *handle = reinterpret_cast<StringHandle>(str_ptr);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_string(StringHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    delete str_ptr;
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_length(StringHandle handle, size_t* length) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *length = str_ptr->length();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_c_str(StringHandle handle, const char** data) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *data = str_ptr->c_str();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    t->set_requires_grad(requires_grad);
   });
 }
