@@ -13,7 +13,9 @@ import contextlib
 import copy
 import functools
 import itertools
+import os
 import pprint
+import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -260,9 +262,34 @@ _CUSTOM_OP_ALIASING_ALLOWLIST = [
 ]
 
 
+def _is_ci() -> bool:
+    """Check if we are running in CI environment."""
+    return bool(os.environ.get("CI"))
+
+
+def _check_custom_op_aliasing(name, args, kwargs, result):
+    """
+    Check if custom op outputs alias inputs or other outputs.
+    In CI, raises RuntimeError. For users, emits a warning.
+    """
+    try:
+        torch._library.utils._c_check_aliasing_constraint(
+            name,
+            args,
+            kwargs,
+            result,
+        )
+    except RuntimeError as e:
+        if _is_ci():
+            raise
+        else:
+            warnings.warn(str(e), UserWarning, stacklevel=3)
+
+
 class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
     """
-    Checks if inp/out of custom ops alias each other
+    Checks if inp/out of custom ops alias each other.
+    In CI, violations raise errors. For users, violations emit warnings.
     """
 
     def __init__(self):
@@ -288,8 +315,8 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             func, torch._ops.HigherOrderOperator
         ) and func.namespace not in ["aten", "prim", "prims", "_c10d_functional"]:
             if func.name() not in _CUSTOM_OP_ALIASING_ALLOWLIST:
-                torch._library.utils._c_check_aliasing_constraint(
-                    func.name,
+                _check_custom_op_aliasing(
+                    func.name(),
                     args,
                     kwargs,
                     res,
