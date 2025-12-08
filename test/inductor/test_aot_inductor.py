@@ -7702,6 +7702,30 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
+    @requires_gpu
+    def test_constant_int_kernel_input(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                device = x.device
+
+                inp = torch.zeros(u0, device=device)
+                inp_rand0 = inp + torch.rand(u0, device=device)
+                inp_rand1 = inp_rand0 - torch.rand(u0, device=device)
+                return torch.where(
+                    torch.rand(u0, device=device) > 0.5,
+                    inp_rand0 + inp_rand1,
+                    inp_rand0 - inp_rand1,
+                )
+
+        example_inputs = (torch.tensor(6, dtype=torch.int64, device=self.device),)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            AOTIRunnerUtil.run(Model(), example_inputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
