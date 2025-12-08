@@ -258,7 +258,7 @@ def _should_disable_saved_tensors_hooks():
 # Custom ops that intentionally mutate inputs (e.g., in-place fusion ops)
 # and should skip the aliasing constraint check
 _CUSTOM_OP_ALIASING_ALLOWLIST = [
-    "mkldnn._convolution_pointwise_.binary",
+    torch.ops.mkldnn._convolution_pointwise_.binary,
 ]
 
 
@@ -314,7 +314,7 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
         if not isinstance(
             func, torch._ops.HigherOrderOperator
         ) and func.namespace not in ["aten", "prim", "prims", "_c10d_functional"]:
-            if func.name() not in _CUSTOM_OP_ALIASING_ALLOWLIST:
+            if func not in _CUSTOM_OP_ALIASING_ALLOWLIST:
                 _check_custom_op_aliasing(
                     func.name(),
                     args,
