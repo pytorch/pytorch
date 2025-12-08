@@ -300,7 +300,7 @@ class CustomConstantType:
         return hash(self.a)
 
 
-pytree.register_constant(CustomConstantType)
+torch._library.opaque_object.register_opaque_type(CustomConstantType, value_type=True)
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):

@@ -13421,7 +13421,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        register_constant(MyInput)
+        torch._library.opaque_object.register_opaque_type(MyInput, value_type=True)
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -16418,6 +16418,8 @@ class GraphModule(torch.nn.Module):
             return fn(x)
 
         def fake_hop(mode, fn, x, schema):
+            print(schema)
+            print(x)
             with mode:
                 return dense_hop(fn, x, schema)
 
@@ -16445,6 +16447,7 @@ class GraphModule(torch.nn.Module):
         mod = Model()
         x = torch.randn(3, 4)
         ep = export(mod, (x,))
+        print(ep)
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
