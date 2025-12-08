@@ -370,6 +370,13 @@ test_h100_distributed() {
 
 test_h100_symm_mem() {
   # symmetric memory test
+
+  # Configure NVSHMEM to use smaller heap and work without NVSwitch
+  # Default heap is 128GB which fails cuMemMap on AWS H100 instances
+  export NVSHMEM_SYMMETRIC_SIZE=4G
+  # Disable NVLink Switch features (not available on AWS H100 instances)
+  export NVSHMEM_DISABLE_NVLS=1
+
   # Install Helion for distributed kernel tests
   pip install helion
   # Clone helion repo to get examples (not included in pip package)
