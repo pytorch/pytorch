@@ -704,7 +704,7 @@ class SideEffects:
                 elif var.source is None:
                     # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
-            elif isinstance(var, variables.TensorVariable):
+            elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
                 # to newly constructed tensor object, so we keep it that way.
                 # They are always loaded from output of the fx graph, so one can
@@ -781,7 +781,7 @@ class SideEffects:
         handle: "variables.RemovableHandleVariable",
         name: str,
     ) -> None:
-        assert isinstance(tensor, variables.TensorVariable)
+        assert tensor.is_tensor()
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
@@ -881,10 +881,7 @@ class SideEffects:
             elif isinstance(var, variables.lists.DequeVariable):
                 # For limited maxlen, the order of operations matter for side
                 # effect, but we currently don't track the order, so no support.
-                if not (
-                    isinstance(var.maxlen, variables.ConstantVariable)
-                    and var.maxlen.value is None
-                ):
+                if not var.maxlen.is_constant_none():
                     unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
