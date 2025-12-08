@@ -803,7 +803,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 and len(args) == 1
                 and isinstance(args[0], variables.ListVariable)
                 and len(args[0].items) > 1
-                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+                and all(x.is_tensor() for x in args[0].items)
             ):
                 # Stack FakeTensor
                 stacked = wrap_fx_proxy(

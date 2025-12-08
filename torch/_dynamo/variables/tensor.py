@@ -229,6 +229,9 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
+    def is_tensor(self) -> bool:
+        return True
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -1126,7 +1129,7 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        if isinstance(value, TensorVariable):
+        if value.is_tensor():
             # [Note: Tensor.__setitem__ and VariableTracker metadata]
             # At this point, we proxied a node representing `self[key] = value` into the graph.
             # When executed, this node will mutate `self`'s tensor metadata, so it's important
@@ -1762,11 +1765,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
 
         new_func = self.value.__new__
         if new_func is torch.Tensor.__new__:
-            if (
-                len(args) == 1
-                and isinstance(args[0], TensorVariable)
-                and len(kwargs) == 0
-            ):
+            if len(args) == 1 and args[0].is_tensor() and len(kwargs) == 0:
                 data = args[0]
                 # Simulate `torch.Tensor.__new__` as shallow-copying the input
                 # tensor data with a new type. TODO polyfill?
