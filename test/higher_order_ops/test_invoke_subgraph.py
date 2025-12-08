@@ -2843,6 +2843,33 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
 
+class InvokeSubgraphNoRetracingTests(TestCase):
+    def test_module_no_retracing(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @nested_compile_region(is_pure=True)
+            def forward(self, x):
+                return torch.sin(x)
+
+        class LLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = Block()
+                self.mod2 = Block()
+
+            def forward(self, x):
+                return self.mod1(self.mod2(x))
+
+        x = torch.randn(8, requires_grad=True)
+
+        mod = LLM()
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        opt_mod(x)
+
+
 class NegativeTesting(TestCase):
     def test_graph_break(self):
         @nested_compile_region

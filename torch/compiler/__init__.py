@@ -635,7 +635,7 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None):
+def nested_compile_region(fn=None, is_pure=False):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -665,7 +665,7 @@ def nested_compile_region(fn=None):
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn)
+    return _mark_compile_region(fn, is_pure)
 
 
 def load_compiled_function(

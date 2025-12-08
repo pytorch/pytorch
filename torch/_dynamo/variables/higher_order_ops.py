@@ -4339,6 +4339,70 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
+    def create_wrapped_node(
+        self,
+        tx: "InstructionTranslator",
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        description,
+        *,
+        subgraph_name="wrap_body",
+    ):
+        # is_pure = fn_args_vt[0].as_python_constant()
+        fn_args_vt = fn_args_vt[1:]
+        # See NOTE [HigherOrderOperator tracing design] for more details
+        (
+            body_r,
+            body_graph,
+            body_lifted_freevars,
+            body_graph_output_vts,
+        ) = speculate_subgraph_with_auto_output_flattening(
+            tx,
+            fn_vt,
+            fn_args_vt,
+            kwargs,
+            description,
+            set_subgraph_inputs=self.set_subgraph_inputs,
+            source_target=self.value,
+            allow_side_effects=self.allow_side_effects,
+            supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
+        )
+
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        body_name = self.install_subgraph_in_output_graph(
+            tx,
+            fn_vt,
+            fn_args_vt,
+            kwargs,
+            body_gmod,
+            attr_name=subgraph_name,
+        )
+        body_node = make_attr(tx, body_name)
+
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
+        # all the arguments are lifted.
+        lifted_args = tuple(arg for arg in body_lifted_freevars)
+
+        proxy_args = (body_node,) + lifted_args
+
+        example_value = pytree.tree_map_only(
+            torch.fx.Node,
+            lambda a: a.meta["example_value"],
+            body_graph.find_nodes(op="output")[0].args[0],
+        )
+
+        return (
+            proxy_args,
+            {},
+            example_value,
+            body_r,
+            body_gmod,
+            body_name,
+            body_graph_output_vts,
+        )
+
     @raise_hard_error_if_graph_break(
         reason="torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
     )
