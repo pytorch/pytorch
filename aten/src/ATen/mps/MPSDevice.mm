@@ -53,6 +53,12 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
 }
 
+bool MPSDevice::isGPUFamily(MTLGPUFamily_t family) const {
+  @autoreleasepool {
+    return [_mtl_device supportsFamily:family];
+  }
+}
+
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   auto is_os_version_at_least = [](int major, int minor) {
     @autoreleasepool {
@@ -119,6 +125,10 @@ bool is_available() {
 
 bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+bool is_gpu_family(MTLGPUFamily_t family) {
+  return MPSDevice::getInstance()->isGPUFamily(family);
 }
 
 } // namespace at::mps
