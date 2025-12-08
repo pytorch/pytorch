@@ -166,6 +166,7 @@ Inference with ``torch.compile``
 """"""""""""""""""""""""""""""""
 
 .. code-block:: python
+    
     import torch
     import torchvision.models as models
     import time
