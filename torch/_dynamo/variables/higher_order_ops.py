@@ -393,114 +393,126 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     )
 
 
-def _collect_storages_from_tensor(example_value, excluded_storages):
+def get_tensor_storages(tensor) -> set:
     """
-    Collect storage references from a tensor and add them to excluded_storages.
+    Get storage references from a tensor.
 
-    Handles both regular tensors and traceable wrapper subclasses.
+    Handles regular tensors, traceable wrapper subclasses, and sparse tensors.
+    Returns a set of StorageWeakRef objects.
 
     Args:
-        example_value: The tensor to extract storages from
-        excluded_storages: Set to add storage references to
+        tensor: The tensor to extract storages from
+
+    Returns:
+        Set of StorageWeakRef objects for the tensor's storage(s)
     """
     from torch._subclasses.fake_tensor import get_plain_tensors
     from torch.multiprocessing.reductions import StorageWeakRef
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-    if not isinstance(example_value, torch.Tensor):
-        return
+    storages: set = set()
 
-    if example_value.is_sparse or example_value.is_sparse_csr:
-        return
+    if not isinstance(tensor, torch.Tensor):
+        return storages
 
-    if is_traceable_wrapper_subclass(example_value):
+    if tensor.is_sparse or tensor.is_sparse_csr:
+        return storages
+
+    if is_traceable_wrapper_subclass(tensor):
         inner_tensors = []
-        get_plain_tensors(example_value, inner_tensors)
+        get_plain_tensors(tensor, inner_tensors)
         for inner in inner_tensors:
             if isinstance(inner, torch.Tensor):
-                storage = StorageWeakRef(inner._typed_storage())
-                excluded_storages.add(storage)
+                storages.add(StorageWeakRef(inner._typed_storage()))
     else:
-        storage = StorageWeakRef(example_value._typed_storage())
-        excluded_storages.add(storage)
+        storages.add(StorageWeakRef(tensor._typed_storage()))
+
+    return storages
 
 
-def _build_excluded_storages(tx, graph_output_vts):
-    from torch._higher_order_ops.utils import _collect_fake_inputs
+class StorageAliasingTracker:
+    """
+    Tracks storage references to detect aliasing between tensors.
 
-    excluded_storages = set()
+    This class encapsulates the logic for collecting storages from tensors
+    and checking for aliasing conflicts. Used to filter intermediate outputs
+    that would create input-output or output-output aliasing.
+    """
 
-    # Collect input storages to avoid input-output aliasing
-    for node in tx.output.graph.nodes:
-        if node.op == "placeholder":
-            example_value = _collect_fake_inputs([node])[0]
-            # Skip non-tensor inputs (e.g., symints, None, etc.)
+    def __init__(self):
+        self._excluded_storages: set = set()
+
+    def _collect_storages_from_tensor(self, example_value):
+        """
+        Collect storage references from a tensor and add them to excluded storages.
+        """
+        self._excluded_storages.update(get_tensor_storages(example_value))
+
+    def collect_from_inputs(self, tx):
+        """Collect storages from graph input placeholders."""
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        for node in tx.output.graph.nodes:
+            if node.op == "placeholder":
+                example_value = _collect_fake_inputs([node])[0]
+                if isinstance(example_value, torch.Tensor):
+                    self._collect_storages_from_tensor(example_value)
+            else:
+                break
+
+    def collect_from_outputs(self, graph_output_vts):
+        """Collect storages from existing graph outputs."""
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        for vt in graph_output_vts:
+            proxy = vt.as_proxy()
+            example_value = _collect_fake_inputs([proxy.node])[0]
             if isinstance(example_value, torch.Tensor):
-                _collect_storages_from_tensor(example_value, excluded_storages)
-        else:
-            break
+                self._collect_storages_from_tensor(example_value)
 
-    # Collect existing output storages to avoid output-output aliasing
-    for vt in graph_output_vts:
-        proxy = vt.as_proxy()
-        example_value = _collect_fake_inputs([proxy.node])[0]
-        # Skip non-tensor outputs (e.g., symints)
-        if isinstance(example_value, torch.Tensor):
-            _collect_storages_from_tensor(example_value, excluded_storages)
+    def check_and_track(self, proxy_node) -> bool:
+        """
+        Check if a proxy node can be added without aliasing, and track it if so.
 
-    return excluded_storages
+        Returns True if the node can be safely added (no aliasing), False otherwise.
+        """
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+        from torch.multiprocessing.reductions import StorageWeakRef
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+        example_value = _collect_fake_inputs([proxy_node])[0]
 
-def _check_intermediate_aliasing(proxy_node, excluded_storages):
-    """
-    Check if an intermediate output would create aliasing.
+        # Non-tensor outputs (e.g., symints) don't have aliasing concerns
+        if not isinstance(example_value, torch.Tensor):
+            return True
 
-    Args:
-        proxy_node: The proxy node to check
-        excluded_storages: Set of storages to check against
+        # Check if any storage aliases with existing inputs/outputs
+        tensor_storages = get_tensor_storages(example_value)
+        if tensor_storages & self._excluded_storages:
+            return False
 
-    Returns:
-        Tuple of (should_add: bool, new_storage: StorageWeakRef | None)
-        - should_add: Whether the intermediate can be safely added
-        - new_storage: Storage reference to add to excluded set if added
-    """
-    from torch._higher_order_ops.utils import _collect_fake_inputs
-    from torch.multiprocessing.reductions import StorageWeakRef
-    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+        # Track this tensor's storage (for wrapper subclasses, inner storages were already checked)
+        if not is_traceable_wrapper_subclass(example_value):
+            if not (example_value.is_sparse or example_value.is_sparse_csr):
+                self._excluded_storages.add(
+                    StorageWeakRef(example_value._typed_storage())
+                )
 
-    example_value = _collect_fake_inputs([proxy_node])[0]
-
-    # Non-tensor outputs (e.g., symints) don't have aliasing concerns
-    if not isinstance(example_value, torch.Tensor):
-        return True, None
-
-    # Collect all storages from this tensor
-    temp_storages = set()
-    _collect_storages_from_tensor(example_value, temp_storages)
-
-    # Check if any storage aliases with existing inputs/outputs
-    if temp_storages & excluded_storages:
-        return False, None
-
-    # For wrapper subclasses, we checked inner storages but don't track the wrapper itself
-    if is_traceable_wrapper_subclass(example_value):
-        return True, None
-    else:
-        return True, StorageWeakRef(example_value._typed_storage())
+        return True
 
 
-def _collect_intermediate_outputs(
-    tx, subtracer, graph_output_vts, filter_aliased_intermediates=True
+def collect_intermediate_outputs(
+    tx, subtracer, graph_output_vts, filter_aliased_intermediates=False
 ):
     extra_outputs = []
     existing_out_proxies = {vt.as_proxy() for vt in graph_output_vts}
 
-    # Only build excluded storages if we're filtering aliased intermediates
-    excluded_storages = (
-        _build_excluded_storages(tx, graph_output_vts)
-        if filter_aliased_intermediates
-        else None
-    )
+    # Build the aliasing tracker if we're filtering
+    tracker = None
+    if filter_aliased_intermediates:
+        tracker = StorageAliasingTracker()
+        tracker.collect_from_inputs(tx)
+        tracker.collect_from_outputs(graph_output_vts)
 
     for out in subtracer.tracked_tensor_or_symint_vt:
         proxy = out.as_proxy()
@@ -515,20 +527,14 @@ def _collect_intermediate_outputs(
 
         if not filter_aliased_intermediates:
             extra_outputs.append(out)
-
         else:
-            should_add, new_storage = _check_intermediate_aliasing(
-                proxy.node, excluded_storages
-            )
-
             # TODO: We should detect when a filtered aliased intermediate is captured
             # by side effects and raise a better error. Currently this will fail later
             # with "does not belong to this Graph" error during compilation.
             # See test_side_effect_with_aliased_intermediate for an example.
-            if should_add:
+            if tracker.check_and_track(proxy.node):
                 extra_outputs.append(out)
-                if new_storage is not None:
-                    excluded_storages.add(new_storage)
+
     return extra_outputs
 
 
@@ -1395,7 +1401,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # Controls whether to filter aliased intermediates when collecting extra outputs.
     # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
     # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
-    filter_aliased_intermediates: bool = True,
+    filter_aliased_intermediates: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1612,7 +1618,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 or tx.output.current_tracer.traced_with_externally_visible_side_effects
             )
             if allow_side_effects:
-                extra_outputs = _collect_intermediate_outputs(
+                extra_outputs = collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
                 graph_output_vts = graph_output_vts + tuple(extra_outputs)
@@ -3058,7 +3064,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             allow_side_effects=self.allow_side_effects,
             filter_aliased_intermediates=getattr(
-                self, "filter_aliased_intermediates", True
+                self, "filter_aliased_intermediates", False
             ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
