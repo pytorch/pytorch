@@ -4360,7 +4360,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         previously_installed_submodules = []
         if is_pure and invoke_subgraph_cache:
             """
-            1) Must be pure - its stronger than side effects, the function
+            1) Must be pure - its stronger than no side effects, the function
             should not rely on any global state that can change between calls.
             Depends ONLY on inputs.
             2) Must have all inputs already lifted as the original function arguments
