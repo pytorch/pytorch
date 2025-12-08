@@ -511,6 +511,13 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
+    def test_hash_size(self):
+        # See issue #168254
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
+
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -3250,6 +3257,57 @@ class TestGuardsExpressions(TestCase):
             f"Size comparison should not cause recompilation.",
         )
 
+    @skipIfTorchDynamo("Test uses torch.compile")
+    def test_python_mod_padding_no_recompile(self):
+        """
+        Test that padding with PythonMod and slicing back to original size
+        doesn't cause guards or recompilation.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(x):
+            # Padding to align to multiple of 4
+            padding = (-x.size()[0]) % 4
+            aligned_size = x.size()[0] + padding
+            tensor = torch.empty(aligned_size, x.size()[1])
+            # Do some work on padded tensor
+            tensor = tensor * 100
+            # Remove padding with slicing
+            remove_padding = tensor[0 : x.size()[0], ...]
+            # View should work without guards since shapes match
+            return remove_padding.view(x.size())
+
+        # First call we pass something does not need padding
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        # Second call with different size needs padding
+        result1 = func(torch.rand(10, 12))
+        self.assertEqual(result1.shape, (10, 12))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            f"Expected 1 compilation, got {cnt.frame_count}. "
+            f"PythonMod padding should not cause recompilation.",
+        )
+
+        # test with unbacked.
+        torch._dynamo.reset()
+
+        a = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        result1 = func(a)
+        self.assertEqual(result1.shape, (10, 10))
+
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
@@ -4475,6 +4533,46 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         start = torch.tensor(0)
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, shape):
+            return a.expand(*shape)
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, shape):
+            self.assertEqual(compiled(a, shape), func(a, shape))
+
+        # No specialization - matching dimensions
+        run(torch.rand(2, 10), (2, 10))
+        run(torch.rand(5, 5), (5, 5))
+        self.assertEqual(cnt.frame_count, 1)  # Single compilation
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Specialize input dim to 1 (broadcasting)
+        # Input dim is 1, needs to expand to larger size
+        run(torch.rand(1, 10), (9, 10))  # Compile with input[0] == 1
+        run(torch.rand(1, 5), (7, 5))  # Reuse same compiled graph
+        self.assertEqual(cnt.frame_count, 1)
+        # Changing input from 1 triggers recompilation
+        run(torch.rand(5, 10), (5, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Multi-dimensional broadcasting
+        # Multiple dimensions with different broadcast semantics
+        run(torch.rand(1, 1, 10), (5, 7, 10))  # Broadcast first two dims
+        run(torch.rand(1, 1, 5), (3, 4, 5))  # Reuse pattern
+        self.assertEqual(cnt.frame_count, 1)
 
     @skipIfTorchDynamo()
     @torch.fx.experimental._config.patch("backed_size_oblivious", True)

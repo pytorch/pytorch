@@ -174,7 +174,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -680,7 +680,7 @@ def generic_jump(
             # assert related instructions as we don't need them anymore.
 
             # if we see Tensor as assert statement, no need to call scalar_tensor
-            if isinstance(value, TensorVariable):
+            if value.is_tensor():
                 self.output.create_proxy(
                     "call_function",
                     torch._assert_async,
@@ -735,9 +735,7 @@ def generic_jump(
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
+        elif value.is_tensor() and self.should_compile_partial_graph():
             jump_graph_break(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
@@ -761,10 +759,15 @@ def generic_jump(
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
-                if isinstance(result, ConstantVariable) and isinstance(
-                    result.value, (bool, int)
-                ):
-                    if truth_fn(result.value):
+                method_name = getattr(getattr(x, "fn", None), "__name__", None)
+                if result.is_python_constant():
+                    result_value = result.as_python_constant()
+                    if method_name == "__bool__" and not isinstance(result_value, bool):
+                        msg = variables.ConstantVariable.create(
+                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        )
+                        exc.raise_observed_exception(TypeError, self, args=[msg])
+                    if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
                         self.jump(inst)
@@ -787,9 +790,7 @@ def generic_jump(
                     if push:
                         self.push(value)
                     self.jump(inst)
-        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
-            self
-        ):
+        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 if push:
                     self.push(value)
@@ -858,6 +859,10 @@ def break_graph_if_unsupported(
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.active_generic_context_managers:
+                    # raise original graph break if fullgraph/error_on_graph_break=True
+                    if self.one_graph or self.error_on_graph_break:
+                        raise
+
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
@@ -2050,22 +2055,23 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
+        self.push(it)
         try:
             val = it.next_variable(self)
-            self.push(it)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
                 exc.handle_observed_exception(self)
 
-            # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(it)
                 self.push(ConstantVariable.create(None))
+            else:
+                # pop the iterator in Python < 3.12
+                self.pop()
             self.jump(inst)
 
     def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
@@ -2632,7 +2638,7 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+        if isinstance(obj, NNModuleVariable) and not val.is_python_constant():
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert not self.export, (
@@ -3391,9 +3397,9 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if isinstance(seq, TensorVariable):
+        if seq.is_tensor():
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
+        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
@@ -3547,7 +3553,7 @@ class InstructionTranslatorBase(
         kwargs: dict[str, VariableTracker] = {}
         assert inst.arg is not None
         for part in self.popn(inst.arg):
-            if isinstance(part, ConstantVariable):
+            if part.is_python_constant():
                 format_string_parts.append("{}")
                 args.append(part)
             elif isinstance(part, variables.StringFormatVariable):
@@ -4166,6 +4172,33 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _make_frame_loc(
+        self, filename: str, lineno: Optional[int], fallback_lineno: int
+    ) -> tuple[str, int]:
+        if lineno is None or lineno < 0:
+            return (filename, fallback_lineno)
+        return (filename, lineno)
+
+    def _get_frame_loc_chain(
+        self, frame_loc: tuple[str, int]
+    ) -> tuple[tuple[str, int], ...]:
+        frame_loc_chain_list: list[tuple[str, int]] = []
+
+        if config.nested_graph_breaks:
+            current_tx: Optional[InstructionTranslatorBase] = self.parent
+            while current_tx is not None:
+                parent_frame_loc = self._make_frame_loc(
+                    current_tx.f_code.co_filename,
+                    current_tx.lineno,
+                    current_tx.f_code.co_firstlineno,
+                )
+                frame_loc_chain_list.append(parent_frame_loc)
+                current_tx = current_tx.parent
+
+        frame_loc_chain_list.reverse()
+        frame_loc_chain_list.append(frame_loc)
+        return tuple(frame_loc_chain_list)
+
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4176,14 +4209,25 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+            if config.nested_graph_breaks and self.parent is not None:
+                frame_loc = self._make_frame_loc(
+                    self.f_code.co_filename,
+                    self.lineno,
+                    self.f_code.co_firstlineno,
+                )
+            else:
+                frame_loc = self._make_frame_loc(
+                    user_stack[-1].filename,
+                    user_stack[-1].lineno,
+                    0,
+                )
         except IndexError:
             # first instruction
             frame_loc = (
                 code_options["co_filename"],
                 code_options["co_firstlineno"],
             )
-
+        frame_loc_chain = self._get_frame_loc_chain(frame_loc)
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
@@ -4228,7 +4272,7 @@ class InstructionTranslatorBase(
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add(frame_loc)
+            and graph_break_dup_warning_checker.add(frame_loc_chain)  # type: ignore[arg-type]
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
@@ -4941,10 +4985,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
                 args = []
-                if not (
-                    isinstance(self.symbolic_result, ConstantVariable)
-                    and self.symbolic_result.value is None
-                ):
+                if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]
                 exc.raise_observed_exception(StopIteration, self, args=args)
             else:
@@ -4952,7 +4993,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             if is_generator(code):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
-                assert self.symbolic_result.as_python_constant() is None
+                assert self.symbolic_result.is_constant_none()
                 return ListIteratorVariable(
                     self.generated_items,
                     mutation_type=ValueMutationNew(),
@@ -5184,7 +5225,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if not (isinstance(val, ConstantVariable) and val.value is None):
+        if not val.is_constant_none():
             # invoke send
             # Unreachable code - if you hit this, you are implementing generator support and have
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
@@ -5226,7 +5267,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
-            if isinstance(val, ConstantVariable) and val.value is None:
+            if val.is_constant_none():
                 try:
                     val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:

@@ -227,6 +227,11 @@ class TestDynamoTimed(TestCase):
     Test utilities surrounding dynamo_timed.
     """
 
+    def setUp(self):
+        super().setUp()
+        if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
+            torch._dynamo.reset_recompile_user_contexts()
+
     def run_forward_backward(self):
         model = torch.compile(TestModel())
         x = torch.rand([3], requires_grad=True)
@@ -920,7 +925,7 @@ class TestDynamoTimed(TestCase):
         first, second = {
             (3, 9): (10, 6),
             (3, 10): (10, 6),
-            (3, 11): (10, 6),
+            (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
