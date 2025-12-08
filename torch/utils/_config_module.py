@@ -127,7 +127,7 @@ if TYPE_CHECKING:
         alias: str | None = None,
         # Deprecation support
         deprecated: bool = False,
-        deprecation_message: str | None = None
+        deprecation_message: str | None = None,
     ) -> T: ...
 
 else:
@@ -141,8 +141,7 @@ else:
         alias: str | None = None,
         # Deprecation support
         deprecated: bool = False,
-        deprecation_message: str | None = None
-
+        deprecation_message: str | None = None,
     ) -> _Config[T]:
         return _Config(
             default=default,
@@ -153,7 +152,7 @@ else:
             alias=alias,
             # Deprecation support
             deprecated=deprecated,
-            deprecation_message=deprecation_message
+            deprecation_message=deprecation_message,
         )
 
 
@@ -388,6 +387,7 @@ class ConfigModule(ModuleType):
             config = self._config[name]
             if config.deprecated and not config._deprecation_warned:
                 import warnings
+
                 msg = f"{self.__name__}.{name} is deprecated"
                 if config.deprecation_message:
                     msg += f" and {config.deprecation_message}"
@@ -409,6 +409,7 @@ class ConfigModule(ModuleType):
             # Issue deprecation warning on read (once per config)
             if config.deprecated and not config._deprecation_warned:
                 import warnings
+
                 msg = f"{self.__name__}.{name} is deprecated"
                 if config.deprecation_message:
                     msg += f" and {config.deprecation_message}"

@@ -33,15 +33,13 @@ e_aliased_bool: bool = Config(
     alias="torch.testing._internal.fake_config_module2.e_aliasing_bool"
 )
 e_deprecated: bool = Config(
-    default=True,
-    deprecated=True,
-    deprecation_message="is no longer needed"
+    default=True, deprecated=True, deprecation_message="is no longer needed"
 )
 e_not_deprecated: bool = Config(default=False)
 e_deprecated_alias: bool = Config(
     alias="torch.testing._internal.fake_config_module.e_not_deprecated",
     deprecated=True,
-    deprecation_message="use something else instead"
+    deprecation_message="use something else instead",
 )
 
 
