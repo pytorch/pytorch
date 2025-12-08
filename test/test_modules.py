@@ -28,7 +28,6 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
-
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -890,7 +889,7 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if torch.accelerator.is_available:
+        if torch.cuda.is_available or torch.xpu.is_available:
             devices += [device_type]
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
