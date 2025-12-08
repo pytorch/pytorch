@@ -846,27 +846,15 @@ def validate_args_and_maybe_create_graph_inputs(
         for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
+                # Add the tensor input to the subgraph right away. This way, the
+                # tensor inputs are in the same order as that of original
+                # function. This improve readability, and can also simplify the
+                # future implementation of certain hops like invoke_subgraph and
+                # autograd.Function.
+                if isinstance(a, variables.TensorVariable):
+                    tracer.maybe_lift_tracked_freevar_to_input(a.proxy)
                 args.append(a)
                 continue
-            elif set_subgraph_inputs == "automatic_with_forced_inputs":
-                if isinstance(a, variables.TensorVariable):
-                    node = a.maybe_fx_node()
-                    example_value = node.meta["example_value"]
-                    arg_name = (
-                        a.as_proxy().node.name
-                        if sub_args_names is None
-                        else sub_args_names[idx]
-                    )
-                    new_proxy = tracer.create_graph_input(
-                        arg_name, a.python_type(), example_value
-                    )
-                    example_value = node.meta.get("example_value", None)
-                    a = wrap_fx_proxy_cls(
-                        target_cls=type(a),
-                        tx=tx,
-                        proxy=new_proxy,
-                        example_value=example_value,
-                    )
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
                     example_value = a.as_proxy().node.meta["example_value"]
