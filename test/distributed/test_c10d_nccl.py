@@ -258,7 +258,8 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         super().setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def tearDown(self):
         pass
@@ -4001,8 +4002,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
             # we need a brand new fileStore for the new PG
             # the new file name is shared through the old fileStore
-            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
-            store.set("file", new_file_name)
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                new_file_name = f.name
+                store.set("file", new_file_name)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
@@ -4059,21 +4061,21 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        nccl_debug_file = tempfile.NamedTemporaryFile()
-        nccl_env = {
-            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-            "NCCL_ALGO": "NVLS",
-            "NCCL_DEBUG": "INFO",
-            "NCCL_DEBUG_SUBSYS": "NVLS",
-            "NCCL_DEBUG_FILE": nccl_debug_file.name,
-        }
-        if torch.cuda.nccl.version() >= (2, 24, 3):
-            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
-        self.env_patcher.start()
-        self._spawn_processes()
+        with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
+            nccl_env = {
+                # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+                # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                "NCCL_ALGO": "NVLS",
+                "NCCL_DEBUG": "INFO",
+                "NCCL_DEBUG_SUBSYS": "NVLS",
+                "NCCL_DEBUG_FILE": nccl_debug_file.name,
+            }
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+            self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+            self.env_patcher.start()
+            self._spawn_processes()
 
     def tearDown(self):
         self.env_patcher.stop()
@@ -4445,15 +4447,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
         pg_opts.config.split_share = 1
-        nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
 
-        # Tests functionality when passing nccl config
-        self._test_pass_nccl_options(pg_opts)
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
 
-        # Tests if comms were configured
-        nccl_debug_file_content = nccl_debug_file.read()
+            # Tests if comms were configured
+            nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         split_share = re.search(
