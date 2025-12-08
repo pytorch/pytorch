@@ -201,13 +201,13 @@ class ExperimentalConfigWrapper {
     for (size_t i = 0; i < num_metrics; i++) {
       configss << config_.profiler_metrics[i];
       if (num_metrics > 1 && i < (num_metrics - 1)) {
-        configss << ",";
+        configss << ',';
       }
     }
     configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
              << (config_.profiler_measure_per_kernel ? "true" : "false")
-             << "\n";
-    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << "\n";
+             << '\n';
+    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
@@ -236,8 +236,8 @@ static const std::string setTraceID(const std::string& trace_id) {
     return "";
   }
   std::stringstream configss;
-  configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
-  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
+  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
   return configss.str();
 }
 
@@ -249,7 +249,7 @@ static const std::string appendCustomConfig(
   }
   std::stringstream configss;
   configss << config;
-  configss << "CUSTOM_CONFIG=" << custom_profiler_config << "\n";
+  configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
   return configss.str();
 }
 #endif

@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -12,12 +12,13 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -292,6 +293,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.masked_fill_.Scalar,
     aten.maximum.default,
     aten.maximum.out,
     aten.minimum.default,
@@ -490,13 +492,39 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
+def safe_avoid_redistribution(op, args_schema, placement):
+    """
+    Check if we can avoid redistribution for the given op and placement.
+    """
+    if isinstance(placement, _NormPartial):
+        if (
+            op in [aten.div.Scalar, aten.div_.Scalar, aten.mul.Scalar, aten.mul_.Scalar]
+            and args_schema[1] >= 0
+        ):
+            return True
+
+    elif isinstance(placement, Partial):
+        if op not in [aten.add.Tensor, aten.add_.Tensor] or not any(
+            isinstance(arg, _Number) for arg in args_schema
+        ):
+            return True
+
+        """
+        the same logic could be applied to if op in [aten.mul.Tensor, aten.mul_.Tensor],
+        but if the second tensor is partial, we would need
+        to redistribute here to even figure out if an element is negative
+        """
+
+    return False
+
+
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
     linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None,
+    scalar_tensor_idx: int | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -532,24 +560,12 @@ def common_pointwise_strategy(
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
-            elif isinstance(placement, Partial):
-                # list of ops that support linearity with partial placements
-                safe_partial_ops = [
-                    aten.div.Scalar,
-                    aten.div_.Scalar,
-                    aten.mul.Scalar,
-                    aten.mul_.Scalar,
-                    aten.mul.Tensor,
-                    aten.mul_.Tensor,
-                ]
-
-                # note that only partial-sum and partial-avg are supported for linearity
+            elif isinstance(
+                placement, Partial
+            ):  # note that only partial-sum and partial-avg are supported for linearity
                 partial_supports_linearity = (
                     placement.is_partial("sum") or placement.is_partial("avg")
-                ) and (
-                    op in safe_partial_ops
-                    or not any(isinstance(arg, _Number) for arg in args_schema)
-                )
+                ) and safe_avoid_redistribution(op, args_schema, placement)
 
                 if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
@@ -635,10 +651,24 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
+# Scalar ops that need the scalar value in the cache key for _NormPartial handling
+# (the sign of the scalar affects whether we can avoid redistribution)
+_scalar_ops_needing_value_in_cache = {
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+}
+
 for op in linear_pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        linear_pointwise_strategy
-    )
+    if op in _scalar_ops_needing_value_in_cache:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
+    else:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
@@ -730,11 +760,11 @@ def list_pointwise_strategy(
 
     def args_tuple_strategies(
         args_schema: tuple[object, ...],
-    ) -> list[Optional[TupleStrategy]]:
+    ) -> list[TupleStrategy | None]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.children)
-        tuple_strategies: list[Optional[TupleStrategy]] = []
+        tuple_strategies: list[TupleStrategy | None] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
@@ -760,7 +790,7 @@ def list_pointwise_strategy(
 
     for child_idx, child_strtgy in enumerate(follow_strategy.children):
         assert isinstance(child_strtgy, OpStrategy)
-        args_schema: list[Optional[OpStrategy]] = [
+        args_schema: list[OpStrategy | None] = [
             cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies
         ]
