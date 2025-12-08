@@ -46,7 +46,6 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void** get_buffer_ptrs_dev() override;
   void** get_signal_pad_ptrs_dev() override;
   size_t get_buffer_size() override;
-  size_t get_signal_pad_size() override;
   size_t get_offset() override;
 
   bool has_multicast_support() override;
