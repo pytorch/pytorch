@@ -2289,6 +2289,13 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d grouped nodes are filtered",
                 len(grouped),
             )
+        mix_order = [x for x in nodes if isinstance(x, FusedMixOrderReductions)]
+        if mix_order:
+            log.debug(
+                "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
+                len(mix_order),
+            )
+
         filtered_nodes = [
             x
             for x in nodes
@@ -2298,6 +2305,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     NopKernelSchedulerNode,
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
+                    FusedMixOrderReductions,
                 ),
             )
         ]
@@ -2339,7 +2347,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 for buf_name in node.get_buffer_names()
             ]
         )
-
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
             device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
@@ -2350,9 +2357,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 if device and (device.type == "mps" or device.type == "cpu"):
                     continue
 
-                if isinstance(node, FusedMixOrderReductions) or (
-                    node.used_buffer_names() & excluded_buffer_names
-                ):
+                # exclude nodes that read from FusedMixOrderReductions output buffers'
+                if node.used_buffer_names() & excluded_buffer_names:
                     continue
                 device_groups[device].append(node)
 
@@ -2364,7 +2370,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                         for i in range(0, len(device_nodes), max_num_nodes)
                     ]
                 )
-
         return grouped_nodes
 
     group_algorithm_for_combo_kernels: Callable[
