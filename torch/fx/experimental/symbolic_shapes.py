@@ -1192,6 +1192,38 @@ def _free_unbacked_symbols_with_path(
     if pending is None:
         pending = set()
     r = {}
+
+    def match_tensor(a: torch.Tensor, real_tensor: Optional[torch.Tensor] = None):
+        r.update(
+            go(
+                a.size(),
+                path + (CallMethodKey("size"),),
+                real=real_tensor.size() if real_tensor is not None else None,
+            )
+        )
+        if a.layout not in [
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            r.update(
+                go(
+                    a.stride(),
+                    path + (CallMethodKey("stride"),),
+                    real=real_tensor.stride() if real_tensor is not None else None,
+                )
+            )
+        r.update(
+            go(
+                a.storage_offset(),
+                path + (CallMethodKey("storage_offset"),),
+                real=(
+                    real_tensor.storage_offset() if real_tensor is not None else None
+                ),
+            )
+        )
+
     if isinstance(a, (tuple, list)):
         # NB: real is apparently not always a tuple/list here
         # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
@@ -1209,6 +1241,12 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
+
+        # match DTensor outer shapes
+        if torch.distributed.is_available() and isinstance(
+            a, torch.distributed.tensor.DTensor
+        ):
+            match_tensor(a)
     elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
         unwrapped_tensor = get_unwrapped(a)
         r.update(go(unwrapped_tensor, path))
@@ -1216,38 +1254,7 @@ def _free_unbacked_symbols_with_path(
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
-        r.update(
-            go(
-                a.size(),
-                path + (CallMethodKey("size"),),
-                real=a.real_tensor.size() if a.real_tensor is not None else None,
-            )
-        )
-        if a.layout not in [
-            torch.sparse_csr,
-            torch.sparse_csc,
-            torch.sparse_bsr,
-            torch.sparse_bsc,
-        ]:
-            r.update(
-                go(
-                    a.stride(),
-                    path + (CallMethodKey("stride"),),
-                    real=a.real_tensor.stride() if a.real_tensor is not None else None,
-                )
-            )
-        r.update(
-            go(
-                a.storage_offset(),
-                path + (CallMethodKey("storage_offset"),),
-                real=(
-                    a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None
-                ),
-            )
-        )
-
+        match_tensor(a, a.real_tensor)
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -1354,6 +1361,8 @@ def compute_unbacked_bindings(
     fs = shape_env.pending_fresh_unbacked_symbols
 
     pending = set(fs)
+    ignorable = set(shape_env.ignorable_fresh_unbacked_symbols)
+    shape_env.ignorable_fresh_unbacked_symbols.clear()
     if not pending:
         return None
 
@@ -1364,6 +1373,7 @@ def compute_unbacked_bindings(
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+    pending -= ignorable
     if not peek and pending:
         extra = (
             repr((example_value.stride(), example_value.storage_offset()))
@@ -3897,6 +3907,9 @@ class ShapeEnv:
         # NB: fresh unbacked symbols NEVER get substitutions applied to them,
         # they are binding sites!
         self.pending_fresh_unbacked_symbols: list[sympy.Symbol] = []
+        # These are symbols which we'd like to process as pending, but if
+        # they're missing then it's okay too.
+        self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
@@ -4251,7 +4264,7 @@ class ShapeEnv:
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Iterator[None]:
         """
-        Indicates that the newly allocated unbacked SymInts are being
+        Indicates that the newly allocated unbacked SymInts may be
         discarded
         """
         prev = self._ignore_fresh_unbacked_symbols_set(True)
@@ -4904,8 +4917,9 @@ class ShapeEnv:
         )
         self.unbacked_symfloat_counter += 1
         self.counter["create_unbacked_symbol"] += 1
-        if not self._ignore_fresh_unbacked_symbols_tls():
-            self.pending_fresh_unbacked_symbols.append(symbol)
+        self.pending_fresh_unbacked_symbols.append(symbol)
+        if self._ignore_fresh_unbacked_symbols_tls():
+            self.ignorable_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
         assert vr.is_float
@@ -4929,8 +4943,9 @@ class ShapeEnv:
             SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
         self.unbacked_symint_counter += 1
-        if not self._ignore_fresh_unbacked_symbols_tls():
-            self.pending_fresh_unbacked_symbols.append(symbol)
+        self.pending_fresh_unbacked_symbols.append(symbol)
+        if self._ignore_fresh_unbacked_symbols_tls():
+            self.ignorable_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -4958,8 +4973,9 @@ class ShapeEnv:
             SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
         self.unbacked_symint_counter += 1
-        if not self._ignore_fresh_unbacked_symbols_tls():
-            self.pending_fresh_unbacked_symbols.append(symbol)
+        self.pending_fresh_unbacked_symbols.append(symbol)
+        if self._ignore_fresh_unbacked_symbols_tls():
+            self.ignorable_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)

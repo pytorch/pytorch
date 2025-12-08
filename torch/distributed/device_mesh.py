@@ -229,6 +229,7 @@ else:
                 f"which isn't large enough for layout {_layout}"
             )
 
+            self._rank = _rank if _rank is not None else get_rank()
             self._device_type = device_type
             self._layout = _layout
             self._rank_map = _rank_map
@@ -284,31 +285,59 @@ else:
                     # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
-                if _rank is None:
-                    _rank = get_rank()
+                self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
-                # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == _rank).nonzero()
-                if rank_coords.size(0) not in (0, 1):
-                    raise AssertionError(
-                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
-                    )
-                self._coordinate_on_dim: list[int] | None = (
-                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+        @staticmethod
+        def _compute_coordinates_from_mesh(
+            mesh_tensor: torch.Tensor,
+            rank: int,
+        ) -> Optional[tuple[int, ...]]:
+            """
+            Compute the coordinates of a rank within a mesh tensor.
+
+            Args:
+                mesh_tensor: The mesh tensor to search in
+                rank: The rank to find coordinates for
+
+            Returns:
+                A tuple of coordinates if the rank is found in the mesh, None otherwise
+
+            Raises:
+                AssertionError: If the rank appears more than once in the mesh
+            """
+            rank_coords = (mesh_tensor == rank).nonzero()
+            if rank_coords.size(0) not in (0, 1):
+                raise AssertionError(
+                    f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
                 )
+
+            if rank_coords.size(0) == 0:
+                return None
+
+            coords = rank_coords[0].tolist()
+            return tuple(coords)
+
+        def _compute_coordinate_on_dim(self) -> tuple[int, ...] | None:
+            # calculate the coordinates of the current global rank on the mesh
+            return self._compute_coordinates_from_mesh(self.mesh, self._rank)
 
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
             return self._device_type
 
-        @property
-        def mesh(self) -> torch.Tensor:
-            """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+        @staticmethod
+        def _get_mesh_tensor_from_full_mesh(
+            full_mesh: torch.Tensor,
+            current_rank: int | None = None,
+        ) -> torch.Tensor:
             if full_mesh.size(0) == 1:
                 return full_mesh[0]
-            my_coords = (full_mesh == get_rank()).nonzero()
+
+            if current_rank is None:
+                current_rank = get_rank()
+
+            my_coords = (full_mesh == current_rank).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
             raise RuntimeError(
@@ -316,6 +345,12 @@ else:
                 "either have all its original dimensions (e.g., no slicing) "
                 "or it needs to contain the local rank"
             )
+
+        @property
+        def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            return self._get_mesh_tensor_from_full_mesh(full_mesh)
 
         @property
         def mesh_dim_names(self) -> tuple[str, ...] | None:
@@ -553,7 +588,7 @@ else:
             ``mesh_dim_names``
 
             Args:
-                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh_dim_names (Union[str, tuple[str, ...]]): the name or the tuple of names of the
                 mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
@@ -925,7 +960,7 @@ else:
                 mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
                     integer tensor describing the layout of devices, where the IDs are global IDs
                     of the default process group. Default is None.
-                mesh_dim_names (tuple[str], optional): A tuple of mesh dimension names to assign
+                mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign
                     to each dimension of the multi-dimensional array describing the layout of devices.
                     Its length must match the length of `mesh_shape`. Each string in `mesh_dim_names`
                     must be unique. Default is None.
@@ -1050,12 +1085,24 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> list[int] | None:
+        def is_current_rank_part_of_mesh(self) -> bool:
+            """
+            Return True if the current rank is part of this mesh.
+            """
+            # TODO: Do we need to patch dynamo?
+            return self._coordinate_on_dim is not None
+
+        def get_coordinate(self) -> tuple[int, ...] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        def sym_get_coordinate(self, index: int) -> int:
+            # This is only valid when the current rank is part of the mesh.
+            assert self._coordinate_on_dim
+            return self._coordinate_on_dim[index]
 
         def _flatten(
             self,
@@ -1304,7 +1351,7 @@ else:
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
-            mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
+            mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign to each dimension
                 of the multi-dimensional array describing the layout of devices. Its length must match the length
                 of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
             backend_override (Dict[int | str, tuple[str, Options] | str | Options], optional): Overrides for some or all of
