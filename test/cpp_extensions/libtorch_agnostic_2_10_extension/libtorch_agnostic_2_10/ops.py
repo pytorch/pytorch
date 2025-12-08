@@ -638,3 +638,24 @@ def my_sum_dim1(self) -> Tensor:
     Returns: Tensor - the sum of the tensor along dimension 1
     """
     return torch.ops.libtorch_agnostic_2_10.my_sum_dim1.default(self)
+
+
+def my_full(
+    size, fill_value, dtype=None, layout=None, device=None, pin_memory=None
+) -> Tensor:
+    """
+    Creates a tensor filled with a scalar value.
+
+    Args:
+        size: list[int] - size of the tensor to create
+        fill_value: float - value to fill the tensor with
+        dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
+        device: Device or None - device on which to create the tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - a tensor filled with fill_value
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_full.default(
+        size, fill_value, dtype, layout, device, pin_memory
+    )
