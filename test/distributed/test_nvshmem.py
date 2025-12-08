@@ -3,6 +3,7 @@
 # To run:
 # python test/distributed/test_nvshmem.py
 
+import os
 
 import torch
 import torch.distributed as dist
@@ -31,14 +32,7 @@ def requires_nvshmem():
 
 
 def requires_nvls():
-    """Skip test if NVLS (NVLink Switch) is not available.
-
-    Kernels like tile_reduce use NVLS algorithms which require NVSwitch hardware.
-    When NVSHMEM_DISABLE_NVLS=1 is set (to allow NVSHMEM to initialize on machines
-    without NVSwitch, e.g., AWS H100), these operations will fail with illegal
-    memory access errors.
-    """
-    import os
+    """Skip test if NVLS (NVLink Switch) is not available."""
     nvls_disabled = os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1"
     return skip_but_pass_in_sandcastle_if(
         nvls_disabled,
