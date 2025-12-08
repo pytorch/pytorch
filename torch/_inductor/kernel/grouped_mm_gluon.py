@@ -54,11 +54,13 @@ def compute_stage_variants(
     min_acc_buffers = 1
     compiler_overhead = 256
 
-    min_smem = (ab_bytes_per_stage * min_load_buffers +
-                c_bytes_per_stage +
-                8 * min_load_buffers * 2 +
-                8 * min_acc_buffers * 2 +
-                compiler_overhead)
+    min_smem = (
+        ab_bytes_per_stage * min_load_buffers
+        + c_bytes_per_stage
+        + 8 * min_load_buffers * 2
+        + 8 * min_acc_buffers * 2
+        + compiler_overhead
+    )
 
     if min_smem > smem_limit:
         # This tile size is too large - even minimal pipelining doesn't fit
@@ -97,14 +99,11 @@ def compute_stage_variants(
 
 
 def compute_stages(
-    BLOCK_M: int,
-    BLOCK_N: int,
-    BLOCK_K: int,
-    dtype,
-    num_store_warps: int = 4,
-    **kwargs
+    BLOCK_M: int, BLOCK_N: int, BLOCK_K: int, dtype, num_store_warps: int = 4, **kwargs
 ):
-    variants = compute_stage_variants(BLOCK_M, BLOCK_N, BLOCK_K, dtype, num_store_warps, **kwargs)
+    variants = compute_stage_variants(
+        BLOCK_M, BLOCK_N, BLOCK_K, dtype, num_store_warps, **kwargs
+    )
     return variants[0] if variants else (1, 1)
 
 
@@ -184,17 +183,23 @@ def grouped_mm(
     num_compute_thread_registers=24,
     maxnreg=128,
 ):
-    assert num_load_thread_registers < maxnreg and num_compute_thread_registers < maxnreg
+    assert (
+        num_load_thread_registers < maxnreg and num_compute_thread_registers < maxnreg
+    )
 
     if num_load_buffers is None or num_acc_buffers is None:
         computed_load, computed_acc = compute_stages(
-            BLOCK_M, BLOCK_N, BLOCK_K, dtype=torch.bfloat16, num_store_warps=num_store_warps
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_K,
+            dtype=torch.bfloat16,
+            num_store_warps=num_store_warps,
         )
         if num_load_buffers is None:
             num_load_buffers = computed_load
         if num_acc_buffers is None:
             num_acc_buffers = computed_acc
-    
+
     device = C.device
     dtype = torch.int8
 
@@ -294,22 +299,22 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
     configs = []
 
     if M is not None and N is not None and K is not None:
-      if M < 256:
-          BLOCK_M_vals = [64]
-      else:
-          BLOCK_M_vals = [64, 128]
-      if N <= 64:
-          BLOCK_N_vals = [32, 64]
-      elif N <= 512:
-          BLOCK_N_vals = [64, 128, 256]
-      else:
-          BLOCK_N_vals = [128, 256]
-      if K < 128:
-          BLOCK_K_vals = [64]
-      elif K < 512:
-          BLOCK_K_vals = [64, 128]
-      else:
-          BLOCK_K_vals = [64, 128, 256]
+        if M < 256:
+            BLOCK_M_vals = [64]
+        else:
+            BLOCK_M_vals = [64, 128]
+        if N <= 64:
+            BLOCK_N_vals = [32, 64]
+        elif N <= 512:
+            BLOCK_N_vals = [64, 128, 256]
+        else:
+            BLOCK_N_vals = [128, 256]
+        if K < 128:
+            BLOCK_K_vals = [64]
+        elif K < 512:
+            BLOCK_K_vals = [64, 128]
+        else:
+            BLOCK_K_vals = [64, 128, 256]
 
     NUM_LOAD_WARP_vals = [1, 2]
     NUM_COMPUTE_WARP_vals = [1, 2]
@@ -344,7 +349,9 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
         )
 
         for num_load_buffers, num_acc_buffers in buffer_variants:
-            total_regs = (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+            total_regs = (
+                (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+            )
             REGS_PER_SM = 65536
             MAX_CTAS_PER_SM = 32
             estimated_occupancy = min(REGS_PER_SM // total_regs, MAX_CTAS_PER_SM)
@@ -450,6 +457,10 @@ if __name__ == "__main__":
     dtype = torch.bfloat16
     align = 16 // dtype.itemsize
 
+    # fixme: uncomment this!
+    # os.environ["CUTEDSL_ENABLE_AUTOTUNING"] = "1"
+    # os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE"] = "EXHAUSTIVE"
+
     results = []
     for M, G, N, K in [
         [5, 2, 16, 16],
@@ -464,7 +475,7 @@ if __name__ == "__main__":
         [8257, 32, 5120, 1536],
         [32768, 24, 6144, 2048],
         [32768, 48, 6144, 2048],
-        [32768, 64, 6144, 2048],  # fixme: crash
+        [32768, 64, 6144, 2048],
         [65536, 24, 6144, 2048],
         [65536, 32, 6144, 2048],  ##
         [65536, 48, 6144, 2048],
@@ -627,7 +638,7 @@ if __name__ == "__main__":
                 num_compute_warps,
                 num_store_warps,
                 num_load_thread_registers,
-                num_load_thread_registers,
+                num_compute_thread_registers,
                 maxnreg,
                 occupancy,
             ) = best_config
