@@ -227,6 +227,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolVariable
 from .misc import (
     AutogradEngineVariable,
     AutogradFunctionContextVariable,
@@ -1093,6 +1094,14 @@ class VariableBuilder:
                 value,
                 index,
                 source=self.source,
+            )
+        elif isinstance(value, torch.cuda.MemPool):
+            index = register_user_object(value, self.source)
+            proxy = self.tx.output.create_proxy(
+                "call_function", get_external_object_by_index, (index,), {}
+            )
+            return CUDAMemPoolVariable(
+                proxy, value, user_object_index=index, source=self.source
             )
         elif (
             istype(value, contextlib.nullcontext)

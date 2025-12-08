@@ -101,6 +101,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .memory import CUDAMemPoolContextVariable
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
@@ -171,6 +172,7 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
+    "CUDAMemPoolContextVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
