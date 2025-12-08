@@ -367,7 +367,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]],
+    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node, ...]],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -3025,6 +3025,19 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
+        )
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
