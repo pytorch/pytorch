@@ -4654,9 +4654,7 @@ class GraphModule(torch.nn.Module):
         true_pred = torch.tensor(True)
         false_pred = torch.tensor(False)
 
-        # Test true branch
         self.assertEqual(run_logic(true_pred, x), compiled_fn(true_pred, x))
-        # Test false branch
         self.assertEqual(run_logic(false_pred, x), compiled_fn(false_pred, x))
 
     def test_functional_call_with_scan(self):
