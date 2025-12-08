@@ -438,6 +438,9 @@ def _collect_storages_from_tensor(example_value, excluded_storages):
     if not isinstance(example_value, torch.Tensor):
         return
 
+    if example_value.is_sparse or example_value.is_sparse_csr:
+        return
+
     if is_traceable_wrapper_subclass(example_value):
         inner_tensors = []
         get_plain_tensors(example_value, inner_tensors)
@@ -542,20 +545,14 @@ def _collect_intermediate_outputs(
             extra_outputs.append(out)
 
         else:
-            try:
-                should_add, new_storage = _check_intermediate_aliasing(
-                    proxy.node, excluded_storages
-                )
-            except (KeyError, NotImplementedError):
-                # - KeyError: missing example_value metadata
-                # - NotImplementedError: sparse tensors without dense storage
-                continue
+            should_add, new_storage = _check_intermediate_aliasing(
+                proxy.node, excluded_storages
+            )
 
             # TODO: We should detect when a filtered aliased intermediate is captured
             # by side effects and raise a better error. Currently this will fail later
             # with "does not belong to this Graph" error during compilation.
             # See test_side_effect_with_aliased_intermediate for an example.
-
             if should_add:
                 extra_outputs.append(out)
                 if new_storage is not None:
