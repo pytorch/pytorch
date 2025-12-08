@@ -251,7 +251,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         # be the input.
 
         # when testing with dynamic shape, symbols are lifted as input
-        arg_count = ifdynstaticdefault(2, 3)
+        arg_count = ifdynstaticdefault(3, 4)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_vars(self):
@@ -269,7 +269,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         # Since, `x` is unused, we don't lift it to
         # be the input.
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(3, 4)
+        arg_count = ifdynstaticdefault(4, 5)
         self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_var_used_multiple_times(self):
@@ -629,7 +629,7 @@ class GraphModule(torch.nn.Module):
         # Since, `x` is unused, we don't lift it to
         # be the input.
         # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = ifdynstaticdefault(2, 3)
+        arg_count = ifdynstaticdefault(3, 4)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count, 3)
 
     @torch._dynamo.config.patch(
@@ -845,19 +845,19 @@ class GraphModule(torch.nn.Module):
         item: "Sym(u0)" = getitem.item();  getitem = None
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, item, l_x_);  wrap_body_1 = item = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, item);  wrap_body_1 = l_x_ = item = None
         getitem_3: "i16[3]" = wrap[0];  wrap = None
         return (getitem_3,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, item: "Sym(u0)", l_x_: "i16[3]"):
+        def forward(self, l_x_: "i16[3]", item: "Sym(u0)"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, item, l_x_);  wrap_body_0 = item = l_x_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, item);  wrap_body_0 = l_x_ = item = None
             getitem: "i16[3]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, item: "Sym(u0)", l_x_: "i16[3]"):
+            def forward(self, l_x_: "i16[3]", item: "Sym(u0)"):
                 add: "i16[3]" = item + l_x_;  item = l_x_ = None
                 return (add,)
 """,
@@ -990,19 +990,19 @@ class GraphModule(torch.nn.Module):
         cat: "i64[u0 + u1, 1]" = torch.cat((c, d));  c = d = None
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int_2, sym_size_int_3, cat, l_x_);  wrap_body_1 = sym_size_int_2 = sym_size_int_3 = cat = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int_2, sym_size_int_3, cat);  wrap_body_1 = l_x_ = sym_size_int_2 = sym_size_int_3 = cat = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
+        def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, u0, u1, cat, l_x_);  wrap_body_0 = u0 = u1 = cat = l_x_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, u0, u1, cat);  wrap_body_0 = l_x_ = u0 = u1 = cat = None
             getitem: "f32[3]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
+            def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]"):
                 sum_1: "i64[]" = cat.sum();  cat = None
                 add: "f32[3]" = sum_1 + l_x_;  sum_1 = l_x_ = None
                 return (add,)
@@ -1776,7 +1776,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        arg_count = ifdynstaticdefault(2, 3)
+        arg_count = ifdynstaticdefault(3, 4)
         self._test_wrap_simple(f, default_args_generator((x, y, 8)), arg_count)
 
     def test_map_subgraph_name_is_valid(self):
