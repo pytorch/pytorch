@@ -276,11 +276,11 @@ Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<std::st
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(self, value, std::move(rounding_mode), result);
+  return div_out_sparse_zerodim(self, value, rounding_mode, result);
 }
 
 Tensor& div_sparse_(Tensor& self, const Tensor& value, std::optional<std::string_view> rounding_mode) {
-  return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
+  return div_out_sparse_zerodim(self, value, rounding_mode, self);
 }
 
 // --------------------------------------------------------------------

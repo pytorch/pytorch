@@ -897,11 +897,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
 }
 
 Tensor div(const Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
-  return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
+  return self.div(wrapped_scalar_tensor(other), rounding_mode); // redispatch!
 }
 
 Tensor& div_(Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
-  return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
+  return self.div_(wrapped_scalar_tensor(other), rounding_mode); // redispatch!
 }
 
 // divide, alias for div
@@ -926,23 +926,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
 }
 
 Tensor& divide_out(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, Tensor& result) {
-  return at::div_out(result, self, other, std::move(rounding_mode));
+  return at::div_out(result, self, other, rounding_mode);
 }
 
 Tensor divide(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode) {
-  return self.div(other, std::move(rounding_mode));
+  return self.div(other, rounding_mode);
 }
 
 Tensor& divide_(Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode) {
-  return self.div_(other, std::move(rounding_mode));
+  return self.div_(other, rounding_mode);
 }
 
 Tensor divide(const Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
-  return self.div(other, std::move(rounding_mode));
+  return self.div(other, rounding_mode);
 }
 
 Tensor& divide_(Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
-  return self.div_(other, std::move(rounding_mode));
+  return self.div_(other, rounding_mode);
 }
 
 // true_divide, an alias for div
