@@ -52,6 +52,7 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+ENV ROCM_VERSION=${ROCM_VERSION}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -60,24 +61,31 @@ RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh common_utils.sh
 RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
-RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
-ENV ROCM_PATH /opt/rocm
-ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
-ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV PATH /opt/rocm/llvm/bin:$PATH
-ENV MAGMA_HOME /opt/rocm/magma
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
+
+# Set ROCm environment variables
+# For theRock (nightly), install_rocm.sh writes /etc/rocm_env.sh which is sourced by entrypoint
+# For traditional ROCm, we set the standard paths
+# Note: We append to /etc/bash.bashrc so the env is available in all bash sessions
+RUN if [ "${ROCM_VERSION}" = "nightly" ] && [ -f /etc/rocm_env.sh ]; then \
+      cat /etc/rocm_env.sh >> /etc/bash.bashrc; \
+    else \
+      echo 'export ROCM_PATH=/opt/rocm' >> /etc/bash.bashrc && \
+      echo 'export ROCM_HOME=/opt/rocm' >> /etc/bash.bashrc && \
+      echo 'export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}' >> /etc/bash.bashrc && \
+      echo 'export MAGMA_HOME=/opt/rocm/magma' >> /etc/bash.bashrc; \
+    fi
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
 # Install amdsmi
+COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
-RUN rm install_amdsmi.sh
+RUN rm install_amdsmi.sh detect_rocm_path.sh
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -86,9 +94,10 @@ ENV UCX_COMMIT $UCX_COMMIT
 ENV UCC_COMMIT $UCC_COMMIT
 ENV UCX_HOME /usr
 ENV UCC_HOME /usr
+COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 ADD ./common/install_ucc.sh install_ucc.sh
 RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
+RUN rm install_ucc.sh detect_rocm_path.sh
 
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
@@ -124,9 +133,10 @@ RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
+COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-RUN bash ./install_cache.sh && rm install_cache.sh
+RUN bash ./install_cache.sh && rm install_cache.sh detect_rocm_path.sh
 
 # Install Open MPI for ROCm
 COPY ./common/install_openmpi.sh install_openmpi.sh
@@ -139,6 +149,12 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+# Copy and set entrypoint script to handle ROCm path detection
+COPY ./common/detect_rocm_path.sh /detect_rocm_path.sh
+COPY ./ubuntu-rocm/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
 USER jenkins
 CMD ["bash"]

@@ -26,6 +26,74 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
+    if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+      echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+
+      # Clean any previous ROCm installation in the base CI image.
+      if [[ -d /opt/rocm ]]; then
+        echo "Removing existing /opt/rocm from base image"
+        rm -rf /opt/rocm
+      fi
+
+      # Determine theRock nightly URL based on GPU architecture
+      # Check BUILD_ENVIRONMENT or PYTORCH_ROCM_ARCH for the target GPU
+      if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
+          # MI350 (gfx950)
+          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/"
+          echo "Detected gfx950 architecture - using MI350 theRock nightly repository"
+        else
+          # Default to MI300 (gfx942/gfx94X)
+          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/"
+          echo "Using gfx94X (MI300) theRock nightly repository"
+        fi
+      fi
+
+      export THEROCK_NIGHTLY_INDEX_URL
+      echo "TheRock Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
+      
+      python3 -m pip install \
+        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
+        "rocm[libraries,devel]"
+
+      # Use the rocm-sdk CLI helper to populate environment defaults
+      ROCM_HOME="$(rocm-sdk path --root)"
+      ROCM_BIN="$(rocm-sdk path --bin)"
+      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+
+      echo "ROCM_HOME=${ROCM_HOME}"
+      echo "ROCM_BIN=${ROCM_BIN}"
+      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+
+      export ROCM_HOME
+      export ROCM_PATH="${ROCM_HOME}"
+      export PATH="${ROCM_BIN}:${PATH}"
+      export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+
+      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
+      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
+      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
+      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+
+      # Write environment to file that build.sh can source
+      cat > /etc/rocm_env.sh << ROCM_ENV
+export ROCM_PATH="${ROCM_HOME}"
+export ROCM_HOME="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\${PATH}"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
+export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
+export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
+export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
+ROCM_ENV
+
+      echo "install_rocm.sh: TheRock nightly ROCm install complete"
+      exit 0
+    fi
+
     # Make sure rocm packages from repo.radeon.com have highest priority
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
