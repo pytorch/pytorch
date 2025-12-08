@@ -272,13 +272,13 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
 
         # Defer this to subclass torchdispatch modes (probably shouldn't have fake tensor here tho)
         if not all(type(x) in HANDLED_TYPES for x in flat_tensor_args):
-            return NotImplementedError
+            return NotImplemented
 
         res = func(*args, **kwargs)
         # Only check aliasing for custom ops (non-aten/prim/_c10d_functional)
         if not isinstance(
             func, torch._ops.HigherOrderOperator
-        ) and func.namespace not in ["aten", "prim", "_c10d_functional"]:
+        ) and func.namespace not in ["aten", "prim", "prims", "_c10d_functional"]:
             torch._library.utils._c_check_aliasing_constraint(
                 func.name,
                 args,
