@@ -1361,6 +1361,80 @@ except RuntimeError as e:
             else:
                 self.assertNotIn("C++ CapturedTraceback:", error_message)
 
+        @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(
+            "AssertionError(tensor's device must be `meta`, got cpu instead)"
+        )
+        def test_my_new_empty(self, device):
+            """Test new_empty with all kwargs."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device, dtype=torch.float32)
+
+            # Test with default args (should inherit from self)
+            result = libtorch_agnostic.ops.my_new_empty(t, [2, 3])
+            expected = t.new_empty([2, 3])
+            self.assertEqual(result.shape, expected.shape)
+            self.assertEqual(result.dtype, expected.dtype)
+            self.assertEqual(result.device, expected.device)
+
+            # Test with different dtype
+            result_dtype = libtorch_agnostic.ops.my_new_empty(
+                t, [2, 3], dtype=torch.float64
+            )
+            expected_dtype = t.new_empty([2, 3], dtype=torch.float64)
+            self.assertEqual(result_dtype.shape, expected_dtype.shape)
+            self.assertEqual(result_dtype.dtype, torch.float64)
+
+            # Test with different device (move to CPU)
+            result_device = libtorch_agnostic.ops.my_new_empty(t, [2, 3], device="cpu")
+            expected_device = t.new_empty([2, 3], device="cpu")
+            self.assertEqual(result_device.shape, expected_device.shape)
+            self.assertEqual(result_device.device.type, "cpu")
+
+            # Test with dtype and device together
+            result_both = libtorch_agnostic.ops.my_new_empty(
+                t, [4, 5], dtype=torch.int64, device="cpu"
+            )
+            expected_both = t.new_empty([4, 5], dtype=torch.int64, device="cpu")
+            self.assertEqual(result_both.shape, expected_both.shape)
+            self.assertEqual(result_both.dtype, torch.int64)
+            self.assertEqual(result_both.device.type, "cpu")
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo(
+            "AssertionError(tensor's device must be `meta`, got cpu instead)"
+        )
+        def test_my_new_zeros(self, device):
+            """Test new_zeros with all kwargs."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device, dtype=torch.float32)
+
+            # Test with default args (should inherit from self)
+            result = libtorch_agnostic.ops.my_new_zeros(t, [2, 3])
+            expected = t.new_zeros([2, 3])
+            self.assertEqual(result, expected, exact_device=True)
+
+            # Test with different dtype
+            result_dtype = libtorch_agnostic.ops.my_new_zeros(
+                t, [2, 3], dtype=torch.float64
+            )
+            expected_dtype = t.new_zeros([2, 3], dtype=torch.float64)
+            self.assertEqual(result_dtype, expected_dtype, exact_device=True)
+
+            # Test with different device (move to CPU)
+            result_device = libtorch_agnostic.ops.my_new_zeros(t, [2, 3], device="cpu")
+            expected_device = t.new_zeros([2, 3], device="cpu")
+            self.assertEqual(result_device, expected_device, exact_device=True)
+
+            # Test with dtype and device together
+            result_both = libtorch_agnostic.ops.my_new_zeros(
+                t, [4, 5], dtype=torch.int64, device="cpu"
+            )
+            expected_both = t.new_zeros([4, 5], dtype=torch.int64, device="cpu")
+            self.assertEqual(result_both, expected_both, exact_device=True)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
