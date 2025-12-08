@@ -1358,17 +1358,18 @@ def compute_unbacked_bindings(
     if shape_env is None:
         return None
 
-    fs = shape_env.pending_fresh_unbacked_symbols
+    fresh_sym = shape_env.pending_fresh_unbacked_symbols
+    ign_sym = shape_env.ignorable_fresh_unbacked_symbols
 
-    pending = set(fs)
-    ignorable = set(shape_env.ignorable_fresh_unbacked_symbols)
-    shape_env.ignorable_fresh_unbacked_symbols.clear()
+    pending = set(fresh_sym)
+    ignorable = set(ign_sym)
+    if not peek:
+        log.info("compute_unbacked_bindings %s", fresh_sym)
+        fresh_sym.clear()
+        ign_sym.clear()
+
     if not pending:
         return None
-
-    if not peek:
-        log.info("compute_unbacked_bindings %s", fs)
-        fs.clear()
 
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
@@ -4264,7 +4265,7 @@ class ShapeEnv:
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Iterator[None]:
         """
-        Indicates that the newly allocated unbacked SymInts may be
+        Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
         prev = self._ignore_fresh_unbacked_symbols_set(True)
@@ -4917,9 +4918,8 @@ class ShapeEnv:
         )
         self.unbacked_symfloat_counter += 1
         self.counter["create_unbacked_symbol"] += 1
-        self.pending_fresh_unbacked_symbols.append(symbol)
-        if self._ignore_fresh_unbacked_symbols_tls():
-            self.ignorable_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
         assert vr.is_float
@@ -4943,9 +4943,8 @@ class ShapeEnv:
             SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
         self.unbacked_symint_counter += 1
-        self.pending_fresh_unbacked_symbols.append(symbol)
-        if self._ignore_fresh_unbacked_symbols_tls():
-            self.ignorable_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -4973,9 +4972,8 @@ class ShapeEnv:
             SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
         self.unbacked_symint_counter += 1
-        self.pending_fresh_unbacked_symbols.append(symbol)
-        if self._ignore_fresh_unbacked_symbols_tls():
-            self.ignorable_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
