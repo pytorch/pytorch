@@ -490,7 +490,7 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
-        if use_static_cuda_launcher and TEST_WITH_ROCM:
+        if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
