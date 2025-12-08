@@ -161,6 +161,7 @@ class CuteDSLTemplateKernel(Kernel):
             "get_tensor_buffers": self.get_tensor_buffers,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
+            "set_cute_hash": self.set_cute_hash,
         }
 
         # Render the template with the environment and provided kwargs
@@ -281,6 +282,16 @@ class CuteDSLTemplateKernel(Kernel):
         if output is None:
             raise ValueError(f"Output buffer '{buf_name}' not found in args")
         return output
+
+    def set_cute_hash(self, func_name: str, suffix: str = ""):
+        """Generate code to set __cute_hash__ on a codegen function.
+
+        This allows hash_callable in flash_attn to skip expensive runtime hashing
+        for Inductor-generated functions. The hash is based on the kernel name
+        which already contains a unique hash suffix.
+        """
+        hash_value = f"{self.kernel_name}_{suffix}" if suffix else self.kernel_name
+        return f'{func_name}.__cute_hash__ = "{hash_value}"'
 
     def get_tensor_buffers(self):
         """Get list of tensor buffer names that were collected during modifications."""
