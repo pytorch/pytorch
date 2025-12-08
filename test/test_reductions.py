@@ -1235,6 +1235,86 @@ class TestReductions(TestCase):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    def test_amin_amax_exclude_dim(self, device, dtype):
+        """Test the exclude_dim parameter for amin and amax."""
+        # Basic test: 3D tensor, exclude one dimension
+        x = torch.randn(2, 3, 4, device=device, dtype=dtype)
+
+        # exclude_dim=[1] means reduce over dims 0 and 2, keep dim 1
+        result_amin = torch.amin(x, exclude_dim=[1])
+        result_amax = torch.amax(x, exclude_dim=[1])
+
+        # Expected shape: (3,) since we reduce dims 0 and 2
+        self.assertEqual(result_amin.shape, torch.Size([3]))
+        self.assertEqual(result_amax.shape, torch.Size([3]))
+
+        # Verify correctness by comparing with explicit dim reduction
+        expected_amin = torch.amin(x, dim=[0, 2])
+        expected_amax = torch.amax(x, dim=[0, 2])
+        self.assertEqual(result_amin, expected_amin)
+        self.assertEqual(result_amax, expected_amax)
+
+        # Test with keepdim=True
+        result_amin_keepdim = torch.amin(x, exclude_dim=[1], keepdim=True)
+        result_amax_keepdim = torch.amax(x, exclude_dim=[1], keepdim=True)
+        self.assertEqual(result_amin_keepdim.shape, torch.Size([1, 3, 1]))
+        self.assertEqual(result_amax_keepdim.shape, torch.Size([1, 3, 1]))
+
+        expected_amin_keepdim = torch.amin(x, dim=[0, 2], keepdim=True)
+        expected_amax_keepdim = torch.amax(x, dim=[0, 2], keepdim=True)
+        self.assertEqual(result_amin_keepdim, expected_amin_keepdim)
+        self.assertEqual(result_amax_keepdim, expected_amax_keepdim)
+
+        # Test with multiple excluded dimensions
+        y = torch.randn(2, 3, 4, 5, device=device, dtype=dtype)
+        result_amin_multi = torch.amin(y, exclude_dim=[0, 2])
+        result_amax_multi = torch.amax(y, exclude_dim=[0, 2])
+
+        # Reduce dims 1 and 3, shape should be (2, 4)
+        self.assertEqual(result_amin_multi.shape, torch.Size([2, 4]))
+        self.assertEqual(result_amax_multi.shape, torch.Size([2, 4]))
+
+        expected_amin_multi = torch.amin(y, dim=[1, 3])
+        expected_amax_multi = torch.amax(y, dim=[1, 3])
+        self.assertEqual(result_amin_multi, expected_amin_multi)
+        self.assertEqual(result_amax_multi, expected_amax_multi)
+
+        # Test with negative indices in exclude_dim
+        z = torch.randn(2, 3, 4, device=device, dtype=dtype)
+        result_amin_neg = torch.amin(z, exclude_dim=[-1])  # exclude last dim
+        result_amax_neg = torch.amax(z, exclude_dim=[-1])
+
+        expected_amin_neg = torch.amin(z, dim=[0, 1])  # reduce dims 0 and 1
+        expected_amax_neg = torch.amax(z, dim=[0, 1])
+        self.assertEqual(result_amin_neg, expected_amin_neg)
+        self.assertEqual(result_amax_neg, expected_amax_neg)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_amin_amax_exclude_dim_errors(self, device, dtype):
+        """Test error cases for exclude_dim parameter."""
+        x = torch.randn(2, 3, 4, device=device, dtype=dtype)
+
+        # Error: dim and exclude_dim cannot both be specified
+        with self.assertRaisesRegex(RuntimeError, "Only one of 'dim' or 'exclude_dim'"):
+            torch.amin(x, dim=[0], exclude_dim=[1])
+        with self.assertRaisesRegex(RuntimeError, "Only one of 'dim' or 'exclude_dim'"):
+            torch.amax(x, dim=[0], exclude_dim=[1])
+
+        # Error: exclude_dim index out of range
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.amin(x, exclude_dim=[5])
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.amax(x, exclude_dim=[-5])
+
+        # Error: exclude_dim covers all dimensions (nothing left to reduce)
+        with self.assertRaisesRegex(RuntimeError, "nothing left to reduce"):
+            torch.amin(x, exclude_dim=[0, 1, 2])
+        with self.assertRaisesRegex(RuntimeError, "nothing left to reduce"):
+            torch.amax(x, exclude_dim=[0, 1, 2])
+
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
