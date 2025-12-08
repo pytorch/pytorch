@@ -354,7 +354,7 @@ void launch(
 
   // We have specialized launches for different sizes, as sort_size affects
   // shared memory, registers per thread and occupancy. We can use 'LAUNCH_KERNEL(512, false);'
-  // however, that results in lower performance. 
+  // however, that results in lower performance.
   if (largest) {
     if (inputSliceSize <= 64) {
       LAUNCH_KERNEL(64, true);
@@ -805,7 +805,7 @@ __global__ void computeBlockwiseWithinKCounts(
     warp_counts[warp] = count;
   }
   __syncthreads();
-  
+
   CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
   if (warp != 0) {
     return;
