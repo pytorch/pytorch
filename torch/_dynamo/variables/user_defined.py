@@ -1852,6 +1852,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         return ctor(*args, **kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        from dataclasses import fields
+
         # Handle specific pytree classes
         import torch.utils._pytree as pytree
 
@@ -1863,8 +1865,62 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             codegen.extend_output(create_call_function(0, False))
             return
 
-        # For other frozen dataclasses, fall back to the base class behavior
-        super().reconstruct(codegen)
+        # For general frozen dataclasses, reconstruct by calling the constructor
+        # with the field values as arguments
+        dataclass_cls = self.python_type()
+
+        if hasattr(dataclass_cls, "__post_init__"):
+            unimplemented(
+                gb_type="Frozen dataclass with __post_init__",
+                context=f"dataclass={dataclass_cls.__name__}",
+                explanation="Cannot reconstruct frozen dataclass with __post_init__ method, "
+                "as it may have side effects that would be incorrectly replayed.",
+                hints=[
+                    "Remove the __post_init__ method from the frozen dataclass.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # Collect positional and keyword-only arguments
+        pos_args = []
+        kw_args = []
+        for field in fields(dataclass_cls):
+            if not field.init:
+                continue
+            field_vt = self.fields.get(field.name)
+            if field_vt is None:
+                unimplemented(
+                    gb_type="Frozen dataclass with missing field",
+                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
+                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
+                    "was not tracked during tracing.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if getattr(field, "kw_only", False):
+                kw_args.append((field.name, field_vt))
+            else:
+                pos_args.append(field_vt)
+
+        # Load the dataclass constructor
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(dataclass_cls)
+            )
+        )
+        # Reconstruct all arguments
+        for arg_vt in pos_args:
+            codegen(arg_vt)
+        for _, arg_vt in kw_args:
+            codegen(arg_vt)
+        # Call the constructor
+        total_args = len(pos_args) + len(kw_args)
+        if kw_args:
+            kw_names = tuple(name for name, _ in kw_args)
+            codegen.extend_output(
+                codegen.create_call_function_kw(total_args, kw_names, push_null=False)
+            )
+        else:
+            codegen.extend_output(create_call_function(total_args, False))
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
