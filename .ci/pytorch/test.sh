@@ -461,6 +461,29 @@ test_inductor_distributed() {
   assert_git_not_dirty
 }
 
+test_inductor_core() {
+  time python test/run_test.py \
+    --include-inductor-core-tests \
+    --exclude inductor/test_benchmark_fusion \
+              inductor/test_cutlass_backend \
+              inductor/test_flex_attention \
+              inductor/test_max_autotune \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_compiled_autograd \
+              inductor/test_compile_subprocess \
+              inductor/test_cpu_cpp_wrapper \
+              inductor/test_cpu_repro \
+              inductor/test_cpu_select_algorithm \
+              inductor/test_torchinductor_dynamic_shapes \
+              inductor/test_torchinductor \
+              inductor/test_mkldnn_pattern_matcher \
+              inductor/test_torchinductor_codegen_dynamic_shapes \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_inductor_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -760,17 +783,6 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
-        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
-        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
-        # to fill the dashboard.
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
-          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv" || true
-        # Copy cudagraph results as mock data, easiest choice?
-        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv" \
-          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv"
-      fi
     done
   done
 }
@@ -863,8 +875,14 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
+  # Exclude torchrec_dlrm for CUDA 13 as FBGEMM is not compatible
+  local extra_args=()
+  if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+    extra_args=(--exclude-exact torchrec_dlrm)
+  fi
+
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
-    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # TODO (huydhn): Just smoke test some sample models
     if [[ "${TEST_CONFIG}" == *b200* ]]; then
@@ -876,7 +894,7 @@ test_dynamo_benchmark() {
         export TORCHBENCH_ONLY_MODELS="BERT_pytorch"
       fi
     fi
-    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
+    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "${extra_args[@]}" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu* ]]; then
       local dt="float32"
@@ -884,17 +902,17 @@ test_dynamo_benchmark() {
         dt="amp"
       fi
       if [[ "${TEST_CONFIG}" == *freezing* ]]; then
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "${extra_args[@]}" "$@"
       else
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "${extra_args[@]}" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
-      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
+      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
     fi
   fi
 }
@@ -1799,6 +1817,11 @@ test_attention_microbenchmark() {
     --output-json-for-dashboard "${TEST_REPORTS_DIR}/attention_microbenchmark.json"
 }
 
+test_openreg() {
+  python test/run_test.py --openreg --verbose
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1903,7 +1926,8 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* ]]; then
+    # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
@@ -1914,6 +1938,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti_cpp
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
+  test_inductor_core
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
@@ -1978,6 +2004,8 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == openreg ]]; then
+  test_openreg
 else
   install_torchvision
   install_monkeytype

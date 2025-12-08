@@ -497,7 +497,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         torch.compile(foo)(*inp)
         self.assertEqual(len(dynamo_counters["graph_break"]), 1)
         self.assertTrue(
-            "Opaque object were created in the middle of the program and passed to a custom op."
+            "Opaque object were created in the middle of the program"
             in next(iter(dynamo_counters["graph_break"].keys())),
         )
 

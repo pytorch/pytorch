@@ -264,6 +264,12 @@ def get_supported_param_types():
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))

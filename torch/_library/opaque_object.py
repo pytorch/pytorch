@@ -1,44 +1,44 @@
+"""
+Note [Opaque Objects]
+
+Opaque objects are the way we allow custom operators to accept a user-defined
+"black box" object as an input.
+
+There are two kinds of opaque types: VALUE type and REFERENCE type.
+The distinction determines how torch.compile handles the object.
+
+REFERENCE TYPES (default):
+
+Reference-typed opaque objects represent mutable stateful objects and are
+treated as black boxes. In torch.compile, since torch.compile cannot optimize
+the anything (including tensors) within the object, the object must be an
+input to the graph.
+
+You can register a custom class as being a reference-based opaque object class
+through `register_opaque_type(MyClass)`.
+
+VALUE TYPES:
+
+Value-typed opaque objects represent constant values.
+In torch.compile, the graph specializes on the object like how other constants
+are. Therefore there are a couple of methods on the class that must be
+implemented before registering it as a value-typed opaque object class:
+  - __eq__: torch.compile will create guards based on the equality of this
+  object, meaning that a recompilation will happen if __eq__ returns False.
+  - __hash__: This must be implemented for Fake Tensor caching
+  - __repr__: This must be implemented as it will be used in the FX graph's
+    codegen to reconstruct the object. The string representation must be able to
+    construct the object again through its __init__ method.
+
+You can register a custom class as being a reference-based opaque object class
+through `register_opaque_type(MyClass, value_type=True)`.
+"""
+
 from typing import Any, NewType
 
 import torch
 
 from .fake_class_registry import register_fake_class
-
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Note [Opaque Objects]
-#
-# Opaque objects are the way we allow custom operators to accept a user-defined
-# "black box" object as an input.
-#
-# There are two kinds of opaque types: VALUE type and REFERENCE type.
-# The distinction determines how torch.compile handles the object.
-#
-# REFERENCE TYPES (default):
-# Reference-typed opaque objects represent mutable stateful objects and are
-# treated as black boxes. In torch.compile, since torch.compile cannot optimize
-# the anything (including tensors) within the object, the object must be an
-# input to the graph.
-#
-# You can register a custom class as being a reference-based opaque object class
-# through `register_opaque_type(MyClass)`.
-#
-# VALUE TYPES:
-# Value-typed opaque objects represent constant values.
-# In torch.compile, the graph specializes on the object like how other constants
-# are. Guards are based on equality (obj.__eq__), meaning torch.compile will
-# recompile if implemented __eq__ returns false. Therefore there are a couple of
-# methods on a class that must be implemented before registering it as a
-# value-typed opaque object class:
-#   - __eq__ must be implemented as torch.compile guard on this to decide
-#   whether or not to recompile.
-#   - __hash__ must be implemented for Fake Tensor caching
-#   - __repr__ must be implemented as it will be used in the FX graph's
-#     codegen to reconstruct the object
-#
-# You can register a custom class as being a reference-based opaque object class
-# through `register_opaque_type(MyClass, value_type=True)`.
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 @register_fake_class("aten::OpaqueObject")

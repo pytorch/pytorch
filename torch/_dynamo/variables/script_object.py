@@ -25,10 +25,15 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._guards import Source
-from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
+from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -60,9 +65,9 @@ def _raise_hard_error_if_graph_break(
     return deco
 
 
-class OpaqueObjectValueTypeVariable(UserDefinedVariable):
+class OpaqueObjectClassVariable(UserDefinedVariable):
     """
-    A variable that represents an opaque object value type (not instance).
+    A variable that represents an opaque object class (not instance).
     Since UserDefinedClassVariable has some special handling for side effects,
     we have a separate class here which will directly return the object when
     __init__ is called.
@@ -87,6 +92,25 @@ class OpaqueObjectValueTypeVariable(UserDefinedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # disallow creating reference-type opaque objects in the middle of the
+        # program
+        if is_opaque_reference_type(self.value):
+            # Skip __init__ to prevent dynamo from tracing it during resume
+            skip_code(self.value.__init__.__code__)
+
+            unimplemented(
+                gb_type="Opaque object were created in the middle of the program.",
+                context=f"Opaque object type: {self.value}.",
+                explanation=(
+                    "Opaque objects cannot be created inside the torch.compile region. "
+                    "They must be created before entering the compiled function."
+                ),
+                hints=[
+                    "Please create the opaque object before calling torch.compile "
+                    "and pass it in as an argument or as a global variable."
+                ],
+            )
+
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
             {ConstantVariable(k): v for k, v in kwargs.items()}
@@ -202,3 +226,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 "Avoid calling this method.",
             ],
         )
+
+    def as_python_constant(self):
+        if is_opaque_value_type(type(self.value)):
+            return self.value
+        return super().as_python_constant()

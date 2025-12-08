@@ -414,6 +414,9 @@ class TracerBase:
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
+        elif is_opaque_value_type(type(a)):
+            return a
+
         elif is_dataclass(a):
             kwargs = {
                 field.name: self.create_arg(getattr(a, field.name))
@@ -422,9 +425,6 @@ class TracerBase:
             return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
-            return a
-
-        elif is_opaque_value_type(type(a)):
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")

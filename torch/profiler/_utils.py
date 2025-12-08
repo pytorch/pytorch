@@ -4,7 +4,7 @@ import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 from torch.autograd.profiler import profile
 from torch.profiler import DeviceType
@@ -408,8 +408,8 @@ class TimelineEvent:
 
     timestamp: int
     event_type: Literal["start", "end", "regular"]
-    marker_type: Optional[Literal["filename", "node"]]
-    identifier: Optional[str | int]
+    marker_type: Literal["filename", "node"] | None
+    identifier: str | int | None
     event: dict[str, Any]
 
 
@@ -419,8 +419,8 @@ class ContextStackEntry:
 
     context_type: Literal["filename", "node"]
     identifier: str | int
-    metadata: Optional[dict]
-    tid: Optional[int] = None  # Thread ID associated with this context
+    metadata: dict | None
+    tid: int | None = None  # Thread ID associated with this context
 
 
 def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
@@ -520,7 +520,7 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                     if current_file_metadata:
                         node_metadata = current_file_metadata.get("node_metadata", {})
                         if timeline_event.identifier in node_metadata:
-                            node_meta: Optional[dict] = node_metadata[
+                            node_meta: dict | None = node_metadata[
                                 timeline_event.identifier
                             ]
                             context_stack.append(
