@@ -22,7 +22,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
@@ -474,9 +474,7 @@ class CodeGen:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if (
-                _is_from_torch(obj) and obj != torch.device
-            ):  # to support registering torch.device
+            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -569,18 +567,10 @@ class CodeGen:
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             elif is_opaque_value_type(type(arg)):
-                arg_type = type(arg)
-                add_global(arg_type.__name__, arg_type)
-
-                if arg_type.__repr__ is object.__repr__:  # type: ignore[comparison-overlap]
-                    raise TypeError(
-                        f"Value-type opaque object of type {arg_type} is "
-                        "expected to have to have a non-default `__repr__` "
-                        "implementation as we will use this to reconstruct "
-                        "the object in the FX codegen."
-                    )
-                arg_repr = repr(arg)
-                return arg_repr
+                obj_repr, opaque_types = get_opaque_obj_repr(arg)
+                for n, t in opaque_types.items():
+                    add_global(n, t)
+                return obj_repr
             else:
                 return blue(repr(arg))
 
@@ -1877,8 +1867,11 @@ class Graph:
                 yield None
             finally:
                 # restore the original repr functions
+                # Only restore nodes that were in the original set
+                # (new nodes may have been added during code generation)
                 for node in graph.nodes:
-                    node._repr_fn = orig_repr_fns[node]
+                    if node in orig_repr_fns:
+                        node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
             return self._python_code(

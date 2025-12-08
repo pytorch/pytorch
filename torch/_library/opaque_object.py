@@ -34,6 +34,7 @@ You can register a custom class as being a reference-based opaque object class
 through `register_opaque_type(MyClass, value_type=True)`.
 """
 
+import dataclasses
 from typing import Any, NewType
 
 import torch
@@ -162,3 +163,63 @@ def is_opaque_reference_type(cls: Any) -> bool:
                 return not is_value
 
     return not _OPAQUE_TYPES[cls][1]
+
+
+def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
+    types = {}
+
+    def _add_type(_obj) -> str:
+        obj_type = type(_obj)
+        types[obj_type.__name__] = obj_type
+
+        if obj_type.__repr__ is object.__repr__:  # type: ignore[comparison-overlap]
+            raise TypeError(
+                f"Value-type opaque object of type {obj_type} is "
+                "expected to have to have a non-default `__repr__` "
+                "implementation as we will use this to reconstruct "
+                "the object in the FX codegen."
+            )
+
+        obj_repr = repr(_obj)
+        try:
+            import ast
+
+            ast.parse(obj_repr, mode="eval")
+        except SyntaxError as e:
+            raise TypeError(
+                f"Value-type opaque object of type {obj_type} does "
+                "not have a valid implementation of `__repr__` "
+                "which correctly reconstructs the original object. "
+                f"Instead of {_obj}, it is returning {obj_repr}."
+            ) from e
+
+        return obj_repr
+
+    # Recursively add globals for all nested opaque value types
+    # that appear in the object's attributes
+    def add_nested_opaque_types(_obj):
+        if _obj is None:
+            return
+
+        if isinstance(_obj, (list, tuple)):
+            for item in _obj:
+                add_nested_opaque_types(item)
+            return
+        elif isinstance(_obj, dict):
+            for value in _obj.values():
+                add_nested_opaque_types(value)
+            return
+        elif is_opaque_value_type(type(_obj)):
+            _add_type(_obj)
+
+        if hasattr(_obj, "__dict__"):
+            for attr_value in _obj.__dict__.values():
+                add_nested_opaque_types(attr_value)
+        elif hasattr(_obj, "__dataclass_fields__"):
+            for field in dataclasses.fields(_obj):
+                attr_value = getattr(_obj, field.name)
+                add_nested_opaque_types(attr_value)
+
+    obj_repr = _add_type(obj)
+    add_nested_opaque_types(obj)
+    return obj_repr, types
