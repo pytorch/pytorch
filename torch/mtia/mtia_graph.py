@@ -1,3 +1,4 @@
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
 from typing import Optional, Union
@@ -7,6 +8,13 @@ import torch
 
 
 _POOL_HANDLE = tuple[int, int]
+
+
+def graph_pool_handle() -> _POOL_HANDLE:
+    """
+    Return an opaque token representing the id of a graph memory pool.
+    """
+    return torch._C._mtia_graphPoolHandle()
 
 
 class MTIAGraph(torch._C._MTIAGraph):
@@ -93,4 +101,5 @@ class graph:
 __all__ = [
     "MTIAGraph",
     "graph",
+    "graph_pool_handle",
 ]
