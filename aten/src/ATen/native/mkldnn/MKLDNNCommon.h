@@ -29,6 +29,18 @@ static inline dnnl::memory::data_type get_mkldnn_dtype(const Tensor& t) {
   return get_mkldnn_dtype(t.scalar_type());
 }
 
+TORCH_API dnnl::memory::desc get_mkldnn_memory_desc(const Tensor& tensor);
+
+TORCH_API dnnl::memory mkldnn_memory_from_tensor(
+    const Tensor& tensor,
+    const dnnl::memory::desc& desc,
+    const dnnl::engine& engine,
+    bool from_const_data_ptr = false);
+
+TORCH_API dnnl::engine& get_mkldnn_cpu_engine();
+
+TORCH_API dnnl::stream& get_mkldnn_default_stream();
+
 TORCH_API int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor);
 
 TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(

@@ -67,6 +67,53 @@ dnnl::memory::data_type get_mkldnn_dtype(ScalarType type) {
   }
 }
 
+dnnl::memory::desc get_mkldnn_memory_desc(const Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+      return itensor_from_tensor(tensor).get_desc();
+  }
+  TORCH_CHECK(
+      tensor.device().is_cpu(),
+      "get_mkldnn_memory_desc expects CPU tensor input");
+  TORCH_CHECK(
+      tensor.layout() == Layout::Strided,
+      "get_mkldnn_memory_desc expects dense tensor input");
+
+  std::vector<int64_t> dims(tensor.sizes().begin(), tensor.sizes().end());
+  std::vector<int64_t> strides(tensor.strides().begin(), tensor.strides().end());
+
+  return dnnl::memory::desc(
+      dims,
+      get_mkldnn_dtype(tensor.scalar_type()),
+      strides);
+}
+
+dnnl::memory mkldnn_memory_from_tensor(
+    const Tensor& tensor,
+    const dnnl::memory::desc& desc,
+    const dnnl::engine& engine,
+    bool from_const_data_ptr) {
+  TORCH_CHECK(
+      tensor.device().is_cpu(),
+      "mkldnn_memory_from_tensor expects CPU tensor input");
+
+  void* data_ptr = from_const_data_ptr
+      ? const_cast<void*>(tensor.const_data_ptr())
+      : tensor.data_ptr();
+
+  return dnnl::memory(desc, engine, data_ptr);
+}
+
+dnnl::engine& get_mkldnn_cpu_engine() {
+  static dnnl::engine cpu_engine(dnnl::engine::kind::cpu, 0);
+  return cpu_engine;
+}
+
+dnnl::stream& get_mkldnn_default_stream() {
+  static dnnl::stream default_stream(get_mkldnn_cpu_engine());
+  return default_stream;
+}
+
+
 int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
