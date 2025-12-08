@@ -61,8 +61,8 @@ def _add_full_names(
 
 
 def _make_block(pf: PythonFile, begin: int) -> Block:
-    end = 0
     name = ""
+    end = 0
     docstring = ""
 
     for i in range(begin + 1, len(pf.tokens)):
@@ -76,11 +76,10 @@ def _make_block(pf: PythonFile, begin: int) -> Block:
                     pass
             elif t.string == "...":
                 end = i
-
         elif t.type == token.STRING:
             docstring = t.string
             break
-        elif is_empty(t):
+        elif not is_empty(t):
             break
 
     category = Block.Category[pf.tokens[begin].string.upper()]

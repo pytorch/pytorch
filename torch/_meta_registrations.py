@@ -5663,8 +5663,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
+    attention = torch.empty_like(query)
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -5691,7 +5690,7 @@ def meta__scaled_dot_product_flash_attention(
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
-    if torch.version.hip and torch.cuda.is_available():
+    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
         # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
@@ -5717,8 +5716,7 @@ def alloc_with_matching_layout(
     res_shape: tuple[int, ...],
 ):
     if tuple(query.shape) == res_shape:
-        query_t = query.transpose(1, 2)
-        res = torch.empty_like(query_t).transpose(1, 2)
+        res = torch.empty_like(query)
     else:
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
@@ -5841,9 +5839,9 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: float | None = None,
 ):
-    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
     return grad_q, grad_k, grad_v
 
 
@@ -6362,7 +6360,7 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6592,7 +6590,7 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -8103,7 +8101,8 @@ def meta_scaled_grouped_mm(
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
-        assert x.dtype == torch.half
+        assert x.dtype in [torch.half, torch.bfloat16]
+
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
