@@ -689,6 +689,124 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   END_HANDLE_TH_ERRORS
 }
 
+struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
+  TorchDLPackExchangeAPI() {
+    header.version.major = DLPACK_MAJOR_VERSION;
+    header.version.minor = DLPACK_MINOR_VERSION;
+    header.prev_api = nullptr;
+    managed_tensor_allocator = ManagedTensorAllocator;
+    managed_tensor_from_py_object_no_sync = ManagedTensorFromPyObjectNoSync;
+    managed_tensor_to_py_object_no_sync = ManagedTensorToPyObjectNoSync;
+    dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
+    current_work_stream = CurrentWorkStream;
+  }
+
+  static const DLPackExchangeAPI* Global() {
+    static TorchDLPackExchangeAPI inst;
+    return &inst;
+  }
+
+ private:
+  // Fast non-owning PyObject→DLTensor conversion
+  static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
+    try {
+      // Use handle (non-owning) to avoid unnecessary refcount operations
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      at::toDLPackNonOwning(tensor, out);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // PyObject→DLManagedTensorVersioned conversion
+  static int ManagedTensorFromPyObjectNoSync(
+      void* py_obj,
+      DLManagedTensorVersioned** out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // DLManagedTensorVersioned→PyObject conversion
+  static int ManagedTensorToPyObjectNoSync(
+      DLManagedTensorVersioned* src,
+      void** py_obj_out) {
+    try {
+      at::Tensor tensor = at::fromDLPackVersioned(src, nullptr);
+      *py_obj_out = THPVariable_Wrap(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // Allocate new tensor from prototype
+  static int ManagedTensorAllocator(
+      DLTensor* prototype,
+      DLManagedTensorVersioned** out,
+      void* error_ctx,
+      void (
+          *SetError)(void* error_ctx, const char* kind, const char* message)) {
+    try {
+      at::IntArrayRef shape(
+          prototype->shape, prototype->shape + prototype->ndim);
+      at::TensorOptions options =
+          at::TensorOptions()
+              .dtype(at::toScalarType(prototype->dtype))
+              .device(at::dlDeviceToTorchDevice(
+                  prototype->device.device_type, prototype->device.device_id));
+      at::Tensor tensor = at::empty(shape, options);
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      SetError(error_ctx, "MemoryError", e.what());
+      return -1;
+    }
+  }
+
+  // Get current CUDA/ROCm work stream
+  static int CurrentWorkStream(
+      DLDeviceType device_type,
+      int32_t device_id,
+      void** out_stream) {
+    try {
+#ifdef USE_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+};
+
+static PyObject* THPModule_DLPackExchangeAPI(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyCapsule_New(
+      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
+      "dlpack_exchange_api",
+      nullptr);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   size_t frames_to_skip = 0;
@@ -1864,6 +1982,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_torchDeviceToDLDevice,
      METH_O,
      nullptr},
+    {"_dlpack_exchange_api", THPModule_DLPackExchangeAPI, METH_NOARGS, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
@@ -2154,7 +2273,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) && !defined(USE_ROCM)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS

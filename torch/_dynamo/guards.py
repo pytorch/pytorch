@@ -3893,7 +3893,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                {
+                OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3901,7 +3901,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                }
+                )
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
