@@ -474,7 +474,9 @@ class CodeGen:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
+            if (
+                _is_from_torch(obj) and obj != torch.device
+            ):  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -1867,11 +1869,8 @@ class Graph:
                 yield None
             finally:
                 # restore the original repr functions
-                # Only restore nodes that were in the original set
-                # (new nodes may have been added during code generation)
                 for node in graph.nodes:
-                    if node in orig_repr_fns:
-                        node._repr_fn = orig_repr_fns[node]
+                    node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
             return self._python_code(
