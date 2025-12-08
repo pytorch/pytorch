@@ -1226,8 +1226,9 @@ class DeviceCachingAllocator {
       if (already_split && !block->expandable_segment) {
         // Allocate from an existing inactive split block: decrease inactive
         // split bytes.
-        decrease_stat_array(
-            stats.inactive_split_bytes, block->size, params.stat_types);
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split_bytes[stat_type].decrease(block->size);
+        });
       } else if (!block->expandable_segment) {
         // First time split a non-expandable block: create a new inactive
         // split block (the remaining part), so increase the inactive split
