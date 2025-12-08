@@ -821,6 +821,86 @@ class TestCrossPGOverlap(InductorTestCase):
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
+    def test_two_queue_scheduling_off_path_nodes(self):
+        """
+        Test that off-path nodes (nodes that don't block compute) are scheduled
+        near their original position rather than drifting to the end.
+
+        Graph structure:
+        mm1 -> rs1 (reduce_scatter, off-path) -> mm2 -> rs2 (off-path) -> mm3
+
+        Off-path reduce_scatters should stay near their original positions.
+        """
+
+        def func(a):
+            group_name = "0"
+            group_size = 2
+
+            # Compute -> reduce_scatter (off-path, result not used for further compute)
+            mm1 = torch.mm(a, a)
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                mm1, "sum", group_size, group_name
+            )
+
+            # More compute -> another reduce_scatter
+            mm2 = torch.mm(a, a)
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                mm2, "sum", group_size, group_name
+            )
+
+            # Final compute
+            mm3 = torch.mm(a, a)
+
+            # Waits at the end (simulating gradient outputs)
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return mm3.sum() + rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a)
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "reduce_scatter" in str(node.target):
+                return 5.0
+            if "mm" in str(node.target):
+                return 10.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        out = scheduler.run()
+
+        # Find the scheduled order of nodes
+        node_names = [n.name for n in out.graph.nodes if n.op == "call_function"]
+
+        # Get positions of reduce_scatters and mm nodes
+        rs_positions = [i for i, name in enumerate(node_names) if "reduce_scatter" in name]
+        mm_positions = [i for i, name in enumerate(node_names) if name.startswith("mm")]
+
+        # Verify reduce_scatters didn't all drift to the end
+        # They should be interspersed with compute, not all after the last mm
+        if rs_positions and mm_positions:
+            last_mm = max(mm_positions)
+            # At least one reduce_scatter start should be before the last mm
+            rs_starts = [p for p in rs_positions if "wait" not in node_names[p]]
+            self.assertTrue(
+                any(p < last_mm for p in rs_starts),
+                f"Off-path reduce_scatters drifted to end: rs_positions={rs_positions}, mm_positions={mm_positions}",
+            )
+
 
 if __name__ == "__main__":
     run_tests()

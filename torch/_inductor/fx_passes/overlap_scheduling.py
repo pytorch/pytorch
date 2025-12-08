@@ -343,16 +343,29 @@ class OverlapScheduler:
         )
         self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
-        self.ready: list[tuple[object, fx.Node]] = []
+
+        # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
+        self.on_path_ready: list[tuple[object, fx.Node]] = []
+        self.off_path_ready: list[tuple[object, fx.Node]] = []
 
         for node in self.nodes:
             if self.in_degree[node] == 0:
-                heapq.heappush(self.ready, (self._compute_score(node), node))
+                self._add_to_ready_queue(node)
 
         self.in_flight: dict[fx.Node, CollectiveInfo] = {}  # start -> info
         self.in_flight_bytes = 0
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
+
+        self.last_on_path_node_idx = -1
+
+    def _add_to_ready_queue(self, node: fx.Node) -> None:
+        if self.off_compute_path(node):
+            score = self._compute_off_path_score(node)
+            heapq.heappush(self.off_path_ready, (score, node))
+        else:
+            score = self._compute_on_path_score(node)
+            heapq.heappush(self.on_path_ready, (score, node))
 
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
@@ -650,6 +663,38 @@ class OverlapScheduler:
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
+    def _get_next_node(self) -> fx.Node | None:
+        """Get next node: off-path nodes scheduled near original position, exposed waits deferred."""
+        if self.off_path_ready:
+            score, node = self.off_path_ready[0]
+            is_deferred = score[0] == 1
+
+            should_schedule = False
+
+            if not self.on_path_ready or node in self.scheduled:
+                should_schedule = True
+            elif is_deferred:
+                # Check if exposed wait is now hidden
+                info = self.collective_info[self.wait_to_start[node]]
+                over_budget = (
+                    self.memory_tracker.current_memory_bytes
+                    > self.allowed_peak_memory_bytes
+                )
+                # Schedule if hidden, no on-path work left, or over memory budget
+                should_schedule = not info.is_exposed or over_budget
+            else:
+                # Schedule if we've passed its original position
+                should_schedule = self.node_idx[node] <= self.last_on_path_node_idx
+
+            if should_schedule:
+                heapq.heappop(self.off_path_ready)
+                return node
+
+        if self.on_path_ready:
+            return heapq.heappop(self.on_path_ready)[1]
+
+        return None
+
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
         # All ranks must make identical decisions on overlap reordering,
@@ -657,12 +702,15 @@ class OverlapScheduler:
         # For now we do benchmarking only for compute nodes.
         self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
-        while self.ready:
+        while self.on_path_ready or self.off_path_ready:
             if self._should_force_wait_for_memory():
                 self._force_oldest_wait()
                 continue
 
-            _, node = heapq.heappop(self.ready)
+            # Get next node from appropriate queue
+            node = self._get_next_node()
+            if node is None:
+                break
 
             # we don't always remove nodes from the heap when we schedule them
             if node in self.scheduled:
@@ -676,6 +724,13 @@ class OverlapScheduler:
                 self._handle_wait(node)
             else:
                 self._handle_compute_or_other(node)
+
+            # Track progress for off-path scheduling - only for nodes from main queue
+            # (not prefetched collectives which may have high node_idx)
+            if not self.off_compute_path(node):
+                self.last_on_path_node_idx = max(
+                    self.last_on_path_node_idx, self.node_idx[node]
+                )
 
         self._reorder_graph()
 
@@ -803,11 +858,10 @@ class OverlapScheduler:
         for user in node.users:
             self.in_degree[user] -= 1
             if self.in_degree[user] == 0:
-                heapq.heappush(self.ready, (self._compute_score(user), user))
+                self._add_to_ready_queue(user)
 
-    def _compute_score(self, node: fx.Node) -> object:
-        """Compute priority score for a node"""
-
+    def _compute_on_path_score(self, node: fx.Node) -> object:
+        """Compute priority score for on-path nodes (domination-based)."""
         if _schedulable_wait_node(node):
             info = self.collective_info[self.wait_to_start[node]]
             # defer waits locally if they are exposed.
@@ -826,6 +880,13 @@ class OverlapScheduler:
             compute_local_priority,  # collective_start=-1, wait=1, or neither=0
             self.node_idx[node],  # Original order for stability
         )
+
+    def _compute_off_path_score(self, node: fx.Node) -> object:
+        """Off-path: by original order, but defer exposed waits."""
+        if _schedulable_wait_node(node):
+            info = self.collective_info[self.wait_to_start[node]]
+            return (int(info.is_exposed), self.node_idx[node])
+        return (0, self.node_idx[node])
 
     @staticmethod
     def is_cheap_fn(node: fx.Node) -> bool:
@@ -951,13 +1012,11 @@ class OverlapScheduler:
 
             candidates.append(collective)
 
-        # Sort candidates prioritizing:
-        # 1. reduce_scatter operations (reduce memory pressure)
-        # 2. Earlier domination index
-        # 3. Original order for stability
+        # Sort: prioritize off-path nodes past current position, then by domination
         candidates.sort(
             key=lambda n: (
-                not is_reduce_scatter(n),  # reduce_scatter first
+                # Off-path nodes past current idx get priority (0), others get (1)
+                0 if (self.off_compute_path(n) and self.node_idx[n] <= self.last_on_path_node_idx) else 1,
                 self.compute_index_domination[n],
                 self.node_idx[n],
             ),
