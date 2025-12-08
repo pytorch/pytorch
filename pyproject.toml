@@ -451,7 +451,7 @@ keep-runtime-typing = true
 ".ci/docker/manywheel/build_scripts/manylinux1-check.py" = ["S101"]
 ".ci/pytorch/smoke_test/check_binary_symbols.py" = ["S101"]
 ".ci/pytorch/smoke_test/smoke_test.py" = ["S101"]
-".ci/lumen_cli/test/test_vllm.py" = ["S101"]
+".ci/lumen_cli/tests/test_vllm.py" = ["S101"]
 ".ci/lumen_cli/tests/test_run_plan.py" = ["S101"]
 
 [tool.codespell]
