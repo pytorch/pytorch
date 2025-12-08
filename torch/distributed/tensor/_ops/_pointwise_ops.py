@@ -291,6 +291,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.masked_fill_.Scalar,
     aten.maximum.default,
     aten.maximum.out,
     aten.minimum.default,
