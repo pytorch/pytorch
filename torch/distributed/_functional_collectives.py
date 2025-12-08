@@ -94,7 +94,7 @@ RANK_TYPES = Union[
     dist.ProcessGroup,
     DeviceMesh,
     tuple["dist.tensor.DeviceMesh", int],
-    str,
+    c10d.GroupName,
 ]
 
 
@@ -778,7 +778,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
-def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
@@ -787,7 +787,11 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
-        return group
+        # In some cases Dynamo doesn't like tracing through NewType constructors
+        # - so use a cast instead (the actual newtype representation is
+        # literally the underlying type so this is fine). I haven't been able to
+        # reproduce it in isolation (see T247631668).
+        return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(

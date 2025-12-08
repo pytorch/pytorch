@@ -19,6 +19,7 @@ import numpy as np
 import yaml
 
 import torch._custom_ops as custom_ops
+import torch.distributed
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
@@ -892,6 +893,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [True]
         if typ is str:
             return ["foo"]
+        if torch.distributed.is_available():
+            from torch.distributed.distributed_c10d import GroupName
+
+            if typ is GroupName:
+                return ["group"]
         if typ is torch.dtype:
             return [torch.float32]
         if typ is torch.device:
