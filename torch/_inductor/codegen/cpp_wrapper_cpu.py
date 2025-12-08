@@ -423,7 +423,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     from torch.utils._sympy.value_ranges import bound_sympy
 
                     sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
-                    if not math.isinf(sym_range.lower):
+                    if config.aot_inductor.check_lowerbound and not math.isinf(
+                        sym_range.lower
+                    ):
                         self.prefix.splice(
                             f"""
                                 if ({name}_size[{dim_idx}] < {sym_range.lower}) {{

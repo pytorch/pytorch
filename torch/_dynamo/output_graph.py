@@ -160,7 +160,6 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
-    TensorVariable,
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
@@ -1235,7 +1234,7 @@ class OutputGraph(OutputGraphCommon):
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
                     self.dynamo_flat_name_to_original_fqn[
-                        OutputGraph.module_key_name(new_source.name())
+                        OutputGraph.module_key_name(new_source.name)
                     ] = leaf_name
 
             # annoying, but there are cases when we do not have parameters
@@ -1591,7 +1590,7 @@ class OutputGraph(OutputGraphCommon):
                 and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
                 for v in stack_values_flat
             )
-            and all(isinstance(x, TensorVariable) for x in stack_values_flat)
+            and all(x.is_tensor() for x in stack_values_flat)
             and len(set(stack_values_flat)) == len(stack_values_flat)
             and self.side_effects.is_empty()
             and not tx.debug_locals
@@ -1628,11 +1627,6 @@ class OutputGraph(OutputGraphCommon):
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
-
-            # Close all generators opened while tracing. Needs to be done after
-            # pass1, as PyCodegen might try to reconstruct the generator, which
-            # sets LocalGeneratorObjectVariable.remaining_items
-            self.side_effects.close_local_generators()
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
@@ -1690,7 +1684,7 @@ class OutputGraph(OutputGraphCommon):
                                 "input",
                                 vt.source,
                             )
-                        elif isinstance(vt, torch._dynamo.variables.ConstantVariable):
+                        elif vt.is_python_constant():
                             self.export_metadata.output_return_type[idx] = (
                                 "constant",
                                 vt.as_python_constant(),
@@ -2571,7 +2565,7 @@ class OutputGraph(OutputGraphCommon):
             return None
 
         def remove_unused(node: fx.Node) -> None:
-            log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
+            log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name)
             # I'm not really sure why you need to delete these from the
             # node since the node is going to get removed
             del node.meta["grapharg"]
@@ -2753,7 +2747,7 @@ class OutputGraph(OutputGraphCommon):
     def add_fqn_info_for_inlined_modules(
         self, inlined_module: torch.nn.Module, source: Source
     ) -> None:
-        name = OutputGraph.module_key_name(source.name())
+        name = OutputGraph.module_key_name(source.name)
         name = get_unique_name_wrt(
             name, self.used_inlined_inbuilt_modules_names, self.global_scope
         )
@@ -2766,7 +2760,7 @@ class OutputGraph(OutputGraphCommon):
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):
                 self.dynamo_flat_name_to_original_fqn[
-                    OutputGraph.module_key_name(new_source.name())
+                    OutputGraph.module_key_name(new_source.name)
                 ] = leaf_name
 
         # annoying, but there are cases when we do not have parameters
@@ -3317,7 +3311,7 @@ class SubgraphTracer(fx.Tracer):
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
-            source.name() if source is not None else "(none)",
+            source.name if source is not None else "(none)",
             example_value,
             self.debug_level,
             before,
@@ -3663,7 +3657,7 @@ class SubgraphTracer(fx.Tracer):
                     log.debug(
                         "_lift_symbols_in_symint %s from %s at debug_level %s",
                         s0,
-                        source.name() if source is not None else "subgraph inputs",
+                        source.name if source is not None else "subgraph inputs",
                         self.debug_level,
                     )
                     self.lifted_freevars[parent_proxy] = ph  # type: ignore[index]
@@ -3689,7 +3683,7 @@ class SubgraphTracer(fx.Tracer):
                 log.debug(
                     "_lift_symbols_in_symint %s from %s at debug_level %s",
                     s,
-                    source.name() if source is not None else "subgraph inputs",
+                    source.name if source is not None else "subgraph inputs",
                     self.debug_level,
                 )
                 ph.node.meta["grapharg"] = GraphArg(
