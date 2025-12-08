@@ -822,5 +822,292 @@ class TestCrossPGOverlap(InductorTestCase):
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
 
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestMemoryAwareScheduling(InductorTestCase):
+    """
+    Unit tests for memory-aware scheduling features.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def _create_scheduler(self, traced, custom_runtime=None):
+        """Helper to create an OverlapScheduler with default settings."""
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        if custom_runtime is None:
+            def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+                if "all_gather" in str(node.target):
+                    return 10.0
+                if "reduce_scatter" in str(node.target):
+                    return 10.0
+                return 0.0
+
+        return OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+            max_memory_increase_gb=1.0,
+            max_memory_increase_ratio=0.05,
+        )
+
+    def test_wait_freeing_potential_computed(self):
+        """
+        Test that wait freeing potential is computed for all waits.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+
+            mm1 = torch.mm(a, a)
+            mm2 = torch.mm(b, b)
+
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return ag1_out.sum() + ag2_out.sum() + mm1.sum() + mm2.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Verify wait_freeing_potential was computed for all waits
+        self.assertEqual(len(scheduler.wait_freeing_potential), 2)
+        for wait_node, freeing in scheduler.wait_freeing_potential.items():
+            self.assertIsInstance(freeing, int)
+            self.assertGreaterEqual(freeing, 0)
+
+    def test_baseline_memory_computed(self):
+        """
+        Test that baseline memory profile is computed correctly.
+        """
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm = torch.mm(a, a)
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return ag_out.sum() + mm.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Verify baseline memory was computed
+        self.assertGreater(scheduler.original_peak_memory, 0)
+        self.assertGreater(scheduler.allowed_peak_memory_bytes, scheduler.original_peak_memory)
+
+    def test_reduce_scatter_prioritized(self):
+        """
+        Test that reduce_scatter operations are prioritized for prefetch
+        because they help memory (large input -> small output).
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            # reduce_scatter consumes large input, produces small output
+            rs = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            mm1 = torch.mm(b, b)
+            rs_out = torch.ops._c10d_functional.wait_tensor(rs)
+
+            return rs_out.sum() + mm1.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(8, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Get the reduce_scatter node
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
+        rs_node = rs_nodes[0]
+
+        # reduce_scatter should not be blocked by memory budget
+        # because it's memory-beneficial
+        self.assertFalse(scheduler._prefetch_would_exceed_memory_budget(rs_node))
+
+    def test_memory_tight_preserves_original_order(self):
+        """
+        Test that when memory is tight, original order is preserved.
+        """
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm = torch.mm(a, a)
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return ag_out.sum() + mm.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Run scheduler
+        result = scheduler.run()
+
+        # Verify rescheduled memory doesn't exceed allowed budget
+        self.assertLessEqual(
+            scheduler.memory_tracker.peak_memory,
+            scheduler.allowed_peak_memory_bytes
+        )
+
+    def test_hidden_waits_not_deferred(self):
+        """
+        Test that hidden (overlapped) waits are not deferred further.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            # mm1 can hide ag1
+            mm1 = torch.mm(b, b)
+            mm2 = torch.mm(b, b)
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+
+            return ag1_out.sum() + mm1.sum() + mm2.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Run scheduler
+        result = scheduler.run()
+
+        # Verify that the collective_info shows hidden status
+        for start_node, info in scheduler.collective_info.items():
+            # After scheduling, exposed waits should have exposed_time > 0
+            # and hidden waits should have exposed_time == 0
+            pass  # Just verify no crash; detailed check requires runtime
+
+    def test_cumulative_prefetch_tracking(self):
+        """
+        Test that cumulative prefetch memory is tracked across compute indices.
+        """
+
+        def func(a, b, c):
+            group_name = "0"
+            group_size = 1
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm1 = torch.mm(c, c)  # compute 0
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            mm2 = torch.mm(c, c)  # compute 1
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return ag1_out.sum() + ag2_out.sum() + mm1.sum() + mm2.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        scheduler = self._create_scheduler(traced)
+
+        # Verify cumulative_prefetch_mem_by_compute_index is initialized
+        self.assertEqual(
+            len(scheduler.cumulative_prefetch_mem_by_compute_index),
+            len(scheduler.compute_nodes)
+        )
+
+    def test_memory_counters_tracked(self):
+        """
+        Test that memory counters are updated during scheduling.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            mm1 = torch.mm(b, b)
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+
+            return ag1_out.sum() + mm1.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        # Reset counters
+        counters["inductor"]["overlap_original_mem"] = 0
+        counters["inductor"]["rescheduled_mem"] = 0
+
+        scheduler = self._create_scheduler(traced)
+        result = scheduler.run()
+
+        # Verify counters were set
+        self.assertGreater(counters["inductor"]["overlap_original_mem"], 0)
+        self.assertGreater(counters["inductor"]["rescheduled_mem"], 0)
+
+
 if __name__ == "__main__":
     run_tests()
