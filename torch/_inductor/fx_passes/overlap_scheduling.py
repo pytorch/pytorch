@@ -358,9 +358,6 @@ class OverlapScheduler:
         # When we defer a wait, we also defer the memory freeing from its downstream nodes
         self.wait_freeing_potential: dict[fx.Node, int] = self._compute_wait_freeing_potential()
 
-        # Track net memory benefit from off-path collectives
-        # Negative = scheduling this collective's path would reduce memory
-        self.off_path_memory_benefit: dict[fx.Node, int] = self._compute_off_path_memory_benefit()
 
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
@@ -413,80 +410,6 @@ class OverlapScheduler:
         )
 
         return wait_freeing
-
-    def _compute_off_path_memory_benefit(self) -> dict[fx.Node, int]:
-        """
-        Compute net memory benefit from scheduling each off-path collective.
-
-        For off-path collectives (domination_index == maxsize), compute:
-        - Memory allocated by the collective start (output size)
-        - Memory freed by scheduling the wait and its downstream nodes
-
-        Returns dict: collective_start -> net_memory_change (negative = benefit)
-        """
-        off_path_benefit: dict[fx.Node, int] = {}
-        alias_tracker = self.memory_tracker.alias_tracker
-
-        for start_node, info in self.collective_info.items():
-            if self.compute_index_domination[start_node] != sys.maxsize:
-                continue  # Skip on-path collectives
-
-            wait_node = info.wait_node
-
-            # Memory allocated by the collective (its output)
-            alloc = 0
-            fresh = alias_tracker.get_fresh_allocations(start_node)
-            for storage_key in fresh:
-                if self.memory_tracker.device_filter(storage_key.device):
-                    alloc += self.memory_tracker._get_storage_size(storage_key)
-
-            # Memory freed when wait's users are scheduled
-            # This is an approximation - we look at what the wait consumes
-            freed = 0
-
-            # The wait node itself might free the collective's input
-            input_storages = alias_tracker.get_storage_uses(wait_node)
-            for storage_key in input_storages:
-                if not self.memory_tracker.device_filter(storage_key.device):
-                    continue
-                allocator = alias_tracker.storage_to_allocator[storage_key]
-                if not self.memory_tracker.is_releasable(allocator):
-                    continue
-
-                # Check if wait is the last user of this storage
-                last_user = alias_tracker.storage_to_last_user.get(storage_key)
-                if last_user == wait_node:
-                    freed += self.memory_tracker._get_storage_size(storage_key)
-
-            # Also check what the wait's direct users would free
-            for user in wait_node.users:
-                user_input_storages = alias_tracker.get_storage_uses(user)
-                for storage_key in user_input_storages:
-                    if not self.memory_tracker.device_filter(storage_key.device):
-                        continue
-                    allocator = alias_tracker.storage_to_allocator[storage_key]
-                    if not self.memory_tracker.is_releasable(allocator):
-                        continue
-
-                    last_user = alias_tracker.storage_to_last_user.get(storage_key)
-                    if last_user == user:
-                        freed += self.memory_tracker._get_storage_size(storage_key)
-
-            # Net benefit: negative means scheduling this path reduces memory
-            net_change = alloc - freed
-            off_path_benefit[start_node] = net_change
-
-        # Log summary
-        beneficial = sum(1 for v in off_path_benefit.values() if v < 0)
-        total_benefit = sum(v for v in off_path_benefit.values() if v < 0)
-        log.debug(
-            "Off-path memory analysis: %d collectives, %d beneficial, total benefit %d MB",
-            len(off_path_benefit),
-            beneficial,
-            -total_benefit // (1024 * 1024),
-        )
-
-        return off_path_benefit
 
     def _compute_baseline_memory(self) -> int:
         """
@@ -986,10 +909,10 @@ class OverlapScheduler:
             # Get the freeing potential of this wait
             freeing_potential = self.wait_freeing_potential.get(node, 0)
 
-            # Check if this is an off-path wait with memory benefit
+            # Off-path reduce_scatter waits are always beneficial (large input -> small output)
+            # and don't block compute, so don't defer them
             is_off_path = self.compute_index_domination[start_node] == sys.maxsize
-            off_path_benefit = self.off_path_memory_benefit.get(start_node, 0)
-            is_beneficial_off_path = is_off_path and off_path_benefit < 0
+            is_beneficial_off_path = is_off_path and is_reduce_scatter(start_node)
 
             # Check if deferring this wait would risk exceeding memory budget
             # Use original profile as reference - allow only small increase above original
@@ -1225,17 +1148,13 @@ class OverlapScheduler:
         return best_wait, best_freeing
 
     def _get_beneficial_hidden_wait(self) -> fx.Node | None:
-        """Find a ready wait for an off-path collective that would reduce memory.
+        """Find a ready wait for a hidden off-path reduce_scatter.
 
         Returns a wait node if:
-        1. Its collective is off-path (doesn't block compute)
+        1. Its collective is off-path reduce_scatter (helps memory, doesn't block compute)
         2. Its collective is hidden (overlapped with compute)
-        3. Scheduling the wait's path would reduce memory (negative benefit)
-        4. The wait is ready to be scheduled
+        3. The wait is ready to be scheduled
         """
-        best_wait = None
-        best_benefit = 0  # We want the most negative (most beneficial)
-
         for start_node in self.in_flight:
             info = self.collective_info[start_node]
             wait_node = info.wait_node
@@ -1244,68 +1163,23 @@ class OverlapScheduler:
             if self.in_degree[wait_node] > 0:
                 continue
 
-            # Check if this is an off-path collective
+            # Check if this is an off-path reduce_scatter
             if self.compute_index_domination[start_node] != sys.maxsize:
+                continue
+            if not is_reduce_scatter(start_node):
                 continue
 
             # Check if it's hidden (overlapped with compute)
             if info.is_exposed:
                 continue
 
-            # Check if scheduling this path would reduce memory
-            benefit = self.off_path_memory_benefit.get(start_node, 0)
-            if benefit < best_benefit:  # More negative = more beneficial
-                best_benefit = benefit
-                best_wait = wait_node
+            return wait_node
 
-        return best_wait
+        return None
 
     def _force_wait(self, wait_node: fx.Node) -> None:
-        """Force scheduling a specific wait node.
-
-        Also schedules the wait's direct users that would free memory,
-        since scheduling just the wait doesn't directly free memory.
-        """
+        """Force scheduling a specific wait node."""
         self._handle_wait(wait_node)
-
-        # Schedule the wait's users that would free memory
-        self._schedule_memory_freeing_users(wait_node)
-
-    def _schedule_memory_freeing_users(self, wait_node: fx.Node) -> None:
-        """Schedule users of a wait that would free significant memory."""
-        alias_tracker = self.memory_tracker.alias_tracker
-
-        for user in wait_node.users:
-            # Skip if already scheduled
-            if user in self.scheduled:
-                continue
-
-            # Skip if not ready (has unscheduled dependencies)
-            if self.in_degree[user] > 0:
-                continue
-
-            # Skip waits, collectives, and compute nodes - let them go through normal scheduling
-            if _schedulable_wait_node(user) or user in self.collective_info or is_compute_node(user):
-                continue
-
-            # Check how much memory this user would free
-            input_storages = alias_tracker.get_storage_uses(user)
-            freeing = 0
-            for storage_key in input_storages:
-                if not self.memory_tracker.device_filter(storage_key.device):
-                    continue
-                allocator = alias_tracker.storage_to_allocator[storage_key]
-                if not self.memory_tracker.is_releasable(allocator):
-                    continue
-
-                # Check if all other uses are scheduled
-                all_uses = alias_tracker.storage_to_uses[storage_key]
-                if all(u in self.scheduled or u == user for u in all_uses):
-                    freeing += self.memory_tracker._get_storage_size(storage_key)
-
-            # Schedule if it would free significant memory
-            if freeing > gb_to_bytes(0.1):  # At least 0.1 GB
-                self._schedule(user)
 
     def _handle_collective_start(self, node: fx.Node) -> None:
         """Handle scheduling a collective start."""
