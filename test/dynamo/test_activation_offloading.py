@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 # flake8: noqa: B950
 
+import unittest
 from functools import partial
 
 import pytest
@@ -43,6 +44,7 @@ def get_fw_bw_graph(
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
+@unittest.skipIf(not HAS_GPU, "requires GPU")
 class ActivationOffloadingTests(TestCase):
     """Tests activation offloading functionality"""
 

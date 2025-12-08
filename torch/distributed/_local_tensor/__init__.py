@@ -53,7 +53,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Optional, Union
+from typing import Any, Optional, ParamSpec, TypeVar, Union
 
 
 try:
@@ -84,6 +84,9 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils.checkpoint import get_device_states, set_device_states
 
+
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -227,58 +230,58 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     return val
 
 
-def _collect_cuda_rng_states() -> dict[int, torch.Tensor]:
+def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available CUDA devices.
+    Collects RNG state from all available acceleator devices.
 
     Returns:
-        List of RNG state tensors, one for each CUDA device.
-        Returns empty list if CUDA is not available.
+        List of RNG state tensors, one for each accelerator device.
+        Returns empty list if accelerator is not available.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return {}
 
-    if torch.cuda.is_available():
-        device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
-            return {device_idx: torch.cuda.get_rng_state()}
+    if torch.accelerator.is_available():
+        device_idx = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(device_idx):
+            return {device_idx: torch.get_device_module().get_rng_state()}
 
     return {}
 
 
-def _set_cuda_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
+def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     """
-    Sets RNG state for all CUDA devices from a list of states.
+    Sets RNG state for all accelerator devices from a list of states.
 
     Args:
         rng_states: List of RNG state tensors to restore.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return
 
-    for device_idx, device_rng_state in rng_states.items():
-        with torch.cuda.device(device_idx):
-            torch.cuda.set_rng_state(device_rng_state)
+    if torch.accelerator.is_available():
+        for device_idx, device_rng_state in rng_states.items():
+            with torch.accelerator.device_index(device_idx):
+                torch.get_device_module().set_rng_state(device_rng_state)
 
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
-    Gets CPU and CUDA rng states from all devices.
+    Gets CPU and accelerator (e.g., CUDA, XPU device) rng states from all devices.
     """
-    return (torch.get_rng_state(), _collect_cuda_rng_states())
+    return (torch.get_rng_state(), _collect_accelerator_rng_states())
 
 
 def _set_rng_state(
-    cpu_state: torch.Tensor, cuda_states: dict[int, torch.Tensor]
+    cpu_state: torch.Tensor, accelerator_states: dict[int, torch.Tensor]
 ) -> None:
     """
-    Sets CPU and CUDA rng states for all devices. If the list of cuda states
-    is shorter than the number of devices only the first len(cuda_states) devices
-    will get their rng state set.
+    Sets CPU and accelerator (e.g., CUDA, XPU device) rng states for all devices. If
+    the list of accelerator states is shorter than the number of devices only the
+    first len(accelerator_states) devices will get their rng state set.
     """
     torch.set_rng_state(cpu_state)
-    _set_cuda_rng_states(cuda_states)
+    _set_accelerator_rng_states(accelerator_states)
 
 
 def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymInt:
@@ -1304,8 +1307,6 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_functional_reduce_scatter_tensor(*args, **kwargs)
             elif func is torch.ops._c10d_functional.all_to_all_single.default:
                 return _c10d._local_functional_all_to_all_single(*args, **kwargs)
-            elif func is torch.ops._c10d_functional.wait_tensor.default:
-                return _c10d._local_functional_wait_tensor(*args, **kwargs)
             else:
                 with LocalTensorMode(self.ranks):
                     return func._op_dk(
@@ -1621,7 +1622,7 @@ def enabled_local_tensor_mode() -> Optional[LocalTensorMode]:
     return None
 
 
-def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
+def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator that ensures a function is executed for each local tensor shard
     when running under LocalTensorMode. If not in LocalTensorMode, the function
@@ -1644,7 +1645,7 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if not (lm := enabled_local_tensor_mode()):
             return func(*args, **kwargs)
         ret = None

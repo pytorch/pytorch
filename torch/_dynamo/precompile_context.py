@@ -108,9 +108,15 @@ class PrecompileContext:
         """
         Records a backend artifact to be used with dynamo cache entries
         """
-        cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
-            artifact
-        )
+        # Temporarily disable all dispatch modes (including FakeTensorMode) during
+        # deepcopy to avoid issues with cloning fake tensors (e.g., device mesh
+        # with meta tensors that fail when cloning due to device mismatches)
+        from torch.utils._mode_utils import no_dispatch
+
+        with no_dispatch():
+            cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
+                artifact
+            )
 
     @classmethod
     def record_dynamo_cache_entry(
