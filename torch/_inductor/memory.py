@@ -114,13 +114,12 @@ def get_freeable_input_buf(
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs:
                 if not is_nonfreeable_buffers(dep):
-                    # All deps contribute to ordering
+                    # All deps contribute to ordering, but fake weak deps do not contribute to
+                    # memory liveness
                     dep_name_to_succ_nodes_for_ordering[dep.name].add(node)
                     dep_name_to_size[dep.name] = _dep_size_hint(dep)
-                    # Skip is_fake WeakDeps for memory lifetime
-                    if isinstance(dep, WeakDep) and dep.is_fake:
-                        continue
-                    dep_name_to_succ_nodes[dep.name].add(node)
+                    if not (isinstance(dep, WeakDep) and dep.is_fake):
+                        dep_name_to_succ_nodes[dep.name].add(node)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = dict()
@@ -245,12 +244,11 @@ def assign_memory_planning_info_for_scheduler_buffers(
     )
     for node in nodes:
         for dep in node.unmet_dependencies:
-            # All deps contribute to ordering
+            # All deps contribute to ordering, but fake weak deps do not contribute to
+            # memory liveness
             dep_name_to_succ_nodes_for_ordering[dep.name].add(node)
-            # Skip is_fake WeakDeps for memory lifetime
-            if isinstance(dep, WeakDep) and dep.is_fake:
-                continue
-            dep_name_to_succ_nodes[dep.name].add(node)
+            if not (isinstance(dep, WeakDep) and dep.is_fake):
+                dep_name_to_succ_nodes[dep.name].add(node)
 
     # iterate in reverse, so dependencies are picked up transitively.
     for mutating_buf_name, real_buf_name in reversed(
@@ -293,7 +291,6 @@ def assign_memory_planning_info_for_scheduler_nodes(
     ] = collections.defaultdict(OrderedSet)
 
     # collect all predecessors using existing successor mappings
-    # Use succ_nodes_for_ordering to include is_fake WeakDeps for ordering
     for node in nodes:
         succ_nodes = OrderedSet(
             succ_node
