@@ -1,4 +1,4 @@
-## ⚠️ DEPRECATION NOTICE ⚠️
+### ⚠️ DEPRECATION NOTICE ⚠️
 
 **The `torch.utils.data.datapipes` module is deprecated and will be removed in a future version of PyTorch.**
 

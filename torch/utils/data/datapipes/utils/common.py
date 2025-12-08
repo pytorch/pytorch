@@ -259,6 +259,81 @@ _iter_deprecated_functional_names: dict[str, dict] = {}
 _map_deprecated_functional_names: dict[str, dict] = {}
 
 
+# Module-level deprecation warning state and logic
+_datapipes_module_deprecation_warned = False
+
+
+def _is_external_user_import():
+    """
+    Check if the import is from external user code (not torch internal or pytorch tests).
+
+    Returns True only if an external user directly imported datapipes.
+    Returns False if called from torch internal code or pytorch test files.
+    """
+    import sys
+
+    current_frame = sys._getframe()
+    found_torch_internal = False
+
+    while current_frame is not None:  # pyrefly: ignore [bad-assignment]
+        filename = current_frame.f_code.co_filename
+
+        # Skip importlib machinery
+        if "importlib" in filename or "<frozen" in filename:
+            current_frame = current_frame.f_back
+            continue
+
+        # Check if this is torch internal code
+        if "/torch/" in filename or "\\torch\\" in filename:
+            # torch/utils/data/__init__.py is the entry point for lazy imports - skip it
+            if filename.endswith(
+                ("torch/utils/data/__init__.py", "torch\\utils\\data\\__init__.py")
+            ):
+                current_frame = current_frame.f_back
+                continue
+            # datapipes/utils/common.py is where warning originates - skip it
+            if "datapipes" in filename and "common.py" in filename:
+                current_frame = current_frame.f_back
+                continue
+            # Any other torch internal code means we shouldn't warn
+            found_torch_internal = True
+            current_frame = current_frame.f_back
+            continue
+
+        # We've reached non-torch code
+
+        # If torch internal code was in the stack, don't warn
+        if found_torch_internal:
+            return False
+
+        # Check if this is a pytorch test file (in pytorch repo's test directory)
+        if "/test/" in filename or "\\test\\" in filename:
+            return False
+
+        # External user code
+        return True
+
+    return False
+
+
+def _warn_datapipes_deprecation():
+    """
+    Warn about datapipes module deprecation, but only once and only for external callers.
+    """
+    global _datapipes_module_deprecation_warned
+    if _datapipes_module_deprecation_warned:
+        return
+    if not _is_external_user_import():
+        return
+    warnings.warn(
+        "The datapipes symbols in 'torch.utils.data' (IterDataPipe, MapDataPipe, etc.) "
+        "are deprecated and will be removed in a future version.",
+        FutureWarning,
+        stacklevel=4,
+    )
+    _datapipes_module_deprecation_warned = True
+
+
 def _deprecation_warning(
     old_class_name: str,
     *,

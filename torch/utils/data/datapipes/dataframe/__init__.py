@@ -1,12 +1,3 @@
-import warnings
-
-
-warnings.warn(
-    "The 'torch.utils.data.datapipes.dataframe' module is deprecated and will be removed in a future version.",
-    FutureWarning,
-    stacklevel=2,
-)
-
 from torch.utils.data.datapipes.dataframe.dataframes import (
     CaptureDataFrame,
     DFIterDataPipe,

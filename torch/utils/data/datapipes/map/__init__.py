@@ -1,12 +1,3 @@
-import warnings
-
-
-warnings.warn(
-    "The 'torch.utils.data.datapipes.map' module is deprecated and will be removed in a future version.",
-    FutureWarning,
-    stacklevel=2,
-)
-
 # Functional DataPipe
 from torch.utils.data.datapipes.map.callable import MapperMapDataPipe as Mapper
 from torch.utils.data.datapipes.map.combinatorics import (
