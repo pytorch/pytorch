@@ -473,6 +473,9 @@ def _unlift_graph(
         pytree.treespec_leaf(),
         None,
     )
+    # After unlifting, the buffer mutation information is lost. Pass the information
+    # so that Inductor can do optimizations correctly.
+    unlifted_gm.meta["mutated_named_buffers"] = OrderedSet(buffer_mutations.values())
     return unlifted_gm
 
 
@@ -2537,16 +2540,19 @@ def _extract_inputs_from_exported_gm(
     fake_inputs = [
         node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
     ]
-    # Replace non-tensor (constant) inputs with Nones, since these are not being
-    # used anyways by the graph
-    fake_inputs = [
-        inp if isinstance(inp, torch.Tensor) else None for inp in fake_inputs
-    ]
+
+    if not config.fx_wrapper:
+        # Replace non-tensor inputs with Nones
+        # constant scalars embedded in the graph
+        # symbolic scalars (symint) are not supported in non-fx_wrapper mode
+        fake_inputs = [
+            inp if isinstance(inp, torch.Tensor) else None for inp in fake_inputs
+        ]
 
     if any(v is not None for v in fake_inputs):
         # Validate devices before switching to fake tensors.
         for idx, fi, i in zip(count(), fake_inputs, example_inputs_):
-            if fi is not None:
+            if fi is not None and isinstance(fi, torch.Tensor):
                 assert isinstance(i, torch.Tensor)
                 if fi.device != i.device:
                     raise ValueError(
