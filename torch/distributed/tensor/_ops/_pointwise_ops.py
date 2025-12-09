@@ -492,26 +492,6 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
-def safe_avoid_redistribution(op, args_schema, placement):
-    """
-    Check if we can avoid redistribution for the given op and placement.
-    """
-    if isinstance(placement, _NormPartial):
-        if (
-            op in [aten.div.Scalar, aten.div_.Scalar, aten.mul.Scalar, aten.mul_.Scalar]
-            and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
-        ):
-            return True
-
-    elif isinstance(placement, Partial):
-        if op not in [aten.add.Tensor, aten.add_.Tensor] or not any(
-            isinstance(arg, _Number) for arg in args_schema
-        ):
-            return True
-
-    return False
-
-
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
