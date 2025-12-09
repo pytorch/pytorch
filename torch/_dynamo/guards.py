@@ -2439,6 +2439,11 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        if is_from_skip_guard_source(
+            guard.originating_source
+        ) or is_from_skip_guard_source(source_b):
+            return
+
         if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
