@@ -270,6 +270,13 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support setUseOnOOM. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setNoSplit. "
+        "If you need it, please file an issue describing your use case.");
+  }
 
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
@@ -515,7 +522,9 @@ inline void createOrIncrefPool(
 inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setUseOnOOM(device, mempool_id);
 }
-
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
+}
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }
