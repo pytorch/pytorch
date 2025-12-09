@@ -614,6 +614,9 @@ class FxGraphCachePickler(pickle.Pickler):
         code = data["_code"]
         code = re.sub(r"kernel_idx = \d+", "", code)
         code = re.sub(r"constant_args_idx = \d+", "", code)
+        # Also strip DTensor side table indices (used for redistribute/to_local/from_local)
+        # The actual args are captured separately in dtensor_args_hashes
+        code = re.sub(r"args_idx = \d+", "", code)
         data["_code"] = code
         return fn, (data, imports)
 
