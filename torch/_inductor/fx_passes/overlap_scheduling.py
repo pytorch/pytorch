@@ -1,5 +1,6 @@
 import functools
 import heapq
+import importlib
 import itertools
 import logging
 import sys
@@ -14,6 +15,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._logging import trace_structured
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -24,6 +26,52 @@ log = logging.getLogger(__name__)
 from torch._inductor.fx_passes.bucketing import bucket_key
 
 from ..pattern_matcher import stable_topological_sort
+
+
+def _format_table_with_tabulate(
+    rows: list[list[Any]],
+    headers: list[str],
+) -> str:
+    """
+    Format rows and headers as a table string using tabulate if available.
+
+    Falls back to simple string formatting if tabulate is not installed.
+
+    Args:
+        rows: List of row data (each row is a list of values)
+        headers: List of column header strings
+
+    Returns:
+        Formatted table string
+    """
+    if importlib.util.find_spec("tabulate"):
+        # pyrefly: ignore[import-error]
+        from tabulate import tabulate
+
+        return tabulate(rows, headers=headers)
+    else:
+        result = "Please `pip install tabulate` to nicely render overlap stats.\n"
+        result += str(headers) + "\n"
+        result += "\n".join(map(str, rows))
+        return result
+
+
+def estimate_runtime_analytical(n: torch.fx.Node) -> float:
+    """Estimate runtime using analytical roofline model for mm operations."""
+    if n.target != torch.ops.aten.mm.default:
+        return 0.0
+    import torch.utils._pytree as pytree
+    from torch.distributed._tools import RuntimeEstimator
+
+    def _val(node: Any) -> Any:
+        if not isinstance(node, torch.fx.Node):
+            return node
+        return node.meta["val"]
+
+    args = pytree.tree_map(_val, n.args)
+    kwargs = pytree.tree_map(_val, n.kwargs)
+    _, ms = RuntimeEstimator._roofline_estimate(n.target, args, kwargs)
+    return ms
 
 
 @dataclass
@@ -498,6 +546,61 @@ class OverlapScheduler:
 
         return domination_index
 
+    def _log_compute_estimations(
+        self,
+        compute_nodes: list[fx.Node],
+        benchmarked_estimations: list[float],
+        analytical_estimations: list[float],
+    ) -> None:
+        """Log compute node runtime estimations comparing benchmarked vs analytical."""
+        import torch.utils._pytree as pytree
+        from torch._inductor.fx_utils import count_flops_fx
+        from torch.utils._dtype_abbrs import dtype_abbrs
+
+        def _node_summary(n: fx.Node) -> str:
+            ret = str(n)
+            for arg in pytree.arg_tree_leaves(n.args, n.kwargs):
+                if not isinstance(arg, torch.fx.Node):
+                    continue
+                if "val" in arg.meta:
+                    t = arg.meta["val"]
+                    ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
+            return ret
+
+        headers = [
+            "Node",
+            "Benchmarked Est(us)",
+            "Analytical Est(us)",
+            "Diff(%)",
+            "Diff(us)",
+            "Flops",
+        ]
+
+        rows = [
+            [
+                _node_summary(node)[:120],
+                est_b * 1e3,
+                est_a * 1e3,
+                (est_a / est_b) if est_b > 0 else 0,
+                (est_a - est_b) * 1e3,
+                count_flops_fx(node),
+            ]
+            for node, est_b, est_a in zip(
+                compute_nodes, benchmarked_estimations, analytical_estimations
+            )
+        ]
+
+        log_str = _format_table_with_tabulate(rows, headers)
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_compute_nodes_runtime_estimation",
+                "encoding": "string",
+            },
+            payload_fn=lambda: log_str,
+        )
+
     def _log_collective_benchmarks(
         self,
         collective_nodes: list[fx.Node],
@@ -506,6 +609,16 @@ class OverlapScheduler:
         world_size: int,
     ) -> None:
         """Log collective benchmarks with analytical comparisons for tlparse."""
+        headers = [
+            "Collective Key",
+            "Benchmarked(ms)",
+            "NCCL Est(ms)",
+            "Inductor Est(ms)",
+            "NCCL Diff(%)",
+            "Inductor Diff(%)",
+        ]
+
+        rows = []
         collective_benchmarks = {}
         for key, benchmarked_ms, coll_node in zip(
             collective_keys, benchmarked_medians, collective_nodes
@@ -526,19 +639,33 @@ class OverlapScheduler:
                 "analytical_inductor_ms": inductor_ms,
             }
 
-        # Emit tlparse artifact
-        from torch._logging import trace_structured
+            # Compute percentage differences
+            nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            inductor_diff_pct = (
+                (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            )
+
+            rows.append(
+                [
+                    key[:80],
+                    f"{benchmarked_ms:.4f}",
+                    f"{nccl_ms:.4f}",
+                    f"{inductor_ms:.4f}",
+                    f"{nccl_diff_pct:.2f}",
+                    f"{inductor_diff_pct:.2f}",
+                ]
+            )
+
+        log_str = f"World size: {world_size}\n"
+        log_str += _format_table_with_tabulate(rows, headers)
 
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "node_runtime_estimation",
-                "encoding": "json",
+                "name": "fx_collectives_node_runtime_estimation",
+                "encoding": "string",
             },
-            payload_fn=lambda: {
-                "world_size": world_size,
-                "collective_benchmarks": collective_benchmarks,
-            },
+            payload_fn=lambda: log_str,
         )
 
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
@@ -554,11 +681,26 @@ class OverlapScheduler:
         runtime_estimations: list[float] = []
         compute_key_count = 0
 
+        # Also collect analytical estimations for logging
+        runtime_estimations_analytical: list[float] = []
+
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+
+            # Analytical estimations
+            val_analytical = estimate_runtime_analytical(n)
+            runtime_estimations_analytical.append(val_analytical)
+
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
             compute_key_count += 1
+
+        # Log compute estimations
+        self._log_compute_estimations(
+            self.compute_nodes,
+            runtime_estimations,
+            runtime_estimations_analytical,
+        )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -585,7 +727,7 @@ class OverlapScheduler:
                     continue
 
                 # Benchmark actual size
-                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=2)
+                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)

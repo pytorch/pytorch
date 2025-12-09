@@ -4,6 +4,7 @@ Collective runtime estimation using CUDA events and power-of-2 rounding.
 
 from __future__ import annotations
 
+import itertools
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -58,6 +59,11 @@ def can_benchmark_collective() -> bool:
     return True
 
 
+def _median(lst):
+    assert len(lst) > 0
+    return torch.median(torch.tensor(lst)).item()
+
+
 def _benchmark_collective_with_cuda_events_impl(
     n: torch.fx.Node,
     args: tuple[Any, ...],
@@ -68,19 +74,33 @@ def _benchmark_collective_with_cuda_events_impl(
     Core benchmarking logic using CUDA events and barriers.
     Returns runtime in ms or None on failure.
     """
-    import torch.distributed as c10d
+    from torch._dynamo.testing import rand_strided
+
+    # Convert FakeTensors to real tensors before benchmarking
+    def to_real(t: torch.Tensor) -> torch.Tensor:
+        shape = [get_hint(dim) for dim in t.shape]
+        stride = [get_hint(s) for s in t.stride()]
+
+        if any(s is None for s in itertools.chain(shape, stride)):
+            raise ValueError("Cannot convert tensor with symbolic dimensions")
+
+        return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
+
+    args, kwargs = torch.utils._pytree.tree_map_only(
+        torch.Tensor,
+        to_real,
+        (args, kwargs),
+    )
 
     # Warmup: call collective once and wait
     torch.cuda.synchronize()
     result = n.target(*args, **kwargs)  # type: ignore[operator]
     torch.ops._c10d_functional.wait_tensor(result)
+    torch.cuda.synchronize()
 
     # Benchmark with CUDA events
-    comm_time = 0.0
+    comm_times = []
     for _ in range(nruns):
-        c10d.barrier()
-        torch.cuda.synchronize()
-
         start_evt = torch.cuda.Event(enable_timing=True)
         end_evt = torch.cuda.Event(enable_timing=True)
 
@@ -90,9 +110,9 @@ def _benchmark_collective_with_cuda_events_impl(
         end_evt.record()
         end_evt.synchronize()
 
-        comm_time += start_evt.elapsed_time(end_evt)
+        comm_times.append(start_evt.elapsed_time(end_evt))
 
-    return comm_time / nruns
+    return _median(comm_times)
 
 
 def benchmark_collective_with_cuda_events(
@@ -109,7 +129,7 @@ def benchmark_collective_with_cuda_events(
 
 def benchmark_collective_with_cuda_events_impl(
     n: torch.fx.Node,
-    nruns: int = 2,
+    nruns: int = 3,
 ) -> tuple[float | None, str]:
     """
     Benchmark collective with CUDA events. Returns (runtime_ms, cache_key) or (None, "") on failure.
