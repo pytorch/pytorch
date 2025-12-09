@@ -299,8 +299,11 @@ class CustomConstantType:
         # custom hash ignores b
         return hash(self.a)
 
+    def __repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
-pytree.register_constant(CustomConstantType)
+
+torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
