@@ -776,6 +776,18 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::math: {
 #ifdef USE_MPS
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(query_.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        query_.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(key.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        key.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(value.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        value.scalar_type());
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
@@ -870,6 +882,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       ? value.to(at::kFloat)
       : value;
   auto attn_mask = attn_mask_;
+  const auto math_sdp_precision = at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATH_SDP);
+  // Temporarily override matmul precision with value from cuda.math_sdp
+  // IEEE should be used when use fp32+math backend as golden reference.
+  at::Fp32PrecisonGuard<at::Float32Backend::CUDA, at::Float32Op::MATMUL> fp32guard(math_sdp_precision);
+
   // Naive, composite implementation defined here.
 
   // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for
