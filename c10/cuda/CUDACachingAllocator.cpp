@@ -8,6 +8,7 @@
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
@@ -1590,7 +1591,7 @@ class DeviceCachingAllocator {
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " PYTORCH_ALLOC_CONF=expandable_segments:True to avoid"
           " fragmentation.  See documentation for Memory Management "
           " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
@@ -1799,8 +1800,10 @@ class DeviceCachingAllocator {
       if (deps == nullptr) {
         C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
       } else {
-        cudaGraphEdgeData edgeData;
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData, count));
+        SmallVector<cudaGraphEdgeData> edgeData;
+        edgeData.resize(*count);
+        C10_CUDA_CHECK(
+            cudaGraphNodeGetDependencies(n, deps, edgeData.data(), count));
       }
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
