@@ -5,7 +5,6 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import copy
 import os
 import queue
 import random
@@ -16,7 +15,13 @@ from typing import Optional, TYPE_CHECKING
 import torch
 from torch._utils import ExceptionWrapper
 
-from . import HAS_NUMPY, IS_WINDOWS, STATUS_CHECK_INTERVAL, signal_handling
+from . import (
+    HAS_NUMPY,
+    IS_WINDOWS,
+    pin_memory as pin_memory_module,
+    signal_handling,
+    STATUS_CHECK_INTERVAL,
+)
 
 
 if TYPE_CHECKING:
@@ -86,6 +91,7 @@ class WorkerInfo:
         seed: Random seed set for this worker
         dataset: Copy of the dataset object in this worker
         rng: RNG state container (set for thread workers only)
+        worker_method: The worker method ("multiprocessing" or "thread")
     """
 
     id: int
@@ -93,6 +99,7 @@ class WorkerInfo:
     seed: int
     dataset: "Dataset"
     rng: Optional["_RNG"] = None
+    worker_method: str = "multiprocessing"
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -110,6 +117,8 @@ def get_worker_info() -> WorkerInfo | None:
     * :attr:`dataset`: the copy of the dataset object in **this** process/thread. Note
       that this will be a different object in a different process/thread than the one
       in the main process.
+    * :attr:`worker_method`: the worker method being used. Either ``"multiprocessing"``
+      for process-based workers or ``"thread"`` for thread-based workers.
 
     When called in the main process, this returns ``None``.
 
@@ -258,11 +267,15 @@ def _base_worker_loop(
     num_workers,
     persistent_workers,
     shared_rng=None,
-    is_process=True,
+    worker_method="multiprocessing",
     watchdog_constructor=None,
- ) -> None:
+    pin_memory=False,
+) -> None:
     """
     Base worker loop with common functionality for both process and thread workers.
+
+    Args:
+        worker_method: The worker method ("multiprocessing", "thread")
     """
     try:
         torch.set_num_threads(1)
@@ -271,7 +284,9 @@ def _base_worker_loop(
 
         init_exception = None
 
-        error_prefix = "worker process" if is_process else "worker thread"
+        error_prefix = (
+            "worker process" if worker_method == "multiprocessing" else "worker thread"
+        )
         try:
             if init_fn is not None:
                 init_fn(worker_id)
@@ -307,14 +322,19 @@ def _base_worker_loop(
                 iteration_end = False
 
                 # Note: DataPipe is not supported in thread mode
-                if is_process:
+                if worker_method == "multiprocessing":
                     from torch.utils.data import IterDataPipe
-                    from torch.utils.data.graph_settings import apply_random_seed
 
                     if isinstance(dataset, IterDataPipe):
+                        from torch.utils.data.graph_settings import apply_random_seed
+
                         if r.seed is None:
                             raise AssertionError(
                                 "resume iteration seed is None for IterDataPipe"
+                            )
+                        if shared_rng is None:
+                            raise AssertionError(
+                                "shared_rng is None for IterDataPipe in multiprocessing mode"
                             )
                         shared_rng.manual_seed(r.seed)
                         dataset = apply_random_seed(dataset, shared_rng)
@@ -336,14 +356,27 @@ def _base_worker_loop(
                 # (None) yet. I will keep continuing until get it, and skip the
                 # processing steps.
                 continue
-            idx, index = r
+            task_id, data_index = r
             data: _IterableDatasetStopIteration | ExceptionWrapper
             if init_exception is not None:
                 data = init_exception
                 init_exception = None
             else:
                 try:
-                    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+                    data = fetcher.fetch(data_index)  # type: ignore[possibly-undefined]
+
+                    # Pin memory after fetching if enabled (for thread workers only)
+                    if (
+                        pin_memory
+                        and worker_method == "thread"
+                        and not isinstance(data, ExceptionWrapper)
+                    ):
+                        try:
+                            data = pin_memory_module.pin_memory(data)
+                        except Exception:
+                            data = ExceptionWrapper(
+                                where=f"in pin_memory for DataLoader {error_prefix} {worker_id}"
+                            )
                 except Exception as e:
                     if (
                         isinstance(e, StopIteration)
@@ -361,8 +394,8 @@ def _base_worker_loop(
                         data = ExceptionWrapper(
                             where=f"in DataLoader {error_prefix} {worker_id}"
                         )
-            data_queue.put((idx, data))
-            del data, idx, index, r  # save memory
+            data_queue.put((task_id, data))
+            del data, task_id, data_index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
@@ -393,7 +426,7 @@ def _process_worker_loop(
     # again.
     # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
     signal_handling._set_worker_signal_handlers()
-    torch.multiprocessing._set_thread_name("pt_data_worker")
+    torch.multiprocessing._set_thread_name("pt_multiprocess_data_worker")
 
     seed = base_seed + worker_id
     random.seed(seed)
@@ -405,10 +438,11 @@ def _process_worker_loop(
         np.random.seed(np_seed)
 
     from torch.utils.data import IterDataPipe
-    from torch.utils.data.graph_settings import apply_random_seed
 
     shared_rng = torch.Generator()
     if isinstance(dataset, IterDataPipe):
+        from torch.utils.data.graph_settings import apply_random_seed
+
         if shared_seed is None:
             raise AssertionError(
                 "shared_seed must be provided for IterDataPipe workers"
@@ -421,6 +455,7 @@ def _process_worker_loop(
         num_workers=num_workers,
         seed=seed,
         dataset=dataset,
+        worker_method="multiprocessing",
     )
 
     global _worker_info
@@ -441,7 +476,7 @@ def _process_worker_loop(
         num_workers=num_workers,
         persistent_workers=persistent_workers,
         shared_rng=shared_rng,
-        is_process=True,
+        worker_method="multiprocessing",
         watchdog_constructor=ManagerWatchdog,
     )
 
@@ -464,12 +499,14 @@ def _thread_worker_loop(
     worker_id,
     num_workers,
     persistent_workers,
+    pin_memory=False,
 ):
     """
     Thread worker loop that uses the common base worker loop for threads.
     Sets up thread-local RNG state and creates deep copies of dataset/transforms
     to avoid race conditions and shared state issues.
     """
+    torch.multiprocessing._set_thread_name("pt_thread_data_worker")
 
     # Set the thread name for better debugging
     threading.current_thread().name = f"DataLoader_thread_{worker_id}"
@@ -501,6 +538,7 @@ def _thread_worker_loop(
         seed=seed,
         dataset=dataset,
         rng=rng,  # not set for process workers
+        worker_method="thread",
     )
 
     _thread_local_worker_info.worker_info = worker_info
@@ -520,6 +558,8 @@ def _thread_worker_loop(
         worker_id=worker_id,
         num_workers=num_workers,
         persistent_workers=persistent_workers,
-        is_process=False,
+        shared_rng=None,  # Not used for thread workers
+        worker_method="thread",
         watchdog_constructor=None,  # No watchdog needed for threads
+        pin_memory=pin_memory,
     )
