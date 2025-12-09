@@ -85,9 +85,6 @@ if _IS_MONKEYTYPE_INSTALLED:
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
 
-        def __init__(self, store: CallTraceStore) -> None:
-            super().__init__(store)
-
         def log(self, trace: CallTrace) -> None:
             # pyrefly: ignore [missing-attribute]
             self.traces.append(trace)
