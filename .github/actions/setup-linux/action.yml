@@ -62,6 +62,13 @@ runs:
         fi
         aws --version
 
+    - name: Configure AWS credentials for GCP runners
+      if: ${{ contains(runner.name, 'google') || contains(runner.name, 'gcp') }}
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      with:
+        role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+        aws-region: us-east-1
+
     - name: Log in to ECR
       uses: nick-fields/retry@v3.0.0
       env:
