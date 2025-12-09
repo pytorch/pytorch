@@ -1,3 +1,4 @@
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
@@ -145,7 +146,7 @@ struct MTIAHooks : public at::MTIAHooksInterface {
   }
 
   c10::DeviceIndex deviceCount() const override {
-    torch::utils::device_lazy_init(at::kMTIA);
+    // Don't call device_lazy_init here to avoid recursive deadlock during initialization
     return c10::DeviceIndex(2);
   }
 
@@ -207,6 +208,20 @@ struct MTIAHooks : public at::MTIAHooksInterface {
     if (current_device != device) {
       current_device = device;
     }
+  }
+
+  const at::Generator& getDefaultGenerator(c10::DeviceIndex device) const override {
+    // Don't call device_lazy_init here to avoid recursive deadlock during initialization
+    static std::vector<at::Generator> default_gens = {
+      at::make_generator<at::CPUGeneratorImpl>(),
+      at::make_generator<at::CPUGeneratorImpl>()
+    };
+    return default_gens[device];
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device) const override {
+    torch::utils::device_lazy_init(at::kMTIA);
+    return at::make_generator<at::CPUGeneratorImpl>();
   }
 };
 
