@@ -390,15 +390,6 @@ class DTensorSpec:
         """
         return any(placement.is_shard() for placement in self.placements)
 
-    def is_split(self) -> bool:
-        """
-        return True if the current DTensorSpec is split on any mesh dims (devices)
-        """
-        return any(
-            isinstance(placement, Shard | _StridedShard)
-            for placement in self.placements
-        )
-
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: TensorMeta | None
     ) -> "DTensorSpec":

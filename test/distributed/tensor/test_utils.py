@@ -1017,13 +1017,28 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             A = distribute_tensor(input_tensor, mesh, [Shard(1), Shard(1)])
             B1 = distribute_tensor(input_tensor, mesh, [Shard(0), Shard(0)])
             B2 = distribute_tensor(
-                input_tensor, mesh, [_StridedShard(0, split_factor=4), Shard(0)]
+                input_tensor,
+                mesh,
+                [_StridedShard(0, split_factor=mesh.size(1)), Shard(0)],
             )
-            res1 = A @ B1
-            res2 = A @ B2
+            with CommDebugMode() as comm_mode:
+                # res1 will be (Partial, Partial), no redistribution needed
+                res1 = A @ B1
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
+            )
+
+            with CommDebugMode() as comm_mode:
+                # `A @ B2` will trigger redistribution on both inputs as below:
+                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
+                # B2: _S(0, 4)S(0)[0] -> RS(0)
+                # The final output res2's placements will be RP.
+                res2 = A @ B2
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+            )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
-            self.assertEqual(res1.full_tensor(), res2.full_tensor())
             self.assertEqual(res1.full_tensor(), res2.full_tensor())
 
     @with_comms
@@ -1036,10 +1051,14 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
                 mesh,
                 [Shard(1), _StridedShard(1, split_factor=2), Shard(1), Shard(0)],
             )
-            res1 = torch.sum(A, dim=0)
+            with CommDebugMode() as comm_mode:
+                res1 = torch.sum(A, dim=0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             assert isinstance(res1, DTensor)
             self.assertEqual(res1.full_tensor(), torch.sum(input_tensor, dim=0))
-            res2 = torch.sum(A, dim=1)
+            with CommDebugMode() as comm_mode:
+                res2 = torch.sum(A, dim=1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             assert isinstance(res2, DTensor)
             self.assertEqual(res2.full_tensor(), torch.sum(input_tensor, dim=1))
 
