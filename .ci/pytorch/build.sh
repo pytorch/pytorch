@@ -8,6 +8,7 @@ set -ex -o pipefail
 
 # Source ROCm environment for theRock nightly builds (needed for docker exec)
 if [[ -f /etc/rocm_env.sh ]]; then
+  # shellcheck disable=SC1091
   source /etc/rocm_env.sh
 fi
 
