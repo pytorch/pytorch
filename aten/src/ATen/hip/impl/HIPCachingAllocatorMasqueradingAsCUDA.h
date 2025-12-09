@@ -155,6 +155,10 @@ inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setUseOnOOM(device, mempool_id);
 }
 
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
+}
+
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }
