@@ -272,7 +272,7 @@ def aoti_load_package(
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,

@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
+from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -1610,10 +1610,7 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        ):
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
             return self._codegen_mix_order_reduction(node2, node1)
 
         def _pick_split_size():
@@ -1625,7 +1622,10 @@ class SIMDScheduling(BaseScheduling):
             device_prop = DeviceProperties.create(node1.get_device())
             num_sm = device_prop.multi_processor_count
             estimated_num_splits = num_sm * 8
-            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+
+            # split_size is decided based on hint
+            numel_hint = V.graph.sizevars.size_hint(numel)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1634,10 +1634,7 @@ class SIMDScheduling(BaseScheduling):
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
-        assert V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        )
+        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -1681,7 +1678,6 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            # print(f"Autotuning pick split size {split_size}")
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
@@ -1726,6 +1722,8 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
+        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
+        self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -1733,7 +1731,9 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        nsplit = (numel + split_size - 1) // split_size
+        nsplit = V.graph.wrapper_code.codegen_python_sizevar(
+            (numel + split_size - 1) // split_size
+        )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
