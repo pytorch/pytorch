@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import sympy
 
@@ -22,7 +22,6 @@ from .ir import (
     MultiOutputLayout,
     MutationOutput,
     NoneLayout,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES

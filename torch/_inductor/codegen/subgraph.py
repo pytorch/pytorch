@@ -1,7 +1,7 @@
 import itertools
 import logging
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._inductor.config as config
