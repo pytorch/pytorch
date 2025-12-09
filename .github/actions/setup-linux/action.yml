@@ -50,7 +50,7 @@ runs:
         fi
 
     - name: Log in to ECR
-      if: ${{ contains(runner.name, 'google') || contains(runner.name, 'gcp') }}
+      if: ${{ !contains(runner.name, 'google') && !contains(runner.name, 'gcp') }}
       uses: nick-fields/retry@v3.0.0
       env:
         AWS_RETRY_MODE: standard
