@@ -47,29 +47,6 @@ runs:
             echo "Starting docker daemon..." && sudo systemctl start docker;
         fi
 
-    - name: Log in to ECR
-      uses: nick-fields/retry@v3.0.0
-      env:
-        AWS_RETRY_MODE: standard
-        AWS_MAX_ATTEMPTS: "5"
-        AWS_DEFAULT_REGION: us-east-1
-      with:
-        shell: bash
-        timeout_minutes: 5
-        max_attempts: 3
-        retry_wait_seconds: 30
-        command: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-
-          # For LF Runners we need to make sure we also login to Meta's ECR docker registry too.
-          META_AWS_ACCOUNT_ID=308535385114
-          if [ "$AWS_ACCOUNT_ID" != "$META_AWS_ACCOUNT_ID" ] ; then
-              aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-                  --password-stdin "$META_AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-          fi
-
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
