@@ -6811,6 +6811,9 @@ def _internal_new_from_data(
         # This handles the case: with torch.device("meta"): torch.tensor(3.0)
         default_device = torch.get_default_device()
         device = default_device if default_device.type != "cpu" else options["device"]
+
+    # Normalize device to ensure it's always a device object
+    device = torch.device(device)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
@@ -6818,7 +6821,7 @@ def _internal_new_from_data(
     if _isStorage(data):
         return NotImplemented
     else:
-        if torch.device(device).type == "meta":
+        if device.type == "meta":
             from torch._guards import active_fake_mode
 
             # If FakeTensorMode is *not* active, keep old behavior: delegate to C++.
