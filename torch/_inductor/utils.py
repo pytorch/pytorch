@@ -145,11 +145,7 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {
-    "cuda": ".cubin",
-    "hip": ".hsaco",
-    "xpu": f".{XPU_KERNEL_FORMAT}",
-}
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -2045,7 +2041,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cuda.cutlass_utils import try_import_cutlass
+    from .codegen.cutlass.utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:

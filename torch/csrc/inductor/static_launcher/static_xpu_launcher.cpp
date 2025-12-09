@@ -1,8 +1,9 @@
-/** This file follows the API design of "static_cuda_launcher.cpp" and copied
- *parts of the code.
+/**
+ * This file follows the API design of "static_cuda_launcher.cpp" and copied
+ * parts of the code.
  * TODO: Extract the parts shared with static_cuda_launcher.cpp and unify to a
- *static_triton_launcher.h
- **/
+ * static_triton_launcher.h
+ */
 
 #if defined(USE_XPU)
 // TODO: enable on Windows.
@@ -12,7 +13,8 @@
 #include <ATen/Context.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
-#include <torch/csrc/inductor/static_launcher/xpu/static_xpu_launcher.h>
+#include <fmt/format.h>
+#include <torch/csrc/inductor/static_launcher/static_xpu_launcher.h>
 #include <cstdint>
 #include <stdexcept>
 
@@ -35,11 +37,20 @@
 
 namespace {
 
+/**
+ * For num_args <= MAX_ARGS, we use static allocated memory for better
+ * performance. And for num_args > MAX_ARGS, we use dynamic allocated heap
+ * memory. Here we use 120 as MAX_ARGS following static_cuda_launcher.cpp which
+ * has been tuned before.
+ */
 // 120 max args + 1 for global scratch size
 #define MAX_ARGS 121
 typedef void* syclDevicePtr_t;
 
-syclDevicePtr_t getPointer(PyObject* obj, const sycl::queue* queuePtr) {
+syclDevicePtr_t getPointer(
+    PyObject* obj,
+    int idx,
+    const sycl::queue* queuePtr) {
   syclDevicePtr_t data_ptr = 0;
 
   if (THPUtils_checkLong(obj)) {
@@ -73,12 +84,21 @@ syclDevicePtr_t getPointer(PyObject* obj, const sycl::queue* queuePtr) {
   prop.pNext = nullptr;
   auto res = zeMemGetAllocProperties(
       (ze_context_handle_t)handle, data_ptr, &prop, nullptr);
+
   TORCH_CHECK(
       res == ZE_RESULT_SUCCESS,
-      "Failed to get memory properties for pointer argument");
+      fmt::format(
+          "Failed to get memory properties for pointer argument at {}-th argument, err={}",
+          idx,
+          static_cast<int>(res)));
+
   TORCH_CHECK(
       prop.type == ZE_MEMORY_TYPE_DEVICE,
-      "Pointer argument doesn't reference XPU device memory");
+      fmt::format(
+          "Pointer argument doesn't reference XPU device memory at {}-th argument, err={}",
+          idx,
+          static_cast<int>(res)));
+
   return data_ptr;
 }
 
@@ -152,7 +172,7 @@ void parseKernelArgs(
         break;
       case 'O': { // pointer; using helper getPointer() (which may call
                   // data_ptr() if needed)
-        syclDevicePtr_t ptr = getPointer(item, queuePtr);
+        syclDevicePtr_t ptr = getPointer(item, i, queuePtr);
         *reinterpret_cast<syclDevicePtr_t*>(slot) = ptr;
         break;
       }
@@ -164,11 +184,11 @@ void parseKernelArgs(
   }
 }
 
-static inline ze_module_handle_t _createModule(
+inline ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
-  sycl::device& syclDevice = c10::xpu::get_raw_device(device_idx);
+  auto& syclDevice = c10::xpu::get_raw_device(device_idx);
   auto& syclContext = c10::xpu::get_device_context();
   auto device =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
@@ -176,11 +196,7 @@ static inline ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
 
   const char* buildFlags = "";
-#ifdef _WIN32
-  const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
-#else
   const ze_module_format_t format = ZE_MODULE_FORMAT_NATIVE;
-#endif
   ze_module_desc_t moduleDescription = {};
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
@@ -207,7 +223,7 @@ static inline ze_module_handle_t _createModule(
   return module;
 }
 
-static inline sycl::kernel* _createKernel(
+inline sycl::kernel* _createKernel(
     ze_module_handle_t module,
     const char* kernelName,
     uint32_t* nSpillsPtr = nullptr) {
@@ -240,7 +256,7 @@ static inline sycl::kernel* _createKernel(
   return fun;
 }
 
-static sycl::kernel* loadKernel(
+sycl::kernel* loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
@@ -256,7 +272,7 @@ static sycl::kernel* loadKernel(
   return _createKernel(mod, funcName, nSpillsPtr);
 }
 
-static void launchKernel(
+void launchKernel(
     sycl::kernel* kernelPtr,
     uint32_t gridX,
     uint32_t gridY,
@@ -269,7 +285,6 @@ static void launchKernel(
       sycl::info::kernel_device_specific::compile_sub_group_size>(
       queuePtr->get_device());
   if (threadsPerWarp == 0) {
-    abort();
     threadsPerWarp = 32; // default to 32 if not set
   }
   std::string kernelName =
