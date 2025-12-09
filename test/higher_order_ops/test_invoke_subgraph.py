@@ -2254,11 +2254,11 @@ class GraphModule(torch.nn.Module):
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', x, y);  subgraph_0 = x = None
-        z: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
+        getitem_4: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', z, y);  subgraph_1 = z = y = None
-        getitem_1: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1,)
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', getitem_4, y);  subgraph_1 = getitem_4 = y = None
+        getitem_5: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_5,)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, x: "f32[5]", y: "f32[5]"):
