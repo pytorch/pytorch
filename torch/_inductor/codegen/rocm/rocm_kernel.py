@@ -284,7 +284,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             **dict(self.info_kwargs["op"].dict_items()),  # type: ignore[union-attr, index]
         }
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             ROCmTemplateBuffer(

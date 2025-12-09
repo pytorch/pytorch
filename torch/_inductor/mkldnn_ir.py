@@ -619,8 +619,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: Union["ShapeAsConstantBuffer", "TensorBox"],
-        x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
+        x_scale: "TensorBox",
+        x_zero_point: "TensorBox",
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
         w_zero_point,
