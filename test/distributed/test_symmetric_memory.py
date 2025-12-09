@@ -6,6 +6,9 @@ import random
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
+import triton
+import triton.language as tl
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -60,6 +63,17 @@ device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
 
+@triton.jit
+def barrier_test_kernel(
+    signal_pad_ptrs,
+    rank: tl.constexpr,
+    world_size: tl.constexpr,
+):
+    torch.ops.symm_mem.symm_mem_sync(
+        signal_pad_ptrs, rank, world_size, None, False, False
+    )
+
+
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcContinuousTest):
@@ -97,6 +111,75 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(len(connectivity.matrix), torch.cuda.device_count())
         for row in connectivity.matrix:
             self.assertEqual(len(row), torch.cuda.device_count())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad_size(self) -> None:
+        # Test that get_signal_pad_size returns a positive integer
+        signal_pad_size = symm_mem.get_signal_pad_size()
+        self.assertIsInstance(signal_pad_size, int)
+        self.assertGreater(signal_pad_size, 0)
+
+        # Test that the C++ API returns the same value
+        cpp_signal_pad_size = _SymmetricMemory.signal_pad_size
+        self.assertEqual(signal_pad_size, cpp_signal_pad_size)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_set_signal_pad_size(self) -> None:
+        # Save the original signal pad size
+        original_size = symm_mem.get_signal_pad_size()
+
+        # Test setting a new signal pad size
+        new_size = 1024 * 1024  # 1MB
+        symm_mem.set_signal_pad_size(new_size)
+        self.assertEqual(symm_mem.get_signal_pad_size(), new_size)
+
+        # Test that the C++ API reflects the change
+        self.assertEqual(_SymmetricMemory.signal_pad_size, new_size)
+
+        # Restore original size for other tests
+        symm_mem.set_signal_pad_size(original_size)
+        self.assertEqual(symm_mem.get_signal_pad_size(), original_size)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_set_signal_pad_size_with_allocation(self) -> None:
+        """Test that custom signal pad size is actually used in allocations."""
+        self._init_process()
+
+        # Save the original signal pad size
+        original_size = symm_mem.get_signal_pad_size()
+
+        # Test with a custom signal pad size (2x the default)
+        custom_size = original_size * 2
+        symm_mem.set_signal_pad_size(custom_size)
+
+        # Allocate symmetric memory and verify the signal pad size
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # Verify the allocated symmetric memory uses the custom signal pad size
+        self.assertEqual(symm_mem_hdl.signal_pad_size, custom_size)
+
+        # Test that signal pad operations work with the custom size
+        signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
+        expected_numel = custom_size // 4  # uint32_t
+        self.assertEqual(signal_pad.numel(), expected_numel)
+
+        # Verify we can use the full custom signal pad
+        signal_pad.fill_(0)
+        signal_pad[0] = 42
+        self.assertEqual(signal_pad[0].item(), 42)
+
+        # Restore original settings
+        symm_mem.set_signal_pad_size(original_size)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1145,6 +1228,36 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         ref = torch.ops._c10d_functional.wait_tensor(ref)
 
         self.assertTrue(out.eq(ref).all())
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemBarrierTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+    @skip_if_rocm_multiprocess  # SIGIOT error
+    @skip_if_lt_x_gpu(2)
+    def test_torch_ops_symm_mem_sync_within_triton_kernel(self):
+        """Test using torch.ops.symm_mem.symm_mem_sync within Triton kernel"""
+        self._init_process()
+        t = symm_mem.empty(4096, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        barrier_test_kernel[(32, 1, 1)](
+            symm_mem_hdl.signal_pad_ptrs_dev,
+            rank=symm_mem_hdl.rank,
+            world_size=symm_mem_hdl.world_size,
+        )
+
+        signal_pad = symm_mem_hdl.get_signal_pad(symm_mem_hdl.rank)
+        assert signal_pad.eq(0).all().item()
 
 
 @instantiate_parametrized_tests
