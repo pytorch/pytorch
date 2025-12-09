@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    skipCUDAVersionIn,
 )
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
@@ -1150,6 +1151,7 @@ except RuntimeError as e:
         @onlyCUDA
         @parametrize("show_cpp_stacktraces", [False, True])
         @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        @skipCUDAVersionIn([(13, 0, 2)])
         def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
             """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
 
