@@ -49,8 +49,20 @@ runs:
           fi
         fi
 
+    - name: Install AWS CLI on GCP runners
+      if: ${{ contains(runner.name, 'google') || contains(runner.name, 'gcp') }}
+      shell: bash
+      run: |
+        if ! command -v aws &> /dev/null; then
+          echo "Installing AWS CLI..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          rm -rf awscliv2.zip aws
+        fi
+        aws --version
+
     - name: Log in to ECR
-      if: ${{ !contains(runner.name, 'google') && !contains(runner.name, 'gcp') }}
       uses: nick-fields/retry@v3.0.0
       env:
         AWS_RETRY_MODE: standard
