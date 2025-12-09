@@ -47,7 +47,6 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value: bool) -> "ConstantVariable": ...
 
-    # TODO: Refactor to make these return ConstantVariable
     @overload
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker: ...
