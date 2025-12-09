@@ -1289,6 +1289,10 @@ void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   [encoder setBytes:ptr length:size atIndex:idx];
 }
 
+void MetalKernelFunction::setBuffer(unsigned idx, const void* buffer) {
+  [encoder setBuffer:(id<MTLBuffer>)buffer offset:0 atIndex:idx];
+}
+
 uint64_t MetalKernelFunction::getMaxThreadsPerThreadgroup() const {
   return [cps maxTotalThreadsPerThreadgroup];
 }
