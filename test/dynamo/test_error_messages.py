@@ -1850,7 +1850,9 @@ User code traceback:
             munge_exc(full_messages[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1875,7 +1877,9 @@ User code traceback:
             ),
             """\
 Graph break (user stack suppressed due to duplicate graph break) in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
