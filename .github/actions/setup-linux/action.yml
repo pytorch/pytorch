@@ -49,6 +49,26 @@ runs:
           fi
         fi
 
+    - name: Install AWS CLI on GCP runners
+      if: ${{ contains(runner.name, 'google') || contains(runner.name, 'gcp') }}
+      shell: bash
+      run: |
+        if ! command -v aws &> /dev/null; then
+          echo "Installing AWS CLI..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          rm -rf awscliv2.zip aws
+        fi
+        aws --version
+
+    - name: Configure AWS credentials for GCP runners
+      if: ${{ contains(runner.name, 'google') || contains(runner.name, 'gcp') }}
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      with:
+        role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+        aws-region: us-east-1
+
     - name: Log in to ECR
       uses: nick-fields/retry@v3.0.0
       env:
