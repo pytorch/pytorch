@@ -713,13 +713,13 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     return user_stack
 
 
-def remove_resume_prefix(name: str) -> Optional[str]:
+def remove_resume_prefix(name: str) -> str:
     from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
     match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
     if match:
         return match.group(1)
-    return None
+    return name
 
 
 def collapse_resume_frames(stack: StackSummary) -> StackSummary:
@@ -751,6 +751,7 @@ def collapse_resume_frames(stack: StackSummary) -> StackSummary:
             new_stack[-1] = frame
             frame.name = name
         else:
+            frame.name = name
             new_stack.append(frame)
 
     return new_stack
