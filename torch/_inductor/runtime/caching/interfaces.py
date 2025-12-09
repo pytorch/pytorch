@@ -572,7 +572,7 @@ class _DeterministicCacheIntf(_CacheIntf):
             )
             fpath: Path = odc._cache_dir / "imc.save"
             with odc.lock():
-                r_fp, w_fp = None, None
+                w_fp = None
                 try:
                     w_fp = open(fpath, "x")  # noqa:SIM115
                 except FileExistsError:
