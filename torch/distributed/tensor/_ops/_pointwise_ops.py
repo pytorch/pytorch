@@ -499,7 +499,7 @@ def safe_avoid_redistribution(op, args_schema, placement):
     if isinstance(placement, _NormPartial):
         if (
             op in [aten.div.Scalar, aten.div_.Scalar, aten.mul.Scalar, aten.mul_.Scalar]
-            and args_schema[1] >= 0
+            and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
         ):
             return True
 
@@ -508,12 +508,6 @@ def safe_avoid_redistribution(op, args_schema, placement):
             isinstance(arg, _Number) for arg in args_schema
         ):
             return True
-
-        """
-        the same logic could be applied to if op in [aten.mul.Tensor, aten.mul_.Tensor],
-        but if the second tensor is partial, we would need
-        to redistribute here to even figure out if an element is negative
-        """
 
     return False
 
@@ -563,9 +557,70 @@ def common_pointwise_strategy(
             elif isinstance(
                 placement, Partial
             ):  # note that only partial-sum and partial-avg are supported for linearity
+                safe_avoid_redistribution = False
+
+                if isinstance(placement, _NormPartial):
+                    if (
+                        op
+                        in [
+                            aten.div.Scalar,
+                            aten.div_.Scalar,
+                            aten.mul.Scalar,
+                            aten.mul_.Scalar,
+                        ]
+                        and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
+                    ):
+                        safe_avoid_redistribution = True
+                        """
+                        Proof:
+
+                        dt: _NormPartial
+
+                        rank 0: a₁ b₁
+                        rank 1: a₂ b₂
+
+                        1.
+                        res = dt * c, where c >= 0
+
+                        with_redistribution = c√(a₁² + a₂²), c√(b₁² + b₂²)
+
+                        without redistribution
+                        rank 0: ca₁ cb₁
+                        rank 1: ca₂ cb₂
+
+                        redistribute = √((ca₁)² + (ca₂)²), √((cb₁)² + (cb₂)²)
+                        = √(c²a₁² + c²a₂²), √(c²b₁² + c²b₂²)
+                        = √(c²(a₁² + a₂²)), √(c²(b₁² + b₂²))
+                        = c√(a₁² + a₂²), c√(b₁² + b₂²)
+
+                        with_redistribution == redistribute
+
+
+                        2.
+                        res = dt * c, where c < 0
+                        with_redistribution = -c√(a₁² + a₂²), -c√(b₁² + b₂²)
+
+                        without redistribution
+                        rank 0: -ca₁ -cb₁
+                        rank 1: -ca₂ -cb₂
+
+                        redistribute = √((-ca₁)² + (-ca₂)²), √((-cb₁)² + (-cb₂)²)
+                        = √(c²a₁² + c²a₂²), √(c²b₁² + c²b₂²)
+                        = √(c²(a₁² + a₂²)), √(c²(b₁² + b₂²))
+                        = c√(a₁² + a₂²), c√(b₁² + b₂²)
+
+                        with_redistribute != redistribute
+                        """
+
+                elif isinstance(placement, Partial):
+                    if op not in [aten.add.Tensor, aten.add_.Tensor] or not any(
+                        isinstance(arg, _Number) for arg in args_schema
+                    ):
+                        safe_avoid_redistribution = True
+
                 partial_supports_linearity = (
                     placement.is_partial("sum") or placement.is_partial("avg")
-                ) and safe_avoid_redistribution(op, args_schema, placement)
+                ) and safe_avoid_redistribution
 
                 if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
