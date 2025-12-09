@@ -453,7 +453,7 @@ class ComplexWrappedAOTInput(DifferentiableAOTInput):
     def is_buffer(self) -> bool:
         return self.original_input.is_buffer()
 
-    def is_tangen(self) -> bool:
+    def is_tangent(self) -> bool:
         return self.original_input.is_tangent()
 
 
