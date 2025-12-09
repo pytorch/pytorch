@@ -42,6 +42,10 @@ basic_gnn_sage,pass,0
 
 
 
+cm3leon_generate,pass,4
+
+
+
 dcgan,pass,0
 
 
@@ -78,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+detectron2_fcos_r_50_fpn,pass,22
 
 
 
@@ -130,11 +134,15 @@ lennard_jones,pass,0
 
 
 
+llama,pass,0
+
+
+
 llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
-llava,eager_two_runs_differ,0
+llava,model_fail_to_load,0
 
 
 
@@ -170,7 +178,7 @@ moco,pass,7
 
 
 
-moondream,pass,0
+moondream,model_fail_to_load,0
 
 
 
@@ -242,6 +250,10 @@ sam,pass,0
 
 
 
+sam_fast,model_fail_to_load,0
+
+
+
 shufflenet_v2_x1_0,pass,0
 
 
@@ -258,6 +270,14 @@ squeezenet1_1,pass,0
 
 
 
+stable_diffusion_text_encoder,pass,0
+
+
+
+stable_diffusion_unet,pass_due_to_skip,0
+
+
+
 torch_multimodal_clip,pass,0
 
 
@@ -266,11 +286,11 @@ tts_angular,pass,2
 
 
 
-vgg16,eager_two_runs_differ,0
+vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_to_run,18
+vision_maskrcnn,pass,18
 
 
 

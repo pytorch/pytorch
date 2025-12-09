@@ -98,6 +98,18 @@ dlrm,pass,0
 
 
 
+doctr_det_predictor,pass,0
+
+
+
+doctr_reco_predictor,pass,0
+
+
+
+drq,fail_to_run,0
+
+
+
 functorch_dp_cifar10,pass,0
 
 
@@ -110,11 +122,15 @@ lennard_jones,pass,0
 
 
 
+llama,fail_to_run,0
+
+
+
 llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
-llava,eager_two_runs_differ,0
+llava,model_fail_to_load,0
 
 
 
@@ -150,7 +166,7 @@ moco,fail_to_run,0
 
 
 
-moondream,pass,0
+moondream,model_fail_to_load,0
 
 
 
@@ -218,7 +234,15 @@ sam,pass,0
 
 
 
+sam_fast,fail_to_run,0
+
+
+
 shufflenet_v2_x1_0,pass,0
+
+
+
+soft_actor_critic,fail_to_run,0
 
 
 
@@ -226,15 +250,27 @@ squeezenet1_1,pass,0
 
 
 
+stable_diffusion_text_encoder,pass,0
+
+
+
+stable_diffusion_unet,pass_due_to_skip,0
+
+
+
 torch_multimodal_clip,pass,0
 
 
 
-tts_angular,fail_to_run,0
+tts_angular,pass,0
 
 
 
-vgg16,eager_two_runs_differ,0
+vgg16,pass,0
+
+
+
+vision_maskrcnn,fail_to_run,0
 
 
 

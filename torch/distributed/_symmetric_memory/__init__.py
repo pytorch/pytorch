@@ -17,6 +17,8 @@ import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
+from . import symm_mem_sync
+
 
 _group_name_to_store: dict[str, c10d.Store] = {}
 
@@ -1976,6 +1978,22 @@ def is_nvshmem_available() -> bool:
 
     # Check if NVSHMEM is available on current system.
     return _is_nvshmem_available()
+
+
+def is_nccl_symmem_available() -> bool:
+    r"""
+    is_nccl_symmem_available() -> bool
+
+    Check if NCCL is available as a backend for symmetric memory.
+    """
+    try:
+        from torch._C._distributed_c10d import _is_nccl_symmem_available
+    except ImportError:
+        # Not all builds have NCCL built.
+        return False
+
+    # Check if NCCL is available as a backend for symmetric memory.
+    return _is_nccl_symmem_available()
 
 
 def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
