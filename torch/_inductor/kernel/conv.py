@@ -821,7 +821,19 @@ def conv_bwd_weight_layout(
     )
 
 
-def call_aten_dw(x_t, go_t, *, w_shape, stride, padding, dilation, groups, out):
+def call_aten_dw(
+    x_t,
+    go_t,
+    *,
+    w_shape,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    out,
+):
     if x_t.is_contiguous(memory_format=torch.channels_last):
         memory_fmt = torch.channels_last
     else:
@@ -839,8 +851,8 @@ def call_aten_dw(x_t, go_t, *, w_shape, stride, padding, dilation, groups, out):
         stride,
         padding,
         dilation,
-        False,
-        [0, 0],
+        transposed,
+        output_padding,
         groups,
         (False, True, False),
     )[1]
@@ -852,7 +864,19 @@ def call_aten_dw(x_t, go_t, *, w_shape, stride, padding, dilation, groups, out):
 ext_kn_aten_dw = ExternKernelChoice(call_aten_dw, None)
 
 
-def call_aten_dx(go_t, w_t, *, x_shape, stride, padding, dilation, groups, out):
+def call_aten_dx(
+    go_t,
+    w_t,
+    *,
+    x_shape,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    out,
+):
     if go_t.is_contiguous(memory_format=torch.channels_last):
         memory_fmt = torch.channels_last
     else:
@@ -870,8 +894,8 @@ def call_aten_dx(go_t, w_t, *, x_shape, stride, padding, dilation, groups, out):
         stride,
         padding,
         dilation,
-        False,
-        [0, 0],
+        transposed,
+        output_padding,
         groups,
         (True, False, False),
     )[0]
@@ -1156,7 +1180,6 @@ def convolution_backward_lowering(
     )
 
     ndim = len(kernel_shape)
-    assert ndim == 2, "This template only handles 2D for now"
 
     stride = pad_listlike(stride, ndim)
     padding = pad_listlike(padding, ndim)
@@ -1166,7 +1189,9 @@ def convolution_backward_lowering(
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
 
-    input.realize(); weight.realize(); grad_output.realize()
+    input.realize()
+    weight.realize()
+    grad_output.realize()
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -1184,20 +1209,22 @@ def convolution_backward_lowering(
 
     dw = None
     if output_mask[1]:
-        choices_dw = []
-
-        args_w = [input, grad_output]
-        layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
+        choices_dw = []        
 
         if V.graph.layout_opt and ndim == 2:
+            V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)
             grad_output = ir.ExternKernel.require_channels_last(grad_output)
+            layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
         else:
+            layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dw.stride)
             )
             input = ir.ExternKernel.require_stride_order(input, req_stride_order)
             grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+
+        args_w = [input, grad_output]
 
         if (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
@@ -1205,8 +1232,6 @@ def convolution_backward_lowering(
             and not transposed
             and is_zeros(output_padding)
         ):
-
-            
             for cfg in conv_configs(
                 sympy_product([input.get_size()[0], *input.get_size()[2:]]),
                 out_chan,
@@ -1248,12 +1273,16 @@ def convolution_backward_lowering(
                         "stride",
                         "padding",
                         "dilation",
+                        "transposed",
+                        "output_padding",
                         "groups",
                     ],
                     w_shape=weight.get_size(),
                     stride=stride,
                     padding=padding,
                     dilation=dilation,
+                    transposed=transposed,
+                    output_padding=output_padding,
                     groups=groups,
                 )
             )
@@ -1270,15 +1299,19 @@ def convolution_backward_lowering(
 
         args_x = [grad_output, weight]
 
-        layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
-
         if V.graph.layout_opt and ndim == 2:
+            V.graph.num_channels_last_conv += 1
             grad_output = ir.ExternKernel.require_channels_last(grad_output)
+            weight = ir.ExternKernel.require_channels_last(weight)
+            layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
         else:
+            layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dx.stride)
             )
             grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+
+        args_x = [grad_output, weight]
 
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
@@ -1323,9 +1356,22 @@ def convolution_backward_lowering(
                 ext_kn_aten_dx.bind(
                     input_nodes=args_x,
                     layout=layout_dx,
-                    ordered_kwargs_for_cpp_kernel=["x_shape", "stride", "padding", "dilation", "groups"],
+                    ordered_kwargs_for_cpp_kernel=[
+                        "x_shape",
+                        "stride",
+                        "padding",
+                        "dilation",
+                        "transposed",
+                        "output_padding",
+                        "groups",
+                    ],
                     x_shape=input.get_size(),
-                    stride=stride, padding=padding, dilation=dilation, groups=groups,
+                    stride=stride,
+                    padding=padding,
+                    dilation=dilation,
+                    transposed=transposed,
+                    output_padding=output_padding,
+                    groups=groups,
                 )
             )
 
@@ -1335,7 +1381,7 @@ def convolution_backward_lowering(
 
     db = None
     if output_mask[2] and bias_sizes is not None:
-        db = grad_output.sum(dim=(0, 2, 3))
+        db = L[aten.sum](grad_output, axis=[0] + list(range(2, ndim + 2)))
 
     return (dx, dw, db)
 
@@ -1347,4 +1393,3 @@ def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
         return constrain_to_fx_strides(fx_node, *args, **kwargs)
 
 add_layout_constraint(aten.convolution_backward, constrain_conv_bwd_to_fx_strides)
-
