@@ -361,22 +361,35 @@ def compute_global_tensor_shape(
     if isinstance(placements[0], Replicate):
         return shape
     elif isinstance(placements[0], Shard):
-        local_shape = torch.tensor(list(shape), device=mesh.device_type)
+
+        @maybe_run_for_local_tensor
+        def _create_local_shape_tensor(shape):
+            return torch.tensor(list(shape), device=mesh.device_type)
+
+        local_shape = _create_local_shape_tensor(shape)
         gathered_shaped_tensors = [
             torch.empty_like(local_shape, device=local_shape.device)
             for _ in range(mesh.size())
         ]
         funcol.all_gather_inplace(gathered_shaped_tensors, local_shape, mesh)
-        sharded_dim_sum = 0
-        shard_dim = placements[0].dim
-        other_dims = [d for d in range(mesh.ndim) if d != shard_dim]
-        for shape_tensor in gathered_shaped_tensors:
-            if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
-                raise RuntimeError(
-                    "Non-sharded dimensions should have identical size across ranks."
-                )
-            shape_tensor_list = shape_tensor.tolist()
-            sharded_dim_sum += shape_tensor_list[shard_dim]
+
+        @maybe_run_for_local_tensor
+        def _validate_and_compute_global_shape(local_shape, gathered_shaped_tensors):
+            sharded_dim_sum = 0
+            shard_dim = placements[0].dim  # type: ignore[union-attr]
+            other_dims = [d for d in range(len(shape)) if d != shard_dim]
+            for shape_tensor in gathered_shaped_tensors:
+                if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
+                    raise RuntimeError(
+                        "Non-sharded dimensions should have identical size across ranks."
+                    )
+                shape_tensor_list = shape_tensor.tolist()
+                sharded_dim_sum += shape_tensor_list[shard_dim]
+            return sharded_dim_sum
+
+        sharded_dim_sum = _validate_and_compute_global_shape(
+            local_shape, gathered_shaped_tensors
+        )
         global_shape = list(shape)
         global_shape[placements[0].dim] = sharded_dim_sum
         return torch.Size(global_shape)
