@@ -13,6 +13,51 @@
 
 namespace torch::autograd {
 
+namespace {
+// Filter function matching the logic used by MemoryViz.js frameFilter
+bool shouldOmitFrame(const std::string& funcname, const std::string& filename) {
+  // Functions to omit - matches MemoryViz.js omitFunctions
+  static const std::vector<std::string> omitFunctions = {
+      "unwind::unwind",
+      "CapturedTraceback::gather",
+      "gather_with_cpp",
+      "_start",
+      "__libc_start_main",
+      "PyEval_",
+      "PyObject_",
+      "PyFunction_",
+  };
+
+  // Filenames to omit - matches MemoryViz.js omitFilenames
+  static const std::vector<std::string> omitFilenames = {
+      "core/boxing",
+      "/Register",
+      "/Redispatch",
+      "pythonrun.c",
+      "Modules/main.c",
+      "Objects/call.c",
+      "Objects/methodobject.c",
+      "pycore_ceval.h",
+      "ceval.c",
+      "cpython/abstract.h",
+  };
+
+  for (const auto& of : omitFunctions) {
+    if (funcname.find(of) != std::string::npos) {
+      return true;
+    }
+  }
+
+  for (const auto& of : omitFilenames) {
+    if (filename.find(of) != std::string::npos) {
+      return true;
+    }
+  }
+
+  return false;
+}
+} // namespace
+
 void PyAnomalyMetadata::store_stack() {
   if (AnomalyMode::should_use_mixed_stack()) {
     // Use CapturedTraceback for mixed Python/C++/TorchScript traces
@@ -45,12 +90,28 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
         captured_traceback_.get()};
     torch::SymbolizedTracebacks symbolized = torch::symbolize(to_symbolize);
 
-    std::ostringstream oss;
+    std::vector<std::string> filtered_frames;
     for (uint64_t frame_idx : symbolized.tracebacks.at(0)) {
       const auto& frame = symbolized.all_frames.at(frame_idx);
-      oss << "  File \"" << frame.filename << "\", line " << frame.lineno
-          << ", in " << frame.funcname << "\n";
+      // Use the same filtering logic as MemoryViz.js frameFilter
+      if (shouldOmitFrame(frame.funcname, frame.filename)) {
+        continue;
+      }
+      std::ostringstream frame_oss;
+      frame_oss << "  File \"" << frame.filename << "\", line " << frame.lineno
+                << ", in " << frame.funcname;
+      filtered_frames.push_back(frame_oss.str());
     }
+
+    // Skip the first 3 frames as they are internal to anomaly mode
+    // (store_stack, Node constructor, etc.)
+    size_t start_idx = std::min(static_cast<size_t>(3), filtered_frames.size());
+
+    std::ostringstream oss;
+    for (size_t i = start_idx; i < filtered_frames.size(); ++i) {
+      oss << filtered_frames[i] << "\n";
+    }
+
     TORCH_WARN(
         "Error detected in ",
         current_node_name,
