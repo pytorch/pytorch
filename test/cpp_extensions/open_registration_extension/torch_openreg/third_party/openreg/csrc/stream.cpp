@@ -1,5 +1,4 @@
 #include <include/openreg.h>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -109,6 +108,9 @@ orError_t orEventDestroy(orEvent_t event) {
 
 orError_t orEventRecord(orEvent_t event, orStream_t stream) {
   if (!event || !stream)
+    return orErrorUnknown;
+
+  if (event->impl->device_index != stream->device_index)
     return orErrorUnknown;
 
   auto event_impl = event->impl;
@@ -267,6 +269,9 @@ orError_t orStreamWaitEvent(orStream_t stream, orEvent_t event, unsigned int) {
   if (!stream || !event)
     return orErrorUnknown;
 
+  if (event->impl->device_index != stream->device_index)
+    return orErrorUnknown;
+
   auto event_impl = event->impl;
   auto wait_task = [event_impl]() {
     std::unique_lock<std::mutex> lock(event_impl->mtx);
@@ -283,9 +288,9 @@ orError_t orDeviceGetStreamPriorityRange(
     return orErrorUnknown;
   }
 
-  // OpenReg have only one priority now.
+  // OpenReg priority levels are 0 and 1
   *leastPriority = 0;
-  *greatestPriority = 0;
+  *greatestPriority = 1;
   return orSuccess;
 }
 
