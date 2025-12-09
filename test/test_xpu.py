@@ -3,6 +3,7 @@
 import collections
 import ctypes
 import gc
+import json
 import random
 import re
 import subprocess
@@ -719,28 +720,24 @@ if __name__ == "__main__":
             gc.collect()
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
-            # make x the second block in a segment
+            # Make x the second block in a segment
             torch.rand(2 * 311, 411, device="xpu")
             unused = torch.rand(310, 410, device="xpu")
             x = torch.rand(311, 411, device="xpu")
 
-            # create a bunch of tensors that all will tile into the
-            # same segment to  exercise the history merging code
-            # 512B is the minimum block size,
-            # so we allocate all the tensors to this size to make sure
-            # they tile evenly
+            # Allocate many 512B tensors to fill a segment and test history merging.
             tensors = [torch.rand(128, device="xpu") for _ in range(1000)]
             while tensors:
                 del tensors[random.randint(0, len(tensors) - 1)]
 
-            # exercise the history trimming code
             torch.rand(128 * 5, device="xpu")
 
-            ss = torch.xpu.memory.memory_snapshot()
+            ss = torch._C._xpu_memorySnapshot(None)
             found_it = False
             for seg in ss["segments"]:
                 self.assertTrue("frames" in seg)
                 for b in seg["blocks"]:
+                    # Look for x by size
                     if b["requested_size"] == 311 * 411 * 4:
                         self.assertTrue("test_xpu" in b["frames"][0]["filename"])
                         found_it = True
@@ -751,7 +748,7 @@ if __name__ == "__main__":
             del x
             gc.collect()
             torch.xpu.empty_cache()
-            ss = torch.xpu.memory.memory_snapshot()
+            ss = torch._C._xpu_memorySnapshot(None)
             self.assertTrue(
                 ss["device_traces"][0][-1]["action"]
                 in ("segment_free", "segment_unmap")
@@ -799,7 +796,7 @@ if __name__ == "__main__":
 
                 thealloc()
                 thefree()
-                ss = torch.xpu.memory_snapshot()
+                ss = json.dumps(torch._C._xpu_memorySnapshot(None))
                 self.assertEqual(("thefree" in ss), (context == "all"))
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
