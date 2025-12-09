@@ -40,7 +40,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
-from torch._dynamo.variables.tensor import SymNodeVariable
+from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -153,14 +153,12 @@ def check_meta_consistency_vt(
 ) -> None:
     from torch._higher_order_ops.utils import check_meta_consistency
 
-    from . import TensorVariable
-
     def _unwrap_var(var):
-        if isinstance(var, TensorVariable):
+        if var.is_tensor():
             return var.proxy.node.meta["example_value"]
         elif isinstance(var, SymNodeVariable):
             return var.sym_num
-        elif isinstance(var, ConstantVariable):
+        elif var.is_python_constant():
             return var.as_python_constant()
         else:
             unimplemented(
@@ -225,11 +223,7 @@ def find_mismatched_vars(var, types, allow_none=False):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
     else:
-
-        def _is_none(var):
-            return var.is_python_constant() and var.as_python_constant() is None
-
-        if not isinstance(var, types) and not (allow_none and _is_none(var)):
+        if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
     return mismatched_vars
 
@@ -313,11 +307,9 @@ def _call_function_with_auto_output_flattening(
     # while still allowing `body_r` to contain arbitrary Python objects.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-            if isinstance(
-                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
-            ):
-                assert isinstance(
-                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            if orig_vt.is_tensor() or isinstance(orig_vt, SymNodeVariable):
+                assert subgraph_vt.is_tensor() or isinstance(
+                    subgraph_vt, SymNodeVariable
                 )
                 orig_vt.proxy = subgraph_vt.proxy
     return body_r
@@ -347,11 +339,9 @@ def _call_function_and_unflatten_output(
     # outer graph uses an original vt, it uses the subgraph output.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(body_r.items, flat_variable.items):
-            if isinstance(
-                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
-            ):
-                assert isinstance(
-                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            if orig_vt.is_tensor() or isinstance(orig_vt, SymNodeVariable):
+                assert subgraph_vt.is_tensor() or isinstance(
+                    subgraph_vt, SymNodeVariable
                 )
                 orig_vt.proxy = subgraph_vt.proxy
 
@@ -419,8 +409,6 @@ def _collect_intermediate_outputs(tx, subtracer, graph_output_vts):
 
 
 def _check_all_tensorvariable(args):
-    from . import TensorVariable
-
     if not all(type(a.realize()) is TensorVariable for a in args):
         unimplemented(
             gb_type="HOP: non torch.Tensor leaf",
@@ -453,8 +441,6 @@ def _call_while_loop(
     stack_output: bool,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
-
-    from . import TensorVariable
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -503,7 +489,8 @@ def _call_while_loop(
         def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
-                isinstance(carry, ConstantVariable) and carry.python_type() is int
+                carry.is_python_constant()
+                and isinstance(carry.as_python_constant(), int)
             ) or isinstance(carry, SymNodeVariable):
                 example_value = _create_unbacked_symint(
                     tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
@@ -514,7 +501,7 @@ def _call_while_loop(
                 return SymNodeVariable.create(tx, proxy, example_value)
             else:
                 # See NOTE [unspecialize constant tensor carry]
-                assert isinstance(carry, TensorVariable)
+                assert carry.is_tensor()
                 cloned_carry = carry.clone()
                 cloned_carry.proxy.node.meta["example_value"].constant = None
                 return cloned_carry
@@ -525,7 +512,7 @@ def _call_while_loop(
                 tx,
                 (
                     carry.call_method(tx, "clone", args=(), kwargs={})
-                    if isinstance(carry, TensorVariable)
+                    if carry.is_tensor()
                     else carry
                 ),
             )
@@ -536,7 +523,7 @@ def _call_while_loop(
                 tx,
                 (
                     carry.call_method(tx, "clone", args=(), kwargs={})
-                    if isinstance(carry, TensorVariable)
+                    if carry.is_tensor()
                     else carry
                 ),
             )
@@ -588,7 +575,7 @@ def _call_while_loop(
     )
     cond_nn_modules = dict(tx.output.nn_modules)
     validate_subgraph_output_types(cond_r)
-    if isinstance(cond_r, TensorVariable):
+    if cond_r.is_tensor():
         cond_r_meta = _extract_tensor_metadata(
             cond_r.proxy.node.meta["example_value"], include_contiguity=False
         )
@@ -601,7 +588,7 @@ def _call_while_loop(
                     *graph_break_hints.USER_ERROR,
                 ],
             )
-    elif isinstance(cond_r, ConstantVariable):
+    elif cond_r.is_python_constant():
         # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
         pred = cond_r.as_python_constant()
         if pred:
@@ -1068,7 +1055,7 @@ def _merge_graph_inputs(
 # The following code re-order the placeholders to
 # O1, O2, O3, O4, O5, X1, X2, X3
 def move_lifted_freevars_phs_to_end(
-    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
+    graph: torch.fx.Graph, lifted_freevars: dict[Any, torch.fx.Node]
 ):
     lifted_ph_set = {child_p.node for child_p in lifted_freevars.values()}
 
@@ -1442,10 +1429,8 @@ def speculate_subgraph_with_auto_output_flattening(
             # We walk the output structure and extract proxyable VTs.
             graph_output_vts = []
 
-            output_types = (variables.TensorVariable, variables.SymNodeVariable)
-
             def visit(vt):
-                if isinstance(vt, output_types):
+                if vt.is_tensor() or isinstance(vt, SymNodeVariable):
                     graph_output_vts.append(vt)
 
             VariableTracker.visit(visit, output)
@@ -1875,7 +1860,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TensorVariable
+        from . import ListVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1914,7 +1899,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
-        if type(pred) not in (ConstantVariable, TensorVariable, SymNodeVariable):
+        if type(pred.realize()) not in (
+            ConstantVariable,
+            TensorVariable,
+            SymNodeVariable,
+        ):
             unimplemented(
                 gb_type="torch.cond: improper predicate",
                 context=str(pred),
@@ -2004,7 +1993,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                if ret.is_python_constant() and not isinstance(
+                    ret.as_python_constant(), int
+                ):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
@@ -2131,7 +2122,8 @@ def validate_subgraph_output_types(output: VariableTracker):
             if (
                 isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
             ) or (
-                isinstance(out, ConstantVariable) and out.python_type() in (int, bool)
+                out.is_python_constant()
+                and isinstance(out.as_python_constant(), (int, bool))
             ):
                 continue
             unimplemented(
@@ -2651,9 +2643,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 def non_single_tensor_return_unsupported(api, ret):
-    from . import TensorVariable
-
-    if not isinstance(ret, TensorVariable):
+    if not ret.is_tensor():
         unimplemented(
             gb_type="non-single Tensor return unsupported",
             context=f"api: {api}, ret: {ret}",
@@ -2747,10 +2737,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
         body_r_vars = body_r.unpack_var_sequence(tx)
-        none_mask = [
-            type(x.realize()) is ConstantVariable and x.as_python_constant() is None
-            for x in body_r_vars
-        ]
+        none_mask = [x.is_constant_none() for x in body_r_vars]
         _check_all_tensorvariable(
             [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )
@@ -3039,7 +3026,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         grad_enabled, fn_var, *rest_args = args
 
-        if not isinstance(grad_enabled, ConstantVariable):
+        if not grad_enabled.is_python_constant():
             unimplemented(
                 gb_type="wrap_with_set_grad_enabled: non-constant grad_enabled",
                 context=str(grad_enabled),
@@ -3127,7 +3114,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
 
         for arg in [device_type, dtype, enabled, cache_enabled]:
-            if not isinstance(arg, ConstantVariable):
+            if not arg.is_python_constant():
                 unimplemented(
                     gb_type="wrap_with_autocast: expected constant arg",
                     context=str(args),
@@ -3745,8 +3732,14 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, score_mod, "score_mod"
         )
         mask_fn = block_mask.items[-1]
-        if isinstance(mask_fn, ConstantVariable):
-            mask_fn = UserFunctionVariable(torch.nn.attention._flex_attention._no_mask)
+        if mask_fn.is_python_constant():
+            mask_callable = mask_fn.as_python_constant()
+            if mask_callable is None:
+                mask_callable = torch.nn.attention.flex_attention.noop_mask
+            mask_fn = UserFunctionVariable(
+                mask_callable,
+                source=mask_fn.source,
+            )
         mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
             tx, query, mask_fn, "mask_fn"
         )
@@ -3940,7 +3933,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             )
 
         def is_strict_for(v: VariableTracker):
-            if isinstance(v, variables.TensorVariable):
+            if v.is_tensor():
                 # we can be more lax for stuff from forward
                 return v.proxy.tracer is not fwd_tracer
             return True
@@ -4031,10 +4024,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             non_differentiable_set = set(ctx.non_differentiable)
             assert isinstance(fwd_out, variables.BaseListVariable)
             for i, x in enumerate(fwd_out.items):
-                if (
-                    isinstance(x, variables.TensorVariable)
-                    and x.as_proxy() in non_differentiable_set
-                ):
+                if x.is_tensor() and x.as_proxy() in non_differentiable_set:
                     non_differentiable_idx.append(i)
 
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
@@ -4087,7 +4077,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # at torch._functorch.autograd_function.AutogradFunctionApply.
         args_tensor_mask = [False] * len(args)
         for i, arg in enumerate(args):
-            if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
+            if arg.is_tensor() or isinstance(arg, SymNodeVariable):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
 
@@ -4498,7 +4488,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             if isinstance(vt, variables.lazy.LazyVariableTracker):
                 vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
-            if not isinstance(vt, variables.TensorVariable):
+            if not vt.is_tensor():
                 assert placements is None
                 continue
 
@@ -4602,7 +4592,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         outs = out.items if isinstance(out, TupleVariable) else [out]
         assert len(outs) == len(out_placements.value)
         for placements, vt in zip(out_placements.value, outs):
-            if not isinstance(vt, variables.TensorVariable):
+            if not vt.is_tensor():
                 assert placements is None
                 continue
 
