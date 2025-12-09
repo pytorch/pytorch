@@ -34,7 +34,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+def wrap_with_tensorbox(node) -> ir.TensorBox:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -609,7 +609,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
     ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+    def output_node(self) -> ir.TensorBox:
         return ir.TensorBox.create(
             ir.CppTemplateBuffer(
                 layout=self.layout,
