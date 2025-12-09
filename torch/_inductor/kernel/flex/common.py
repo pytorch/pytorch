@@ -166,9 +166,7 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(
-    args: list[TensorBox], subgraph: Subgraph
-) -> SubgraphResults:
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
