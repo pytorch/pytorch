@@ -57,6 +57,19 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
+std::optional<c10::MaybeOwned<Tensor>> inline maybe_prepare_matrix_with_layout(const Tensor& t, bool make_row_major_like) {
+  int64_t ld = make_row_major_like ? 0 : 1;
+  IntArrayRef strides = t.strides();
+  IntArrayRef sizes = t.sizes();
+  if (strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld])) {
+    // Means already complies with being row-/col-major-like
+    return c10::MaybeOwned<Tensor>::borrowed(t);
+  } else {
+    // No compliance, it is best to copy bias into result
+    return std::nullopt;
+  }
+}
+
 } // namespace
 
 /**
@@ -97,6 +110,8 @@ struct cublasCommonArgs {
       const Tensor& mat1,
       const Tensor& mat2,
       Tensor& c,
+      const std::optional<Tensor>& self = std::nullopt,
+      const std::optional<Scalar>& beta = std::nullopt,
       const std::optional<Tensor>& scale_a = std::nullopt,
       const std::optional<Tensor>& scale_b = std::nullopt,
       const std::optional<Tensor>& scale_result = std::nullopt,
@@ -149,6 +164,36 @@ struct cublasCommonArgs {
       lda = lda * 2;
       ldb = ldb * 2;
     }
+
+    // Prepare bias if it is different from result and beta != 0
+    if (self.has_value() && !c.is_same(*self) && beta->toComplexDouble() != 0.0) {
+      const bool can_use_bias_in_epilogue = (
+          transpose_result // required so that bias properly broadcasts in epilogue
+          && (!beta.has_value() || beta->toComplexDouble() == 1.0) // no scaling for bias in epilogue
+          && self->is_contiguous()
+          && (self->dim() == 1 || self->squeeze().dim() == 1)
+          && self->sizes().back() == m // should match the rows, hence transpose_result is essential
+      );
+      if (can_use_bias_in_epilogue) { // Case for bias in epilogue
+        bias = c10::MaybeOwned<Tensor>::borrowed(*self);
+      } else { // Case for, potentially, an out-of-place GEMM
+        if (self->dim() == 2) { // 2D bias
+          // Bias should match the result's layout
+          bias = maybe_prepare_matrix_with_layout(*self, transpose_result);
+          if (bias.has_value()) {
+            bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
+          }
+        } else { // 1D bias
+          if (!transpose_result && self->is_contiguous()) {
+            // Bias expanded to a matrix with the leading dimension 0
+            bias = c10::MaybeOwned<Tensor>::owned(
+              (self->unsqueeze(-2)).expand(result->sizes())
+            );
+            bias_ld = static_cast<int64_t>(0);
+          }
+        }
+      }
+    }
   }
 
   // Matrix members
@@ -156,6 +201,10 @@ struct cublasCommonArgs {
   int64_t m, n, k;
   int64_t lda, ldb, result_ld;
   c10::MaybeOwned<Tensor> mata, matb, result;
+
+  // Bias
+  std::optional<int64_t> bias_ld = std::nullopt;
+  std::optional<c10::MaybeOwned<Tensor>> bias = std::nullopt;
 
   // Scale members
   void* scale_mata_ptr = nullptr;

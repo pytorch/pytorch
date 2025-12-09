@@ -146,6 +146,8 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
 
 /*
  * Check whether for the given input we want to enable the Lt interface
+ * NOTE: cuBLAS dispatches to Lt internally, so we can retire this function.
+ * TODO: retire this function
  */
 static bool isInputCompliesAddmmCudaLt(
     Tensor& result,
@@ -253,7 +255,7 @@ static bool isInputCompliesAddmmCudaLt(
 }
 
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, int64_t bias_ld, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -270,6 +272,7 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
   params.c = args.result->data_ptr<scalar_t>();
   params.ldc = args.result_ld;
   params.bias = bias;
+  params.ldbias = bias_ld;
   params.activation = activation;
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
@@ -311,9 +314,18 @@ bool launchGemmAndBiasCublasLt(
   if (tuning_ctx->IsTunableOpEnabled()) {
     // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
+      args, alpha, self_ptr, -1, activation_to_gemm_and_blas_arg(activation)
     );
     return true;
+  }
+
+  if (args.bias.has_value()) {
+    std::cout << "HERE!";
+    if (args.bias_ld.has_value()) {
+      std::cout << " bias ld: " << *args.bias_ld << std::endl;
+    } else {
+      self_ptr = args.bias.value()->const_data_ptr<scalar_t>();
+    }
   }
 
   return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
@@ -327,9 +339,10 @@ bool launchGemmAndBiasCublasLt(
     args.lda,
     args.matb->const_data_ptr<scalar_t>(),
     args.ldb,
-    self_ptr,
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
+    self_ptr,
+    args.bias_ld,
     activation_to_gemm_and_blas_arg(activation)
   );
 }
@@ -442,7 +455,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     );
   }
 
-  cublasCommonArgs args(mat1, mat2, result);
+  cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
   // The Lt path
