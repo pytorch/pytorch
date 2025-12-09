@@ -3339,35 +3339,26 @@ def _persistent_reduction_configs(
     # TODO(jansel): we should be able to improve these heuristics
     elif not max_autotune_enabled:  # Do not filter configs when tuning
         if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            if (
-                rnumel > 1024
-                or xnumel // 8 < 128
-                or inductor_meta.get("RSPLIT_SIZE")
-                or torch.xpu.is_available()
-            ):
+            X_BLOCK_BASE = 8
+            cuda_available = torch.cuda.is_available()
+            insufficient_xblock = xnumel // X_BLOCK_BASE < 128
+            mix_order_reduction = inductor_meta.get("RSPLIT_SIZE") is not None
+            high_load_store = (
+                inductor_meta.get("num_load", 0) + inductor_meta.get("num_store", 0)
+                >= 5
+            )
+            cuda_needs_default = cuda_available and (
+                insufficient_xblock or mix_order_reduction
+            )
+            if rnumel > 1024 or cuda_needs_default:
                 configs = configs[:1]
-                # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
-                # We apply different configurations from #168335.
-                # We currently let cost model in Triton to decide whether to use shared memory.
-                if torch.xpu.is_available() and rnumel <= 1024:
-                    loads_and_stores = inductor_meta.get(
-                        "num_load", 0
-                    ) + inductor_meta.get("num_store", 0)
-                    x_block = 8
-                    if xnumel // x_block < 128 or loads_and_stores >= 5:
-                        x_block = 1
-                    configs = [
-                        triton_config_reduction(
-                            size_hints,
-                            x_block,
-                            rnumel,
-                            register_intensive=True,
-                        )
-                    ]
             else:
-                num_warps, min_num_warps = 1, 1
-                x_block = min(1024 // rnumel, 8)
-
+                num_warps, min_num_warps, reduction_hint = None, None, None
+                x_block = 1 if insufficient_xblock or high_load_store else X_BLOCK_BASE
+                if cuda_available:
+                    num_warps, min_num_warps = 1, 1
+                    reduction_hint = ReductionHint.INNER
+                    x_block = min(1024 // rnumel, X_BLOCK_BASE)
                 configs = [
                     triton_config_reduction(
                         size_hints,
