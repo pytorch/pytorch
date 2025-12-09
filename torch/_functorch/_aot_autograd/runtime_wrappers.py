@@ -13,7 +13,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import os
 import pprint
 import warnings
 from collections.abc import Callable
@@ -41,6 +40,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.utils import is_builtin
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -255,22 +255,24 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
-# Custom ops that intentionally mutate inputs (e.g., in-place fusion ops)
-# and should skip the aliasing constraint check
-_CUSTOM_OP_ALIASING_ALLOWLIST = [
-    torch.ops.mkldnn._convolution_pointwise_.binary,
-]
-
-
-def _is_ci() -> bool:
-    """Check if we are running in CI environment."""
-    return bool(os.environ.get("CI"))
+def _schema_allows_aliasing(func) -> bool:
+    schema = func._schema
+    # View ops have non-write aliases declared in arguments
+    if schema._is_view_op():
+        return True
+    # Handles cases like mkldnn::_convolution_pointwise_.binary
+    # where the schema is Tensor(a!) other -> Tensor(a!) Y
+    for ret in schema.returns:
+        if ret.alias_info is not None:
+            return True
+    return False
 
 
 def _check_custom_op_aliasing(name, args, kwargs, result):
     """
     Check if custom op outputs alias inputs or other outputs.
-    In CI, raises RuntimeError. For users, emits a warning.
+    If config.check_custom_op_mode is True, raises RuntimeError.
+    Otherwise, emits a warning.
     """
     try:
         torch._library.utils._c_check_aliasing_constraint(
@@ -280,7 +282,7 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
             result,
         )
     except RuntimeError as e:
-        if _is_ci():
+        if config.check_custom_op_mode:
             raise
         else:
             warnings.warn(str(e), UserWarning, stacklevel=3)
@@ -289,7 +291,8 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
 class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
     """
     Checks if inp/out of custom ops alias each other.
-    In CI, violations raise errors. For users, violations emit warnings.
+    If config.check_custom_op_mode is True, violations raise errors.
+    Otherwise, violations emit warnings.
     """
 
     def __init__(self):
@@ -309,18 +312,21 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             return NotImplemented
 
         res = func(*args, **kwargs)
-        # Only check aliasing for custom ops (non-aten/prim/_c10d_functional)
-        # Skip ops in allowlist that intentionally mutate inputs for fusion
-        if not isinstance(
-            func, torch._ops.HigherOrderOperator
-        ) and func.namespace not in ["aten", "prim", "prims", "_c10d_functional"]:
-            if func not in _CUSTOM_OP_ALIASING_ALLOWLIST:
-                _check_custom_op_aliasing(
-                    func.name(),
-                    args,
-                    kwargs,
-                    res,
-                )
+        # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional)
+        # that claim to be functional
+        # Skip ops whose schema declares aliasing is allowed
+        if (
+            not isinstance(func, torch._ops.HigherOrderOperator)
+            and not is_builtin(func)
+            and func.namespace != "_c10d_functional"
+            and not _schema_allows_aliasing(func)
+        ):
+            _check_custom_op_aliasing(
+                func.name(),
+                args,
+                kwargs,
+                res,
+            )
         return res
 
     @classmethod

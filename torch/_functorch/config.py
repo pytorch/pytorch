@@ -77,8 +77,7 @@ autograd_cache_normalize_inputs = not is_fbcode()
 
 # Enable debug mode at first invocation to check if custom ops are valid.
 # When enabled, this checks that custom operators don't violate aliasing constraints.
-# In CI, violations will raise errors; for users, violations will issue warnings.
-check_custom_op_mode = True
+check_custom_op_mode = bool(os.getenv("CI"))
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
