@@ -31,7 +31,6 @@ from ...ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
-    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,

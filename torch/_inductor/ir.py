@@ -976,9 +976,7 @@ class Loops(IRNode):
         return self.ranges
 
     @classmethod
-    def create(
-        cls, *args: Any, **kwargs: Any
-    ) -> TensorBox:
+    def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         r = cls(*args, **kwargs)
@@ -8493,12 +8491,10 @@ class MutableBox(IRNode):
 class TensorBox(MutableBox):
     @overload
     @staticmethod
-    def create(data: ShapeAsConstantBuffer) -> ShapeAsConstantBuffer:
-        ...
+    def create(data: ShapeAsConstantBuffer) -> ShapeAsConstantBuffer: ...
     @overload
     @staticmethod
-    def create(data: IRNode) -> TensorBox:
-        ...
+    def create(data: IRNode) -> TensorBox: ...
     @staticmethod
     def create(data: IRNode):
         if isinstance(data, ShapeAsConstantBuffer):
@@ -8801,7 +8797,7 @@ class Conditional(ExternKernel):
         true_fn: Subgraph,
         false_fn: Subgraph,
         operands: list[TensorBox],
-    ) -> Sequence[IRNode]:
+    ) -> List[MultiOutput]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
         # pyrefly: ignore [bad-assignment]
         predicate = cls.realize_input(predicate)

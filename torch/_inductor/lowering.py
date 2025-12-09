@@ -72,7 +72,6 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,

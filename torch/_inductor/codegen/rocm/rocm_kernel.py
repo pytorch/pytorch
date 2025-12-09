@@ -13,7 +13,6 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...virtualized import V
