@@ -7367,7 +7367,9 @@ class TestMPS(TestCaseMPS):
     # Test inverse
     def test_inverse(self):
         def helper(n, atol=1e-5, rtol=1e-6):
-            cpu_input = torch.randn(n, n, device='cpu')
+            # Generate well-conditioned invertible matrix by adding scaled identity
+            # This ensures the matrix is not singular
+            cpu_input = torch.randn(n, n, device='cpu') + torch.eye(n, device='cpu') * 10
             mps_input = cpu_input.to('mps')
 
             cpu_result = torch.linalg.inv(cpu_input)
