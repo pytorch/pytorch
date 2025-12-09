@@ -232,7 +232,10 @@ def main() -> None:
     parser.add_argument(
         "--std",
         default=None,
-        help="C++ standard to use for compilation (e.g., c++17, c++20). If not specified, uses the standard from compile_commands.json.",
+        help=(
+            "C++ standard to use for compilation (e.g., c++17, c++20). "
+            "If not specified, uses the standard from compile_commands.json."
+        ),
     )
     parser.add_argument(
         "--verbose",
