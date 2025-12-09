@@ -257,16 +257,11 @@ class CuteDSLTemplateKernel(Kernel):
         When inputs are ReinterpretViews of the same underlying buffer (e.g., Q/K/V
         from fused QKV projection), we generate separate arguments for each input
         even though they share the same underlying buffer.
-
-        This method tracks argument info needed by both the signature hook and call_kernel.
-        ReinterpretView codegen is deferred to call_kernel since it requires graph context.
         """
         renames = IndentedBuffer(initial_indent=1)
 
         # Track template input args - each input gets its own arg even if buffers are shared
-        # Stores (arg_name, input_node) - ReinterpretView handling deferred to call_kernel
         self._template_input_args: list[tuple[str, Buffer]] = []
-        # Centralized set of input arg names for filtering python_argdefs
         self._seen_input_args: OrderedSet[str] = OrderedSet()
 
         for i, input_node in enumerate(self.input_nodes):
@@ -286,8 +281,7 @@ class CuteDSLTemplateKernel(Kernel):
             self.args.output(self.output_node.get_name())
 
         def hook():
-            # Generate signature with all template input args (not deduplicated)
-            # plus any additional args from python_argdefs (sizevars, etc.)
+            # Generate signature with template input args plus additional args (output, sizevars)
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
 
@@ -365,7 +359,6 @@ class CuteDSLTemplateKernel(Kernel):
 
         For inputs that are ReinterpretViews (e.g., Q/K/V slices from fused QKV),
         we generate reinterpret_tensor() calls to properly handle the views.
-        Uses _seen_input_args from def_kernel to filter python_argdefs.
         """
         wrapper = V.graph.wrapper_code
 
@@ -373,7 +366,6 @@ class CuteDSLTemplateKernel(Kernel):
         call_args = []
         arg_types = []
 
-        # Add template input args (one per input_node, handling ReinterpretViews)
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
             if reinterpret_view is not None:
@@ -383,7 +375,6 @@ class CuteDSLTemplateKernel(Kernel):
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         # Add additional args from python_argdefs (output, sizevars, etc.)
-        # using the centralized _seen_input_args set from def_kernel
         orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
