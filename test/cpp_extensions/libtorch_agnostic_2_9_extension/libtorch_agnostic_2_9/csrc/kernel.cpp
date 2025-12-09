@@ -478,3 +478,21 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_optional_tensor_ref", TORCH_BOX(&my_optional_tensor_ref));
 }
+
+int64_t my_storage_offset(Tensor t) {
+  return t.storage_offset();
+}
+
+int64_t my_element_size(Tensor t) {
+  return static_cast<int64_t>(t.element_size());
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("my_storage_offset(Tensor t) -> int");
+  m.def("my_element_size(Tensor t) -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
+  m.impl("my_storage_offset", TORCH_BOX(&my_storage_offset));
+  m.impl("my_element_size", TORCH_BOX(&my_element_size));
+}
