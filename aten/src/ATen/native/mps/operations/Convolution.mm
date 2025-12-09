@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/mps/MPSGraphTahoeOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
