@@ -770,7 +770,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-            log.info("aotautograd_cache %s %s", cache_state, cache_info.get("cache_bypass_reason"))
+            log.info("aotautograd_cache %s %s", cache_state, json.dumps(cache_info))
 
             return compiled_fn
 
