@@ -3376,6 +3376,8 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
+    "torch.nn.utils._named_member_accessor",
+    "torch.nn.utils.stateless",
     "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
