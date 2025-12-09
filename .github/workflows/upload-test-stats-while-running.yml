@@ -24,9 +24,6 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: Login to ECR
-        uses: ./.github/actions/ecr-login
-
       - name: Install requirements
         run: |
           python3 -m pip install requests==2.32.2 boto3==1.35.42
