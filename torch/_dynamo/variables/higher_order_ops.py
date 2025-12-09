@@ -63,6 +63,7 @@ from .lists import ListVariable, TupleVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch.multiprocessing.reductions import StorageWeakRef
 
 
 log = logging.getLogger(__name__)
@@ -393,12 +394,12 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     )
 
 
-def get_tensor_storages(tensor) -> set:
+def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
     """
     Get storage references from a tensor.
 
-    Handles regular tensors, traceable wrapper subclasses, and sparse tensors.
-    Returns a set of StorageWeakRef objects.
+    Handles regular tensors. Raises NotImplementedError for sparse tensors
+    and traceable wrapper subclasses.
 
     Args:
         tensor: The tensor to extract storages from
@@ -406,24 +407,21 @@ def get_tensor_storages(tensor) -> set:
     Returns:
         Set of StorageWeakRef objects for the tensor's storage(s)
     """
-    from torch._subclasses.fake_tensor import get_plain_tensors
     from torch.multiprocessing.reductions import StorageWeakRef
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-    storages: set = set()
+    storages: set[StorageWeakRef] = set()
 
     if not isinstance(tensor, torch.Tensor):
         return storages
 
     if tensor.is_sparse or tensor.is_sparse_csr:
-        return storages
+        raise NotImplementedError("get_tensor_storages does not support sparse tensors")
 
     if is_traceable_wrapper_subclass(tensor):
-        inner_tensors = []
-        get_plain_tensors(tensor, inner_tensors)
-        for inner in inner_tensors:
-            if isinstance(inner, torch.Tensor):
-                storages.add(StorageWeakRef(inner._typed_storage()))
+        raise NotImplementedError(
+            "get_tensor_storages does not support traceable wrapper subclasses"
+        )
     else:
         storages.add(StorageWeakRef(tensor._typed_storage()))
 
@@ -443,9 +441,6 @@ class StorageAliasingTracker:
         self.excluded_storages: set = set()
 
     def _collect_storages_from_tensor(self, example_value):
-        """
-        Collect storage references from a tensor and add them to excluded storages.
-        """
         self.excluded_storages.update(get_tensor_storages(example_value))
 
     def collect_from_inputs(self, tx):
@@ -472,9 +467,18 @@ class StorageAliasingTracker:
 
     def check_and_track(self, proxy_node) -> bool:
         """
-        Check if a proxy node can be added without aliasing, and track it if so.
+        Check if a tensor can be added as a subgraph output without causing aliasing issues.
 
-        Returns True if the node can be safely added (no aliasing), False otherwise.
+        Given a proxy node, extracts its example tensor value and checks if its storage
+        aliases with any previously tracked storages (from inputs or other outputs).
+        If there's no aliasing conflict, the tensor's storage is added to the tracked set.
+
+        Args:
+            proxy_node: An FX proxy node whose example_value is the tensor to check.
+
+        Returns:
+            True if the tensor doesn't alias with tracked storages (safe to add as output),
+            False if it aliases (should be filtered out).
         """
         from torch._higher_order_ops.utils import _collect_fake_inputs
         from torch.multiprocessing.reductions import StorageWeakRef
@@ -1400,6 +1404,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
     # Controls whether to filter aliased intermediates when collecting extra outputs.
+    # This is only relevant when allow_side_effects=True.
     # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
     # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
     #
