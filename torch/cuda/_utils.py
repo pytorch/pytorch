@@ -12,8 +12,8 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     try:
         import rocm_sdk
 
-        lib = rocm_sdk._ALL_CDLLS["amdhip64"]
-    except (ImportError, KeyError):
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("amdhip64")[0]))
+    except (ImportError, IndexError):
         if sys.platform == "win32":
             lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
         else:  # Unix-based systems
@@ -59,8 +59,8 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     try:
         import rocm_sdk
 
-        lib = rocm_sdk._ALL_CDLLS["hiprtc"]
-    except (ImportError, KeyError):
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("hiprtc")[0]))
+    except (ImportError, IndexError):
         if sys.platform == "win32":
             version_str = "".join(
                 ["0", torch.version.hip[0], "0", torch.version.hip[2]]
