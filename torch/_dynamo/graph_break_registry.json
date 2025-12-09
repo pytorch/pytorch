@@ -2938,6 +2938,17 @@
       ]
     }
   ],
+  "GB3106": [
+    {
+      "Gb_type": "Invalid set_subgraph_inputs and sub_kwargs settings",
+      "Context": "set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
+      "Explanation": "`set_subgraph_inputs` must be 'automatic/automatic_with_input_arg_ordering' with sub_kwargs.",
+      "Hints": [
+        "Use `set_subgraph_inputs='automatic' or 'automatic_with_input_arg_ordering'` when passing `sub_kwargs`.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
   "GB0288": [
     {
       "Gb_type": "Can't extract message from torch._check()",

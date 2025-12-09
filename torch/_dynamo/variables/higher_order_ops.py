@@ -846,11 +846,18 @@ def validate_args_and_maybe_create_graph_inputs(
         for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
+                args.append(a)
+                continue
+            elif set_subgraph_inputs == "automatic_with_input_arg_ordering":
                 # Add the tensor input to the subgraph right away. This way, the
                 # tensor inputs are in the same order as that of original
                 # function. This improve readability, and can also simplify the
                 # future implementation of certain hops like invoke_subgraph and
                 # autograd.Function.
+                # This is the default for speculate_subgraph_with_auto_output_flattening.
+                # TODO - Consider unifying automatic and
+                # automatic_with_input_arg_ordering. Currently, the CI fails a
+                # lot with control flow hops if we try to switch.
                 if isinstance(a, variables.TensorVariable):
                     tracer.maybe_lift_tracked_freevar_to_input(a.proxy)
                 args.append(a)
@@ -1234,13 +1241,14 @@ def get_hop_args(
         sub_args_names,
     )
 
-    validate_args_and_maybe_create_graph_inputs(
-        sub_kwargs.values(),
-        subtracer,
-        tx,
-        set_subgraph_inputs="automatic",
-        description=description,
-    )
+    if sub_kwargs:
+        validate_args_and_maybe_create_graph_inputs(
+            sub_kwargs.values(),
+            subtracer,
+            tx,
+            set_subgraph_inputs=set_subgraph_inputs,
+            description=description,
+        )
     return args
 
 
@@ -1261,8 +1269,12 @@ def speculate_subgraph_with_auto_output_flattening(
     enable_grad: Optional[bool] = None,
     # TODO - We can probably just make everyone use automatic for wrap_semantics
     set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
-    ] = "automatic",
+        "automatic",
+        "semi_automatic",
+        "flatten_manual",
+        "manual",
+        "automatic_with_input_arg_ordering",
+    ] = "automatic_with_input_arg_ordering",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -1352,19 +1364,23 @@ def speculate_subgraph_with_auto_output_flattening(
 
     assert set_subgraph_inputs in {
         "automatic",
+        "automatic_with_input_arg_ordering",
         "semi_automatic",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
-    if sub_kwargs and set_subgraph_inputs != "automatic":
+    if sub_kwargs and set_subgraph_inputs not in (
+        "automatic",
+        "automatic_with_input_arg_ordering",
+    ):
         unimplemented(
-            gb_type="invalid set_subgraph_inputs and sub_kwargs settings",
+            gb_type="Invalid set_subgraph_inputs and sub_kwargs settings",
             context=f"set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
-            explanation="`sub_kwargs` cannot be used when `set_subgraph_inputs` is not set to 'automatic'.",
+            explanation="`set_subgraph_inputs` must be 'automatic/automatic_with_input_arg_ordering' with sub_kwargs.",
             hints=[
-                "Use `set_subgraph_inputs='automatic'` when passing `sub_kwargs`.",
+                "Use `set_subgraph_inputs='automatic' or 'automatic_with_input_arg_ordering'` when passing `sub_kwargs`.",
                 *graph_break_hints.USER_ERROR,
             ],
         )
