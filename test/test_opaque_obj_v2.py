@@ -1,5 +1,6 @@
 # Owner(s): ["module: custom-operators"]
 
+import gc
 import random
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -16,7 +17,13 @@ from torch._functorch.aot_autograd import (
 )
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
+from torch._library.opaque_object import (
+    _OPAQUE_TYPES,
+    get_opaque_type_name,
+    is_opaque_type,
+    is_opaque_value_type,
+    register_opaque_type,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -118,13 +125,13 @@ class NestedValueSize:
         return f"NestedValueSize(size={self.size!r}, config={self.config!r})"
 
 
-register_opaque_type(OpaqueQueue)
-register_opaque_type(RNGState)
-register_opaque_type(Counter)
-register_opaque_type(AddModule)
-register_opaque_type(ValueConfig, value_type=True)
-register_opaque_type(SizeStore, value_type=True)
-register_opaque_type(NestedValueSize, value_type=True)
+register_opaque_type(OpaqueQueue, typ="reference")
+register_opaque_type(RNGState, typ="reference")
+register_opaque_type(Counter, typ="reference")
+register_opaque_type(AddModule, typ="reference")
+register_opaque_type(ValueConfig, typ="value")
+register_opaque_type(SizeStore, typ="value")
+register_opaque_type(NestedValueSize, typ="value")
 
 
 class TestOpaqueObject(TestCase):
@@ -544,7 +551,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         torch.compile(foo)(*inp)
         self.assertEqual(len(dynamo_counters["graph_break"]), 1)
         self.assertTrue(
-            "Opaque object were created in the middle of the program"
+            "An opaque object was created in the middle of the program"
             in next(iter(dynamo_counters["graph_break"].keys())),
         )
 
@@ -632,6 +639,43 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
+    def test_invalid_value_type(self):
+        class NoEq:
+            def __init__(self, x):
+                self.x = x
+
+        with self.assertRaisesRegex(
+            TypeError, "expected to have a non-default `__eq__`"
+        ):
+            register_opaque_type(NoEq, typ="value")
+
+        class NoHash:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+        with self.assertRaisesRegex(
+            TypeError, "expected to have a non-default `__hash__`"
+        ):
+            register_opaque_type(NoHash, typ="value")
+
+        class NoRepr:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+            def __hash__(self):
+                return hash(self.x)
+
+        with self.assertRaisesRegex(
+            TypeError, "expected to have a non-default `__repr__`"
+        ):
+            register_opaque_type(NoRepr, typ="value")
+
     def test_invalid_schema(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -669,7 +713,7 @@ def forward(self, primals, tangents):
     def test_invalid_opaque_obj_types(self):
         for t in [str, bool, int, float, torch.Tensor]:
             with self.assertRaisesRegex(ValueError, "Unable to register built-in type"):
-                register_opaque_type(t)
+                register_opaque_type(t, typ="reference")
 
         @dataclass
         class Bad1:
@@ -677,16 +721,20 @@ def forward(self, primals, tangents):
 
         pytree.register_dataclass(Bad1)
         with self.assertRaisesRegex(
-            ValueError, "cannot be registered as an opaque object"
+            ValueError,
+            "cannot be registered as an opaque object as it has been registered as a pytree.",
         ):
-            register_opaque_type(Bad1)
+            register_opaque_type(Bad1, typ="reference")
 
         @dataclass
         class Bad2:
             x: int
 
-        register_opaque_type(Bad2)
-        with self.assertRaisesRegex(ValueError, "cannot be registered as a pytree"):
+        register_opaque_type(Bad2, typ="reference")
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot be registered as a pytree as it has been registered as an opaque object.",
+        ):
             pytree.register_dataclass(Bad2)
 
     def test_value_type_recompile(self):
@@ -798,10 +846,7 @@ def forward(self, arg0_1):
             size.increment_size()
             return t2 + size.size
 
-        x = torch.randn(
-            3,
-        )
-
+        x = torch.randn(3)
         backend = AotEagerAndRecordGraphs()
         opt_f = torch.compile(foo, fullgraph=True, backend=backend)
         res = opt_f(x)
@@ -816,6 +861,39 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(cat, 3);  cat = None
     return (add,)""",  # noqa: B950
         )
+
+    def test_weakref_cleanup(self):
+        def register_tmp_class():
+            class TmpClass:
+                def __init__(self, value):
+                    self.value = value
+
+                def __eq__(self, other):
+                    return self.value == other.value
+
+                def __hash__(self):
+                    return hash(self.value)
+
+                def __repr__(self):
+                    return f"TmpClass(value={self.value!r})"
+
+            register_opaque_type(TmpClass, typ="value")
+
+            self.assertTrue(is_opaque_type(TmpClass))
+            self.assertTrue(is_opaque_value_type(TmpClass))
+            self.assertIn(TmpClass, _OPAQUE_TYPES)
+
+            return get_opaque_type_name(TmpClass)
+
+        # registers TmpClass as opaque
+        tmp_class_name = register_tmp_class()
+
+        # garbage collect TmpClass
+        gc.collect()
+
+        # Verify that the class is no longer registered
+        for opaque_info in _OPAQUE_TYPES.values():
+            self.assertFalse(tmp_class_name in opaque_info.class_name)
 
     def test_value_type_nested(self):
         def foo(x, config):

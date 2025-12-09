@@ -99,7 +99,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             skip_code(self.value.__init__.__code__)
 
             unimplemented(
-                gb_type="Opaque object were created in the middle of the program.",
+                gb_type="An opaque object was created in the middle of the program.",
                 context=f"Opaque object type: {self.value}.",
                 explanation=(
                     "Opaque objects cannot be created inside the torch.compile region. "
