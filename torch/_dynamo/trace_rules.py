@@ -3660,7 +3660,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
 # structure does not match the module structure
 # and we want to skip the functions in optim/lr_scheduler.py
 # this has precedence over all other rules in check_file
-FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
+FORCE_SKIP_FILES = {}  # {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 
 def _recompile_re() -> None:
