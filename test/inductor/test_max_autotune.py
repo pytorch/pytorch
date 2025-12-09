@@ -111,7 +111,10 @@ class FailChoiceCaller(ChoiceCaller):
 class TestMaxAutotune(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
+    @parametrize("async_pipelined_autotune", (False, True))
+    def test_max_autotune_mm_plus_mm_zero_size_input(
+        self, dynamic, search_space, async_pipelined_autotune
+    ):
         """
         Make sure autotuning mm_plus_mm with zero-size input works without crashes.
         """
@@ -2543,6 +2546,40 @@ class TestMaxAutotune(TestCase):
             c_f = torch.compile(f, mode="max-autotune-no-cudagraphs")
             _, code_out = run_and_get_code(c_f, *args)
             FileCheck().check(output_code_padding_check).run(code_out[0])
+
+
+class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
+    # Tests that are not compatible with async pipelined autotuning
+    SKIP_TESTS = {
+        "test_max_autotune_decompose_k": "Subgraphs not supported with async pipelining",
+        "test_cat_max_autotune_triton": "Fusions not supported with async pipelining",
+        "test_linear_and_cel": "Fusions not supported with async pipelining",
+        "test_inf_timing": "Logs not consistent with async pipelined autotuning",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._async_config = config.patch(
+            {
+                "pipeline_max_autotune_gemm": True,
+                "epilogue_fusion": False,
+                "prologue_fusion": False,
+            }
+        )
+        cls._async_config.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._async_config.__exit__(None, None, None)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        test_name = self._testMethodName
+        for skip_test_name in self.SKIP_TESTS:
+            if skip_test_name in test_name:
+                self.skipTest(self.SKIP_TESTS[skip_test_name])
 
 
 class TestMaxAutotunePrecompile(TestCase):

@@ -466,6 +466,11 @@ distributed_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
 )
 
+# Pipeline autotuning for max-autotune-gemm. Overlap lowering and benchmarking on GPU
+pipeline_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 

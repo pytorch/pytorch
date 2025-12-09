@@ -2819,6 +2819,9 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        if config.max_autotune_gemm or config.max_autotune:
+            torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
+
         if config.combo_kernels:
             with dynamo_timed(
                 "Scheduler.create_combo_kernel_nodes",
