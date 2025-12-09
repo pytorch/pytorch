@@ -14,7 +14,7 @@ import torch
 from torch.fx import GraphModule
 from torch.utils._sympy.functions import Identity
 
-from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...ir import FixedLayout, Subgraph, TensorBox
 from ...lowering import empty_strided
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
@@ -256,7 +256,7 @@ def create_flex_flash_attention_kernel(
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
+) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
@@ -411,7 +411,7 @@ def create_flex_flash_attention_backward_kernel(
     # kv_indices: TensorBox | None,
     # full_kv_num_blocks: TensorBox | None,
     # full_kv_indices: TensorBox | None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
+) -> tuple[TensorBox, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
