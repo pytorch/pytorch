@@ -82,20 +82,14 @@ _FXOutput = _Base | Sequence["_FXOutput"]
 
 
 class FlatApply(HigherOrderOperator):
-    # If True (default) then the output is flattened. If False then the output
-    # is returned verbatim (and must be valid graphable output).
-    flatten_output: bool = True
-
-    def __init__(self, *, flatten_output: bool = True) -> None:
+    def __init__(self) -> None:
         super().__init__("flat_apply")
-        self.out_spec: pytree.TreeSpec | None = None
-        self.flatten_output = flatten_output
 
     def __call__(
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: tuple[Unpack[_Ts]],
+        *flat_args: Unpack[_Ts],
         # If True then the output is flattened. If False (the default) then the
         # output is returned verbatim (and must be valid graphable output).
         flatten_output: bool = False,
@@ -112,7 +106,7 @@ class FlatApply(HigherOrderOperator):
         >>> def flat_apply_impl(func, in_spec, *flat_args):
         >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         >>>     output = func(*args, **kwargs)
-        >>>     flat_output, self.out_spec = pytree.tree_flatten(output)
+        >>>     flat_output, _ = pytree.tree_flatten(output)
         >>>     return flat_output
 
         flat_apply supports the following two cases:
@@ -122,38 +116,16 @@ class FlatApply(HigherOrderOperator):
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
 
-        Output is handled in a similar, but reverse, fashion with the output
-        spec stored on the FlatApply object. Note that wrapped functions must
+        Output is handled in a similar, but reverse, fashion by tree_flattening
+        the output and trace the unflattening. Note that wrapped functions must
         return the same pytree structure every time they're called.
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
 
-        if isinstance(func, pytree.TreeSpec):
-            # assume _ConstantFunction
-            func = pytree._retrieve_constant(func)
-            assert isinstance(func, _ConstantFunction)
-
         # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
-        args, kwargs = from_graphable(flat_args, in_spec)
-        out = func(*args, **kwargs)
-
-        if flatten_output:
-            out, out_spec = to_graphable(out)
-
-            if self.out_spec is None:
-                self.out_spec = out_spec
-            elif self.out_spec != out_spec:
-                raise RuntimeError(
-                    "Invalid function passed to FlatApply. The called function returned a value with a different "
-                    "pytree shape on a subsequent call."
-                )
-
-        assert _is_valid_output(out)
+        out, _ = impl(func, in_spec, flatten_output, flat_args)
         return out
-
-
-flat_apply = FlatApply()
 
 
 @overload
@@ -168,3 +140,59 @@ def _is_valid_output(x: object) -> bool:
     if isinstance(x, (tuple, list)):
         return all(map(_is_valid_output, x))
     return is_graphable(x)
+
+
+# Common functionality for FlatApply and FlatApplyCaptureSpec
+def impl(
+    func: _OpTypes | pytree.TreeSpec,
+    in_spec: pytree.TreeSpec,
+    flatten_output: bool,
+    flat_args: tuple[Unpack[_Ts]],
+) -> tuple[object, pytree.TreeSpec | None]:
+    if isinstance(func, pytree.TreeSpec):
+        # assume _ConstantFunction
+        func = pytree._retrieve_constant(func)
+        assert isinstance(func, _ConstantFunction)
+
+    # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+    args, kwargs = from_graphable(flat_args, in_spec)
+    out = func(*args, **kwargs)
+
+    # All outputs must either be graphable or lists/tuples of graphables. If
+    # flatten_output is specified then we also allow PyTree flattenable outputs
+    # as well (and the leaves must be graphable).
+    #
+    out_spec = None
+    if flatten_output:
+        out, out_spec = to_graphable(out)
+
+    assert _is_valid_output(out)
+    return out, out_spec
+
+
+flat_apply = FlatApply()
+
+
+# FlatApplyCaptureSpec is used with FlatApply to capture the TreeSpec when
+# running the wrapped function. The TreeSpec is captured in self.out_spec. Other
+# than that it behaves the same as FlatApply.
+class FlatApplyCaptureSpec(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("flat_apply")
+        self.out_spec: pytree.TreeSpec | None = None
+
+    def __call__(
+        self,
+        func: _OpTypes | pytree.TreeSpec,
+        in_spec: pytree.TreeSpec,
+        *flat_args: tuple[Unpack[_Ts]],
+        flatten_output: bool = False,
+        **_unused: object,
+    ) -> object:
+        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
+        assert len(_unused) == 0
+
+        out, self.out_spec = impl(
+            func, in_spec, flatten_output, flat_args
+        )
+        return out

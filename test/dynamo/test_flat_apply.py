@@ -163,6 +163,7 @@ class FlatApplyTests(PytreeRegisteringTestCase):
 
         @torch._dynamo.nonstrict_trace
         def trace_point_tensor(pt):
+            # import fbvscode ; fbvscode.set_trace()
             torch._dynamo.graph_break()
             return pt.t + trace_point(pt.p)
 
