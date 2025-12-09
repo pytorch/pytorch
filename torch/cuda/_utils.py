@@ -9,6 +9,9 @@ from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_hip_runtime_library() -> ctypes.CDLL:
+    # If ROCm python packages are available, query the OS-independent absolute
+    # path to the library provided by those packages, including any version suffix.
+    # See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md#dynamic-library-resolution
     try:
         import rocm_sdk
 
