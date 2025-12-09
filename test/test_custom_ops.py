@@ -2979,6 +2979,14 @@ class TestCustomOpAPI(TestCase):
                 continue
             self.assertGreater(after, prev)
 
+    def test_mutated_no_warning(self):
+        def f():
+            @torch.library.custom_op("mylib::func", mutates_args=("x",))
+            def func(x: Tensor) -> None:
+                x.add_(1)
+
+        self.assertNotWarn(f)
+
     def test_mutated_unknown(self):
         @torch.library.custom_op(
             "_torch_testing::f", mutates_args="unknown", device_types="cpu"
