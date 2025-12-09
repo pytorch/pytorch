@@ -67,10 +67,19 @@ def raise_unhashable(
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
+    try:
+        arg_type = arg.python_type()
+    except Exception:
+        arg_type = type(arg)
+
     raise_observed_exception(
         TypeError,
         tx,
-        msg=f"Unhashable type: {arg.python_type()!r} and variable tracker = {type(arg.realize())}",
+        args=[
+            ConstantVariable(
+                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}"
+            )
+        ],
     )
 
 
@@ -348,8 +357,10 @@ class ConstDictVariable(VariableTracker):
                     f"Debug representation of the key is {arg.debug_repr()!r}"
                 )
             except Exception:
-                error_message = f"Dict key lookup failed for {str(arg)}"
-            raise_observed_exception(KeyError, tx, msg=error_message)
+                error_message = ConstantVariable.create(
+                    f"Dict key lookup failed for {str(arg)}"
+                )
+            raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
 
     def getitem_const(
@@ -404,7 +415,6 @@ class ConstDictVariable(VariableTracker):
         #   3b) contains=False. There is no easy way to selectively apply this
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
-        from . import ConstantVariable
 
         if not self.source:
             return
@@ -413,12 +423,12 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and isinstance(args[0], ConstantVariable):
+        if args[0].source is None and args[0].is_python_constant():
             install_guard(
                 self.make_guard(
                     functools.partial(
                         type(self).CONTAINS_GUARD,
-                        key=args[0].value,
+                        key=args[0].as_python_constant(),
                         invert=not contains,
                     )
                 )
@@ -590,10 +600,10 @@ class ConstDictVariable(VariableTracker):
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
             ):
-                if len(args) == 1 and isinstance(args[0], ConstantVariable):
-                    last = args[0].value
-                elif (v := kwargs.get("last")) and isinstance(v, ConstantVariable):
-                    last = v.value
+                if len(args) == 1 and args[0].is_python_constant():
+                    last = args[0].as_python_constant()
+                elif (v := kwargs.get("last")) and v.is_python_constant():
+                    last = v.as_python_constant()
                 else:
                     raise_args_mismatch(tx, name)
                 k, v = self.items.popitem(last=last)  # type: ignore[possibly-undefined]
@@ -698,15 +708,11 @@ class ConstDictVariable(VariableTracker):
                 raise_observed_exception(KeyError, tx)
 
             last = True
-            if len(args) == 2 and isinstance(args[1], ConstantVariable):
-                last = args[1].value
+            if len(args) == 2 and args[1].is_python_constant():
+                last = args[1].as_python_constant()
 
-            if (
-                kwargs
-                and "last" in kwargs
-                and isinstance(kwargs["last"], ConstantVariable)
-            ):
-                last = kwargs.get("last").value  # type: ignore[union-attr]
+            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+                last = kwargs.get("last").as_python_constant()  # type: ignore[union-attr]
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
