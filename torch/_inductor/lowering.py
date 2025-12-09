@@ -7698,20 +7698,3 @@ def force_fallback(op: torch._ops.OpOverload):
             lowerings[op] = old_handler
         else:
             lowerings.pop(op)
-
-
-@register_lowering(aten.index_select)
-def index_select(x, dim, index):
-    dim = _validate_dim(x, dim)
-    indices = [None] * len(x.get_size())
-    indices[dim] = index
-
-    # We pass wrap_neg=False to forbid negative indices, and check=True to enable bounds checking.
-    output_size, inner_fn, _ = index_impl_helper(x, indices, check=True, wrap_neg=False)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=output_size,
-    )
