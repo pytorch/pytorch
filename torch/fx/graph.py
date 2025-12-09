@@ -2223,7 +2223,7 @@ class Graph:
 
         return on_generate_code_context_manager()
 
-    def clear_nodes(self) -> None:
+    def _clear_nodes(self) -> None:
         nodes = [n for n in reversed(self.nodes)]
         for node in nodes:
             node.meta.clear()

@@ -2806,6 +2806,15 @@ class DynamoTracerOutput:
         else:
             self.output_graph = tracer.output
 
+    def _cleanup_output_graph(self) -> None:
+        og = self.output_graph_for_cleanup
+        if og:
+            for tracer in og.tracers:
+                tracer.graph._clear_nodes()
+            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+            if og.tracing_context.fake_mode and og.tracing_context.fake_mode.shape_env:
+                og.tracing_context.fake_mode.shape_env.tracked_fakes = None
+
 
 err_epilogue = (
     "With the current config, we will graph break "

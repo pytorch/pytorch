@@ -1355,16 +1355,7 @@ def compile_frame(  # type: ignore[return]
             # Clean up the failed tracer output's graph to break reference cycles
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
-                og = failed_tracer_output.output_graph_for_cleanup
-                if og:
-                    for tracer in og.tracers:
-                        tracer.graph.clear_nodes()
-                    # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
-                    if (
-                        og.tracing_context.fake_mode
-                        and og.tracing_context.fake_mode.shape_env
-                    ):
-                        og.tracing_context.fake_mode.shape_env.tracked_fakes = None
+                failed_tracer_output._cleanup_output_graph()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1384,16 +1375,7 @@ def compile_frame(  # type: ignore[return]
             # Clean up the failed tracer output's graph to break reference cycles
             failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if failed_tracer_output:
-                og = failed_tracer_output.output_graph_for_cleanup
-                if og:
-                    for tracer in og.tracers:
-                        tracer.graph.clear_nodes()
-                    # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
-                    if (
-                        og.tracing_context.fake_mode
-                        and og.tracing_context.fake_mode.shape_env
-                    ):
-                        og.tracing_context.fake_mode.shape_env.tracked_fakes = None
+                failed_tracer_output._cleanup_output_graph()
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",

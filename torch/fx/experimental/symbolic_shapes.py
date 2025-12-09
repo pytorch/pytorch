@@ -2254,35 +2254,9 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    # _fake: Union[weakref.ReferenceType[FakeTensor], SymInt]
     fake: Union[FakeTensor, SymInt]
     source: Source
     symbolic_context: Optional[SymbolicContext]
-
-    # @property
-    # def fake(self) -> Optional[Union[FakeTensor, SymInt]]:
-    #     return (
-    #         self._fake()
-    #         if isinstance(self._fake, weakref.ReferenceType)
-    #         else self._fake
-    #     )
-
-    # @fake.setter
-    # def fake(self, value: Union[FakeTensor, SymInt]) -> None:
-    #     if isinstance(value, SymInt):
-    #         self._fake = value
-    #     else:
-    #         self._fake = weakref.ref(value)
-
-    def __init__(
-        self,
-        fake: Union[FakeTensor, SymInt],
-        source: Source,
-        symbolic_context: Optional[SymbolicContext],
-    ) -> None:
-        self.fake = fake
-        self.source = source
-        self.symbolic_context = symbolic_context
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name))
