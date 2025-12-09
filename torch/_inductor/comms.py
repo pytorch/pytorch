@@ -281,7 +281,6 @@ def coll_exposed_communication_time(
     collective_snode = snodes[0]
     comm_time = runtimes[collective_snode]
     comp_time = 0.0
-    # Optimization: use regular set instead of OrderedSet for faster creation
     collective_outs: OrderedSet[str] = OrderedSet(
         o.get_name() for o in collective_snode.get_outputs()
     )
@@ -290,7 +289,6 @@ def coll_exposed_communication_time(
     for snode in snodes[1:]:
         # We may have some ops without Wait,
         # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
-        # Optimization: use regular set for temporary dependency checking
         unmet_deps = OrderedSet(
             d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
         )
@@ -435,7 +433,6 @@ def is_corresponding_collective_wait(
     Check if a wait node corresponds to a given collective node by verifying if the wait
     depends on outputs from the collective.
     """
-    # Optimization: use regular sets instead of OrderedSet for faster creation
     collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
     unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
     return bool(unmet_deps & collective_outs)
