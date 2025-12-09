@@ -146,6 +146,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -245,6 +246,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -292,6 +294,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -339,6 +342,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -374,6 +378,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -400,6 +405,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -431,6 +437,7 @@ class TestPatternMatcher(TestCase):
             "benchmark_epilogue_fusion": "False",
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
+            "autoheuristic_use": "",  # Disable autoheuristic for determinism
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
@@ -480,6 +487,7 @@ class TestPatternMatcher(TestCase):
                 "benchmark_epilogue_fusion": "False",
                 "max_autotune_gemm_backends": "TRITON",
                 "max_autotune_gemm": True,
+                "autoheuristic_use": "",  # Disable autoheuristic for determinism
             }
         ):
             self._test_mixed_impl(fn, args, True, False)
