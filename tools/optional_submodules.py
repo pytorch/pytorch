@@ -28,19 +28,46 @@ def _checkout_by_tag(repo: str, tag: str) -> None:
 
 
 def read_nccl_pin() -> str:
-    nccl_file = "nccl-cu12.txt"
-    if os.getenv("DESIRED_CUDA", os.getenv("CUDA_VERSION", "")).startswith("13"):
+    """
+    Read the NCCL version pin for the current CUDA version.
+
+    Note: This is kept for backward compatibility. For regular builds,
+    CMake automatically detects CUDA version and fetches the correct
+    NCCL version via FetchContent. See cmake/External/nccl.cmake
+    """
+    cuda_version = os.getenv("DESIRED_CUDA", os.getenv("CUDA_VERSION", ""))
+
+    # Determine pin file based on CUDA version
+    if cuda_version.startswith("13"):
         nccl_file = "nccl-cu13.txt"
+    elif cuda_version.startswith("12"):
+        nccl_file = "nccl-cu12.txt"
+    else:
+        # Default to cu12 if version is not specified or unsupported
+        print(
+            f"Warning: CUDA version '{cuda_version}' not recognized, defaulting to cu12 pin"
+        )
+        nccl_file = "nccl-cu12.txt"
+
     nccl_pin_path = repo_root / ".ci" / "docker" / "ci_commit_pins" / nccl_file
     return _read_file(nccl_pin_path)
 
 
 def checkout_nccl() -> None:
+    """
+    Checkout NCCL submodule at the pinned version.
+
+    Note: This is kept for backward compatibility and manual checkouts.
+    For regular builds, CMake automatically detects CUDA version and
+    fetches the correct NCCL version via FetchContent. See cmake/External/nccl.cmake
+    """
     release_tag = read_nccl_pin()
     print(f"-- Checkout nccl release tag: {release_tag}")
     nccl_basedir = third_party_path / "nccl"
     if not nccl_basedir.exists():
         _checkout_by_tag("https://github.com/NVIDIA/nccl", release_tag)
+    else:
+        print(f"-- NCCL already exists at {nccl_basedir}")
 
 
 def checkout_eigen() -> None:

@@ -10,6 +10,40 @@ if(NOT __NCCL_INCLUDED)
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
     endif()
   else()
+    # Detect CUDA version first to determine which NCCL version to use
+    find_package(CUDAToolkit REQUIRED)
+
+    # Determine NCCL version based on detected CUDA version
+    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.0")
+      set(NCCL_PIN_FILE "${PROJECT_SOURCE_DIR}/.ci/docker/ci_commit_pins/nccl-cu13.txt")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.0")
+      set(NCCL_PIN_FILE "${PROJECT_SOURCE_DIR}/.ci/docker/ci_commit_pins/nccl-cu12.txt")
+    else()
+      message(FATAL_ERROR "CUDA version ${CUDAToolkit_VERSION} is not supported. Minimum CUDA 12.0 required.")
+    endif()
+
+    # Read NCCL version from pin file
+    file(READ "${NCCL_PIN_FILE}" NCCL_VERSION)
+    string(STRIP "${NCCL_VERSION}" NCCL_VERSION)
+    message(STATUS "Using NCCL version ${NCCL_VERSION} for CUDA ${CUDAToolkit_VERSION}")
+
+    # Use FetchContent to download NCCL
+    message(STATUS "Fetching NCCL ${NCCL_VERSION} from GitHub...")
+    include(FetchContent)
+    FetchContent_Declare(
+      nccl
+      GIT_REPOSITORY https://github.com/NVIDIA/nccl.git
+      GIT_TAG ${NCCL_VERSION}
+      GIT_SHALLOW TRUE
+    )
+
+    FetchContent_GetProperties(nccl)
+    if(NOT nccl_POPULATED)
+      FetchContent_Populate(nccl)
+    endif()
+
+    set(NCCL_SOURCE_DIR ${nccl_SOURCE_DIR})
+
     torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
     string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
     # this second replacement is needed when there are multiple archs
@@ -39,7 +73,7 @@ if(NOT __NCCL_INCLUDED)
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
-      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
+      SOURCE_DIR ${NCCL_SOURCE_DIR}
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
