@@ -1412,7 +1412,7 @@ def forward(self, pred_1, x_1):
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.map",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f, x, y)
 
@@ -1421,7 +1421,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
             # "Expected all leaves to be of torch.Tensor type.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.map",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f1, x, y)
 
@@ -7081,7 +7081,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.map",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             functional_f(*example_inputs)
 

@@ -787,7 +787,11 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
-        return c10d.GroupName(group)
+        # In some cases Dynamo doesn't like tracing through NewType constructors
+        # - so use a cast instead (the actual newtype representation is
+        # literally the underlying type so this is fine). I haven't been able to
+        # reproduce it in isolation (see T247631668).
+        return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(

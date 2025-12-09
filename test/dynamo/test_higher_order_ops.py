@@ -2347,7 +2347,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.map",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2377,7 +2377,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.map",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2520,9 +2520,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
-            },
+            {"HOP: Unsafe side effect": 1},
         )
 
     def test_fallback_on_graph_break_simple(self):

@@ -89,6 +89,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
+    raise_on_overridden_hash,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
@@ -802,7 +803,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 and len(args) == 1
                 and isinstance(args[0], variables.ListVariable)
                 and len(args[0].items) > 1
-                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+                and all(x.is_tensor() for x in args[0].items)
             ):
                 # Stack FakeTensor
                 stacked = wrap_fx_proxy(
@@ -883,8 +884,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif self.value is random.Random:
-            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
-                seed = args[0].value
+            if len(args) == 1 and args[0].is_python_constant():
+                seed = args[0].as_python_constant()
             else:
                 seed = None
             random_object = random.Random(seed)
@@ -928,6 +929,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return (
+            isinstance(other, variables.UserDefinedClassVariable)
+            and self.value is other.value
+        )
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
@@ -1747,26 +1760,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return True
+
+    def get_python_hash(self):
+        # default hash
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        # id check
+        return self.value is other.value
+
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
-    class HashWrapper:
-        """This class is hashed if a dataclass is used as a key in a dict.
-        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
-
-        def __init__(self, c, fields):
-            self.cls = c
-            self.fields = tuple(fields.items())
-
-        def __eq__(self, other):
-            return (
-                type(self) is type(other)
-                and self.cls == other.cls
-                and self.fields == other.fields
-            )
-
-        def __hash__(self):
-            return hash((self.cls, self.fields))
-
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
@@ -1845,6 +1852,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         return ctor(*args, **kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        from dataclasses import fields
+
         # Handle specific pytree classes
         import torch.utils._pytree as pytree
 
@@ -1856,8 +1865,62 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             codegen.extend_output(create_call_function(0, False))
             return
 
-        # For other frozen dataclasses, fall back to the base class behavior
-        super().reconstruct(codegen)
+        # For general frozen dataclasses, reconstruct by calling the constructor
+        # with the field values as arguments
+        dataclass_cls = self.python_type()
+
+        if hasattr(dataclass_cls, "__post_init__"):
+            unimplemented(
+                gb_type="Frozen dataclass with __post_init__",
+                context=f"dataclass={dataclass_cls.__name__}",
+                explanation="Cannot reconstruct frozen dataclass with __post_init__ method, "
+                "as it may have side effects that would be incorrectly replayed.",
+                hints=[
+                    "Remove the __post_init__ method from the frozen dataclass.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # Collect positional and keyword-only arguments
+        pos_args = []
+        kw_args = []
+        for field in fields(dataclass_cls):
+            if not field.init:
+                continue
+            field_vt = self.fields.get(field.name)
+            if field_vt is None:
+                unimplemented(
+                    gb_type="Frozen dataclass with missing field",
+                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
+                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
+                    "was not tracked during tracing.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if getattr(field, "kw_only", False):
+                kw_args.append((field.name, field_vt))
+            else:
+                pos_args.append(field_vt)
+
+        # Load the dataclass constructor
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(dataclass_cls)
+            )
+        )
+        # Reconstruct all arguments
+        for arg_vt in pos_args:
+            codegen(arg_vt)
+        for _, arg_vt in kw_args:
+            codegen(arg_vt)
+        # Call the constructor
+        total_args = len(pos_args) + len(kw_args)
+        if kw_args:
+            kw_names = tuple(name for name, _ in kw_args)
+            codegen.extend_output(
+                codegen.create_call_function_kw(total_args, kw_names, push_null=False)
+            )
+        else:
+            codegen.extend_output(create_call_function(total_args, False))
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
@@ -1867,6 +1930,22 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def is_python_hashable(self):
+        # TODO - Check corner cases like eq=False, hash=False etc
+        return True
+
+    def get_python_hash(self):
+        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
+
+    def is_python_equal(self, other):
+        is_class_same = self.python_type() is other.python_type()
+        is_field_name_same = self.fields.keys() == other.fields.keys()
+        is_field_value_same = all(
+            value_a.is_python_equal(value_b)
+            for value_a, value_b in zip(self.fields.values(), other.fields.values())
+        )
+        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
@@ -1915,9 +1994,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         elif (
             name == "__setattr__"
             and len(args) == 2
-            and isinstance(args[0], variables.ConstantVariable)
-            and args[0].value
-            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+            and args[0].is_constant_match(
+                "__cause__", "__context__", "__suppress_context__", "__traceback__"
+            )
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
         elif name == "with_traceback":
@@ -2088,6 +2167,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._dict_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
+
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
@@ -2161,6 +2244,18 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._set_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._set_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._set_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedSetVariable
+        ) and self._set_vt.is_python_equal(other._set_vt)
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -2201,6 +2296,10 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._list_vt)
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -2249,6 +2348,18 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if type(self.value).__iter__ is tuple.__iter__:
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._tuple_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._tuple_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedTupleVariable
+        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

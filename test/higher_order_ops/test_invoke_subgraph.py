@@ -28,6 +28,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -551,6 +552,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):
