@@ -1,5 +1,6 @@
 import inspect
 import logging
+import sys
 import traceback
 from collections import namedtuple
 from collections.abc import Callable
@@ -52,9 +53,10 @@ def post_process_error_msg(
 
     orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
-    constraint_violation_error.args = (
-        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
-    )
+    if constraint_violation_error.args:
+        constraint_violation_error.args = (
+            _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+        )
     return constraint_violation_error
 
 
@@ -422,9 +424,12 @@ def _suggest_or_raise_constraint_violation(
             forced_specializations,
         )
         if constraint_violation_error:
-            constraint_violation_error.args = (
-                constraint_violation_error.args[0] + msg,
-            )
+            if constraint_violation_error.args:
+                constraint_violation_error.args = (
+                    constraint_violation_error.args[0] + msg,
+                )
+            else:
+                constraint_violation_error.args = (msg,)
         else:
             if forced_specializations:
                 constraint_violation_error = ConstraintViolationError(msg)
@@ -501,6 +506,7 @@ def pytreeify(
     torch._dynamo.eval_frame.check_user_input_output(
         flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
     )
+    f_globals = out.graph_capture_output.f_globals
 
     class Yield(Exception):
         pass
@@ -522,7 +528,9 @@ def pytreeify(
                 raise Yield
 
             try:
-                out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
+                out.forward_callable(
+                    compiled_fn=backend_dummy, extra_globals=f_globals
+                )(*args, **kwargs)
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
@@ -557,7 +565,9 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            results = out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
+            results = out.forward_callable(
+                compiled_fn=backend_dummy, extra_globals=f_globals
+            )(*args, **kwargs)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -606,7 +616,6 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
-            torch._dynamo.config.patch(replay_side_effects=False),
             torch._dynamo.config.patch(side_effect_replay_policy="warn"),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
@@ -647,7 +656,12 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
-            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            if sys.version_info >= (3, 14):
+                import annotationlib  # added in 3.14
+
+                annotations = annotationlib.get_annotations(torch.nn.Module)
+            else:
+                annotations = getattr(torch.nn.Module, "__annotations__", None)
             for name, value in pyt.root.__dict__.items():
                 if annotations and name not in annotations:
                     graph_module.__dict__[name] = value

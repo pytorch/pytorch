@@ -99,7 +99,7 @@ def jvp(
 
 def jacrev(
     func: Callable,
-    argnums: Union[int, tuple[int]] = 0,
+    argnums: Union[int, tuple[int, ...]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
