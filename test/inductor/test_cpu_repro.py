@@ -3376,7 +3376,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(
         IS_ARM64,
-        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142231"
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142231",
     )
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
@@ -3703,7 +3703,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(
         IS_ARM64,
-        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/169958"
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/169958",
     )
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
@@ -3949,10 +3949,9 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
-
     @unittest.skipIf(
         IS_ARM64,
-        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/169958"
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/169958",
     )
     def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
@@ -4561,7 +4560,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
 
     def test_float32_to_uint8(self):
-
         def assert_equal(actual, expected):
             torch.testing.assert_close(
                 actual,
@@ -4581,7 +4579,6 @@ class CPUReproTests(TestCase):
         a = torch.tensor([255, 254, 253, 252], dtype=torch.uint8, device="cpu")
         b = x.to(torch.uint8)
         c = fn(x)
-
 
         # 3 way assertion check
         assert_equal(a, b)
@@ -5214,7 +5211,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(
         IS_ARM64,
-        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142134"
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142134",
     )
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
