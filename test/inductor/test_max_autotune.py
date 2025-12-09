@@ -1911,6 +1911,7 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
+    @skipIfXpu(msg="out_dtype override only available on NVIDIA")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -2318,7 +2319,9 @@ class TestMaxAutotune(TestCase):
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
-            config_heuristics.exhaustive_configs = [GemmConfig(32, 32, 32, 1, 8, 8)]
+            config_heuristics.exhaustive_configs = [
+                GemmConfig(32, 32, 32, 1, 8, group_m=8)
+            ]
             config_mock.return_value = config_heuristics
 
             from torch._dynamo.utils import counters

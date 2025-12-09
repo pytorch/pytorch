@@ -14,6 +14,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.fx.graph as fx_graph
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
@@ -303,6 +304,26 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
+        self._saved_default_device_context = getattr(
+            torch._GLOBAL_DEVICE_CONTEXT, "device_context", None
+        )
+
+    def tearDown(self):
+        fx_graph.magic_methods.clear()
+        fx_graph.magic_methods.update(self._fx_magic_methods_snapshot)
+
+        current_ctx = getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+        if current_ctx is not self._saved_default_device_context:
+            if self._saved_default_device_context is None:
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(self._saved_default_device_context.device)
+
+        super().tearDown()
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
@@ -1455,7 +1476,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.skipTest("Torch distributed is not available")
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1480,6 +1501,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}
@@ -1505,7 +1527,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         if not dist.is_available():
             self.skipTest("Torch distributed is not available")
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa:SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1537,6 +1559,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_function_with_wrong_fqn(self):
         def foo(inputs):
@@ -1624,7 +1647,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def foo(inputs):
             return inputs.x + 1
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo",
             init_method=f"file://{tmpfile.name}",
@@ -1639,6 +1662,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"inputs": Inputs(x, pg)}, True)
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_unserializable_submodule(self):
         def foo(mod, x):
@@ -1781,7 +1805,7 @@ class SimpleModule(torch.nn.Module):
         return z
 
 
-if not IS_MACOS:
+if torch.distributed.is_available() and not IS_MACOS:
     from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 
     @torch._dynamo.config.patch({"strict_precompile": True})

@@ -2,8 +2,6 @@
 
 #include <torch/csrc/lazy/core/helpers.h>
 
-#include <memory>
-
 #include <torch/csrc/lazy/core/ir_builder.h>
 
 namespace torch::lazy {
