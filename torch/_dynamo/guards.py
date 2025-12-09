@@ -2550,8 +2550,12 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
+        code = [
+            f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
+        ]
+        
         self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
+            global_state, code
         )
 
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
