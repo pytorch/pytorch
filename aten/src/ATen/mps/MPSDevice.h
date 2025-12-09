@@ -10,7 +10,7 @@
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
 typedef id<MTLDevice> MTLDevice_t;
-typedef MTLGPUFamily MTLGPUFamily_t;
+typedef NSInteger MTLGPUFamily_t;
 #else
 typedef void* MTLDevice_t;
 typedef void* MTLGPUFamily_t;

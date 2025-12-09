@@ -55,7 +55,7 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
 
 bool MPSDevice::isGPUFamily(MTLGPUFamily_t family) const {
   @autoreleasepool {
-    return [_mtl_device supportsFamily:family];
+    return [_mtl_device supportsFamily:(MTLGPUFamily)family];
   }
 }
 
