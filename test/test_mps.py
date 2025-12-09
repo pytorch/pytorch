@@ -805,6 +805,49 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+    def ulpAssertAllClose(self, output, reference, n_ulps):
+        """
+        Wrapper for element-wise tolerances with known
+        uncertainty in terms of units in last place.
+        """
+        # Handle infinities: same-signed infinities are considered equal
+        both_inf = torch.isinf(output) & torch.isinf(reference)
+        matching_inf = both_inf & (torch.sign(output) == torch.sign(reference))
+
+        uncertainty = n_ulps * torch.abs(torch.nextafter(output, 2 * output) - output).to('cpu')
+        difference = torch.abs(output - reference)
+
+        condition = matching_inf | (difference <= uncertainty)
+
+        if not torch.all(condition):
+            # Mask out all infinities when computing mismatches
+            non_inf_mask = ~both_inf
+            actual_mismatches = ~condition & non_inf_mask
+
+            num_mismatched = actual_mismatches.sum().item()
+            num_elements = condition.numel()
+            mismatch_percentage = (num_mismatched / num_elements) * 100.0
+
+            masked_diff = difference.clone()
+            masked_diff[both_inf] = -float('inf')
+            greatest_diff_index = masked_diff.argmax().item()
+
+            greatest_diff_value = difference.flatten()[greatest_diff_index].item()
+            allowed_uncertainty = uncertainty.flatten()[greatest_diff_index].item()
+            diff_coords = torch.unravel_index(
+                torch.tensor(greatest_diff_index),
+                difference.shape
+            )
+            coords_str = tuple(coord.item() for coord in diff_coords)
+            error_msg = (f"Tensor-likes are not close!\n\n"
+                         f"Mismatched elements: {num_mismatched:,} / {num_elements:,} "
+                         f"({mismatch_percentage:.1f}%)\n"
+                         f"Greatest absolute difference: {greatest_diff_value:.6e}"
+                         f"  at index {coords_str}"
+                         f"  (up to {allowed_uncertainty:.3e} allowed)")
+            raise AssertionError(error_msg)
+
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -844,7 +887,12 @@ class TestMPS(TestCaseMPS):
         # Mismatched elements: 3 / 4 (75.0%)
         # Greatest absolute difference: 1.1920928955078125e-07 at index (3,) (up to 1e-08 allowed)
         # Greatest relative difference: 1.0786502002702036e-07 at index (3,) (up to 1e-08 allowed)
-        self.assertEqual(output, output_cpu, atol=1e-8, rtol=1e-8)
+
+        # precise::metal::exp promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
+
+
 
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
@@ -6219,7 +6267,10 @@ class TestMPS(TestCaseMPS):
 
         log_result = torch.log1p(x)
         log_result_cpu = torch.log1p(cpu_x)
-        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
+
+        # precise::metal::log promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
 
         # Fallback to log
         cpu_x = torch.arange(-1.0, 2.0, 1e-4, dtype=dtype, requires_grad=False)
@@ -6228,7 +6279,9 @@ class TestMPS(TestCaseMPS):
         log_result = torch.log1p(x)
         log_result_cpu = torch.log1p(cpu_x)
 
-        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
+        # precise::metal::log promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
 
     def test_logaddexp(self):
         def helper(shape):
