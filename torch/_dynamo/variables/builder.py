@@ -310,6 +310,7 @@ log = logging.getLogger(__name__)
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
+symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 
 
 DimList = list
@@ -2473,8 +2474,7 @@ class VariableBuilder:
                     0
                 ]
             ) or not config.assume_static_by_default:
-                shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
-                shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
+                symbolic_shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -3504,8 +3504,7 @@ def _automatic_dynamic(
         marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         if marked_dynamic:
-            shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
-            shape_log.info("marking %s as dynamic (from mark_dynamic)", name)
+            symbolic_shape_log.info("marking %s as dynamic (from mark_dynamic)", name)
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
@@ -3622,8 +3621,7 @@ def _automatic_dynamic(
         else:
             # TODO: When does this show up?
             if not config.assume_static_by_default:
-                shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
-                shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
+                symbolic_shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:
