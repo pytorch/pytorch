@@ -284,6 +284,14 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
+def _reconstruct_source(source_type, field_values):
+    """
+    Reconstruct a Source object from its type and field values.
+    Used by AOTAutogradCachePickler to unpickle Source objects.
+    """
+    return source_type(**field_values)
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -395,6 +403,40 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 AOTConfig: functools.partial(self._reduce_aot_config),
                 torch.Tensor: functools.partial(self._reduce_tensor),
             }
+        )
+
+    def reducer_override(self, obj):
+        """
+        Override reducer for Source objects to exclude cached fields like _hash.
+
+        Source objects use @dataclass_with_cached_hash which adds a _hash field
+        that contains a process-specific Python hash. This field changes between
+        processes due to PYTHONHASHSEED randomization, causing cache key instability.
+
+        We reduce Source objects to only their dataclass fields, excluding:
+        - _hash: cached Python hash (process-specific)
+        - name: cached property
+        - guard_source: cached property
+        - _name_template: can be a cached property in some subclasses
+        """
+        from torch._guards import Source
+
+        if isinstance(obj, Source):
+            return self._reduce_source(obj)
+        # Return NotImplemented to use the default reducer
+        return NotImplemented
+
+    def _reduce_source(self, source):
+        """
+        Reduce a Source object to only its dataclass fields for stable caching.
+        """
+        import dataclasses
+
+        # Get only the declared dataclass fields, not cached properties
+        field_values = {f.name: getattr(source, f.name) for f in dataclasses.fields(source)}
+        return (
+            _reconstruct_source,
+            (type(source), field_values),
         )
 
     def _reduce_aot_config(self, aot_config: AOTConfig):
