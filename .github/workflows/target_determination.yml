@@ -34,6 +34,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
