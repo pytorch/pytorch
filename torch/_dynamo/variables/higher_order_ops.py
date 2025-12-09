@@ -1734,6 +1734,57 @@ def make_attr(tx: "InstructionTranslator", name):
     return node
 
 
+def add_hop_context(cls):
+    """
+    Class decorator that adds HOP context to exceptions raised in call_function.
+
+    Requires the class to have _HOP_NAME and _ALLOW_GRAPH_BREAKS set.
+    """
+
+    if hasattr(cls.call_method, "_hop_wrapped"):
+        return cls
+
+    if cls._HOP_NAME is None:
+        raise TypeError(f"{cls.__name__} must define _HOP_NAME class attribute.")
+    if cls._ALLOW_GRAPH_BREAKS is None:
+        raise TypeError(
+            f"{cls.__name__} must define _ALLOW_GRAPH_BREAKS class attribute."
+        )
+
+    original_call_function = cls.call_function
+
+    @functools.wraps(original_call_function)
+    def wrapped_call_function(self, *args, **kwargs):
+        try:
+            return original_call_function(self, *args, **kwargs)
+        except (Unsupported, ObservedException) as e:
+            # Only tag if not already tagged (reports deepest HOP only)
+            if hasattr(e, "_hop_name"):
+                raise
+
+            if self._ALLOW_GRAPH_BREAKS:
+                # Tag the exception with HOP name for later formatting in exc.py
+                # NOTE: because nested graph breaks are NOT supported on HOPs, we will
+                # NEVER log a HOP graph break before running this
+                e._hop_name = self._HOP_NAME
+
+                raise
+            else:
+                msg = e.msg if hasattr(e, "msg") else str(type(e))
+                real_stack = e.real_stack if hasattr(e, "real_stack") else None
+                full_msg = (
+                    "This higher order operator doesn't work unless it is "
+                    f"captured completely with torch.compile. Got:\n{msg}"
+                )
+                exc = UncapturedHigherOrderOpError(full_msg, real_stack)
+                exc._hop_name = self._HOP_NAME
+                raise exc.with_traceback(e.__traceback__) from None
+
+    wrapped_call_function._hop_wrapped = True
+    cls.call_function = wrapped_call_function
+    return cls
+
+
 class TorchHigherOrderOperatorVariable(VariableTracker):
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
     _HOP_NAME: Optional[str] = None
@@ -1742,52 +1793,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-
-        # All subclasses must define _HOP_NAME
-        if cls._HOP_NAME is None:
-            raise TypeError(
-                f"{cls.__name__} must define _HOP_NAME class attribute. "
-                "All TorchHigherOrderOperatorVariable subclasses must specify "
-                "the name of the higher order operator they wrap."
-            )
-
-        # Automatically wrap call_function to add HOP context
-        original_call_function = cls.call_function
-
-        if not hasattr(original_call_function, "_hop_wrapped"):
-
-            @functools.wraps(original_call_function)
-            def wrapped_call_function(self, *args, **kwargs):
-                try:
-                    return original_call_function(self, *args, **kwargs)
-                except (Unsupported, ObservedException) as e:
-                    hop_name = self._HOP_NAME
-                    allow_graph_breaks = self._ALLOW_GRAPH_BREAKS
-
-                    # Only tag if not already tagged (reports deepest HOP only)
-                    if hasattr(e, "_hop_name"):
-                        raise
-
-                    if allow_graph_breaks:
-                        # Tag the exception with HOP name for later formatting in exc.py
-                        # NOTE: because nested graph breaks are NOT supported on HOPs, we will
-                        # NEVER log a HOP graph break before running this
-                        e._hop_name = hop_name  # type: ignore[attr-defined]
-
-                        raise
-                    else:
-                        msg = e.msg if hasattr(e, "msg") else str(type(e))
-                        real_stack = e.real_stack if hasattr(e, "real_stack") else None
-                        full_msg = (
-                            "This higher order operator doesn't work unless it is "
-                            f"captured completely with torch.compile. Got:\n{msg}"
-                        )
-                        exc = UncapturedHigherOrderOpError(full_msg, real_stack)
-                        exc._hop_name = hop_name  # type: ignore[attr-defined]
-                        raise exc.with_traceback(e.__traceback__) from None
-
-            wrapped_call_function._hop_wrapped = True
-            cls.call_function = wrapped_call_function
+        add_hop_context(cls)
 
     def __init__(
         self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
@@ -3844,7 +3850,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return proxy
 
 
+@add_hop_context
 class AutogradFunctionApplyVariable(VariableTracker):
+    _HOP_NAME: str = "autograd.Function"
+    _ALLOW_GRAPH_BREAKS = True
+
     def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
         self.fwd_graph = fwd_graph
@@ -3900,7 +3910,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=tx.output.current_tracer,
-            source_target="autograd.Function",
+            source_target=self._HOP_NAME,
         )
 
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
@@ -3936,7 +3946,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_fn,
             fwd_args,
             kwargs,
-            "autograd.Function",
+            self._HOP_NAME,
             enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
@@ -3960,7 +3970,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=fwd_tracer,
-            source_target="autograd.Function",
+            source_target=self._HOP_NAME,
         )
 
         # Speculate subgraph on the backward. We make the
@@ -4006,7 +4016,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     bwd_fn,
                     bwd_args,
                     kwargs,
-                    "autograd.Function",
+                    self._HOP_NAME,
                     enable_grad=False,
                     set_subgraph_inputs="manual",
                     restore_side_effects=False,
@@ -4021,7 +4031,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
                         tx.output,
                         parent=fwd_tracer,
-                        source_target="autograd.Function",
+                        source_target=self._HOP_NAME,
                     )
                     from .._trace_wrapped_higher_order_op import (
                         autograd_function_backward_rewritten,
@@ -4055,7 +4065,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             bwd_fn,
                             bwd_args,
                             kwargs,
-                            "autograd.Function",
+                            self._HOP_NAME,
                             enable_grad=False,
                             set_subgraph_inputs="manual",
                             restore_side_effects=False,

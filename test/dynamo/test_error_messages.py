@@ -1760,7 +1760,9 @@ from user code:
             munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: HOP: Unsafe side effect
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
   Hint: If the HOP is activation checkpointing, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
