@@ -1247,19 +1247,15 @@ class TensorVariable(VariableTracker):
         return result.call_method(tx, "item", [], {})
 
     def method_redistribute(self, *args, **kwargs):
+        from ..side_tables import dtensor_args_side_table, dtensor_redistribute
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-        # and rewrite args to have only proxyable args, then insert call_function
-        args_as_value = [x.as_python_constant() for x in args]
+        # Store non-primitive args/kwargs in side table and pass index through graph
+        args_as_value = tuple(x.as_python_constant() for x in args)
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
-        def redistribute_fn_with_prim_types(x):
-            return x.redistribute(*args_as_value, **kwargs_as_value)
-
-        # attach the same function name for better debugging
-        redistribute_fn_with_prim_types.__name__ = "prim_redistribute"
+        args_idx = dtensor_args_side_table.add_args(args_as_value, kwargs_as_value)
 
         from .builder import wrap_fx_proxy
 
@@ -1267,18 +1263,17 @@ class TensorVariable(VariableTracker):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                redistribute_fn_with_prim_types,
-                *proxy_args_kwargs([self], {}),
+                dtensor_redistribute,
+                *proxy_args_kwargs([self], {"args_idx": args_idx}),
             ),
         )
 
     def method_to_local(self, *args, **kwargs):
+        from ..side_tables import dtensor_args_side_table, dtensor_to_local
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-        # and rewrite args to have only proxyable args, then insert call_function
-
+        # Handle grad_placements which may be a sequence-like structure
         grad_placements_vt = kwargs.get(
             "grad_placements", ConstantVariable.create(None)
         )
@@ -1291,14 +1286,11 @@ class TensorVariable(VariableTracker):
         if kwargs.get("grad_placements") is not None:
             kwargs["grad_placements"] = grad_placements_vt
 
-        args_as_value = [x.as_python_constant() for x in args]
+        # Store non-primitive args/kwargs in side table and pass index through graph
+        args_as_value = tuple(x.as_python_constant() for x in args)
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
-        def to_local_fn_with_prim_types(x):
-            return x.to_local(*args_as_value, **kwargs_as_value)
-
-        # attach the same function name for better debugging
-        to_local_fn_with_prim_types.__name__ = "prim_to_local"
+        args_idx = dtensor_args_side_table.add_args(args_as_value, kwargs_as_value)
 
         from .builder import wrap_fx_proxy
 
@@ -1306,8 +1298,8 @@ class TensorVariable(VariableTracker):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                to_local_fn_with_prim_types,
-                *proxy_args_kwargs([self], {}),
+                dtensor_to_local,
+                *proxy_args_kwargs([self], {"args_idx": args_idx}),
             ),
         )
 

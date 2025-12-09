@@ -349,6 +349,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
+        # Include DTensor args hashes in cache key for redistribute/to_local calls
+        from torch._dynamo.side_tables import get_dtensor_args_hashes_from_gm
+
+        self.dtensor_args_hashes = get_dtensor_args_hashes_from_gm(gm)
+
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
             def _add_wrapped_user_cache_hashes(_gm, _l):
@@ -761,6 +766,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
+            log.info("aotautograd_cache %s %s", cache_state, cache_info.get("cache_bypass_reason"))
 
             return compiled_fn
 
