@@ -62,8 +62,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
             except ImportError:
                 return
 
-    with torch._dynamo.config.patch(nested_graph_breaks=True):
-        run_tests()
+    run_tests()
 
 
 class TestCase(TorchTestCase):
@@ -88,6 +87,8 @@ class TestCase(TorchTestCase):
 
     def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
+        self._prior_nested_graph_breaks = config.nested_graph_breaks
+        config.nested_graph_breaks = True
         super().setUp()
         reset()
         utils.counters.clear()
@@ -104,6 +105,7 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+        config.nested_graph_breaks = self._prior_nested_graph_breaks
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if config.debug_disable_compile_counter:
