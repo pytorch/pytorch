@@ -15,7 +15,11 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-from functorch.compile import default_partition, min_cut_rematerialization_partition
+from functorch.compile import (
+    default_partition,
+    min_cut_rematerialization_partition,
+    nop,
+)
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -376,6 +380,29 @@ class ActivationCheckpointingViaTagsTests(
             partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
+
+    @requires_cuda_and_triton
+    def test_checkpoint_shows_tags_in_tlparse(self, device):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True, preserve_rng_state=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            gm_str = joint_gm.print_readable(print_output=False)
+            self.assertTrue("# ac_graph_id: 2 - PREFER_RECOMPUTE" in gm_str)
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
     @parametrize(
