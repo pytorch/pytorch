@@ -205,8 +205,7 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto error_no = ZE_RESULT_SUCCESS;
-  error_no =
+  auto error_no =
       zeModuleCreate(context, device, &moduleDescription, &module, &buildLog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
