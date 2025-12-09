@@ -361,3 +361,43 @@ def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
     Returns: Tensor - flattened tensor
     """
     return torch.ops.libtorch_agnostic_2_9.my_flatten.default(t, start_dim, end_dim)
+
+
+def my_optional_tensor_ref(maybe_tensor, default_size) -> Tensor:
+    """
+    Tests TORCH_BOX with const std::optional<Tensor>& parameter.
+    Returns the tensor if present, otherwise returns a zeros tensor of specified size.
+
+    Args:
+        maybe_tensor: Optional[Tensor] - optional input tensor
+        default_size: int - size of the default zeros tensor if maybe_tensor is None
+
+    Returns: Tensor - the input tensor or a zeros tensor
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_optional_tensor_ref.default(
+        maybe_tensor, default_size
+    )
+
+
+def my_storage_offset(t) -> int:
+    """
+    Returns the storage offset of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - storage offset
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_storage_offset.default(t)
+
+
+def my_element_size(t) -> int:
+    """
+    Returns the element size in bytes of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - element size in bytes
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_element_size.default(t)

@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -14,10 +15,23 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+
+
+if sys.version_info >= (3, 11):
+    from typing import dataclass_transform
+else:
+
+    def dataclass_transform():
+        def decorator(fn):
+            return fn
+
+        return decorator
+
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -245,7 +259,7 @@ class Guard:
     # globals (and locals, if you create a LOCAL guard) to extract the Python
     # object that we want to perform guard tests on.  This evaluation
     # typically happens in GuardBuilder.eval.  In these cases, name is
-    # typically produced by originating_source.name() (not to be confused with
+    # typically produced by originating_source.name (not to be confused with
     # GuardSource - the property source).
     #
     # Occasionally, name is not a valid Python expression; sometimes
@@ -297,11 +311,11 @@ class Guard:
 
     @property
     def name(self) -> str:
-        return self.originating_source.name()
+        return self.originating_source.name
 
     @property
     def source(self) -> GuardSource:
-        return self.originating_source.guard_source()
+        return self.originating_source.guard_source
 
     @staticmethod
     def weakref_to_str(obj_weakref: object) -> str:
@@ -487,16 +501,16 @@ class GuardsCheckpointState:
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
 
-    dynamo_guards: set[Guard] = set()
+    dynamo_guards: OrderedSet[Guard]
 
-    def __init__(self, dynamo_guards: set[Guard]) -> None:
+    def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> set[Guard] | None:
+    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
         """
         Produces a delta against another GuardsCheckpointState.
 
-        Returns None if no delta is found, otherwise, return a set() of mismatched
+        Returns None if no delta is found, otherwise, return an OrderedSet() of mismatched
         Guard type objects.
         """
         r = self.dynamo_guards.difference(other.dynamo_guards)
@@ -605,10 +619,11 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: set[Guard] | None = None) -> None:
+    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
         if inner is None:
-            inner = set()
-        self.inner = inner
+            self.inner: OrderedSet[Guard] = OrderedSet()
+        else:
+            self.inner = inner
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -645,9 +660,9 @@ class GuardsSet:
         """Delete all guards that contains a given source"""
         from ._dynamo.source import is_from_source
 
-        self.inner = {
+        self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
-        }
+        )
 
 
 """
@@ -664,7 +679,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self) -> GuardsCheckpointState:
-        return GuardsCheckpointState(set(self.dynamo_guards.inner))
+        return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
         # NB: "steals" the passed in state
@@ -1076,9 +1091,41 @@ def tracing(
         _TLS.tracing_context = old_context
 
 
+@overload
+def dataclass_with_cached_hash(cls: type[T], **kwargs: Any) -> type[T]: ...
+
+
+@overload
+def dataclass_with_cached_hash(
+    cls: None = None, **kwargs: Any
+) -> Callable[[type[T]], type[T]]: ...
+
+
+@dataclass_transform()
+def dataclass_with_cached_hash(
+    cls: type[T] | None = None, **kwargs: Any
+) -> type[T] | Callable[[type[T]], type[T]]:
+    def wrap(cls_inner: type[T]) -> type[T]:
+        new_cls = dataclasses.dataclass(cls_inner, **kwargs)
+        old_hash = cls_inner.__hash__
+
+        def __hash__(self) -> int:
+            if not hasattr(self, "_hash"):
+                object.__setattr__(self, "_hash", old_hash(self))
+            return self._hash
+
+        new_cls.__hash__ = __hash__
+        return new_cls  # type: ignore[return-value]
+
+    if cls is None:
+        return wrap
+
+    return wrap(cls)
+
+
 # Subclasses can be found in torch/_dynamo/source.py
 # TODO(voz): Consider a toplevel torch/_source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class Source:
     def is_dict_key(self) -> bool:
         return False
@@ -1089,27 +1136,55 @@ class Source:
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
-    def name(self) -> str:
+    @property
+    def _name_template(self) -> str:
+        """
+        A template for the name of the source. Used to prevent code duplication between
+        `name` and `get_value`.
+
+        For non-ChainedSources, `name` and `get_value` use the returned string directly.
+
+        For ChainedSources, `name` and `get_value` expect the return to be a format string
+        with `{0}` present - `name` and `get_value` will apply different values to this function's
+        returned format string.
+        """
         raise NotImplementedError
 
+    @functools.cached_property
+    def name(self) -> str:
+        return self._name_template
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = eval(self._name_template, globals, locals)
+        cache[self] = value
+        return value
+
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
-        if self.guard_source() is GuardSource.CONSTANT:
+        if self.guard_source is GuardSource.CONSTANT:
             raise NotImplementedError
         return Guard(self, fn)
 
     def is_specialized_nn_module(self) -> bool:
-        return self.guard_source().is_specialized_nn_module()
+        return self.guard_source.is_specialized_nn_module()
 
     def subguards_allowed(self) -> bool:
         """True if you can guard on attributes of this"""
-        return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
+        return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ChainedSource(Source):
     base: Source
 
@@ -1120,11 +1195,38 @@ class ChainedSource(Source):
     def is_ephemeral(self) -> bool:
         return self.base.is_ephemeral()
 
+    @functools.cached_property
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source
+
     def get_base(self) -> Source:
         current: Source = self
         while isinstance(current, ChainedSource):
             current = current.base
         return current
+
+    @functools.cached_property
+    def name(self) -> str:
+        return self._name_template.format(self.base.name)
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        tmpvar = "tmp"
+        counter = 0
+        while tmpvar in locals:
+            tmpvar = f"tmp{counter}"
+            counter += 1
+        locals[tmpvar] = self.base.get_value(globals, locals, cache)
+        value = eval(self._name_template.format(tmpvar), globals, locals)
+        del locals[tmpvar]
+        cache[self] = value
+        return value
 
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
