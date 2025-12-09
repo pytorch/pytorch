@@ -80,6 +80,7 @@ install_ubuntu() {
       cat > /etc/rocm_env.sh << ROCM_ENV
 export ROCM_PATH="${ROCM_HOME}"
 export ROCM_HOME="${ROCM_HOME}"
+export ROCM_SOURCE_DIR="${ROCM_HOME}"
 export PATH="${ROCM_BIN}:\${PATH}"
 export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
 export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
@@ -88,6 +89,8 @@ export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
 export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
+# Disable FBGEMM_GENAI for theRock nightly (not yet supported)
+export USE_FBGEMM_GENAI=0
 ROCM_ENV
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
