@@ -2654,6 +2654,7 @@ class BuiltinVariable(VariableTracker):
                     ],
                 )
             if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
                 fake_val = obj.as_proxy().node.meta["example_value"]
                 if (
                     isinstance(fake_val, torch.Tensor)
