@@ -22,7 +22,6 @@ aten = torch.ops.aten
 
 from torch._inductor.lowering import make_fallback
 from torch._utils import _get_device_index
-from torch.library import custom_op
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
@@ -286,6 +285,7 @@ def replace_random(
             if dtype is not None:
                 result = result.to(dtype)
             return result
+
         replacement_fn = replacement_align
 
     # pyrefly: ignore [bad-argument-type]

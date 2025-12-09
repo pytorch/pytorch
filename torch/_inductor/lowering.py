@@ -2459,7 +2459,14 @@ def get_threads_per_round(device: torch.device):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0, align_dtype: torch.dtype = torch.float32):
+def inductor_random(
+    size: list[int],
+    seed: TensorBox,
+    mode: str,
+    *,
+    offset: int = 0,
+    align_dtype: torch.dtype = torch.float32,
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]

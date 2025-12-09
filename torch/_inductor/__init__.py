@@ -8,6 +8,7 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
+from .fx_passes.replace_random import rand_eager_offsets  # noqa: F401
 from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 

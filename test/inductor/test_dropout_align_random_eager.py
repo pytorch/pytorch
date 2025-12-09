@@ -4,6 +4,7 @@ import struct
 import time
 
 import pytest
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -15,6 +16,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     requires_gpu,
 )
+
 
 # ───────────────────────────────────────────────────────────────
 # Global config
@@ -346,18 +348,21 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     def _run_primitive_random_parity(self, kind, device, shape):
         if kind == "rand":
+
             def eager():
                 return torch.rand(shape, device=device)
 
             compiled = torch.compile(eager)
 
         elif kind == "randn":
+
             def eager():
                 return torch.randn(shape, device=device)
 
             compiled = torch.compile(eager)
 
         elif kind == "randint":
+
             def eager():
                 return torch.randint(0, 2**31 - 1, shape, device=device)
 
