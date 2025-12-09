@@ -155,10 +155,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def setUp(self):
+        super().setUp()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
