@@ -3095,10 +3095,22 @@ def _persistent_reduction_configs(
         elif reduction_hint == ReductionHint.OUTER_TINY:
             configs = tiny_configs
     else:
-        # If autotune is enabled append tiny configs
-        for conf in tiny_configs:
-            if conf not in configs:
-                configs.append(conf)
+        if torch.version.hip:
+            # If autotune is enabled append tiny configs
+            for conf in tiny_configs:
+                if conf not in configs:
+                    configs.append(conf)
+
+            # Additional custome configs in support of customer workloads
+            configs.append(
+                triton_config_reduction(
+                    size_hints,
+                    1,
+                    rnumel,
+                    num_stages=3,
+                    num_warps=2,
+                )  # 18% improvement
+            )
 
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
