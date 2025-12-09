@@ -3382,6 +3382,17 @@ def _persistent_reduction_configs(
                 if conf not in configs:
                     configs.append(conf)
 
+            # Additional custom configs in support of customer workloads
+            configs.append(
+                triton_config_reduction(
+                    size_hints,
+                    1,
+                    rnumel,
+                    num_stages=3,
+                    num_warps=2,
+                )  # 18% improvement
+            )
+
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
