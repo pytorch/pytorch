@@ -153,9 +153,10 @@ def check_node_safe(node: Node):
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
         "einops.einops.repeat",
-        # DTensor side table functions for redistribute/to_local
+        # DTensor side table functions for redistribute/to_local/from_local
         "torch._dynamo.side_tables.dtensor_to_local",
         "torch._dynamo.side_tables.dtensor_redistribute",
+        "torch._dynamo.side_tables.dtensor_from_local",
     )
 
     def is_public_torch_api(target):

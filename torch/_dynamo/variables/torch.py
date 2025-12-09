@@ -955,8 +955,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             @register(DTensor.from_local)
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
-                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-                # and rewrite args to have only proxyable args, then insert call_function
+                from ..side_tables import dtensor_args_side_table, dtensor_from_local
+
+                # Handle placements which may be a sequence-like structure
                 placements_vt = kwargs.get("placements")
 
                 if placements_vt is None and len(args) >= 3:
@@ -975,34 +976,37 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 elif kwargs.get("placements") is not None:
                     kwargs["placements"] = placements_vt
 
-                args_as_value = [x.as_python_constant() for x in new_args[1:]]
+                # Store non-primitive args/kwargs in side table
+                args_as_value = tuple(x.as_python_constant() for x in new_args[1:])
                 kwargs_as_value = {
                     k: v.as_python_constant()
                     for k, v in kwargs.items()
                     if k not in ["shape", "stride"]
                 }
 
+                args_idx = dtensor_args_side_table.add_args(args_as_value, kwargs_as_value)
+
+                # shape and stride may be symbolic, so they need to go through proxy
                 kwargs_to_be_proxied = {
                     k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
                 }
 
-                def fn_with_prim_types(x, shape=None, stride=None):
-                    return self.value(
-                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
-                    )
+                # Get proxy args and kwargs separately
+                proxy_args, proxy_kwargs = proxy_args_kwargs(
+                    [args[0]],
+                    kwargs_to_be_proxied,
+                )
 
-                # attach the same function name for better debugging
-                fn_with_prim_types.__name__ = "prim " + self.value.__name__
+                # Add args_idx as a constant to the kwargs
+                proxy_kwargs["args_idx"] = args_idx
 
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
-                        fn_with_prim_types,
-                        *proxy_args_kwargs(
-                            [args[0]],
-                            kwargs_to_be_proxied,
-                        ),
+                        dtensor_from_local,
+                        proxy_args,
+                        proxy_kwargs,
                     ),
                 )
 
