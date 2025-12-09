@@ -15,10 +15,12 @@ def _device_constructors():
     return {
         # standard ones
         torch.empty,
+        torch.empty_like,
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
         torch.ones,
+        torch.ones_like,
         torch.arange,
         torch.bartlett_window,
         torch.blackman_window,
@@ -26,6 +28,7 @@ def _device_constructors():
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
         torch.full,
+        torch.full_like,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
@@ -36,7 +39,9 @@ def _device_constructors():
         # torch.normal,
         torch.rand,
         torch.randn,
+        torch.randn_like,
         torch.randint,
+        torch.randint_like,
         torch.randperm,
         torch.range,
         torch.sparse_coo_tensor,
@@ -48,6 +53,7 @@ def _device_constructors():
         torch.tril_indices,
         torch.triu_indices,
         torch.zeros,
+        torch.zeros_like,
         torch.asarray,
         # weird ones
         torch.tensor,
