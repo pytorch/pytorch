@@ -349,9 +349,6 @@ class _FirstInvocationContext:
         Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
         Automatically updates state after first use.
         """
-        if not torch._functorch.config.check_custom_op_mode:
-            return nullcontext()
-
         if self._is_first:
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
