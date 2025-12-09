@@ -1116,7 +1116,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
                 ):
                     name = "forward"
-                    fn = self.value_type.forward
+                    fn = self.value_type.forward  # type: ignore[attr-defined]
 
         if self.source:
             source = self.get_source_by_walking_mro(name)
