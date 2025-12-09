@@ -5376,11 +5376,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
     @onlyCPU
-    def test_native_batch_norm_empty_running_var_cpu(self, device):
+    def test_native_batch_norm_empty_running_var_cpu(self):
         """Test that native_batch_norm raises error for empty running_var instead of segfaulting.
 
         Fixes #169208
         """
+        device = 'cpu'
         input_data = torch.randn(10, 8, device=device)
         weight = torch.ones(8, device=device)
         bias = torch.zeros(8, device=device)
@@ -5400,11 +5401,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             )
 
     @onlyCPU
-    def test_native_batch_norm_zero_channels_ok(self, device):
+    def test_native_batch_norm_zero_channels_ok(self):
         """Test that native_batch_norm allows zero channels (empty tensor case).
 
         This ensures the fix doesn't break valid zero-channel configurations.
         """
+        device = 'cpu'
         input_data = torch.randn(2, 0, 4, 4, device=device)
         weight = torch.ones(0, device=device)
         bias = torch.zeros(0, device=device)
