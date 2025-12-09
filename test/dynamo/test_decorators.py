@@ -499,7 +499,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State, value_type=True)
+        torch._library.opaque_object.register_opaque_type(State, typ="value")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -794,7 +794,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch._library.opaque_object.register_opaque_type(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="reference")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -812,7 +812,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn(
-                "Opaque object were created in the middle of the program.",
+                "An opaque object was created in the middle of the program.",
                 str(e),
             )
 
