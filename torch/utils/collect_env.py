@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from collections import namedtuple
-from typing import cast as _cast, Dict
+from typing import cast as _cast, Dict as _Dict
 
 
 try:
@@ -654,7 +654,7 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
-def get_cachingallocator_config() -> Dict[str, str]:
+def get_cachingallocator_config() -> _Dict[str, str]:
     """Return the caching allocator configuration from environment variables.
     """
     # pyrefly: ignore [bad-return]
