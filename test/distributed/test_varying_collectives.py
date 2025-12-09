@@ -44,13 +44,13 @@ class TestVaryingFunctionalCollectives(MultiThreadedTestCase):
         self._spawn_threads()
 
     @parametrize("device", devices)
-    def test_all_reduce_sum_invariant_forward(self, device):
+    def test_all_reduce_invariant_forward(self, device):
         """Forward does all_reduce(sum) on varying tensors."""
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
 
         input_tensor = torch.full((3, 3), fill_value=float(rank), device=device)
-        output = vcols.all_reduce_sum_invariant(input_tensor, group_name)
+        output = vcols.all_reduce_invariant(input_tensor, "sum", group_name)
 
         expected = torch.full(
             (3, 3),
@@ -70,12 +70,12 @@ class TestVaryingFunctionalCollectives(MultiThreadedTestCase):
         self.assertEqual(output, input_tensor)
 
     @parametrize("device", devices)
-    def test_all_reduce_sum_invariant_backward(self, device):
+    def test_all_reduce_invariant_backward(self, device):
         """Backward is identity (no gradient aggregation)."""
         group_name = dist.group.WORLD.group_name
 
         input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
-        output = vcols.all_reduce_sum_invariant(input_tensor, group_name)
+        output = vcols.all_reduce_invariant(input_tensor, "sum", group_name)
 
         output.sum().backward()
 
@@ -128,15 +128,15 @@ class TestVaryingFunctionalCollectives(MultiThreadedTestCase):
     ]
 
     @parametrize("test_utils", test_utils)
-    def test_all_reduce_sum_invariant_opcheck(self, test_utils):
+    def test_all_reduce_invariant_opcheck(self, test_utils):
         """Verify custom op registration (schema, autograd, fake tensor)."""
         group_name = dist.group.WORLD.group_name
 
         input_tensor = torch.ones(3, 3, requires_grad=True)
 
         torch.library.opcheck(
-            torch.ops._c10d_functional.all_reduce_sum_invariant,
-            (input_tensor, group_name),
+            torch.ops._c10d_functional.all_reduce_invariant,
+            (input_tensor, "sum", group_name),
             test_utils=test_utils,
         )
 
@@ -153,13 +153,13 @@ class TestVaryingFunctionalCollectives(MultiThreadedTestCase):
             test_utils=test_utils,
         )
 
-    def test_all_reduce_sum_invariant_compile(self):
+    def test_all_reduce_invariant_compile(self):
         """Backward works with torch.compile (no gradient aggregation)."""
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
         def compiled_fn(tensor):
-            output = vcols.all_reduce_sum_invariant(tensor, group_name)
+            output = vcols.all_reduce_invariant(tensor, "sum", group_name)
             return output.sum()
 
         input_tensor = torch.randn(3, 3, requires_grad=True)

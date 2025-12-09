@@ -4,12 +4,15 @@
 import torch
 
 
-def all_reduce_sum_invariant(
+def all_reduce_invariant(
     input: torch.Tensor,
+    reduce_op: str,
     group_name: str,
 ) -> torch.Tensor:
-    """Forward: all_reduce(sum), Backward: identity (no grad aggregation)."""
-    output = torch.ops._c10d_functional.all_reduce_sum_invariant(input, group_name)
+    """Forward: all_reduce, Backward: identity (no grad aggregation)."""
+    output = torch.ops._c10d_functional.all_reduce_invariant(
+        input, reduce_op, group_name
+    )
     return torch.ops._c10d_functional.wait_tensor(output)
 
 
@@ -22,30 +25,37 @@ def mark_varying(
     return torch.ops._c10d_functional.wait_tensor(output)
 
 
-@torch.library.custom_op("_c10d_functional::all_reduce_sum_invariant", mutates_args=())
-def all_reduce_sum_invariant_op(input: torch.Tensor, group_name: str) -> torch.Tensor:
-    output = torch.ops._c10d_functional.all_reduce(input, "sum", group_name)
+@torch.library.custom_op("_c10d_functional::all_reduce_invariant", mutates_args=())
+def all_reduce_invariant_op(
+    input: torch.Tensor, reduce_op: str, group_name: str
+) -> torch.Tensor:
+    output = torch.ops._c10d_functional.all_reduce(input, reduce_op, group_name)
     return torch.ops._c10d_functional.wait_tensor(output)
 
 
-@all_reduce_sum_invariant_op.register_fake
-def _(input: torch.Tensor, group_name: str) -> torch.Tensor:
+@all_reduce_invariant_op.register_fake
+def _(input: torch.Tensor, reduce_op: str, group_name: str) -> torch.Tensor:
     return torch.empty_like(input)
 
 
-def all_reduce_sum_invariant_backward(ctx, grad_output: torch.Tensor):
-    return grad_output, None
+def all_reduce_invariant_backward(ctx, grad_output: torch.Tensor):
+    if ctx.reduce_op != "sum":
+        raise RuntimeError(
+            f"all_reduce_invariant backward only supports 'sum' reduction, got '{ctx.reduce_op}'"
+        )
+    return grad_output, None, None
 
 
-def all_reduce_sum_invariant_setup_context(ctx, inputs, output):
-    input, group_name = inputs
+def all_reduce_invariant_setup_context(ctx, inputs, output):
+    input, reduce_op, group_name = inputs
+    ctx.reduce_op = reduce_op
     ctx.group_name = group_name
     return
 
 
-all_reduce_sum_invariant_op.register_autograd(
-    all_reduce_sum_invariant_backward,
-    setup_context=all_reduce_sum_invariant_setup_context,
+all_reduce_invariant_op.register_autograd(
+    all_reduce_invariant_backward,
+    setup_context=all_reduce_invariant_setup_context,
 )
 
 

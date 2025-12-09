@@ -9,16 +9,22 @@ import torch
 if TYPE_CHECKING:
     from torch.distributed.tensor import DTensor
 
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import Replicate
 from torch.utils._pytree import tree_map
+from . import _varying_collectives as vcols
 
 
 _CUSTOM_VARIANCE_STRATEGY_MAP: dict[Callable, Callable] = {}
 
+_CUSTOM_OPERATOR_HANDLER_MAP: dict[Callable, Callable] = {
+    torch.ops._c10d_functional.all_reduce: vcols.all_reduce_invariant
+}
+
 
 def register_variance_strategy(ops):
-    """Register custom variance handler for collective operations."""
+    """Register custom variance strategy for calculating output variance."""
 
     def wrapper(func):
         for op in ops:
@@ -154,7 +160,12 @@ class LTensor(torch.Tensor):
                 out_variant_axes, *args, **kwargs
             )
 
+        func = _CUSTOM_OPERATOR_HANDLER_MAP.get(func, func)
+
         def unwrap_and_insert_mark_varying(t):
+            if isinstance(t, AsyncCollectiveTensor):
+                t = t.trigger_wait()
+
             if not isinstance(t, LTensor):
                 return t
 
@@ -164,8 +175,6 @@ class LTensor(torch.Tensor):
 
             if not missing_axes:
                 return local_tensor
-
-            from . import _varying_collectives as vcols
 
             for axis_name in missing_axes:
                 group_name = mesh.get_group(axis_name).group_name
