@@ -983,6 +983,9 @@ class aten_distributed_optimizations:
     # Maximum prefetch or bucketing candidates. Mainly intended for compile time.
     max_coll_distance: Optional[int] = None
 
+    # Bucket exposed collectives first
+    bucket_exposed_first: bool = True
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
