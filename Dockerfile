@@ -28,12 +28,10 @@ RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 ENV PATH /opt/pytorch-venv/bin:$PATH
 
 FROM dev-base as python-venv
-# Update pip in the system Python
-RUN python3 -m pip install --break-system-packages --upgrade pip setuptools wheel
 COPY requirements.txt requirements-build.txt .
 # Create virtual environment and install packages
 RUN python3 -m venv /opt/pytorch-venv && \
-    /opt/pytorch-venv/bin/pip install --upgrade pip && \
+    /opt/pytorch-venv/bin/pip install --upgrade pip setuptools wheel && \
     /opt/pytorch-venv/bin/pip install cmake pyyaml numpy ipython -r requirements.txt
 
 FROM dev-base as submodule-update
