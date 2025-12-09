@@ -22,6 +22,7 @@ class GuardDebugInfo:
     verbose_code_parts: list[str]
     result: bool
     num_guards_executed: int
+    user_stack: Any
 
 class GuardManager:
     def check(self, value: Any) -> bool: ...

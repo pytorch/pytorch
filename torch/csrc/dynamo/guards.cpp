@@ -1536,14 +1536,16 @@ class GuardDebugInfo {
   GuardDebugInfo(
       bool result,
       py::list verbose_code_parts,
-      int num_guards_executed)
+      int num_guards_executed,
+      py::object user_stack = py::none())
       : result(result),
         verbose_code_parts(std::move(verbose_code_parts)),
-        num_guards_executed(num_guards_executed) {}
+        num_guards_executed(num_guards_executed),
+        user_stack(std::move(user_stack)) {}
 
   // This constructor is used when guard succeeds.
   GuardDebugInfo(bool result, int num_guards_executed)
-      : result(result), num_guards_executed(num_guards_executed) {}
+      : result(result), num_guards_executed(num_guards_executed), user_stack(py::none()) {}
 
   GuardDebugInfo(
       bool result,
@@ -1558,7 +1560,8 @@ class GuardDebugInfo {
     ss << "GuardDebugInfo(\n"
        << "result=" << result << ",\n"
        << "verbose_code_parts=" << verbose_code_parts << ",\n"
-       << "num_guards_executed=" << num_guards_executed << ")\n";
+       << "num_guards_executed=" << num_guards_executed << ",\n"
+       << "user_stack=" << user_stack << ")\n";
     return ss.str();
   }
 
@@ -1574,6 +1577,9 @@ class GuardDebugInfo {
   // Total number of executed guards so far. This is helpful in debugging if
   // shuffling is working.
   int num_guards_executed;
+
+  // User stack trace information for the guard.
+  py::object user_stack;
 };
 
 class GuardManager;
@@ -1616,9 +1622,13 @@ std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
  */
 class LeafGuard {
  public:
-  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
+  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts, py::object user_stack = py::none())
       : _root_guard_manager(root_guard_manager),
-        _verbose_code_parts(std::move(verbose_code_parts)) {}
+        _verbose_code_parts(std::move(verbose_code_parts)), _user_stack(nullptr) {
+    if (!user_stack.is_none()) {
+      _user_stack = new py::object(std::move(user_stack));
+    }
+  }
 
   // check function could be called from python. This is useful for debugging
   // purpose.
@@ -1634,13 +1644,17 @@ class LeafGuard {
       PyObject* value) { // borrowed ref
     bool result = check_nopybind(value);
     if (!result) {
-      return GuardDebugInfo(result, _verbose_code_parts, 0);
+      return GuardDebugInfo(result, _verbose_code_parts, 0, get_user_stack());
     }
     return GuardDebugInfo(true, 0);
   }
 
   py::list verbose_code_parts() {
     return _verbose_code_parts;
+  }
+
+  py::object get_user_stack() const {
+    return _user_stack ? *_user_stack : py::none();
   }
 
   // This is on the hot path and avoids any refcounting code from pybind. This
@@ -1652,7 +1666,11 @@ class LeafGuard {
     return check_nopybind((PyObject*)map->to_dict());
   }
 
-  virtual ~LeafGuard() = default;
+  virtual ~LeafGuard() {
+    if (_user_stack) {
+      delete _user_stack;
+    }
+  }
 
  protected:
   // RootGuardManager has state that is common across all guards like
@@ -1663,6 +1681,7 @@ class LeafGuard {
   // This is set while constructing the leaf guard. This is used for identifying
   // the cause of recompilation.
   py::list _verbose_code_parts;
+  py::object* _user_stack;
 };
 
 /**
@@ -6689,11 +6708,13 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")
       .def(py::init<bool, py::list, int>())
+      .def(py::init<bool, py::list, int, py::object>())
       .def("__str__", &GuardDebugInfo::to_string)
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
       .def_readonly(
-          "num_guards_executed", &GuardDebugInfo::num_guards_executed);
+          "num_guards_executed", &GuardDebugInfo::num_guards_executed)
+      .def_readonly("user_stack", &GuardDebugInfo::user_stack);
 
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard")

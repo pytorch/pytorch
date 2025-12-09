@@ -69,6 +69,41 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    def test_guard_debug_info_user_stack(self):
+        """Test that GuardDebugInfo can store user stack trace information."""
+        import traceback
+
+        # Create a sample user stack
+        user_stack = traceback.StackSummary.from_list(
+            [
+                traceback.FrameSummary("test.py", 10, "test_func", line="x = y + 1"),
+                traceback.FrameSummary("main.py", 5, "main", line="test_func()"),
+            ]
+        )
+
+        # Test creating GuardDebugInfo with user_stack
+        debug_info = guards.GuardDebugInfo(False, ["test_guard_failed"], 1, user_stack)
+
+        # Verify user_stack is stored correctly
+        self.assertFalse(debug_info.result)
+        self.assertEqual(len(debug_info.verbose_code_parts), 1)
+        self.assertEqual(debug_info.num_guards_executed, 1)
+        self.assertIsNotNone(debug_info.user_stack)
+
+        # Verify user_stack content
+        self.assertEqual(len(debug_info.user_stack), 2)
+        self.assertEqual(debug_info.user_stack[0].filename, "test.py")
+        self.assertEqual(debug_info.user_stack[0].lineno, 10)
+        self.assertEqual(debug_info.user_stack[0].name, "test_func")
+
+        # Test GuardDebugInfo without user_stack (backward compatibility)
+        debug_info2 = guards.GuardDebugInfo(True, ["test_guard_passed"], 2)
+        self.assertTrue(debug_info2.result)
+        # user_stack should be None when not provided
+        self.assertTrue(
+            debug_info2.user_stack is None or debug_info2.user_stack == py.none()
+        )
+
     def test_global_state_guard(self):
         root = RootGuardManager()
         guard = guards.GLOBAL_STATE(root, ["global_state_check"])
