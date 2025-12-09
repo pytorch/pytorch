@@ -912,15 +912,15 @@ conv2d_bwd_weight_template = TritonTemplate(
     stride_dyh = {{stride("dY", 2)}}
     stride_dyw = {{stride("dY", 3)}}
 
-    m0 = tl.program_id(0) * BLOCK_M
-    oc = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    m0 = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M
+    oc = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C  = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C  = IN_C  // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -947,7 +947,7 @@ conv2d_bwd_weight_template = TritonTemplate(
     mask = (out_ic[:, None] < GROUP_IN_C) & (oc[None, :] < GROUP_OUT_C)
 
     {{store_output(("out_oc[None, :]", "out_ic[:, None]", "i[:, None]", "j[:, None]"),
-                   "acc", "mask")}}
+                   "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -1044,17 +1044,17 @@ conv2d_bwd_input_template = TritonTemplate(
     group = 0
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     w = nhw % IN_W
     nh = nhw // IN_W
     h = nh % IN_H
     n = nh // IN_H
 
-    ic = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    ic = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
@@ -1073,7 +1073,7 @@ conv2d_bwd_input_template = TritonTemplate(
     ic_global = ic + group * GROUP_IN_C
 
     {{store_output(("n[:, None]", "ic_global[None, :]", "h[:, None]", "w[:, None]"),
-                   "acc", "mask")}}
+                   "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -1096,9 +1096,9 @@ def convolution_backward_lowering(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
-        groups = V.graph.sizevars.evaluate_static_shape(groups)
+        groups = V.graph.sizevars.guard_int(groups)
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(
         weight.get_size()
     )
 
@@ -1110,8 +1110,8 @@ def convolution_backward_lowering(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
-    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
-    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+    stride = tuple(V.graph.sizevars.guard_int_seq(stride))
+    padding = tuple(V.graph.sizevars.guard_int_seq(padding))
 
     input.realize(); weight.realize(); grad_output.realize()
 
@@ -1124,16 +1124,10 @@ def convolution_backward_lowering(
         "groups": groups,
     }
 
-    # TODO: remove this.
-    if "conv_configs" not in globals() and "conv_configs" not in locals():
-        def conv_cfg(arg1, arg2, arg3, device_type):
-            get_cfg = V.choices.get_conv_configs(device_type)
-            rtn = []
-            for cfg in get_cfg(arg1, arg2, arg3, **mm_config_kwargs(device_type, _is_large_block_for_cpu)):
-                rtn.append(cfg)
-            return rtn
+    device_type = ir.get_device_type(input)
 
-        globals()["conv_configs"] = conv_cfg
+    conv_configs = V.choices.get_conv_configs(device_type)
+    dtype_size = input.get_dtype().itemsize
 
     dw = None
     if output_mask[1]:
@@ -1159,12 +1153,12 @@ def convolution_backward_lowering(
             and is_zeros(output_padding)
         ):
 
-            # TODO: Use the autotune configuration specific to backward convolution.
+            
             for cfg in conv_configs(
                 sympy_product([input.get_size()[0], *input.get_size()[2:]]),
                 out_chan,
                 in_chan,
-                device_type=ir.get_device_type(input),
+                dtype_size=dtype_size,
             ):
                 if ndim == 2:
                     conv2d_bwd_weight_template.maybe_append_choice(
@@ -1178,7 +1172,7 @@ def convolution_backward_lowering(
                         STRIDE_H=stride[0],
                         STRIDE_W=stride[1],
                         DILATION_H=dilation[0],
-                        DILATION_W=dilation[0],
+                        DILATION_W=dilation[1],
                         GROUPS=groups,
                         ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                         num_stages=cfg.num_stages,
@@ -1244,7 +1238,7 @@ def convolution_backward_lowering(
                 sympy_product([input.get_size()[0], *input.get_size()[2:]]),
                 out_chan,
                 in_chan,
-                device_type=ir.get_device_type(input),
+                dtype_size=dtype_size,
             ):
                 if ndim == 2:
                     conv2d_bwd_input_template.maybe_append_choice(
