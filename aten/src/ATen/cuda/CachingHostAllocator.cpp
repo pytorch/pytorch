@@ -84,8 +84,8 @@ public:
     // writes to host pinned memory after the GPU is scheduled to read
     // from it during cuda graph replay. I am calling this a
     // CPU-Write-After-GPU-Read hazard. Such a situation is almost
-    // certainly a bug, bcause it doesn't match the semantics of eager
-    // launch. That check happens in end_allocate_to_pool.
+    // certainly a bug, because it doesn't match the semantics of
+    // eager launch. That check happens in end_allocate_to_pool.
 
     Block *block = nullptr;
     if (block_exists(ctx)) {
