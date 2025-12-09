@@ -571,16 +571,7 @@ class CodeGen:
             elif is_opaque_value_type(type(arg)):
                 arg_type = type(arg)
                 add_global(arg_type.__name__, arg_type)
-
-                if arg_type.__repr__ is object.__repr__:  # type: ignore[comparison-overlap]
-                    raise TypeError(
-                        f"Value-type opaque object of type {arg_type} is "
-                        "expected to have to have a non-default `__repr__` "
-                        "implementation as we will use this to reconstruct "
-                        "the object in the FX codegen."
-                    )
-                arg_repr = repr(arg)
-                return arg_repr
+                return repr(arg)
             else:
                 return blue(repr(arg))
 

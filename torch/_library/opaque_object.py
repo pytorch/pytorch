@@ -15,7 +15,7 @@ the anything (including tensors) within the object, the object must be an
 input to the graph.
 
 You can register a custom class as being a reference-based opaque object class
-through `register_opaque_type(MyClass)`.
+through `register_opaque_type(MyClass, typ="reference")`.
 
 VALUE TYPES:
 
@@ -31,10 +31,12 @@ implemented before registering it as a value-typed opaque object class:
     construct the object again through its __init__ method.
 
 You can register a custom class as being a reference-based opaque object class
-through `register_opaque_type(MyClass, value_type=True)`.
+through `register_opaque_type(MyClass, typ="value")`.
 """
 
+from dataclasses import dataclass
 from typing import Any, NewType
+from weakref import WeakKeyDictionary
 
 import torch
 
@@ -58,8 +60,17 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
-# Mapping of type -> (registered string name, whether or not it is a value type)
-_OPAQUE_TYPES: dict[Any, tuple[str, bool]] = {}
+
+@dataclass
+class _OpaqueTypeInfo:
+    class_name: str
+    opaque_typ: str  # either "reference" or "value"
+
+
+# Mapping of type -> (string name, reference/value type)
+_OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
+# Mapping of class_name -> (type, reference/value type)
+_OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
 
 
 def get_opaque_type_name(cls: Any) -> str:
@@ -80,10 +91,10 @@ def get_opaque_type_name(cls: Any) -> str:
             f"Class {cls} is not registered as an opaque type. "
             f"Call register_opaque_type({cls.__name__}) first."
         )
-    return _OPAQUE_TYPES[cls][0]
+    return _OPAQUE_TYPES[cls].class_name
 
 
-def register_opaque_type(cls: Any, *, value_type=False) -> None:
+def register_opaque_type(cls: Any, *, typ: str) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
@@ -93,8 +104,8 @@ def register_opaque_type(cls: Any, *, value_type=False) -> None:
 
     Args:
         cls (type): The class to register as an opaque type.
-        value_type (bool): Whether or not the opaque type is a value-type or a
-            reference-type. See Note [Opaque Objects] for more details.
+        typ (str): Either "reference" or "value". See Note [Opaque Objects] for
+            more details.
     """
     import torch.utils._pytree as pytree
 
@@ -111,10 +122,43 @@ def register_opaque_type(cls: Any, *, value_type=False) -> None:
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
+    assert typ in ["reference", "value"], (
+        "Opaque type must be either 'reference' or 'value'"
+    )
+
+    if typ == "value":
+        if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+            raise TypeError(
+                f"Value-type opaque object of type {cls} is "
+                "expected to have a non-default `__eq__` "
+                "implementation as we will use this in torch.compile "
+                "to guard on the equality of objects."
+            )
+
+        # Class with a custom `__eq__` without `__hash__` won't inherit the default
+        # `__hash__` from object; see https://stackoverflow.com/a/1608907.
+        if cls.__hash__ is None:  # type: ignore[comparison-overlap]
+            raise TypeError(
+                f"Value-type opaque object of type {cls} is "
+                "expected to have a non-default `__hash__` "
+                "implementation as we will use this in torch.compile "
+                "for FakeTensor caching."
+            )
+
+        if cls.__repr__ is object.__repr__:  # type: ignore[comparison-overlap]
+            raise TypeError(
+                f"Value-type opaque object of type {cls} is "
+                "expected to have a non-default `__repr__` "
+                "implementation as we will use this to reconstruct "
+                "the object in the FX codegen."
+            )
+
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    _OPAQUE_TYPES[cls] = (name, value_type)
+    type_info = _OpaqueTypeInfo(name, typ)
+    _OPAQUE_TYPES[cls] = type_info
+    _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
 
@@ -129,7 +173,7 @@ def is_opaque_type(cls: Any) -> bool:
     if cls not in _OPAQUE_TYPES:
         return False
 
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls][0])
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls].class_name)
 
 
 def is_opaque_value_type(cls: Any) -> bool:
@@ -141,11 +185,9 @@ def is_opaque_value_type(cls: Any) -> bool:
         return False
 
     if isinstance(cls, str):
-        for cls_str, is_value in _OPAQUE_TYPES.values():
-            if cls_str == cls:
-                return is_value
+        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
-    return _OPAQUE_TYPES[cls][1]
+    return _OPAQUE_TYPES[cls].opaque_typ == "value"
 
 
 def is_opaque_reference_type(cls: Any) -> bool:
@@ -157,8 +199,6 @@ def is_opaque_reference_type(cls: Any) -> bool:
         return False
 
     if isinstance(cls, str):
-        for cls_str, is_value in _OPAQUE_TYPES.values():
-            if cls_str == cls:
-                return not is_value
+        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
 
-    return not _OPAQUE_TYPES[cls][1]
+    return _OPAQUE_TYPES[cls].opaque_typ == "reference"
