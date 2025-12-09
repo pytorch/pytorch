@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import types
+import inspect
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -104,22 +104,12 @@ class TorchDispatchMode:
     # Mode authors can implement how the mode interacts with higher order operators.
     supports_higher_order_operators = False
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        # Store the wrapped function (not a bound method) to avoid circular reference
-        # This is done in __new__ instead of __init__ to ensure it's always set,
-        # even if subclasses don't call super().__init__()
-
-        # Check if __torch_dispatch__ is a classmethod by inspecting the class dict
-        # If it is, skip wrapping and let C++ validation handle the error
-        torch_dispatch = cls.__dict__.get("__torch_dispatch__")
-        if isinstance(torch_dispatch, classmethod):
-            instance.__dict__["_wrapped_torch_dispatch"] = None
-        else:
-            instance.__dict__["_wrapped_torch_dispatch"] = torch._disable_dynamo(
-                cls.__torch_dispatch__, recursive=True
-            )
-        return instance
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "__torch_dispatch__" in cls.__dict__:
+            raw = inspect.getattr_static(cls, "__torch_dispatch__")
+            if not isinstance(raw, classmethod):
+                cls.__torch_dispatch__ = torch._disable_dynamo(raw, recursive=True)
 
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
@@ -132,17 +122,6 @@ class TorchDispatchMode:
         self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[bool] = (
             deque()
         )
-
-    def __getattribute__(self, name):
-        # Create bound method on demand to avoid circular reference
-        # reference: test/test_fake_tensor.py: test_no_ref_cycle
-        if name == "__torch_dispatch__":
-            wrapped = object.__getattribute__(self, "_wrapped_torch_dispatch")
-            if wrapped is None:
-                # classmethod case - get it from the class to let C++ validation handle it
-                return self.__class__.__torch_dispatch__
-            return types.MethodType(wrapped, self)
-        return object.__getattribute__(self, name)
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
