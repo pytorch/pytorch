@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_convert.h>
+#include <c10/util/TypeCast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
@@ -17,7 +18,7 @@ inline void convertImpl(
     int64_t n) {
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
-    dst[i] = static_cast<to_type>(src[i]);
+    dst[i] = c10::convert<dst_t>(src[i]);
   }
 }
 

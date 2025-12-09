@@ -2,6 +2,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
+#include <c10/util/TypeCast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
@@ -21,7 +22,7 @@ struct VecConvert {
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
     for (int i = 0; i < count; i++) {
-      dst_buf[i] = static_cast<dst_t>(src_buf[i]);
+      dst_buf[i] = c10::convert<dst_t>(src_buf[i]);
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }

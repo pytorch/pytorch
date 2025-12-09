@@ -31,6 +31,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
     parametrize,
@@ -3373,6 +3374,10 @@ class CPUReproTests(TestCase):
                 3,
             )
 
+    @unittest.skipIf(
+        IS_ARM64,
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142231"
+    )
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -4547,17 +4552,32 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
 
     def test_float32_to_uint8(self):
+
+        def assert_equal(actual, expected):
+            torch.testing.assert_close(
+                actual,
+                expected,
+                atol=0.0,
+                rtol=0.0,
+                msg=f"Expected {expected} but got {actual}",
+            )
+
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
         def fn(x):
             return x.to(torch.uint8)
 
         x = torch.tensor([-1.0, -2.0, -3.0, -4.0], dtype=torch.float32, device="cpu")
-        self.assertEqual(
-            x.to(torch.uint8),
-            fn(x),
-            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
-        )
+
+        a = torch.tensor([255, 254, 253, 252], dtype=torch.uint8, device="cpu")
+        b = x.to(torch.uint8)
+        c = fn(x)
+
+
+        # 3 way assertion check
+        assert_equal(a, b)
+        assert_equal(a, c)
+        assert_equal(b, c)
 
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
@@ -5183,6 +5203,10 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @unittest.skipIf(
+        IS_ARM64,
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142134"
+    )
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
