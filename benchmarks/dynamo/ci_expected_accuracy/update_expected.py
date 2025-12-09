@@ -181,6 +181,7 @@ def download_artifacts_and_extract_csvs(urls):
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
+        df = df.sort_values(by="name")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
         apply_lints(out_fn)
 
