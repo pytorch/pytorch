@@ -44,6 +44,7 @@ from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 
 from .. import graph_break_hints, variables
@@ -63,7 +64,6 @@ from .lists import ListVariable, TupleVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch.multiprocessing.reductions import StorageWeakRef
 
 
 log = logging.getLogger(__name__)
