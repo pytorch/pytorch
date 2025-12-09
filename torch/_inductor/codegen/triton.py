@@ -3045,10 +3045,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if (
-                self.fixed_config or self.is_combo_kernel
-            ) and not self._has_constant_xmask():
-                mask_vars = OrderedSet(["xmask"])
+            if self.fixed_config or self.is_combo_kernel:
+                mask_vars = OrderedSet(
+                    f"{tree.prefix}mask"
+                    for tree in self.range_trees
+                    if not tree.is_reduction and not self._has_constant_mask(tree)
+                )
             else:
                 mask_vars = OrderedSet()
             if self._load_mask:
@@ -5680,7 +5682,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config and f"{tree.prefix.upper()}BLOCK" in self.fixed_config:
             if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
                 return True
-        else:
+        elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
                 return True
 
@@ -5717,16 +5719,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def _has_constant_xmask(self) -> bool:
-        if self.is_combo_kernel:
-            xtree = next(
-                (tree for tree in self.range_trees if tree.prefix == "x"), None
-            )
-            # when there's no xtree, there's no output iteration to mask
-            if xtree is None:
-                return True
-        else:
-            xtree = self.range_trees[0]
-            assert xtree.prefix == "x"
+        xtree = self.range_trees[0]
+        assert xtree.prefix == "x"
         return self._has_constant_mask(xtree)
 
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
