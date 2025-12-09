@@ -2026,7 +2026,11 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
-if torch.version.hip and torch.cuda.device_count() > 0 and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+if (
+    torch.version.hip
+    and torch.cuda.device_count() > 0
+    and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+):
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
