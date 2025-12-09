@@ -40,19 +40,19 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
   }
 
   /* Strategy: Balance between full sort and TopK selection based on size, k, and dtype
-  
+
   Analysis:
   - TopK (mbtopk): O(n * radix_passes) - radix passes vary by dtype
     - float32: 4 passes (32 bits / 8 bits per pass)
     - bfloat16/float16: 2 passes (16 bits / 8 bits per pass)
     - Has multi-block overhead and atomics
     - Better for very large n with small k, especially for float32
-  
+
   - Full sort: O(n * log2(n))
     - Better memory patterns and cache locality
     - Efficient rocThrust implementation for moderate sizes
     - Crossover depends on n, k, and dtype
-  
+
   Empirical thresholds (based on benchmarks):
     For n < 500k:  Use sort (rocThrust is well-optimized for moderate sizes)
     For n >= 500k: Dtype-aware strategy
