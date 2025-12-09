@@ -179,7 +179,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -265,7 +265,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -366,7 +366,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -448,7 +448,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -531,7 +531,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
             bucket_mode="custom_ops_multidtype",
@@ -622,7 +622,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
@@ -706,7 +706,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )

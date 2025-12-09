@@ -129,15 +129,20 @@ class OverlapPreservingBucketer:
 
     def __init__(
         self,
-        graph: fx.Graph,
+        gm: fx.GraphModule,
         collective_info: dict[fx.Node, CollectiveInfo],
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        collective_bucketing: bool = True,
+        region_of: dict[fx.Node, "FusionRegion"] | None = None,
     ):
-        self.graph = graph
+        from torch._inductor.fx_passes.fusion_regions import FusionRegion
+
+        self.gm = gm
+        self.graph = gm.graph
         self.collective_info = collective_info
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
@@ -145,6 +150,8 @@ class OverlapPreservingBucketer:
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
+        self.collective_bucketing = collective_bucketing
+        self.region_of: dict[fx.Node, FusionRegion] = region_of if region_of else {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -263,45 +270,96 @@ class OverlapPreservingBucketer:
 
             self.all_hiding_nodes |= info.hiding_nodes
 
+    def _update_for_collapsed_regions(
+        self, replaced: dict[fx.Node, fx.Node]
+    ) -> None:
+        """Update scheduled, hiding_nodes, and node_idx for collapsed regions."""
+        # Update scheduled: replace region nodes with module node
+        new_scheduled: OrderedSet[fx.Node] = OrderedSet()
+        seen_module_nodes: set[fx.Node] = set()
+        for node in self.scheduled:
+            if node in replaced:
+                module_node = replaced[node]
+                if module_node not in seen_module_nodes:
+                    new_scheduled.add(module_node)
+                    seen_module_nodes.add(module_node)
+            else:
+                new_scheduled.add(node)
+        self.scheduled = new_scheduled
+        self.node_idx = {n: i for i, n in enumerate(self.scheduled)}
+
+        # Update hiding_nodes in collective_info
+        for info in self.collective_info.values():
+            new_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
+            for hn in info.hiding_nodes:
+                if hn in replaced:
+                    new_hiding_nodes.add(replaced[hn])
+                else:
+                    new_hiding_nodes.add(hn)
+            info.hiding_nodes = new_hiding_nodes
+
+        # Update all_hiding_nodes
+        new_all_hiding: OrderedSet[fx.Node] = OrderedSet()
+        for hn in self.all_hiding_nodes:
+            if hn in replaced:
+                new_all_hiding.add(replaced[hn])
+            else:
+                new_all_hiding.add(hn)
+        self.all_hiding_nodes = new_all_hiding
+
     def bucket_collectives(self) -> None:
-        # Group collectives by PG first
-        pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for start in self.collective_info:
-            pg = get_group_name(start)
-            pg_collectives[pg].add(start)
-
-        all_buckets: list[CollBucket] = []
-        for pg, collectives in pg_collectives.items():
-            # Populate node_to_event for this PG's timeline
-            self._populate_node_to_event(pg)
-
-            # Group by bucket key within this PG
-            grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(
-                OrderedSet
+        # Collapse fusion regions before bucketing
+        replaced: dict[fx.Node, fx.Node] = {}
+        if self.region_of:
+            from torch._inductor.fx_passes.fusion_regions import (
+                collapse_fusion_regions,
             )
-            for start in collectives:
-                key = bucket_key(start, self.bucket_mode)
-                if key is not None:
-                    grouped_collectives[key].add(start)
 
-            # Find buckets for this PG
-            for key, collective_group in grouped_collectives.items():
-                bucket_log.debug(
-                    "bucketing collective group with key %s: %s",
-                    key,
-                    [n.name for n in collective_group],
+            self.region_of, replaced = collapse_fusion_regions(self.gm, self.region_of)
+
+            # Update scheduled, hiding_nodes, and node_idx for collapsed regions
+            self._update_for_collapsed_regions(replaced)
+
+        # Only do actual bucketing if collective_bucketing is enabled
+        if self.collective_bucketing:
+            # Group collectives by PG first
+            pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+            for start in self.collective_info:
+                pg = get_group_name(start)
+                pg_collectives[pg].add(start)
+
+            all_buckets: list[CollBucket] = []
+            for pg, collectives in pg_collectives.items():
+                # Populate node_to_event for this PG's timeline
+                self._populate_node_to_event(pg)
+
+                # Group by bucket key within this PG
+                grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(
+                    OrderedSet
                 )
-                buckets = self._find_buckets(collective_group)
-                all_buckets.extend(buckets)
+                for start in collectives:
+                    key = bucket_key(start, self.bucket_mode)
+                    if key is not None:
+                        grouped_collectives[key].add(start)
 
-        # Apply bucketing transformations
-        # Dependencies are tracked in aug_graph.extra_deps during bucketing
-        for coll_bucket in all_buckets:
-            if len(coll_bucket.collectives) <= 1:
-                continue
+                # Find buckets for this PG
+                for key, collective_group in grouped_collectives.items():
+                    bucket_log.debug(
+                        "bucketing collective group with key %s: %s",
+                        key,
+                        [n.name for n in collective_group],
+                    )
+                    buckets = self._find_buckets(collective_group)
+                    all_buckets.extend(buckets)
 
-            counters["inductor"]["collective_buckets"] += 1
-            self._apply_bucket(coll_bucket)
+            # Apply bucketing transformations
+            # Dependencies are tracked in aug_graph.extra_deps during bucketing
+            for coll_bucket in all_buckets:
+                if len(coll_bucket.collectives) <= 1:
+                    continue
+
+                counters["inductor"]["collective_buckets"] += 1
+                self._apply_bucket(coll_bucket)
 
         # Extract all dependencies from augmented graph
         # This includes:
@@ -341,6 +399,13 @@ class OverlapPreservingBucketer:
                     filtered_deps[node] = filtered_node_deps
 
             self._preserve_dependencies_with_tokens(filtered_deps)
+
+        # Expand fusion regions back and transfer deps
+        if self.region_of and replaced:
+            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
+
+            replaced = expand_fusion_regions(self.gm, self.region_of, replaced)
+            self.aug_graph.transfer_erased_node_deps(replaced)
 
         self.graph.lint()
 

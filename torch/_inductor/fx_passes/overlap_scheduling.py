@@ -359,6 +359,15 @@ class OverlapScheduler:
 
         self.last_on_path_node_idx = -1
 
+        # Build fusion regions for overlap calculation
+        from typing import Any
+
+        self.region_of: dict[fx.Node, Any] = {}
+        if torch._inductor.config.test_configs.enable_fusion_regions:
+            from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
+
+            self.region_of = build_fusion_regions(self.gm)
+
     def _add_to_ready_queue(self, node: fx.Node) -> None:
         if self.off_compute_path(node):
             score = self._compute_off_path_score(node)
@@ -724,40 +733,10 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if self.collective_bucketing:
+        if self.collective_bucketing or self.insert_overlap_deps:
             self._bucket_collectives()
-        elif self.insert_overlap_deps:
-            # If not bucketing, add effect tokens to preserve hiding dependencies
-            self._add_effect_tokens_for_overlap()
 
         return self.gm
-
-    def _add_effect_tokens_for_overlap(self) -> None:
-        """
-        Add effect tokens to preserve hiding dependency relationships when not bucketing.
-
-        This ensures that communication-compute overlap is preserved through effect tokens
-        when overlap preserving bucketing is not enabled.
-        """
-        from torch._inductor.fx_passes.control_dependencies import (
-            preserve_node_ordering,
-        )
-
-        # Collect hiding dependencies: hiding_node -> collective_start, wait -> hiding_node
-        additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-
-        for start_node, info in self.collective_info.items():
-            if info.is_exposed:
-                continue
-            for hn in info.hiding_nodes:
-                # Compute depends on collective start (compute must wait for collective to start)
-                additional_deps[hn].add(start_node)
-                # Wait depends on compute (wait must wait for compute to finish)
-                additional_deps[info.wait_node].add(hn)
-
-        # Apply effect tokens to preserve these dependencies
-        if additional_deps:
-            preserve_node_ordering(self.graph, additional_deps)
 
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
@@ -1246,12 +1225,14 @@ class OverlapScheduler:
         )
 
         bucketer = OverlapPreservingBucketer(
-            graph=self.graph,
+            gm=self.gm,
             collective_info=self.collective_info,
             scheduled=self.scheduled,
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            collective_bucketing=self.collective_bucketing,
+            region_of=self.region_of,
         )
         bucketer.bucket_collectives()
 
