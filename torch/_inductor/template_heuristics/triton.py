@@ -1535,7 +1535,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexBwDConfig(64, 128, 64, 128, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             else:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
