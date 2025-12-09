@@ -7,6 +7,7 @@ with test_sym_bool)
 import copy
 import io
 import math
+import os
 import tempfile
 import unittest
 import zipfile
@@ -1988,7 +1989,7 @@ class TestSaveLoad(TestCase):
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
                 save(ep, f.name)
                 f.seek(0)
-                file_prefix = f.name.split("/")[2].split(".")[0]
+                file_prefix = os.path.splitext(os.path.basename(f.name))[0]
 
                 # Create a new file and copy things over, but modify the
                 # archive version
