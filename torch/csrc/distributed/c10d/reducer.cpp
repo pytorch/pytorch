@@ -5,17 +5,13 @@
 
 #include <functional>
 
-#include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
