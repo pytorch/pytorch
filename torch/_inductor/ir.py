@@ -50,7 +50,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -958,9 +957,6 @@ class Loops(IRNode):
             + [f"origin_node={self.origin_node!r}"]
         )
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-
     def __str__(self) -> str:
         return self._to_str(("ranges",))
 
@@ -1445,7 +1441,9 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            outer = all(s > 1 for s in strides)
+            # A 0 stride does not make a reduction contiguous.
+            # This can happen when the reduction ranges contains a 1.
+            outer = all(s == 0 or s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -3116,14 +3114,14 @@ class SqueezeView(BaseView):
     @staticmethod
     def squeezer(
         size: Sequence[Expr],
-    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr, ...]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.S.Zero] * length
+            new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -7883,9 +7881,11 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return False
-        return get_schema_info(self.op_overload).is_mutable()
+        from torch._library.utils import is_impure
+
+        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
+        # The check is done on the op_overload itself
+        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
@@ -8229,9 +8229,6 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = [outputs]
         # pyrefly: ignore [bad-return]
         return outputs
-
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
 
 
 @ir_dataclass(frozen=False)
@@ -8666,11 +8663,22 @@ class InvokeSubgraph(ExternKernel):
         fake_operands = None
         if eager_input_vals := current_node.meta.get("eager_input_vals"):
             # eager_input_vals is (args_values, kwargs_values). We need args for invoke_subgraph
-            fake_operands = eager_input_vals[0][2:]
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # Aruguments eagerly are (token, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 3
+            fake_operands = eager_input_vals[0][offset:]
         else:
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # with_effects args: (token, invoke_subgraph, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 4
+
             # For the partitioned backward graph, we do not have
             # eager_input_vals. Here, we rely on the recorded example values.
-            fx_operands = current_node.args[2:]
+            fx_operands = current_node.args[offset:]
             fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
@@ -8839,9 +8847,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(

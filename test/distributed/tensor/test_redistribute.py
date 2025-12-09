@@ -950,8 +950,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
 
             # Clear the transformation cache between iterations. Without this,
-            # the second iteration would use cached paths from the first,
-            # causing the trace validation to fail because:
+            # the second iteration would use cached paths from the first
             _gen_transform_infos.cache_clear()
 
     @with_comms

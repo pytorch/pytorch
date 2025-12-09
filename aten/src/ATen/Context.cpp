@@ -3,12 +3,10 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <stdexcept>
 #include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
@@ -58,6 +56,8 @@ Float32Op str2op(const std::string& name) {
     return Float32Op::RNN;
   else if (name == "matmul")
     return Float32Op::MATMUL;
+  else if (name == "math_sdp")
+    return Float32Op::MATH_SDP;
   TORCH_CHECK(false, "Unknown op: ", name);
 }
 

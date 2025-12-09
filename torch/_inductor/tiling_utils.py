@@ -162,7 +162,7 @@ def find_broadcast_var(
             variables[v] = get_hint(v)
 
     zero_index = sympy_subs(index, variables)
-    for v in var_ranges.keys():
+    for v in var_ranges:
         if v not in index.free_symbols:
             continue
 
@@ -502,7 +502,7 @@ def extract_normalized_read_writes(
 
     # TODO - a few dynamic shapes issues to resolve
     if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
+        (isinstance(var, sympy.Expr) and var.free_symbols)
         for var in (pointwise_numel, red_numel)
     ):
         return None

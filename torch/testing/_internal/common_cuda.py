@@ -118,6 +118,8 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_fp8_grouped_gemm():
@@ -220,6 +222,15 @@ def tf32_enabled():
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
+
+@contextlib.contextmanager
+def math_sdp_precision(target_precision: str):
+    saved_precision = torch.backends.cuda.math_sdp.fp32_precision
+    try:
+        torch.backends.cuda.math_sdp.fp32_precision = target_precision
+        yield
+    finally:
+        torch.backends.cuda.math_sdp.fp32_precision = saved_precision
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
