@@ -144,7 +144,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
+          { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv6e.1" },
         ]}
     secrets: inherit
 
