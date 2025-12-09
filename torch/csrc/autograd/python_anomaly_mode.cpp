@@ -3,14 +3,25 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <sstream>
+
 namespace torch::autograd {
 
 void PyAnomalyMetadata::store_stack() {
+  if (AnomalyMode::should_use_mixed_stack()) {
+    // Use CapturedTraceback for mixed Python/C++/TorchScript traces
+    captured_traceback_ = torch::CapturedTraceback::gather(
+        /*python=*/true, /*script=*/true, /*cpp=*/true);
+    return;
+  }
+
+  // Existing behavior: use torch.fx.traceback.format_stack()
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
   if (!mod) {
@@ -28,6 +39,28 @@ void PyAnomalyMetadata::store_stack() {
 }
 
 void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
+  // If we have a CapturedTraceback (mixed_stack mode), symbolize and print it
+  if (captured_traceback_) {
+    std::vector<torch::CapturedTraceback*> to_symbolize = {
+        captured_traceback_.get()};
+    torch::SymbolizedTracebacks symbolized = torch::symbolize(to_symbolize);
+
+    std::ostringstream oss;
+    for (uint64_t frame_idx : symbolized.tracebacks.at(0)) {
+      const auto& frame = symbolized.all_frames.at(frame_idx);
+      oss << "  File \"" << frame.filename << "\", line " << frame.lineno
+          << ", in " << frame.funcname << "\n";
+    }
+    TORCH_WARN(
+        "Error detected in ",
+        current_node_name,
+        ". ",
+        "Traceback of forward call that caused the error:\n",
+        oss.str());
+    // TODO: Add parent traceback tracking for mixed mode. As it is rarely used (due to lack of popularity of higher order derivative)
+    return;
+  }
+
   pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     TORCH_CHECK(false, "Anomaly metadata is not a python dictionary.");
@@ -90,6 +123,11 @@ void PyAnomalyMetadata::assign_parent(
   if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get())) {
     throw python_error();
   }
+}
+
+std::shared_ptr<torch::CapturedTraceback> PyAnomalyMetadata::captured_traceback()
+    const {
+  return captured_traceback_;
 }
 
 void _print_stack(

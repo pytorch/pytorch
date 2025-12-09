@@ -19,6 +19,8 @@ class detect_anomaly:
       backward function.
     - If ``check_nan`` is ``True``, any backward computation that generate "nan"
       value will raise an error. Default ``True``.
+    - If ``mixed_stack`` is ``True``, the stack traces will show the combined Python/C++
+      traceback.
 
     .. warning::
         This mode should be enabled only for debugging as the different tests
@@ -76,10 +78,12 @@ class detect_anomaly:
 
     """
 
-    def __init__(self, check_nan=True) -> None:  # noqa: D107
+    def __init__(self, check_nan: bool = True, mixed_stack: bool = False) -> None:  # noqa: D107
         self.prev = torch.is_anomaly_enabled()
         self.check_nan = check_nan
+        self.mixed_stack = mixed_stack
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
+        self.prev_mixed_stack = torch.is_anomaly_mixed_stack_enabled()
         warnings.warn(
             "Anomaly Detection has been enabled. "
             "This mode will increase the runtime "
@@ -88,10 +92,10 @@ class detect_anomaly:
         )
 
     def __enter__(self) -> None:  # noqa: D105
-        torch.set_anomaly_enabled(True, self.check_nan)
+        torch.set_anomaly_enabled(True, self.check_nan, self.mixed_stack)
 
     def __exit__(self, *args: object) -> None:  # noqa: D105
-        torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
+        torch.set_anomaly_enabled(self.prev, self.prev_check_nan, self.prev_mixed_stack)
 
 
 class set_detect_anomaly:
@@ -108,16 +112,19 @@ class set_detect_anomaly:
                      or disable (``False``).
         check_nan (bool): Flag whether to raise an error when the backward
                           generate "nan"
+        mixed_stack (bool): Flag whether to capture forward stack traces using
+                            the combined Python/C++ traceback format.
 
     """
 
-    def __init__(self, mode: bool, check_nan: bool = True) -> None:  # noqa: D107
+    def __init__(self, mode: bool, check_nan: bool = True, mixed_stack: bool = False) -> None:  # noqa: D107
         self.prev = torch.is_anomaly_enabled()
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
-        torch.set_anomaly_enabled(mode, check_nan)
+        self.prev_mixed_stack = torch.is_anomaly_mixed_stack_enabled()
+        torch.set_anomaly_enabled(mode, check_nan, mixed_stack)
 
     def __enter__(self) -> None:  # noqa: D105
         pass
 
     def __exit__(self, *args: object) -> None:  # noqa: D105
-        torch.set_anomaly_enabled(self.prev, self.prev_check_nan)
+        torch.set_anomaly_enabled(self.prev, self.prev_check_nan, self.prev_mixed_stack)
