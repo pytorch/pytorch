@@ -8797,7 +8797,7 @@ class Conditional(ExternKernel):
         true_fn: Subgraph,
         false_fn: Subgraph,
         operands: list[TensorBox],
-    ) -> List[MultiOutput]:
+    ) -> list[MultiOutput]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
         # pyrefly: ignore [bad-assignment]
         predicate = cls.realize_input(predicate)
