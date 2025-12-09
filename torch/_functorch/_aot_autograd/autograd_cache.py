@@ -404,6 +404,13 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
             }
         )
+        # Add DTensor to dispatch table if available
+        try:
+            from torch.distributed.tensor import DTensor
+
+            self.dispatch_table[DTensor] = functools.partial(self._reduce_dtensor)
+        except ImportError:
+            pass
 
     def reducer_override(self, obj):
         """
@@ -463,6 +470,19 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         metadata = extract_tensor_metadata_for_cache_key(tensor)
         return (_ident, (metadata,))
+
+    def _reduce_dtensor(self, dtensor):
+        """
+        Reduce a DTensor to a stable key for caching.
+
+        Uses repr() to capture all DTensor-specific metadata (DeviceMesh, placements, etc.)
+        in a human-readable format that can be diffed to identify nondeterministic aspects.
+        """
+        # Get the base tensor metadata
+        metadata = extract_tensor_metadata_for_cache_key(dtensor)
+        # Get DTensor-specific info via repr for debugging/diffing
+        dtensor_repr = repr(dtensor)
+        return (_ident, (metadata, dtensor_repr))
 
 
 @contextlib.contextmanager
