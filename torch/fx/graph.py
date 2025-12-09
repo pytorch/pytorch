@@ -2223,6 +2223,19 @@ class Graph:
 
         return on_generate_code_context_manager()
 
+    def clear_nodes(self) -> None:
+        nodes = [n for n in reversed(self.nodes)]
+        for node in nodes:
+            node.meta.clear()
+            self.erase_node(node)
+        # assert len(self.nodes) == 0
+        self._used_names.clear()
+        self._insert = self._root.prepend
+        self._len = 0
+        self._graph_namespace = _Namespace()
+        self._owning_module = None
+        self._tracer_cls = None
+        self._tracer_extras = None
 
 @contextmanager
 def _override_sym_repr(

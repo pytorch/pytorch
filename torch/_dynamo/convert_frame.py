@@ -848,7 +848,6 @@ def trace_frame(
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
-
     return tracer_output
 
 
@@ -1353,6 +1352,13 @@ def compile_frame(  # type: ignore[return]
                 "Restarting analysis due to %s",
                 LazyString(format_traceback_short, e.__traceback__),
             )
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                og = failed_tracer_output.output_graph_for_cleanup
+                if og:
+                    for tracer in og.tracers:
+                        tracer.graph.clear_nodes()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1369,6 +1375,13 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                og = failed_tracer_output.output_graph_for_cleanup
+                if og:
+                    for tracer in og.tracers:
+                        tracer.graph.clear_nodes()
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
@@ -1902,14 +1915,6 @@ def _compile(
                     if tracer_output
                     else _get_error_on_graph_break()
                 )
-
-            if tracer_output is not None and tracer_output.output_graph is not None:
-                nodes = tracer_output.output_graph.graph.nodes
-                for node in nodes:
-                    if "example_value" in node.meta:
-                        del node.meta["example_value"]
-                gc.collect()
-
 
 class ConvertFrame:
     def __init__(

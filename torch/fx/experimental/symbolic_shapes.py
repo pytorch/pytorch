@@ -30,6 +30,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -2246,7 +2247,6 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
             # pyrefly: ignore [bad-assignment]
             self.inner_contexts = {}
 
-
 @dataclass
 class TrackedFake:
     """
@@ -2254,9 +2254,21 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    fake: Union[FakeTensor, SymInt]
+    _fake: weakref.ReferenceType[Union[FakeTensor, SymInt]]
     source: Source
     symbolic_context: Optional[SymbolicContext]
+
+    @property
+    def fake(self) -> Union[FakeTensor, SymInt]:
+        return self._fake()
+    @fake.setter
+    def fake(self, value: Union[FakeTensor, SymInt]) -> None:
+        self._fake = weakref.ref(value)
+
+    def __init__(self, fake: Union[FakeTensor, SymInt], source: Source, symbolic_context: Optional[SymbolicContext]) -> None:
+        self.fake = fake
+        self.source = source
+        self.symbolic_context = symbolic_context
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name))
