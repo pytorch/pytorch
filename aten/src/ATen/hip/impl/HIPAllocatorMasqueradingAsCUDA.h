@@ -150,6 +150,10 @@ public:
     allocator_->setUseOnOOM(device, mempool_id);
   }
 
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    allocator_->setNoSplit(device, mempool_id);
+  }
+
   bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
