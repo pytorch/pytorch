@@ -10,7 +10,7 @@ import sys
 import types
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 from weakref import WeakValueDictionary
 
 import torch
@@ -85,7 +85,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[FileLike, torch._C.PyTorchFileReader],
+        file_or_buffer: FileLike | torch._C.PyTorchFileReader,
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
@@ -362,7 +362,7 @@ class PackageImporter(Importer):
         )
 
     def _make_module(
-        self, name: str, filename: Optional[str], is_package: bool, parent: str
+        self, name: str, filename: str | None, is_package: bool, parent: str
     ):
         mangled_filename = self._mangler.mangle(filename) if filename else None
         spec = importlib.machinery.ModuleSpec(
@@ -641,9 +641,7 @@ class PackageImporter(Importer):
         else:
             return f"{name.replace('.', '/')}"
 
-    def _get_or_create_package(
-        self, atoms: list[str]
-    ) -> "Union[_PackageNode, _ExternNode]":
+    def _get_or_create_package(self, atoms: list[str]) -> "_PackageNode | _ExternNode":
         cur = self.root
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
@@ -699,7 +697,7 @@ class _PathNode:
 
 
 class _PackageNode(_PathNode):
-    def __init__(self, source_file: Optional[str]):
+    def __init__(self, source_file: str | None):
         self.source_file = source_file
         self.children: dict[str, _PathNode] = {}
 
