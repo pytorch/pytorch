@@ -927,9 +927,9 @@ class OutputGraph(OutputGraphCommon):
     def subtracer(
         self,
         source_target: Optional[Target],
-        prior_tracer: "SubgraphTracer",
+        prior_tracer: Optional["SubgraphTracer"],
         description: Optional[str] = None,
-    ) -> Generator[fx.Tracer, None, None]:
+    ) -> Generator["SubgraphTracer", None, None]:
         new_scope_ctx = enter_new_scope()
         try:
             if prior_tracer:
