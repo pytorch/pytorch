@@ -106,6 +106,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -2260,9 +2261,11 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
-            f"Unexpected type {type(val)}"
-        )
+        assert (
+            isinstance(val, ok_types)
+            or pytree.is_constant_class(type(val))
+            or is_opaque_value_type(type(val))
+        ), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
