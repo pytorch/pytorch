@@ -3298,6 +3298,14 @@
       ]
     }
   ],
+  "GB1501": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",

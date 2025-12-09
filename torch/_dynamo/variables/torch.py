@@ -598,7 +598,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 grad_var = args[1]
                 if getattr(grad_var, "is_sparse", False):
                     unimplemented(
-                        "Sparse gradients are not supported in compiled autograd"
+                        gb_type="sparse_grad_accumulate_grad",
+                        context="accumulate_grad_ with sparse gradient",
+                        explanation="Sparse gradients are not supported in compiled autograd",
+                        hints=[],
                     )
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs

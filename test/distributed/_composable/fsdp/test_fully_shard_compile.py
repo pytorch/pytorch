@@ -571,7 +571,7 @@ autograd.grad with compiled autograd
   Developer debug context:
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0370.html""",  # noqa: B950
-                    )
+                    )  # noqa: W291
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
