@@ -5705,7 +5705,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     # 3.10 CALL_FUNCTION bytecode compatibility for dynamo graph break messages
     s = re.sub(
         r"attempting to trace CALL_FUNCTION:.*$",
-        "attempting to trace CALL: a function call, e.g. f(x, y)",
+        "attempting to trace CALL: a function call, e.g. f(x, y):",
         s,
         flags=re.MULTILINE,
     )
