@@ -34,6 +34,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils import _pytree as pytree
 
 
@@ -759,12 +760,95 @@ class TestViewOps(DTensorTestBase):
         expected = tensor[2:, :]
         self.assertEqual(sliced_dtensor.full_tensor(), expected)
 
+    def test_compile_with_unbacked_view_ops(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # expand
+        placements = (Shard(0), Replicate())
+        x_dt = d_randn(64, 1, device_mesh=device_mesh, placements=placements)
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0)
+
+        y = torch.tensor([2, 3])
+
+        def _expand(x, y):
+            u0, u1 = y.tolist()
+            return x.expand(u0, x.size(0), -1, u1)
+
+        out = torch.compile(_expand, backend="eager", fullgraph=True)(x_dt, y)
+
+        # flatten
+        @torch.compile(backend="eager", fullgraph=True)
+        def _flatten(x):
+            torch._check(x.size(0) % 2 == 0)
+            return x.flatten()
+
+        # Shard only dimension 0 instead
+        x_local = torch.randn(4, 8, 8)
+        x_dt = DTensor.from_local(x_local, device_mesh, [Shard(0), Replicate()])
+        for i in range(3):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+
+        _flatten(x_dt)
+
+        # repeat
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def _repeat(x, ys):
+            u0, u1 = ys.tolist()
+            return x.repeat(8, u0, u1, 1)
+
+        placements = (Shard(1), Shard(2))
+        x_dt = d_randn(8, 8, 8, device_mesh=device_mesh, placements=placements)
+        y = torch.tensor([3, 5])
+        for i in range(4):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+
+        _repeat(x_dt, y)
+
+        # squeeze
+        @torch.compile(backend="eager", fullgraph=True)
+        def _squeeze(x):
+            return x.squeeze(0).squeeze(-1)
+
+        placements = (Shard(1), Replicate())
+        x_dt = d_randn(1, 8, 1, device_mesh=device_mesh, placements=placements)
+        for i in range(4):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+
+        _squeeze(x_dt)
+
+    def test_compile_with_unbacked_einsum(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # einsum bmm
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def _einsum(x, y):
+            return x.sum((1, 2), keepdim=True)
+            return torch.einsum("bij,bjk->b...k", x, y)
+
+        px = (Shard(0), Replicate())
+        py = (Shard(1), Shard(2))
+        x_dt = d_randn(16, 16, 16, device_mesh=device_mesh, placements=px)
+        y_dt = d_randn(16, 16, 16, device_mesh=device_mesh, placements=py)
+        for i in range(3):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+        _einsum(x_dt, y_dt)
+
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
+        "test_compile_with_unbacked_view_ops",
+        "test_compile_with_unbacked_einsum",
     ],
 )
 
