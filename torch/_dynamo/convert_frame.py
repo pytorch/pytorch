@@ -1359,6 +1359,12 @@ def compile_frame(  # type: ignore[return]
                 if og:
                     for tracer in og.tracers:
                         tracer.graph.clear_nodes()
+                    # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+                    if (
+                        og.tracing_context.fake_mode
+                        and og.tracing_context.fake_mode.shape_env
+                    ):
+                        og.tracing_context.fake_mode.shape_env.tracked_fakes = None
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1382,6 +1388,12 @@ def compile_frame(  # type: ignore[return]
                 if og:
                     for tracer in og.tracers:
                         tracer.graph.clear_nodes()
+                    # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+                    if (
+                        og.tracing_context.fake_mode
+                        and og.tracing_context.fake_mode.shape_env
+                    ):
+                        og.tracing_context.fake_mode.shape_env.tracked_fakes = None
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",

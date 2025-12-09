@@ -30,7 +30,6 @@ import re
 import sys
 import threading
 import traceback
-import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
@@ -2255,24 +2254,25 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    _fake: Union[weakref.ReferenceType[FakeTensor], SymInt]
+    # _fake: Union[weakref.ReferenceType[FakeTensor], SymInt]
+    fake: Union[FakeTensor, SymInt]
     source: Source
     symbolic_context: Optional[SymbolicContext]
 
-    @property
-    def fake(self) -> Optional[Union[FakeTensor, SymInt]]:
-        return (
-            self._fake()
-            if isinstance(self._fake, weakref.ReferenceType)
-            else self._fake
-        )
+    # @property
+    # def fake(self) -> Optional[Union[FakeTensor, SymInt]]:
+    #     return (
+    #         self._fake()
+    #         if isinstance(self._fake, weakref.ReferenceType)
+    #         else self._fake
+    #     )
 
-    @fake.setter
-    def fake(self, value: Union[FakeTensor, SymInt]) -> None:
-        if isinstance(value, SymInt):
-            self._fake = value
-        else:
-            self._fake = weakref.ref(value)
+    # @fake.setter
+    # def fake(self, value: Union[FakeTensor, SymInt]) -> None:
+    #     if isinstance(value, SymInt):
+    #         self._fake = value
+    #     else:
+    #         self._fake = weakref.ref(value)
 
     def __init__(
         self,
