@@ -18,11 +18,13 @@ from torch._inductor.codegen.common import (
     ValueRanges,
 )
 from torch._inductor.ir import (
+    BaseView,
     Buffer,
     ComputedBuffer,
+    ExternKernel,
     InputBuffer,
+    MutableBox,
     ReinterpretView,
-    TensorBox,
 )
 from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
@@ -244,11 +246,11 @@ class CuteDSLTemplateKernel(Kernel):
             yield
 
     def _get_reinterpret_view(self, node) -> ReinterpretView | None:
-        """Extract ReinterpretView from a node, unwrapping TensorBox if needed."""
-        if isinstance(node, ReinterpretView):
-            return node
-        if isinstance(node, TensorBox):
-            return self._get_reinterpret_view(node.data)
+        """Extract or convert to ReinterpretView from a node, handling all views."""
+        while isinstance(node, MutableBox):
+            node = node.data
+        if isinstance(node, BaseView):
+            return ExternKernel.convert_to_reinterpret_view(node)
         return None
 
     def def_kernel(self, *argnames):
@@ -362,7 +364,7 @@ class CuteDSLTemplateKernel(Kernel):
         """
         wrapper = V.graph.wrapper_code
 
-        # Build call args matching the signature generated in def_kernel
+        # Build call args matching the signature generated in `def_kernel`
         call_args = []
         arg_types = []
 
@@ -374,15 +376,17 @@ class CuteDSLTemplateKernel(Kernel):
                 call_args.append(input_node.get_name())
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
-        # Add additional args from python_argdefs (output, sizevars, etc.)
+        # Add additional args from python_argdefs (output, sizevars, ..)
         orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
         for arg_def, call_arg, arg_type in zip(
             orig_arg_defs, orig_call_args, orig_arg_types
         ):
+            # dedupe
             if arg_def.full_name() not in self._seen_input_args:
                 call_args.append(call_arg)
                 arg_types.append(arg_type)
 
+        # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
 
     def _get_subgraph(self, subgraph_number: int):
