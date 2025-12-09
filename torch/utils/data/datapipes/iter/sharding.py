@@ -44,6 +44,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
     def __init__(
         self, source_datapipe: IterDataPipe, sharding_group_filter=None
     ) -> None:
+        super().__init__()
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
         self.groups: dict[int, tuple[int, int]] = {}
