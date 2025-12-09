@@ -175,7 +175,7 @@ class ComplexTensor(Tensor):
         return ["_data"], {"neg_flag": self._neg_flag, "conj_flag": self._conj_flag}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
+        return f"ComplexTensor({self._data!r}, conj_flag={self._conj_flag!r}, neg_flag={self._neg_flag!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
         return self._data.is_pinned(device)
