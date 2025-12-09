@@ -349,11 +349,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
-        # 
-        # CUDA: Uses native __trap() instruction → CUDA runtime catches it → 
+        #
+        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
         #       clean exit(6) → exit code 6
-        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) → 
-        #       calls abort() → OS sends SIGABRT signal → process killed by signal → 
+        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
+        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
         #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
@@ -568,7 +568,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             torch.float8_e5m2,
         ],
     )
-    
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
