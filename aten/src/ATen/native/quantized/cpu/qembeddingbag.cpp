@@ -191,7 +191,6 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunneeded-internal-declaration")
 static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
@@ -200,7 +199,6 @@ static inline void embedding_neon_kernel(
     float32x4_t& output4,
     const float32x4_t& scale,
     const uint8x16_t& zero) {
-C10_DIAGNOSTIC_POP()
   auto w_u8 = vld1q_u8(weight_ptr);
   auto w_lo_u16 = vreinterpretq_u16_u8(vzip1q_u8(w_u8, zero));
   auto w_hi_u16 = vreinterpretq_u16_u8(vzip2q_u8(w_u8, zero));
@@ -221,14 +219,12 @@ C10_DIAGNOSTIC_POP()
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunneeded-internal-declaration")
 static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
     const float32x4_t& scale,
     const uint8x16_t& zero) {
-C10_DIAGNOSTIC_POP()
   auto w_u8 = vreinterpretq_u8_u64(vdupq_lane_u64(vreinterpret_u64_u8(vld1_u8(weight_ptr)), 0));
   auto w_lo_u16 = vreinterpretq_u16_u8(vzip1q_u8(w_u8, zero));
 
