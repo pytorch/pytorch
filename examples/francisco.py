@@ -114,9 +114,17 @@ class MyBlock(nn.Module):
     def forward(self, x):
         return (self.l2(self.l1(x)), )
 
+class MyBlock2(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.l1 = nn.Linear(in_dim, out_dim)
+        self.l2 = nn.Linear(out_dim, out_dim)
 
-# m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10), nn.Linear(10, 1))
-m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10))
+    def forward(self, x):
+        return (self.l1(x) + self.l2(x), )
+
+m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10), MyBlock2(10, 10), MyBlock(10, 10), MyBlock2(10, 10))
+# m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10))
 # , nn.Linear(10, 1))
 x = torch.randn(1, 10, requires_grad=True)
 o = m(x)

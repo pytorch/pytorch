@@ -860,6 +860,10 @@ def validate_args_and_maybe_create_graph_inputs(
                 # lot with control flow hops if we try to switch.
                 if isinstance(a, variables.TensorVariable):
                     tracer.maybe_lift_tracked_freevar_to_input(a.proxy)
+                elif isinstance(a, variables.ConstDictVariable):
+                    tensor_vts = [x for x in a.items.values() if isinstance(x, variables.TensorVariable)]
+                    for tensor_vt in tensor_vts:
+                        tracer.maybe_lift_tracked_freevar_to_input(tensor_vt.proxy)
                 args.append(a)
                 continue
             elif set_subgraph_inputs == "semi_automatic":
@@ -4400,9 +4404,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     # Since we use `automatic_with_ordered_inputs`, we can
                     # assume that that the inputs to the subgraph are same as
                     # the original inputs.
-                    tensor_args = [
-                        x for x in args if isinstance(x, variables.TensorVariable)
-                    ]
+                    tensor_args = []
+
+                    for x in args:
+                        if isinstance(x, variables.TensorVariable):
+                            tensor_args.append(x)
+                        elif isinstance(x, variables.ConstDictVariable):
+                            for vt in x.items.values():
+                                if isinstance(vt, variables.TensorVariable):
+                                    tensor_args.append(vt)
+
                     proxy_tensor_args = [x.as_proxy() for x in tensor_args]
                     body_node = make_attr(tx, submodule_name)
                     p_args = (
