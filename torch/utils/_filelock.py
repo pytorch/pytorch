@@ -1,6 +1,7 @@
 from types import TracebackType
 from typing_extensions import Self
 
+# pyrefly: ignore  # import-error
 from filelock import FileLock as base_FileLock
 
 from torch.monitor import _WaitCounter

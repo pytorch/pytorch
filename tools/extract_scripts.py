@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from typing_extensions import TypedDict  # Python 3.11+
 
+# pyrefly: ignore  # import-error
 import yaml
 
 

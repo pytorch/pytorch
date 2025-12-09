@@ -6,11 +6,13 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+# pyrefly: ignore  # import-error
 import yaml
 
 
 try:
     # use faster C loader if available
+    # pyrefly: ignore  # import-error
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]

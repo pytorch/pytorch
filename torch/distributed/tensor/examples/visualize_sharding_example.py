@@ -5,7 +5,9 @@ TERM=xterm-256color torchrun --nproc-per-node=4 visualize_sharding_example.py
 
 import os
 
+# pyrefly: ignore  # import-error
 import rich
+# pyrefly: ignore  # import-error
 import rich.rule
 
 import torch

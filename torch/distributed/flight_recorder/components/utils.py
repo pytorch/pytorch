@@ -45,6 +45,7 @@ logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 try:
+    # pyrefly: ignore  # import-error
     from tabulate import tabulate
 except ModuleNotFoundError:
     logger.debug("tabulate is not installed. Proceeding without it.")

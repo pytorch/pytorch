@@ -78,6 +78,7 @@ if TYPE_CHECKING:
 
 
 try:
+    # pyrefly: ignore  # import-error
     from packaging.version import Version
 except ImportError:
     Version = None  # type: ignore[assignment,misc]

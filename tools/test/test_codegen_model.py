@@ -4,7 +4,9 @@ import textwrap
 import unittest
 from typing import cast
 
+# pyrefly: ignore  # import-error
 import expecttest
+# pyrefly: ignore  # import-error
 import yaml
 
 import torchgen.dest as dest
@@ -28,8 +30,10 @@ class TestCodegenModel(expecttest.TestCase):
         except AssertionError as e:
             # hack to strip out the context
             msg, _ = str(e).split("  in ", 2)
+            # pyrefly: ignore  # missing-attribute
             self.assertExpectedInline("\n".join(textwrap.wrap(msg)), expect, skip=1)
             return
+        # pyrefly: ignore  # missing-attribute
         self.fail(msg="Did not raise when expected to")
 
     def assertUfuncErrorInline(self, yaml_str: str, expect: str) -> None:
@@ -58,8 +62,10 @@ class TestCodegenModel(expecttest.TestCase):
         except AssertionError as e:
             # hack to strip out the context
             msg, _ = str(e).split("  in ", 2)
+            # pyrefly: ignore  # missing-attribute
             self.assertExpectedInline("\n".join(textwrap.wrap(msg)), expect, skip=1)
             return
+        # pyrefly: ignore  # missing-attribute
         self.fail(msg="Did not raise when expected to")
 
     # NB: indent is hardcoded to be two here, so format your yaml accordingly
@@ -155,35 +161,49 @@ cannot use CUDAFunctorOnSelf on non-binary function""",
         custom_class_type = cast(
             CustomClassType, Type.parse(custom_class_name_with_prefix)
         )
+        # pyrefly: ignore  # missing-attribute
         self.assertTrue(isinstance(custom_class_type, CustomClassType))
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(custom_class_name, custom_class_type.class_name)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(custom_class_name_with_prefix, str(custom_class_type))
 
 
 class TestAnnotation(expecttest.TestCase):
     def test_single_alias_no_write(self) -> None:
         a = Annotation.parse("a")
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set, tuple("a"))
+        # pyrefly: ignore  # missing-attribute
         self.assertFalse(a.is_write)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set_after, ())
 
     def test_single_alias_is_write(self) -> None:
         a = Annotation.parse("a!")
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set, tuple("a"))
+        # pyrefly: ignore  # missing-attribute
         self.assertTrue(a.is_write)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set_after, ())
 
     def test_single_alias_is_write_to_wildcard(self) -> None:
         a = Annotation.parse("a! -> *")
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set, tuple("a"))
+        # pyrefly: ignore  # missing-attribute
         self.assertTrue(a.is_write)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set_after, tuple("*"))
 
     def test_alias_set(self) -> None:
         a = Annotation.parse("a|b")
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set, ("a", "b"))
 
     def test_alias_set_is_write_raises_exception(self) -> None:
+        # pyrefly: ignore  # missing-attribute
         with self.assertRaisesRegex(
             AssertionError, r"alias set larger than 1 is not mutable"
         ):
@@ -191,11 +211,15 @@ class TestAnnotation(expecttest.TestCase):
 
     def test_single_alias_is_write_to_alias_set(self) -> None:
         a = Annotation.parse("a! -> a|b")
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set, tuple("a"))
+        # pyrefly: ignore  # missing-attribute
         self.assertTrue(a.is_write)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(a.alias_set_after, ("a", "b"))
 
     def test_before_and_after_alias_set_larger_than_1_raises_exception(self) -> None:
+        # pyrefly: ignore  # missing-attribute
         with self.assertRaisesRegex(
             AssertionError,
             r"before alias set and after alias set cannot be larger than 1 at the same time",
@@ -213,8 +237,11 @@ class TestBaseOperatorName(expecttest.TestCase):
         op_name = BaseOperatorName.parse(op)
         op_name_without_ns = BaseOperatorName.parse(op_without_ns)
 
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(op_name.base, op_name_without_ns.base)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(op_name.inplace, op_name_without_ns.inplace)
+        # pyrefly: ignore  # missing-attribute
         self.assertEqual(op_name.dunder_method, op_name_without_ns.dunder_method)
 
 

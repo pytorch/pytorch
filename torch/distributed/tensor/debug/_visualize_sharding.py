@@ -18,6 +18,7 @@ def _create_table(
     """
     Creates a tabulate table given row and column ranges with device name
     """
+    # pyrefly: ignore  # import-error
     from tabulate import tabulate
 
     # Extract unique row and column ranges
@@ -72,11 +73,17 @@ def _create_rich_table(
     max_width: int = 80,
 ):
     import matplotlib
+    # pyrefly: ignore  # import-error
     import rich.align
+    # pyrefly: ignore  # import-error
     import rich.box
+    # pyrefly: ignore  # import-error
     import rich.console
+    # pyrefly: ignore  # import-error
     import rich.padding
+    # pyrefly: ignore  # import-error
     import rich.style
+    # pyrefly: ignore  # import-error
     import rich.table
 
     dtensor_height = shape[0]

@@ -238,6 +238,7 @@ def tabulate(
     headers: Union[tuple[str, ...], list[str]],
 ) -> str:
     try:
+        # pyrefly: ignore  # import-error
         import tabulate
 
         return tabulate.tabulate(rows, headers=headers)
@@ -3874,6 +3875,7 @@ def tensor_always_has_static_shape(
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
         try:
+            # pyrefly: ignore  # import-error
             from tabulate import tabulate  # TODO: Check that this is installed
         except ImportError:
             return (

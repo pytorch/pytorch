@@ -14,9 +14,11 @@ def graph_pool_handle() -> _POOL_HANDLE:
     """
     Return an opaque token representing the id of a graph memory pool.
     """
+    # pyrefly: ignore  # missing-attribute
     return torch._C._mtia_graphPoolHandle()
 
 
+# pyrefly: ignore  # missing-attribute
 class MTIAGraph(torch._C._MTIAGraph):
     """
     Wrapper around a MTIA graph.

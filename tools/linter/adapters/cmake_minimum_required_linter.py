@@ -12,7 +12,9 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
+# pyrefly: ignore  # import-error
 from packaging.requirements import Requirement
+# pyrefly: ignore  # import-error
 from packaging.version import Version
 
 

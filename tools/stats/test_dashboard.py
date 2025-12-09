@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
+# pyrefly: ignore  # import-error
 import requests
 
 from tools.stats.upload_stats_lib import (

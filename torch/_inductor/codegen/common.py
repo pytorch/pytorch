@@ -851,6 +851,7 @@ class PythonPrinter(_PythonPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            # pyrefly: ignore  # missing-attribute
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -2389,6 +2390,7 @@ class OptimizationContext:
 @functools.cache
 def jinja2_env() -> Any:
     try:
+        # pyrefly: ignore  # import-error
         import jinja2
 
         return jinja2.Environment(
@@ -2422,6 +2424,7 @@ class KernelTemplate:
         if env is None:
             return None
         env.filters["indent_except_first"] = KernelTemplate.indent_except_first
+        # pyrefly: ignore  # import-error
         from jinja2 import TemplateSyntaxError
 
         try:
@@ -2440,15 +2443,20 @@ class KernelTemplate:
                     self.original_error = original_error
 
                 def __str__(self) -> str:
+                    # pyrefly: ignore  # missing-attribute
                     error_info = f"Error in template at line {self.lineno}\n"
+                    # pyrefly: ignore  # missing-attribute
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
                         # pyrefly: ignore [missing-attribute]
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
+                        # pyrefly: ignore  # missing-attribute
                         start = max(0, self.lineno - 2)
+                        # pyrefly: ignore  # missing-attribute
                         end = min(len(lines), self.lineno + 2)
                         for i in range(start, end):
+                            # pyrefly: ignore  # missing-attribute
                             if i == self.lineno - 1:
                                 error_info += f"{i + 1}: --> {lines[i]}\n"
                                 if hasattr(self.original_error, "column"):

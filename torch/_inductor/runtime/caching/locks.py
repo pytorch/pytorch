@@ -15,6 +15,7 @@ from contextlib import _GeneratorContextManager, contextmanager, ExitStack
 from typing import TYPE_CHECKING, TypeAlias
 from typing_extensions import Protocol
 
+# pyrefly: ignore  # import-error
 from filelock import FileLock, Timeout
 
 from . import exceptions, implementations as impls

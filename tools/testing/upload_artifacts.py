@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+# pyrefly: ignore  # import-error
 from filelock import FileLock, Timeout
 
 from tools.stats.upload_test_stats import parse_xml_report
@@ -126,6 +127,7 @@ def zip_and_upload_artifacts(failed: bool) -> None:
 
 
 def trigger_upload_test_stats_intermediate_workflow() -> None:
+    # pyrefly: ignore  # import-error
     import requests
 
     # The GITHUB_TOKEN cannot trigger workflow so this isn't used for now

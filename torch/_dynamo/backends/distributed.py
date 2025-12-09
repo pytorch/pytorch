@@ -116,6 +116,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
             )
 
         try:
+            # pyrefly: ignore  # import-error
             from tabulate import tabulate
 
             log.debug(

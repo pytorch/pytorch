@@ -18,12 +18,16 @@ from itertools import product
 from pathlib import Path
 from typing import Any
 
+# pyrefly: ignore  # import-error
 import yaml
+# pyrefly: ignore  # import-error
 from yaml.constructor import ConstructorError
+# pyrefly: ignore  # import-error
 from yaml.nodes import MappingNode
 
 
 try:
+    # pyrefly: ignore  # import-error
     from yaml import CLoader as Loader
 except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]

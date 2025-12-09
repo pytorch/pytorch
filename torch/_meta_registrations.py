@@ -39,6 +39,7 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
+# pyrefly: ignore  # missing-module-attribute
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 

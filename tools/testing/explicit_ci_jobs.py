@@ -9,6 +9,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+# pyrefly: ignore  # import-error
 import yaml
 
 

@@ -10,7 +10,9 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
+# pyrefly: ignore  # import-error
 from packaging.specifiers import SpecifierSet
+# pyrefly: ignore  # import-error
 from packaging.version import Version
 
 

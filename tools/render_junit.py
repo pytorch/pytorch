@@ -21,6 +21,7 @@ except ImportError as e:
     ) from e
 
 try:
+    # pyrefly: ignore  # import-error
     import rich
 except ImportError:
     print("rich not found, for color output use 'pip install rich'")

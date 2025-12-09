@@ -9,6 +9,7 @@ import re
 from collections import Counter, defaultdict
 from typing import Any, TYPE_CHECKING
 
+# pyrefly: ignore  # import-error
 import yaml
 
 from torchgen.api import cpp

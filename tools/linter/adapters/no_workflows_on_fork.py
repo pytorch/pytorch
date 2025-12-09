@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple, TYPE_CHECKING
 
+# pyrefly: ignore  # import-error
 from yaml import load
 
 
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:
+    # pyrefly: ignore  # import-error
     from yaml import CSafeLoader as Loader
 except ImportError:
     from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]

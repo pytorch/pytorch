@@ -18,6 +18,7 @@ from threading import Lock
 from typing import Any
 from typing_extensions import override
 
+# pyrefly: ignore  # import-error
 from filelock import FileLock
 
 from . import locks, utils

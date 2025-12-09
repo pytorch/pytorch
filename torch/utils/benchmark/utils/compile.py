@@ -16,6 +16,7 @@ _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
 
+    # pyrefly: ignore  # import-error
     from tabulate import tabulate
 
     HAS_TABULATE = True

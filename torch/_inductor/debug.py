@@ -414,6 +414,7 @@ class DebugContext:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
+        # pyrefly: ignore  # import-error
         from filelock import FileLock
 
         try:

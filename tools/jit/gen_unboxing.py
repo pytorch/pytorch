@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TYPE_CHECKING
 
+# pyrefly: ignore  # import-error
 import yaml
 
 from torchgen.api import cpp, unboxing

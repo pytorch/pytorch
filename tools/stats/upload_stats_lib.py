@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
 import boto3  # type: ignore[import]
+# pyrefly: ignore  # import-error
 import requests
 
 

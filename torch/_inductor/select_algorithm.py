@@ -1527,6 +1527,7 @@ class TritonTemplateKernel(TritonKernel):
 @functools.cache
 def _jinja2_env():
     try:
+        # pyrefly: ignore  # import-error
         import jinja2
 
         return jinja2.Environment(

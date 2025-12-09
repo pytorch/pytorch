@@ -338,6 +338,7 @@ def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
         [_summarize_ranks(ranks), str(value)] for value, ranks in value_ranks.items()
     ]
     if importlib.util.find_spec("tabulate"):
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
 
         return tabulate(rank_values, headers=headers)

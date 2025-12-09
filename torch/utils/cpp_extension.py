@@ -669,6 +669,7 @@ class BuildExtension(build_ext):
 
         cuda_ext = False
         sycl_ext = False
+        # pyrefly: ignore  # missing-attribute
         extension_iter = iter(self.extensions)
         extension = next(extension_iter, None)
         while not (cuda_ext and sycl_ext) and extension:
@@ -694,6 +695,7 @@ class BuildExtension(build_ext):
         if cuda_ext and not IS_HIP_EXTENSION:
             _check_cuda_version(compiler_name, compiler_version)
 
+        # pyrefly: ignore  # missing-attribute
         for extension in self.extensions:
             # Ensure at least an empty list of flags for 'cxx', 'nvcc' and 'sycl' when
             # extra_compile_args is a dict. Otherwise, default torch flags do
@@ -730,20 +732,28 @@ class BuildExtension(build_ext):
         # NOTE: At the moment .sycl is not a standard extension for SYCL supported
         # by compiler. Here we introduce a torch level convention that SYCL sources
         # should have .sycl file extension.
+        # pyrefly: ignore  # missing-attribute
         self.compiler.src_extensions += ['.cu', '.cuh', '.hip', '.sycl']
         if torch.backends.mps.is_built():
+            # pyrefly: ignore  # missing-attribute
             self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
+        # pyrefly: ignore  # missing-attribute
         if self.compiler.compiler_type == 'msvc':
+            # pyrefly: ignore  # missing-attribute
             self.compiler._cpp_extensions += ['.cu', '.cuh']
+            # pyrefly: ignore  # missing-attribute
             original_compile = self.compiler.compile
+            # pyrefly: ignore  # missing-attribute
             original_spawn = self.compiler.spawn
         else:
+            # pyrefly: ignore  # missing-attribute
             original_compile = self.compiler._compile
 
         def append_std17_if_no_std_present(cflags) -> None:
             # NVCC does not allow multiple -std to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
+            # pyrefly: ignore  # missing-attribute
             cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
             cpp_flag_prefix = cpp_format_prefix.format('std')
             cpp_flag = cpp_flag_prefix + 'c++17'
@@ -777,9 +787,11 @@ class BuildExtension(build_ext):
             # Copy before we make any modifications.
             cflags = copy.deepcopy(extra_postargs)
             try:
+                # pyrefly: ignore  # missing-attribute
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = [_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc')]
+                    # pyrefly: ignore  # missing-attribute
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
@@ -796,6 +808,7 @@ class BuildExtension(build_ext):
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
                 # Put the original compiler back in place.
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.set_executable('compiler_so', original_compiler)
 
         def unix_wrap_ninja_compile(sources,
@@ -822,13 +835,17 @@ class BuildExtension(build_ext):
             output_dir = os.path.abspath(output_dir)
 
             # See Note [Absolute include_dirs]
+            # pyrefly: ignore  # missing-attribute
             convert_to_absolute_paths_inplace(self.compiler.include_dirs)
 
             _, objects, extra_postargs, pp_opts, _ = \
+                # pyrefly: ignore  # missing-attribute
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
                                              depends, extra_postargs)
+            # pyrefly: ignore  # missing-attribute
             common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
+            # pyrefly: ignore  # missing-attribute
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
@@ -991,11 +1008,13 @@ class BuildExtension(build_ext):
                 return original_spawn(cmd)
 
             try:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.spawn = spawn
                 return original_compile(sources, output_dir, macros,
                                         include_dirs, debug, extra_preargs,
                                         extra_postargs, depends)
             finally:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.spawn = original_spawn
 
         def win_wrap_ninja_compile(sources,
@@ -1007,7 +1026,9 @@ class BuildExtension(build_ext):
                                    extra_postargs=None,
                                    depends=None,
                                    is_standalone=False):
+            # pyrefly: ignore  # missing-attribute
             if not self.compiler.initialized:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.initialize()
             # pyrefly: ignore [no-matching-overload]
             output_dir = os.path.abspath(output_dir)
@@ -1018,9 +1039,11 @@ class BuildExtension(build_ext):
             # in a script-created build folder. Thus, relative paths lose their correctness.
             # To be consistent with jit extension, we allow user to enter relative include_dirs
             # in setuptools.setup, and we convert the relative path to absolute path here.
+            # pyrefly: ignore  # missing-attribute
             convert_to_absolute_paths_inplace(self.compiler.include_dirs)
 
             _, objects, extra_postargs, pp_opts, _ = \
+                # pyrefly: ignore  # missing-attribute
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
                                              depends, extra_postargs)
@@ -1030,8 +1053,10 @@ class BuildExtension(build_ext):
             common_cflags = extra_preargs or []
             cflags = []
             if debug:
+                # pyrefly: ignore  # missing-attribute
                 cflags.extend(self.compiler.compile_options_debug)
             else:
+                # pyrefly: ignore  # missing-attribute
                 cflags.extend(self.compiler.compile_options)
             cflags = cflags + common_cflags + pp_opts + COMMON_MSVC_FLAGS
             if IS_HIP_EXTENSION:
@@ -1129,15 +1154,20 @@ class BuildExtension(build_ext):
             return objects
         # Monkey-patch the _compile or compile method.
         # https://github.com/python/cpython/blob/dc0284ee8f7a270b6005467f26d8e5773d76e959/Lib/distutils/ccompiler.py#L511  # codespell:ignore
+        # pyrefly: ignore  # missing-attribute
         if self.compiler.compiler_type == 'msvc':
             if self.use_ninja:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.compile = win_wrap_ninja_compile
             else:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.compile = win_wrap_single_compile
         else:
             if self.use_ninja:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler.compile = unix_wrap_ninja_compile
             else:
+                # pyrefly: ignore  # missing-attribute
                 self.compiler._compile = unix_wrap_single_compile
 
         build_ext.build_extensions(self)
@@ -1160,7 +1190,9 @@ class BuildExtension(build_ext):
 
     def _check_abi(self) -> tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
+        # pyrefly: ignore  # missing-attribute
         if hasattr(self.compiler, 'compiler_cxx'):
+            # pyrefly: ignore  # missing-attribute
             compiler = self.compiler.compiler_cxx[0]
         else:
             compiler = get_cxx_compiler()

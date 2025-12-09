@@ -10,6 +10,7 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from typing import Any
 
+# pyrefly: ignore  # import-error
 import requests
 from setuptools import distutils  # type: ignore[import,attr-defined]
 

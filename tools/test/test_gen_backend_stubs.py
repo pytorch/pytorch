@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 
+# pyrefly: ignore  # import-error
 import expecttest
 
 from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
@@ -26,6 +27,7 @@ class TestGenBackendStubs(expecttest.TestCase):
 
     def get_errors_from_gen_backend_stubs(
         self, yaml_str: str, *, kernels_str: str | None = None
+    # pyrefly: ignore  # bad-return
     ) -> str:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)
@@ -41,6 +43,7 @@ class TestGenBackendStubs(expecttest.TestCase):
             except AssertionError as e:
                 # Scrub out the temp file name from any error messages to simplify assertions.
                 return str(e).replace(fp.name, "")
+            # pyrefly: ignore  # missing-attribute
             self.fail(
                 "Expected gen_backend_stubs to raise an AssertionError, but it did not."
             )
@@ -96,6 +99,7 @@ cpp_namespace: torch_xla
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, '''You must provide a value for "backend"'''
         )
@@ -107,6 +111,7 @@ cpp_namespace: torch_xla
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, '''You must provide a value for "backend"'''
         )
@@ -118,6 +123,7 @@ cpp_namespace: torch_xla
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """\
@@ -131,6 +137,7 @@ backend: XLA
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, '''You must provide a value for "cpp_namespace"'''
         )
@@ -142,6 +149,7 @@ cpp_namespace:\t
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, '''You must provide a value for "cpp_namespace"'''
         )
@@ -153,6 +161,7 @@ backend: XLA
 cpp_namespace: torch_xla
 supported: abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """expected "supported" to be a list, but got: abs (of type <class 'str'>)""",
@@ -166,6 +175,7 @@ cpp_namespace: torch_xla
 supported:
 - abs_BAD"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, """Found an invalid operator name: abs_BAD"""
         )
@@ -181,6 +191,7 @@ supported:
 autograd:
 - sub"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error, """Found an invalid operator name: add"""
         )  # noqa: B950
@@ -196,6 +207,7 @@ supported:
 autograd:
 - add.out"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".""",  # noqa: B950
@@ -212,6 +224,7 @@ supported:
 autograd:
 - add_.Tensor"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".""",  # noqa: B950
@@ -229,6 +242,7 @@ supported:
 autograd:
 - add.Tensor"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".""",  # noqa: B950
@@ -243,6 +257,7 @@ supported:
 - abs
 invalid_key: invalid_val"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native, ir_gen, symint""",  # noqa: B950
@@ -257,6 +272,7 @@ use_out_as_primary: frue
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """You must provide either True or False for use_out_as_primary. Provided: frue""",
@@ -271,6 +287,7 @@ device_guard: frue
 supported:
 - abs"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """You must provide either True or False for device_guard. Provided: frue""",
@@ -293,6 +310,7 @@ at::Tensor& XLANativeFunctions::add(at::Tensor& self) {}"""
         output_error = self.get_errors_from_gen_backend_stubs(
             yaml_str, kernels_str=kernels_str
         )
+        # pyrefly: ignore  # missing-attribute
         self.assertExpectedInline(
             output_error,
             """\

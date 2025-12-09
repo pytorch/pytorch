@@ -1180,6 +1180,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
             if holder.handles[gid] is None:
                 extra = ""
+                # pyrefly: ignore  # missing-attribute
                 if torch._C._get_graph_exec_group() is not None:
                     extra = (
                         "Performing two backward calls that overlap (i.e. require the same "
@@ -1637,20 +1638,25 @@ class GraphExecGroup:
     """
 
     def __enter__(self) -> "GraphExecGroup":
+        # pyrefly: ignore  # missing-attribute
         if torch._C._get_graph_exec_group() is not None:
             raise RuntimeError(
                 "GraphExecGroup contexts cannot be nested. "
+                # pyrefly: ignore  # missing-attribute
                 f"Already inside group {torch._C._get_graph_exec_group()}"
             )
+        # pyrefly: ignore  # missing-attribute
         torch._C._set_graph_exec_group(self)
         return self
 
     def __exit__(self, *args: object) -> None:
+        # pyrefly: ignore  # missing-attribute
         torch._C._set_graph_exec_group(None)
 
     @classmethod
     def _get_current_group(cls) -> Optional["GraphExecGroup"]:
         # Private API to be used by utils like AC
+        # pyrefly: ignore  # missing-attribute
         return torch._C._get_graph_exec_group()
 
 

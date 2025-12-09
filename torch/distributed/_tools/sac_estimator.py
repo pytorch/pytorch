@@ -41,6 +41,7 @@ _PYTORCH_MIN_ALLOCATE = (
 
 def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> None:
     try:
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
     except ImportError as err:
         raise ImportError("Please install tabulate.") from err

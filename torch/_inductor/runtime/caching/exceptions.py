@@ -10,6 +10,7 @@ for user-facing errors that also inherit from TypeError for compatibility.
 from threading import Lock
 from typing import Any
 
+# pyrefly: ignore  # import-error
 from filelock import FileLock
 
 

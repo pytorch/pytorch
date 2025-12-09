@@ -230,6 +230,7 @@ def parse_profile_event_list(
         if not device_name:
             return 0.0
 
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
 
         profile_events.sort(key=lambda ev: ev.self_device_time_ms, reverse=True)

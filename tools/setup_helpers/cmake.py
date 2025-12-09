@@ -26,6 +26,7 @@ from .env import (
 
 
 try:
+    # pyrefly: ignore  # import-error
     from packaging.version import Version
 except ImportError:
     try:

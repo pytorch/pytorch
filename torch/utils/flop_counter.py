@@ -702,6 +702,7 @@ class FlopCounterMode:
             depth = 999999
 
 
+        # pyrefly: ignore  # import-error
         import tabulate
 
         tabulate.PRESERVE_WHITESPACE = True

@@ -5,6 +5,7 @@ import typing
 import unittest
 from collections import defaultdict
 
+# pyrefly: ignore  # import-error
 import yaml
 from tools.autograd import gen_autograd_functions, load_derivatives
 

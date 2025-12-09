@@ -8,6 +8,7 @@ import torch
 # try to import tablate
 got_tabulate = True
 try:
+    # pyrefly: ignore  # import-error
     from tabulate import tabulate
 except ImportError:
     got_tabulate = False

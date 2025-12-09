@@ -126,6 +126,7 @@ class TestDTypeInfo(TestCase):
         # If reference count is leaked this would be a set of 10 elements
         ref_cnt = {sys.getrefcount(torch.float32.to_complex()) for _ in range(10)}
 
+        # pyrefly: ignore  # missing-attribute
         self.assertLess(len(ref_cnt), 3)
 
         self.assertEqual(torch.float64.to_complex(), torch.complex128)
@@ -137,6 +138,7 @@ class TestDTypeInfo(TestCase):
         # If reference count is leaked this would be a set of 10 elements
         ref_cnt = {sys.getrefcount(torch.cfloat.to_real()) for _ in range(10)}
 
+        # pyrefly: ignore  # missing-attribute
         self.assertLess(len(ref_cnt), 3)
 
         self.assertEqual(torch.complex128.to_real(), torch.double)

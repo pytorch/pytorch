@@ -55,6 +55,7 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
     # python module required for summary
     import csv
 
+    # pyrefly: ignore  # import-error
     from tabulate import tabulate
 
     fwd_graph, bwd_graph = get_inductor_decomp_graphs(model, args, kwargs)

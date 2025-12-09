@@ -72,7 +72,9 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(x)
+        # pyrefly: ignore  # missing-attribute
         div = self.doprint(div)
         if expr.is_integer:
             return f"c10::metal::floor_divide({x}, {div})"
@@ -80,19 +82,23 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(x)
         if div != 1:
+            # pyrefly: ignore  # missing-attribute
             div = self.doprint(div)
             if expr.is_integer:
                 x = f"({x}) / ({div})"
             else:
                 x = f"metal::floor({x}) / ({div})"
+        # pyrefly: ignore  # missing-attribute
         mod = self.doprint(mod)
         return f"({x}) % ({mod})"
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
+        # pyrefly: ignore  # missing-attribute
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -101,6 +107,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
+        # pyrefly: ignore  # missing-attribute
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -108,10 +115,12 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
@@ -123,21 +132,25 @@ class MetalExprPrinter(ExprPrinter_):
             raise ValueError(
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )
+        # pyrefly: ignore  # missing-attribute
         number_str = self.parenthesize(number, PRECEDENCE["Mul"])
         return f"static_cast<float>(metal::rint(1e{ndigits} * {number_str}) * 1e{-ndigits})"
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
+        # pyrefly: ignore  # missing-attribute
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 2
+        # pyrefly: ignore  # missing-attribute
         x, y = map(self.doprint, expr.args)
         return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(expr.args[0])
         return f"static_cast<float>({x})"
 
@@ -152,6 +165,7 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::floor(static_cast<float>({x})))"
 
@@ -159,16 +173,19 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::trunc({x}))"
 
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore  # missing-attribute
         x = self.doprint(expr.args[0])
         return f"metal::log2({x})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
+            # pyrefly: ignore  # missing-attribute
             self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
         )
         return f"{c} ? {p} : {q}"

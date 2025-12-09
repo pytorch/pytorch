@@ -38,6 +38,7 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+# pyrefly: ignore  # import-error
 import yaml
 
 from torchgen.api import cpp

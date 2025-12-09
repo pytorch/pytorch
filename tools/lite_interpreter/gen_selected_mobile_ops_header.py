@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
+# pyrefly: ignore  # import-error
 import yaml
 
 from torchgen.code_template import CodeTemplate
@@ -13,6 +14,7 @@ from torchgen.selective_build.selector import SelectiveBuilder
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:
+    # pyrefly: ignore  # import-error
     from yaml import CSafeLoader as Loader
 except ImportError:
     from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]

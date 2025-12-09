@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+# pyrefly: ignore  # import-error
 from jinja2 import DictLoader, Environment
+# pyrefly: ignore  # import-error
 from tabulate import tabulate
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
@@ -41,6 +43,7 @@ class Response:
 
 def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
     # late import for optional dependency
+    # pyrefly: ignore  # import-error
     import requests
 
     max_workers = 20
@@ -57,6 +60,7 @@ def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
 
 def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
     # late import for optional dependency
+    # pyrefly: ignore  # import-error
     import aiohttp
 
     async def fetch(session: aiohttp.ClientSession, url: str) -> Response:

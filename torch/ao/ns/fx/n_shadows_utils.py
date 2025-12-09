@@ -1383,6 +1383,7 @@ def print_n_shadows_summary(
     """
 
     try:
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
     except ImportError:
         print(

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 
+# pyrefly: ignore  # import-error
 import yaml
 
 

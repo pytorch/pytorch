@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+# pyrefly: ignore  # import-error
 import requests
 from clickhouse import query_clickhouse  # type: ignore[import]
 

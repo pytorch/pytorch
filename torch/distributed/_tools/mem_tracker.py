@@ -243,6 +243,7 @@ def _print_snapshot_tabular(
         print("No memory tracked.")
         return
     try:
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
     except ImportError as err:
         raise ImportError(
@@ -279,6 +280,7 @@ def _print_state_snapshots_tabular(
     snapshots: dict[_State, list[dict[torch.device, dict[str, int]]]], units: str
 ) -> None:
     try:
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
     except ImportError as err:
         raise ImportError(

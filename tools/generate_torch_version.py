@@ -7,6 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
+# pyrefly: ignore  # import-error
 from packaging.version import Version
 from setuptools import distutils  # type: ignore[import,attr-defined]
 
