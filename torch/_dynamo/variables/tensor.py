@@ -1259,12 +1259,15 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
+        # Get the tensor proxy and pass args_idx as a constant
+        proxy_args, _ = proxy_args_kwargs([self], {})
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 dtensor_redistribute,
-                *proxy_args_kwargs([self], {"args_idx": args_idx}),
+                proxy_args,
+                {"args_idx": args_idx},
             ),
         )
 
@@ -1294,12 +1297,15 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
+        # Get the tensor proxy and pass args_idx as a constant
+        proxy_args, _ = proxy_args_kwargs([self], {})
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 dtensor_to_local,
-                *proxy_args_kwargs([self], {"args_idx": args_idx}),
+                proxy_args,
+                {"args_idx": args_idx},
             ),
         )
 
