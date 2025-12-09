@@ -868,8 +868,10 @@ class CachingAutotuner(KernelInterface):
         # control over the kernel code; (ii) there is empirical evidence that
         # for some (complicated) custom Triton kernels, a register-spilling
         # config may yield the best latency.
-        if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
-            "spill_threshold", 16
+        if (
+            not self.custom_kernel
+            and launcher.n_spills is not None
+            and launcher.n_spills > self.inductor_meta.get("spill_threshold", 16)
         ):
             log.debug(
                 "Skip config %s because of register spilling: %d",
