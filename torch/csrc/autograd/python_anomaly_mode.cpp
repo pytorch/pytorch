@@ -57,7 +57,8 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
         ". ",
         "Traceback of forward call that caused the error:\n",
         oss.str());
-    // TODO: Add parent traceback tracking for mixed mode. As it is rarely used (due to lack of popularity of higher order derivative)
+    // TODO: Add parent traceback tracking for mixed mode. As it is rarely used
+    // (due to lack of popularity of higher order derivative)
     return;
   }
 
@@ -125,8 +126,8 @@ void PyAnomalyMetadata::assign_parent(
   }
 }
 
-std::shared_ptr<torch::CapturedTraceback> PyAnomalyMetadata::captured_traceback()
-    const {
+std::shared_ptr<torch::CapturedTraceback> PyAnomalyMetadata::
+    captured_traceback() const {
   return captured_traceback_;
 }
 

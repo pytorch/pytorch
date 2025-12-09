@@ -117,7 +117,9 @@ class set_detect_anomaly:
 
     """
 
-    def __init__(self, mode: bool, check_nan: bool = True, mixed_stack: bool = False) -> None:  # noqa: D107
+    def __init__(
+        self, mode: bool, check_nan: bool = True, mixed_stack: bool = False
+    ) -> None:  # noqa: D107
         self.prev = torch.is_anomaly_enabled()
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
         self.prev_mixed_stack = torch.is_anomaly_mixed_stack_enabled()

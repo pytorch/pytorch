@@ -38,7 +38,8 @@ DetectAnomalyGuard::~DetectAnomalyGuard() {
   std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
   uint32_t& counter = get_anomaly_counter();
   counter--;
-  AnomalyMode::set_enabled(counter > 0, this->prev_check_nan_, this->prev_mixed_stack_);
+  AnomalyMode::set_enabled(
+      counter > 0, this->prev_check_nan_, this->prev_mixed_stack_);
 }
 
 AnomalyMetadata::~AnomalyMetadata() = default;
