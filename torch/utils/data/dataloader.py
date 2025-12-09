@@ -201,6 +201,8 @@ class DataLoader(Generic[_T_co]):
             will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
+        worker_method (str, optional): The worker method to be used. Either ``"multiprocessing"`` for process-based workers
+            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -258,7 +260,6 @@ class DataLoader(Generic[_T_co]):
         drop_last: bool = False,
         timeout: float = 0,
         worker_init_fn: _worker_init_fn_t | None = None,
-        worker_method: str = "multiprocessing",
         multiprocessing_context=None,
         generator=None,
         *,
@@ -266,6 +267,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        worker_method: str = "multiprocessing",
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -822,6 +824,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
         self._prefetch_factor = loader.prefetch_factor
         self._in_order = loader.in_order
+        self._worker_method = loader.worker_method
 
         if self._num_workers <= 0:
             raise AssertionError(
@@ -847,36 +850,27 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         # Will be set in subclasses
         self._worker_result_queue = None
         self._shutdown = False
-        self._workers_done_event = None
-        self._index_queues = []
-        self._workers = []
+        self._workers_done_event: (
+            threading.Event | python_multiprocessing.synchronize.Event | None
+        ) = None
+        self._index_queues: list[Any] = []
+        self._workers: list[Any] = []
         self._data_queue = None
 
     def _initialize_pin_memory(self):
         """Initialize pin memory thread and related queues."""
-        if self._pin_memory:
+        if self._pin_memory and self._worker_method == "multiprocessing":
             self._pin_memory_thread_done_event = threading.Event()
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device = -1
-            if self._pin_memory_device == "cuda":
-                current_device = torch.cuda.current_device()
-            elif self._pin_memory_device == "xpu":
-                current_device = torch.xpu.current_device()
-            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
-                custom_device_mod = getattr(
-                    torch, torch._C._get_privateuse1_backend_name()
-                )
-                current_device = custom_device_mod.current_device()
-            elif self._pin_memory_device is None:
-                current_device = torch.accelerator.current_device_index()
+            current_device_id = torch.accelerator.current_device_index()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
                     self._worker_result_queue,
                     self._data_queue,
-                    current_device,
+                    current_device_id,
                     self._pin_memory_thread_done_event,
                     self._pin_memory_device,
                 ),
@@ -887,7 +881,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
             # pin_memory_thread once it is started.
             self._pin_memory_thread = pin_memory_thread
         else:
-            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
+            self._data_queue = self._worker_result_queue
 
     def _reset(self, loader, first_iter=False):
         super()._reset(loader, first_iter)
@@ -938,6 +932,8 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
+        if self._data_queue is None:
+            raise AssertionError("Data queue not initialized")
         try:
             data = self._data_queue.get(timeout=timeout)
             return (True, data)
@@ -954,7 +950,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 raise RuntimeError(
                     f"DataLoader timed out after {self._timeout} seconds"
                 )
-        elif self._pin_memory:
+        elif self._pin_memory and self._worker_method == "multiprocessing":
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()
                 if success:
@@ -1056,7 +1052,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         else:
             # not found (i.e., didn't break)
             return
-        self._index_queues[worker_queue_idx].put((self._send_idx, index))
+        self._index_queues[worker_queue_idx].put((self._send_idx, index))  # type: ignore[possibly-undefined]
         self._task_info[self._send_idx] = (worker_queue_idx,)
         self._workers_num_tasks[worker_queue_idx] += 1
         self._tasks_outstanding += 1
@@ -1072,7 +1068,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
     def _mark_worker_as_unavailable(self, worker_id, shutdown=False):
         # Mark a worker as having finished its work e.g., due to
         # exhausting an `IterableDataset`. This should be used only when this
-        # iterator is going to continue running.
+        # `_ParallelDataLoaderIter` is going to continue running.
 
         if (
             not self._workers_status[worker_id]
@@ -1083,10 +1079,9 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 "Worker status inconsistent when marking worker as unavailable"
             )
 
-        # Signal termination to that specific worker.
-        q = self._index_queues[worker_id]
-        # Indicate that no more data will be put on this queue by the current
+        # Indicate that no more data will be put on this worker's queue by the current
         # process.
+        q = self._index_queues[worker_id]
         q.put(None)
 
         # Note that we don't actually join the worker here, nor do we remove the
@@ -1100,12 +1095,14 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
         self._workers_status[worker_id] = False
 
+        if self._workers_done_event is None:
+            raise AssertionError("Workers done event not initialized")
         if self._workers_done_event.is_set() != shutdown:
             raise AssertionError(
                 "_workers_done_event state does not match shutdown flag"
             )
 
-    def _shutdown_workers(self):
+    def _shutdown_workers(self) -> None:
         """Common shutdown logic for both threading and multiprocessing implementations."""
         if not self._shutdown:
             self._shutdown = True
@@ -1117,10 +1114,14 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 self._pin_memory_thread_done_event.set()
                 # Send something to pin_memory_thread in case it is waiting
                 # so that it can wake up and check `pin_memory_thread_done_event`
+                if self._worker_result_queue is None:
+                    raise AssertionError("Worker result queue not initialized")
                 self._worker_result_queue.put((None, None))
                 self._pin_memory_thread.join()
 
             # Exit workers now.
+            if self._workers_done_event is None:
+                raise AssertionError("Workers done event not initialized")
             self._workers_done_event.set()
             for worker_id in range(len(self._workers)):
                 # Get number of workers from `len(self._workers)` instead of
@@ -1141,26 +1142,34 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler,
     using threads instead of processes for parallelism.
+
+    Uses per-worker index queues (like multiprocessing mode) to ensure deterministic
+    task-to-worker assignment, which is important for:
+    - Reproducible results with seeded RNG
+    - Consistent behavior with IterableDataset sharding
+    - Matching multiprocessing mode behavior
     """
 
     def __init__(self, loader):
         super().__init__(loader)
 
         # Thread-based implementation uses standard Python queues
-        self._worker_result_queue = queue.SimpleQueue()
+        self._worker_result_queue = queue.SimpleQueue()  # type: ignore[assignment]
         self._shutdown = False
         self._workers_done_event = threading.Event()
 
         self._index_queues = []
         self._workers = []
         for i in range(self._num_workers):
-            index_queue = queue.SimpleQueue()
+            # Each worker gets its own index queue (like multiprocessing)
+            # This ensures deterministic round-robin task assignment
+            index_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
             w = threading.Thread(
                 target=_utils.worker._thread_worker_loop,
                 args=(
                     self._dataset_kind,
                     self._dataset,
-                    index_queue,
+                    index_queue,  # Each thread has its own queue
                     self._worker_result_queue,
                     self._workers_done_event,
                     self._auto_collation,
@@ -1171,10 +1180,12 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
                     i,
                     self._num_workers,
                     self._persistent_workers,
+                    self._pin_memory,
                 ),
                 daemon=True,
             )
             w.start()
+
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
@@ -1502,10 +1513,10 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         # No certainty which module multiprocessing_context is
-        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[assignment]
         self._worker_pids_set = False
         self._shutdown = False
-        self._workers_done_event = multiprocessing_context.Event()
+        self._workers_done_event = multiprocessing_context.Event()  # type: ignore[assignment]
 
         self._index_queues = []
         self._workers = []
@@ -1594,6 +1605,8 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
         #
         # Returns a 2-tuple:
         #   (bool: whether successfully get data, any: data if successful else None)
+        if self._data_queue is None:
+            raise AssertionError("Data queue not initialized")
         try:
             data = self._data_queue.get(timeout=timeout)
             return (True, data)
@@ -1737,7 +1750,7 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
     # 3. Run the script with the `send` option in the second shell:
     # (shell2) ./test_socket.py sock_tmp 1017 send
 
-    def _shutdown_workers(self):
+    def _shutdown_workers(self) -> None:
         # Check for early exit conditions
         if (
             _utils is None
@@ -1753,8 +1766,11 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
 
         try:
             if hasattr(self, "_pin_memory_thread"):
-                self._worker_result_queue.cancel_join_thread()
-                self._worker_result_queue.close()
+                if self._worker_result_queue is None:
+                    raise AssertionError("Worker result queue not initialized")
+                # Multiprocessing queues have cancel_join_thread and close methods
+                self._worker_result_queue.cancel_join_thread()  # type: ignore[attr-defined]
+                self._worker_result_queue.close()  # type: ignore[attr-defined]
 
             for q in self._index_queues:
                 q.cancel_join_thread()
