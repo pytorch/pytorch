@@ -572,7 +572,6 @@ def propagate_shape_and_sharding(
                     maybe_get_shard_mesh_dim_and_placement(dim)
                 )
                 input_sharded = shard_mesh_dim is not None
-
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
@@ -620,10 +619,7 @@ def propagate_shape_and_sharding(
                     out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
                 ]
 
-                shard_mesh_dim, shard_placement = (
-                    maybe_get_shard_mesh_dim_and_placement(in_dim)
-                )
-
+                shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
                 if strict_view and shard_mesh_dim is not None:
                     if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
                         raise RuntimeError(
@@ -717,7 +713,6 @@ def register_op_strategy_map(
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
     def reshape_strategy(op_schema: OpSchema) -> StrategyType:
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        print(rules)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
         mesh = op_schema.get_mesh_from_args(validate=False)
 
