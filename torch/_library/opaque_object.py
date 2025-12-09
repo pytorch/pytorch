@@ -34,8 +34,8 @@ You can register a custom class as being a reference-based opaque object class
 through `register_opaque_type(MyClass, typ="value")`.
 """
 
-from dataclasses import dataclass, fields
-from typing import Any, NewType
+from dataclasses import dataclass
+from typing import Any, Literal, NewType
 from weakref import WeakKeyDictionary
 
 import torch
@@ -64,7 +64,7 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 @dataclass
 class _OpaqueTypeInfo:
     class_name: str
-    opaque_typ: str  # either "reference" or "value"
+    opaque_typ: Literal["reference", "value"]
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -202,36 +202,3 @@ def is_opaque_reference_type(cls: Any) -> bool:
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
 
     return _OPAQUE_TYPES[cls].opaque_typ == "reference"
-
-
-def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
-    types = {}
-
-    # Recursively add globals for all nested opaque value types
-    # that appear in the object's attributes
-    def add_nested_opaque_types(_obj):
-        if _obj is None:
-            return
-
-        if is_opaque_value_type(type(_obj)):
-            obj_type = type(_obj)
-            types[obj_type.__name__] = obj_type
-        elif isinstance(_obj, (list, tuple)):
-            for item in _obj:
-                add_nested_opaque_types(item)
-            return
-        elif isinstance(_obj, dict):
-            for value in _obj.values():
-                add_nested_opaque_types(value)
-            return
-
-        if hasattr(_obj, "__dataclass_fields__"):
-            for field in fields(_obj):
-                attr_value = getattr(_obj, field.name)
-                add_nested_opaque_types(attr_value)
-        elif hasattr(_obj, "__dict__"):
-            for attr_value in _obj.__dict__.values():
-                add_nested_opaque_types(attr_value)
-
-    add_nested_opaque_types(obj)
-    return repr(obj), types
