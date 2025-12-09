@@ -154,12 +154,15 @@ class Shard(torch._C._distributed.Shard):
         src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
-        Shard and scatter a tensor on a mesh dimension (use coordinate
-        0 on the mesh dimension as source of truth).
+        Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
+        mesh dimension as source of truth).
 
-        Unlike ``_split_tensor`` which can handle uneven sharding via padding,
-        this method requires that the tensor dimension is evenly divisible by
-        the number of chunks (mesh dimension size).
+        Create the local tensor for this rank following the given Shard
+        placement. If src_data_rank is None, perform only local splitting.
+        Otherwise, additionally scatter data from src_data_rank. Unlike
+        ``_split_tensor``, which supports uneven sharding via padding, this
+        method requires the tensor dimension to be evenly divisible by the
+        number of chunks (mesh dimension size).
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
@@ -590,12 +593,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
         src_data_rank: Optional[int] = 0,
     ) -> torch.Tensor:
         """
-        Shard and scatter a tensor on a mesh dimension (use coordinate
-        0 on the mesh dimension as source of truth).
+        Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
+        mesh dimension as source of truth).
 
-        Unlike ``_split_tensor`` which can handle uneven sharding via padding,
-        this method requires that the tensor dimension is evenly divisible by
-        the number of chunks (mesh dimension size).
+        Create the local tensor for this rank following the given StridedShard
+        placement. If src_data_rank is None, perform only local splitting.
+        Otherwise, additionally scatter data from src_data_rank. Unlike
+        ``_split_tensor``, which supports uneven sharding via padding, this
+        method requires the tensor dimension to be evenly divisible by the
+        number of chunks (mesh dimension size).
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
