@@ -130,7 +130,6 @@ def get_artifacts_urls(results, suites, is_rocm=False):
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
                 s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runAttempt}/artifact/{artifact_filename}"
                 urls[(suite, int(shard_id))] = s3_url
-                print(f"{suite} {shard_id}, {num_shards}: {s3_url}")
     return urls
 
 
