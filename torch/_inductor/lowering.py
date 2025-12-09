@@ -72,7 +72,6 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -5668,7 +5667,7 @@ def _avg_poolnd(
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
-    if isinstance(rv.data.data, Reduction):
+    if hasattr(rv.data, "data") and isinstance(rv.data.data, Reduction):
         # Only realize if reduction isn't unrolled
         rv.realize()
 

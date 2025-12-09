@@ -30,7 +30,6 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
