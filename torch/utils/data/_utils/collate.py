@@ -266,7 +266,8 @@ def collate_tensor_fn(
             "Batches of sparse tensors are not currently supported by the default collate_fn; "
             "please provide a custom collate_fn to handle them appropriately."
         )
-    if torch.utils.data.get_worker_info() is not None:
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is not None and worker_info.worker_method == "multiprocessing":
         # If we're in a background process, concatenate directly into a
         # shared memory tensor to avoid an extra copy
         numel = sum(x.numel() for x in batch)
