@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+
 import itertools
 from contextlib import nullcontext
 from typing import Any
@@ -10,6 +11,7 @@ from torch.distributed._local_tensor import (
     local_tensor_mode,
     LocalTensor,
     LocalTensorMode,
+    maybe_run_for_local_tensor,
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
@@ -32,6 +34,7 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     generate_shard_orders,
     LocalDTensorTestBase,
@@ -309,11 +312,17 @@ class UtilTest(DTensorTestBase):
         for placements in one_d_placements:
             if isinstance(placements[0], Shard):
                 uneven_dim = list(range(self.world_size))
-                local_shape = (
-                    torch.Size([5, uneven_dim[self.rank]])
-                    if placements[0].dim == 1
-                    else torch.Size([uneven_dim[self.rank], 5])
-                )
+
+                @maybe_run_for_local_tensor
+                def get_local_shape(rank):
+                    local_shape = (
+                        torch.Size([5, uneven_dim[rank]])
+                        if placements[0].dim == 1
+                        else torch.Size([uneven_dim[rank], 5])
+                    )
+                    return local_shape
+
+                local_shape = get_local_shape(self.rank)
                 expected_global_shape = (
                     torch.Size([5, sum(uneven_dim)])
                     if placements[0].dim == 1
@@ -322,6 +331,7 @@ class UtilTest(DTensorTestBase):
             else:
                 expected_global_shape = torch.Size([5, 5])
                 local_shape = torch.Size([5, 5])
+
             global_shape = compute_global_tensor_shape(
                 local_shape, device_mesh, placements
             )
@@ -332,11 +342,18 @@ class UtilTest(DTensorTestBase):
         one_d_placement = [Shard(1)]
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         uneven_dim = list(range(self.world_size))
-        local_shape = (
-            torch.Size([5, uneven_dim[self.rank]])
-            if self.rank % 2 == 0
-            else torch.Size([6, uneven_dim[self.rank]])
-        )
+
+        @maybe_run_for_local_tensor
+        def get_local_shape(rank):
+            local_shape = (
+                torch.Size([5, uneven_dim[rank]])
+                if rank % 2 == 0
+                else torch.Size([6, uneven_dim[rank]])
+            )
+            return local_shape
+
+        local_shape = get_local_shape(self.rank)
+
         with self.assertRaisesRegex(
             RuntimeError,
             "Non-sharded dimensions should have identical size across ranks.",
@@ -424,11 +441,29 @@ class UtilTest(DTensorTestBase):
                 dim0_start, dim0_end = dim[0][0], dim[0][1]
                 dim1_start, dim1_end = dim[1][0], dim[1][1]
 
-                # Check the local tensor of dtensor is exactly the same
-                # if we slice the global_tensor with local_size and global_offset
-                self.assertEqual(
+                @maybe_run_for_local_tensor
+                def maybe_compute_rankwise(
+                    dim0_start,
+                    dim0_end,
+                    dim1_start,
+                    dim1_end,
+                    local_tensor,
+                    global_tensor,
+                ):
+                    # Check the local tensor of dtensor is exactly the same
+                    # if we slice the global_tensor with local_size and global_offset
+                    self.assertEqual(
+                        local_tensor,
+                        global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
+                    )
+
+                maybe_compute_rankwise(
+                    dim0_start,
+                    dim0_end,
+                    dim1_start,
+                    dim1_end,
                     dtensor.to_local(),
-                    global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
+                    global_tensor,
                 )
 
     @with_comms
@@ -543,8 +578,13 @@ class UtilTest(DTensorTestBase):
         rank = global_mesh.get_rank()
         expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
         expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
-        self.assertEqual(local_shape[0], expected_shapes[rank])
-        self.assertEqual(global_offset[0], expected_offsets[rank])
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise(rank, local_shape, global_offset):
+            self.assertEqual(local_shape[0], expected_shapes[rank])
+            self.assertEqual(global_offset[0], expected_offsets[rank])
+
+        maybe_compute_rankwise(rank, local_shape, global_offset)
 
     @with_comms
     def test_hsdp_tp_meta_compute(self):
@@ -688,8 +728,15 @@ class TestStridedSharding(DTensorTestBase):
         """
         shard_placement = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
-        shard_x = tensor_list[self.rank]
-        self.assertEqual(shard_x, x.view(self.world_size, -1)[self.rank])
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise(rank, tensor_list, x):
+            shard_x = tensor_list[rank]
+            self.assertEqual(shard_x, x.view(self.world_size, -1)[rank])
+            return shard_x
+
+        shard_x = maybe_compute_rankwise(self.rank, tensor_list, x)
+
         # shard_to_replicate
         full_tensor = shard_placement._to_replicate_tensor(
             shard_x,
@@ -704,10 +751,15 @@ class TestStridedSharding(DTensorTestBase):
         """
         shard_placement = _StridedShard(0, split_factor=2)
         tensor_list, _ = shard_placement._split_tensor(x, self.world_size)
-        shard_x = tensor_list[self.rank]
-        self.assertEqual(
-            shard_x, x.view(-1, self.world_size).swapdims(-1, 0)[self.rank]
-        )
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise(rank, tensor_list, x):
+            shard_x = tensor_list[rank]
+            self.assertEqual(shard_x, x.view(-1, self.world_size).swapdims(-1, 0)[rank])
+            return shard_x
+
+        shard_x = maybe_compute_rankwise(self.rank, tensor_list, x)
+
         # shard_to_replicate
         full_tensor = shard_placement._to_replicate_tensor(
             shard_x,
@@ -737,16 +789,31 @@ class TestStridedSharding(DTensorTestBase):
         # shard on mesh dim-0
         shard_placement_dim0 = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
-        expected_shard_dim0 = x.view(mesh_dim0_size, -1)[mesh_dim0_local_rank]
-        shard_x = tensor_list[mesh_dim0_local_rank]
-        self.assertEqual(shard_x, expected_shard_dim0)
-
-        # shard on mesh dim-1
         shard_placement_dim1 = _StridedShard(0, split_factor=1)  # same as Shard(0)
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim0_local_rank):
+            expected_shard_dim0 = x.view(mesh_dim0_size, -1)[mesh_dim0_local_rank]
+            shard_x = tensor_list[mesh_dim0_local_rank]
+            self.assertEqual(shard_x, expected_shard_dim0)
+            return shard_x, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
+            mesh_dim0_local_rank
+        )
         tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
-        expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
-        shard_x = tensor_list[mesh_dim1_local_rank]
-        self.assertEqual(shard_x, expected_shard_dim1)
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim1_local_rank):
+            expected_shard_dim1 = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
+            shard_x2 = tensor_list[mesh_dim1_local_rank]
+            self.assertEqual(shard_x2, expected_shard_dim1)
+
+            return shard_x2, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
+            mesh_dim1_local_rank
+        )
 
         # shard_to_replicate on mesh dim-1
         full_tensor = shard_placement_dim1._to_replicate_tensor(
@@ -759,11 +826,12 @@ class TestStridedSharding(DTensorTestBase):
 
         # shard_to_replicate on mesh dim-0
         full_tensor = shard_placement_dim0._to_replicate_tensor(
-            full_tensor,
+            full_tensor.reconcile() if self.is_local_tensor_enabled else full_tensor,
             mesh_2d,
             mesh_dim=0,
             current_logical_shape=list(x.shape),
         )
+
         self.assertEqual(full_tensor, x)
 
         """
@@ -776,22 +844,36 @@ class TestStridedSharding(DTensorTestBase):
         # shard on mesh dim-0
         shard_placement_dim0 = _StridedShard(0, split_factor=split_factor)
         tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
-        shard_x = tensor_list[mesh_dim0_local_rank]
-        expected_shard_dim0 = (
-            torch.tensor([0, 1, 4, 5], device=self.device_type)
-            if mesh_dim0_local_rank == 0
-            else torch.tensor([2, 3, 6, 7], device=self.device_type)
-        )
-        self.assertEqual(shard_x, expected_shard_dim0)
-
-        # shard on mesh dim-1
         shard_placement_dim1 = _StridedShard(0, split_factor=1)  # same as Shard(0)
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim0_local_rank):
+            shard_x = tensor_list[mesh_dim0_local_rank]
+            expected_shard_dim0 = (
+                torch.tensor([0, 1, 4, 5], device=self.device_type)
+                if mesh_dim0_local_rank == 0
+                else torch.tensor([2, 3, 6, 7], device=self.device_type)
+            )
+            self.assertEqual(shard_x, expected_shard_dim0)
+            return shard_x, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
+            mesh_dim0_local_rank
+        )
         tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
-        shard_x = tensor_list[mesh_dim1_local_rank]
-        expected_shard_dim1 = expected_shard_dim0.view(mesh_dim1_size, -1)[
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim1_local_rank):
+            shard_x2 = tensor_list[mesh_dim1_local_rank]
+            expected_shard_dim1 = expected_shard_dim0.view(mesh_dim1_size, -1)[
+                mesh_dim1_local_rank
+            ]
+            self.assertEqual(shard_x2, expected_shard_dim1)
+            return shard_x2, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
             mesh_dim1_local_rank
-        ]
-        self.assertEqual(shard_x, expected_shard_dim1)
+        )
 
         # shard_to_replicate on mesh dim-1
         full_tensor = shard_placement_dim1._to_replicate_tensor(
@@ -804,7 +886,7 @@ class TestStridedSharding(DTensorTestBase):
 
         # shard_to_replicate on mesh dim-0
         full_tensor = shard_placement_dim0._to_replicate_tensor(
-            full_tensor,
+            full_tensor.reconcile() if self.is_local_tensor_enabled else full_tensor,
             mesh_2d,
             mesh_dim=0,
             current_logical_shape=list(x.shape),
@@ -833,23 +915,40 @@ class TestStridedSharding(DTensorTestBase):
         # shard on mesh dim-0
         shard_placement_dim0 = _StridedShard(1, split_factor=split_factor)
         tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
-        shard_x = tensor_list[mesh_dim0_local_rank]
-        expected_shard_dim0 = (
-            torch.tensor([[0, 2], [4, 6]], device=self.device_type)
-            if mesh_dim0_local_rank == 0
-            else torch.tensor([[1, 3], [5, 7]], device=self.device_type)
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim0_local_rank, tensor_list):
+            shard_x2 = tensor_list[mesh_dim0_local_rank]
+            expected_shard_dim0 = (
+                torch.tensor([[0, 2], [4, 6]], device=self.device_type)
+                if mesh_dim0_local_rank == 0
+                else torch.tensor([[1, 3], [5, 7]], device=self.device_type)
+            )
+            self.assertEqual(shard_x2, expected_shard_dim0)
+            return shard_x2, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
+            mesh_dim0_local_rank, tensor_list
         )
-        self.assertEqual(shard_x, expected_shard_dim0)
 
         # shard on mesh dim-1
         shard_placement_dim1 = _StridedShard(1, split_factor=1)  # same as Shard(1)
         tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
-        shard_x = tensor_list[mesh_dim1_local_rank]
-        expected_shard_dim1 = [
-            torch.tensor(value, device=self.device_type)
-            for value in [[[0], [4]], [[2], [6]], [[1], [5]], [[3], [7]]]
-        ][self.rank]
-        self.assertEqual(shard_x, expected_shard_dim1)
+
+        @maybe_run_for_local_tensor
+        def maybe_compute_rankwise_strided(mesh_dim1_local_rank, rank, tensor_list):
+            shard_x = tensor_list[mesh_dim1_local_rank]
+            expected_shard_dim1 = [
+                torch.tensor(value, device=self.device_type)
+                for value in [[[0], [4]], [[2], [6]], [[1], [5]], [[3], [7]]]
+            ][rank]
+            self.assertEqual(shard_x, expected_shard_dim1)
+
+            return shard_x, expected_shard_dim0
+
+        shard_x, expected_shard_dim0 = maybe_compute_rankwise_strided(
+            mesh_dim1_local_rank, self.rank, tensor_list
+        )
 
         # shard_to_replicate on mesh dim-1
         full_tensor = shard_placement_dim1._to_replicate_tensor(
@@ -858,7 +957,13 @@ class TestStridedSharding(DTensorTestBase):
             mesh_dim=1,
             current_logical_shape=list(expected_shard_dim0.shape),
         )
-        self.assertEqual(full_tensor, expected_shard_dim0)
+
+        self.assertEqual(
+            full_tensor,
+            expected_shard_dim0.reconcile()
+            if self.is_local_tensor_enabled
+            else expected_shard_dim0,
+        )
 
         # shard_to_replicate on mesh dim-0
         full_tensor = shard_placement_dim0._to_replicate_tensor(
@@ -1006,8 +1111,13 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 global_tensor, tp_mesh, placements=[Shard(0)]
             )
             chunks = list(torch.chunk(dtensor_tp.to_local(), 2, dim=0))
-            shard_rank = 0 if self.rank // 2 == 0 else 1
-            sharded_param = chunks[shard_rank]
+
+            @maybe_run_for_local_tensor
+            def get_sharded_param(rank, chunks):
+                shard_rank = 0 if rank // 2 == 0 else 1
+                return chunks[shard_rank]
+
+            sharded_param = get_sharded_param(self.rank, chunks)
             spec_2d = DTensorSpec(
                 mesh=mesh_2d,
                 placements=(_StridedShard(0, split_factor=2), Shard(0)),
@@ -1102,6 +1212,22 @@ class TestExplicitRedistribute(LocalTensorTestBase):
             with ExplicitRedistributionContext():
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     torch.matmul(dx, dA)
+            with ExplicitRedistributionContext(mode="warn"):
+                with self.assertLogs(
+                    torch.distributed.tensor._utils.logger, level="WARN"
+                ) as captured:
+                    torch.matmul(dx, dA)
+                    self.assertEqual(len(captured.output), 1)
+                    self.assertRegex(
+                        captured.output[0],
+                        r"WARNING:.*Implicit redistribution occurred",
+                    )
+                    # TODO enable this once fixing the issue that op_info.schema is None in some calls to
+                    # redistribute_local_tensor
+                    # self.assertRegex(
+                    #     captured.output[0],
+                    #     r".*aten\.mm\.default.*",
+                    # )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():
@@ -1130,6 +1256,12 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
 
+
+UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
+TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
+Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
+    Test2DStridedLocalShard
+)
 
 if __name__ == "__main__":
     run_tests()
