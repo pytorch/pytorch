@@ -7,7 +7,6 @@
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
-#include <cstring>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -25,7 +24,6 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 #endif
 
