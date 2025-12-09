@@ -192,7 +192,5 @@ class FlatApplyCaptureSpec(HigherOrderOperator):
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
 
-        out, self.out_spec = impl(
-            func, in_spec, flatten_output, flat_args
-        )
+        out, self.out_spec = impl(func, in_spec, flatten_output, flat_args)
         return out

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo", "module: higher order operators"]
+import re
 from dataclasses import dataclass
 
 import torch
@@ -7,7 +8,9 @@ from torch import Tensor
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
+    extract_graph,
     normalize_gm,
+    remove_trailing_space,
 )
 from torch._higher_order_ops.flat_apply import (
     flat_apply,
@@ -248,9 +251,36 @@ class TestInputOutput(PytreeRegisteringTestCase):
         values = torch.randn(4, 4)
         i = InputData(count, values)
         ref = fn(i)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
         res = opt_fn(i)
         self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_spec, gn_input_spec, 5, l_i_values, flatten_output = True);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply[0]
+        z_result1: "f32[4, 4]" = flat_apply[1]
+        z_result2: "f32[4, 4]" = flat_apply[2];  flat_apply = None
+
+        # code: return x + y + z_result1 + z_result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
+        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
 
     def test_dataclass_input(self):
         a = 4
@@ -274,9 +304,36 @@ class TestInputOutput(PytreeRegisteringTestCase):
         values = torch.randn(4, 4)
         i = InputData(count, values)
         ref = fn(i)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
         res = opt_fn(i)
         self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_spec, gn_input_spec, 5, l_i_values, flatten_output = True);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply[0]
+        z_result1: "f32[4, 4]" = flat_apply[1]
+        z_result2: "f32[4, 4]" = flat_apply[2];  flat_apply = None
+
+        # code: return x + y + z_result1 + z_result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
+        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
 
     def test_invalid_input(self):
         a = 4
@@ -329,9 +386,36 @@ class TestInputOutput(PytreeRegisteringTestCase):
         values = torch.randn(4, 4)
         i = InputData(count, values)
         ref = fn(i)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
         res = opt_fn(i)
         self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z = gn(i.count, i.values)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_spec, gn_input_spec, 5, l_i_values, flatten_output = True);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply[0]
+        value: "f32[4, 4]" = flat_apply[1]
+        value_1: "f32[4, 4]" = flat_apply[2];  flat_apply = None
+
+        # code: return x + y + z.result1 + z.result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + value;  add = value = None
+        add_2: "f32[4, 4]" = add_1 + value_1;  add_1 = value_1 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
 
     def test_invalid_output(self):
         a = 4
@@ -361,6 +445,14 @@ class TestInputOutput(PytreeRegisteringTestCase):
             "Unsupported output type for nonstrict_trace-ed function",
         ):
             opt_fn(i)
+
+
+def remove_file_comment(gm_str: str) -> str:
+    return remove_trailing_space(re.sub(r"# File.*, code:", "# code:", gm_str))
+
+
+def print_graph(graph: torch.fx.GraphModule) -> str:
+    return remove_file_comment(graph.print_readable(print_output=False))
 
 
 if __name__ == "__main__":
