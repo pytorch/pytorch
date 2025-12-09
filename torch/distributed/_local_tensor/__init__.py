@@ -300,6 +300,14 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
     if isinstance(any_v, int):
         return _combine_int_rank_results(rank_results)
 
+    if isinstance(any_v, torch.device):
+        assert all(v.type == any_v.type for v in rank_results.values()), (
+            "device type should be the same"
+        )
+        # Just use the first device - the device type is what matters,
+        # and LocalTensorMode runs on a single physical device anyway
+        return any_v
+
     assert all(v == any_v for v in rank_results.values()), (
         "Non Tensor or int rank results must be equal for all ranks"
     )
@@ -1167,6 +1175,8 @@ class LocalTensorMode(TorchDispatchMode):
             self.ranks = ranks
         self._disable = True
         self._old_get_coordinate = None
+        self._old_get_rank = None
+        self._old_get_local_rank = None
         self._old_torch_manual_seed: Any = None
         self._old_torch_initial_seed: Any = None
         self._per_rank_rng_states: dict[
@@ -1383,14 +1393,28 @@ class LocalTensorMode(TorchDispatchMode):
 
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
+        assert self._old_get_rank is None
+        assert self._old_get_local_rank is None
         self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
+        self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
+        self._old_get_local_rank = DeviceMesh.get_local_rank  # type: ignore[assignment]
         DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
+        DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[method-assign]
+        DeviceMesh.get_local_rank = _LocalDeviceMesh.get_local_rank  # type: ignore[method-assign]
 
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
+        assert self._old_get_rank is not None
+        assert self._old_get_local_rank is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        DeviceMesh.get_rank = self._old_get_rank
+        DeviceMesh.get_local_rank = self._old_get_local_rank
         # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
+        # pyrefly: ignore [bad-assignment]
+        self._old_get_rank = None
+        # pyrefly: ignore [bad-assignment]
+        self._old_get_local_rank = None
 
     def _patch_random_functions(self) -> None:
         import torch.random
@@ -1506,6 +1530,35 @@ class _LocalDeviceMesh:
         # their meshes formed from root mesh and selecting the same dimensions
         # as the current mesh.
         return out  # type: ignore[return-value]
+
+    @staticmethod
+    def get_rank(self) -> int | SymInt:
+        lm = enabled_local_tensor_mode()
+        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        return torch.SymInt(LocalIntNode(local_ints={r: r for r in lm.ranks}))
+
+    @staticmethod
+    def get_local_rank(self, mesh_dim: int | str | None = None) -> int | SymInt:
+        lm = enabled_local_tensor_mode()
+        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found the DeviceMesh have {self.ndim} dimensions",
+                "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        if isinstance(mesh_dim, str):
+            mesh_dim = self._mesh_dim_names.index(mesh_dim)
+
+        # Compute local rank for each global rank
+        # get_coordinate returns a list of SymInt, one per mesh dimension
+        # We need to extract the coordinate for the specified mesh_dim
+        coords = _LocalDeviceMesh.get_coordinate(self)
+        assert coords is not None
+        return coords[mesh_dim]
 
 
 def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:
