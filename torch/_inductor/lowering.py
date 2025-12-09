@@ -749,9 +749,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-def to_dtype(
-    x: TensorBox, dtype: torch.dtype, copy: bool = False
-):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
@@ -7265,7 +7263,7 @@ def cond(pred, true_fn, false_fn, operands):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    result: list[Union[Tensorbox, ShapeAsConstantBuffer]] = ir.Conditional.create(pred, true_fn, false_fn, operands)
     return list(map(TensorBox.create, result))
 
 

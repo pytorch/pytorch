@@ -8495,6 +8495,7 @@ class TensorBox(MutableBox):
     @overload
     @staticmethod
     def create(data: IRNode) -> TensorBox: ...
+
     @staticmethod
     def create(data: IRNode):
         if isinstance(data, ShapeAsConstantBuffer):
