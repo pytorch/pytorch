@@ -8877,9 +8877,9 @@ class Conditional(ExternKernel):
                     else device,  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
                     size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[
-                        Conditional._maybe_expr(sz) for sz in merged_output.stride()
-                    ],
+                    # Use the actual subgraph output's stride, because the subgraph
+                    # output may have been padded.
+                    stride=output.get_stride(),
                     offset=output.get_layout().offset,
                     is_pinned=output.get_layout().is_pinned,
                 ),
