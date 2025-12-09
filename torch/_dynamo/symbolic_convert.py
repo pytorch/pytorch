@@ -44,7 +44,6 @@ import traceback
 import types
 import weakref
 from collections import deque
-from traceback import StackSummary
 from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import TypeIs
 
@@ -91,6 +90,7 @@ from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import (
     ArgsMismatchError,
+    augment_exc_message_with_hop_name,
     BackendCompilerFailed,
     collapse_resume_frames,
     format_graph_break_message,
@@ -4244,14 +4244,8 @@ class InstructionTranslatorBase(
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
         # Add HOP context after the first line of reason if present
-        if exc is not None and hasattr(exc, "_hop_name"):
-            lines = reason.split("\n", 1)
-            if len(lines) == 2:
-                reason = (
-                    f"{lines[0]}\n  Higher Order Operator: {exc._hop_name}\n{lines[1]}"  # type: ignore[attr-defined]
-                )
-            else:
-                reason = f"{reason}\n  Higher Order Operator: {exc._hop_name}"  # type: ignore[attr-defined]
+        if exc is not None:
+            reason = augment_exc_message_with_hop_name(exc, reason)
 
         user_stack_trace = (
             f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"

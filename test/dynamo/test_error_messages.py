@@ -1828,8 +1828,8 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
             """\
 This higher order operator doesn't work unless it is captured completely with torch.compile. Got:
-  Higher Order Operator: torch.cond
 Call to `torch._dynamo.graph_break()`
+  Higher Order Operator: torch.cond
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 

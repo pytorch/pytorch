@@ -207,7 +207,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(3)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
+            "HOP: Unsafe side effect",
         ):
             f(x)
 
@@ -343,9 +343,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
 
         x = torch.tensor(1.0)
-        with self.assertRaisesRegex(
-            RuntimeError, "Mutating a variable not in the current scope"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "HOP: Unsafe side effect"):
             fn_nested(x)
 
     def test_symint_input(self):
