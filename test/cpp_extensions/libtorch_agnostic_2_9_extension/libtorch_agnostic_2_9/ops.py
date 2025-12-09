@@ -361,3 +361,96 @@ def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
     Returns: Tensor - flattened tensor
     """
     return torch.ops.libtorch_agnostic_2_9.my_flatten.default(t, start_dim, end_dim)
+
+
+def my_optional_tensor_ref(maybe_tensor, default_size) -> Tensor:
+    """
+    Tests TORCH_BOX with const std::optional<Tensor>& parameter.
+    Returns the tensor if present, otherwise returns a zeros tensor of specified size.
+
+    Args:
+        maybe_tensor: Optional[Tensor] - optional input tensor
+        default_size: int - size of the default zeros tensor if maybe_tensor is None
+
+    Returns: Tensor - the input tensor or a zeros tensor
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_optional_tensor_ref.default(
+        maybe_tensor, default_size
+    )
+
+
+def my_storage_offset(t) -> int:
+    """
+    Returns the storage offset of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - storage offset
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_storage_offset.default(t)
+
+
+def my_element_size(t) -> int:
+    """
+    Returns the element size in bytes of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: int - element size in bytes
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_element_size.default(t)
+
+
+def my_unsqueeze(t, dim) -> Tensor:
+    """
+    Returns a new tensor with a dimension of size one inserted at the specified position.
+
+    Args:
+        t: Tensor - input tensor
+        dim: int - the index at which to insert the singleton dimension
+
+    Returns: Tensor - unsqueezed tensor
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_unsqueeze.default(t, dim)
+
+
+def my_squeeze(t, dim) -> Tensor:
+    """
+    Returns a tensor with the specified dimension of size 1 removed.
+
+    Args:
+        t: Tensor - input tensor
+        dim: int - the dimension to squeeze
+
+    Returns: Tensor - squeezed tensor
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_squeeze.default(t, dim)
+
+
+def my_select(t, dim, index) -> Tensor:
+    """
+    Slices the tensor along the selected dimension at the given index.
+
+    Args:
+        t: Tensor - input tensor
+        dim: int - the dimension to slice along
+        index: int - the index to select
+
+    Returns: Tensor - sliced tensor with one fewer dimension
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_select.default(t, dim, index)
+
+
+def my_matmul(self, other) -> Tensor:
+    """
+    Matrix product of two tensors.
+
+    Args:
+        self: Tensor - first tensor
+        other: Tensor - second tensor
+
+    Returns: Tensor - matrix product
+    """
+    return torch.ops.libtorch_agnostic_2_9.my_matmul.default(self, other)
