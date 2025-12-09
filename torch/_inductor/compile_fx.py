@@ -1064,7 +1064,6 @@ def _compile_fx_inner(
             metadata=cache_info or {},
             time_ns=start_time,
         )
-        log.info("fx graph cache %s: %s", cache_state, cache_info.get("cache_bypass_reason"))
         # Add event data about cache hits/miss
         # TODO: add remote cache get/put timings here too
         CompileEventLogger.pt2_compile(

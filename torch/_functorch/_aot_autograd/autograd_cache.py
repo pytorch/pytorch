@@ -832,7 +832,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-            log.info("aotautograd_cache %s %s", cache_state, json.dumps(cache_info, indent=1))
 
             return compiled_fn
 
