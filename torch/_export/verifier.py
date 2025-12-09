@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -59,6 +60,8 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
+        elif is_opaque_type(type(val)):
+            return True
         return False
 
     def _no_returns(op):
