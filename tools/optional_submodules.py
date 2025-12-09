@@ -29,8 +29,8 @@ def _checkout_by_tag(repo: str, tag: str) -> None:
 
 def read_nccl_pin() -> str:
     nccl_file = "nccl-cu12.txt"
-    if os.getenv("DESIRED_CUDA", os.getenv("CUDA_VERSION", "")).startswith("11"):
-        nccl_file = "nccl-cu11.txt"
+    if os.getenv("DESIRED_CUDA", os.getenv("CUDA_VERSION", "")).startswith("13"):
+        nccl_file = "nccl-cu13.txt"
     nccl_pin_path = repo_root / ".ci" / "docker" / "ci_commit_pins" / nccl_file
     return _read_file(nccl_pin_path)
 
