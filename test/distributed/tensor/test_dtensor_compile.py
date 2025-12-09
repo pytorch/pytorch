@@ -225,24 +225,24 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
                 )
                 return inter.to_local()
 
-        torch._library.opaque_object.register_opaque_type(DeviceMesh, value_type=True)
+        torch._library.opaque_object.register_opaque_type(DeviceMesh, typ="value")
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor._dtensor_spec.DTensorSpec, value_type=True
+            torch.distributed.tensor._dtensor_spec.DTensorSpec, typ="value"
         )
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor.placement_types.Shard, value_type=True
+            torch.distributed.tensor.placement_types.Shard, typ="value"
         )
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor.placement_types.Replicate, value_type=True
+            torch.distributed.tensor.placement_types.Replicate, typ="value"
         )
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor.placement_types.Partial, value_type=True
+            torch.distributed.tensor.placement_types.Partial, typ="value"
         )
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor._dtensor_spec.TensorMeta, value_type=True
+            torch.distributed.tensor._dtensor_spec.TensorMeta, typ="value"
         )
         torch._library.opaque_object.register_opaque_type(
-            torch.distributed.tensor._dtensor_spec.ShardOrderEntry, value_type=True
+            torch.distributed.tensor._dtensor_spec.ShardOrderEntry, typ="value"
         )
 
         m = Foo()

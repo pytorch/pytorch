@@ -125,7 +125,7 @@ def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None
         kwargs = {}
     # needed for stric export
     torch._library.opaque_object.register_opaque_type(
-        torch.distributed.tensor._dtensor_spec.DTensorSpec, value_type=True
+        torch.distributed.tensor._dtensor_spec.DTensorSpec, typ="value"
     )
 
     # install_free_tensors is required for dynamo to work
