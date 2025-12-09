@@ -840,6 +840,11 @@ def generic_jump(
     return inner
 
 
+# NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
+# with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
+# into a sequence of simpler instructions, or file an issue for consultation.
+# There is an additional requirement that if the instruction causes a function call, e.g. STORE_ATTR,
+# nothing should happen to the result of the function call.
 def break_graph_if_unsupported(
     *, push: bool, msg_prefix: str
 ) -> Callable[
@@ -850,8 +855,11 @@ def break_graph_if_unsupported(
     ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
         @functools.wraps(inner_fn)
         def wrapper(self: InstructionTranslatorBase, inst: Instruction) -> None:
+            prev_push = self.current_instruction_push
+            self.current_instruction_push = push
             speculation = self.speculate()
             if speculation.failed(self):
+                # no need to restore current_instruction_push if speculation failed
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
@@ -899,6 +907,8 @@ def break_graph_if_unsupported(
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
+            finally:
+                self.current_instruction_push = prev_push
             speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
@@ -1119,6 +1129,7 @@ class InstructionTranslatorBase(
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
+    current_instruction_push: bool
     block_stack: list[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -2853,7 +2864,7 @@ class InstructionTranslatorBase(
             tuple(meta.locals_ctx_args),
             tuple(meta.stack_null_idxes),
             tuple(resume_codes),
-            self.current_instruction.opname == "STORE_ATTR",
+            not self.current_instruction_push,
         )
 
         # Add original GraphModule context to the resume function to handle
@@ -4314,6 +4325,7 @@ class InstructionTranslatorBase(
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
+        self.current_instruction_push = True
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
