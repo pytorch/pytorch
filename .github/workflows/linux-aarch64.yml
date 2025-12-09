@@ -32,7 +32,7 @@ jobs:
     needs: get-label-type
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       runner: linux.arm64.m7g.4xlarge
       test-matrix: |
         { include: [
