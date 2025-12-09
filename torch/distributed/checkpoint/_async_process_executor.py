@@ -1,5 +1,6 @@
 # pyre-strict
 # mypy: allow-untyped-defs
+import gc
 import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -7,6 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
+
+import psutil
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -57,12 +60,18 @@ class _ProcessGroupInitInfo:
     tcp_store_master_addr: str
     tcp_store_master_port: int
     use_prefix_store: bool
+    disable_automatic_gc: bool
+    disable_manual_gc: bool
 
     def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
         self.use_prefix_store = os.environ.get("DCP_USE_PREFIX_STORE", "0") == "1"
+        self.disable_automatic_gc = (
+            os.environ.get("DCP_DISABLE_AUTOMATIC_GC", "0") == "1"
+        )
+        self.disable_manual_gc = os.environ.get("DCP_DISABLE_MANUAL_GC", "0") == "1"
 
         # Let coordinator rank find a port on the localhost.
         # Broadcast the (master_addr, port) to all ranks; each rank in the
@@ -264,6 +273,12 @@ class _AsyncCheckpointProcess:
 
             logger.info("Checkpoint background process is running...")
             parent_conn.send(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+
+            if pg_init_info.disable_automatic_gc:
+                # Disable automatic garbage collection
+                # GC can optionally be called manually after each checkpoint
+                gc.disable()
+                logger.info("Disabled automatic garbage collection")
         except BaseException as e:  # noqa: B036
             logger.error(
                 f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
@@ -273,6 +288,7 @@ class _AsyncCheckpointProcess:
 
         # Phase 2: Serving Loop
         try:
+            first_request = True
             while True:
                 logger.info("Waiting for checkpoint save request...")
                 obj = parent_conn.recv()
@@ -291,6 +307,10 @@ class _AsyncCheckpointProcess:
                 )
 
                 try:
+                    process = psutil.Process()
+                    mem_bytes = process.memory_info().rss
+                    logger.info(f"Current memory is {mem_bytes / (1024 * 1024):.2f} MB")  # noqa: G004
+
                     response = _AsyncCheckpointProcess._execute_save(
                         obj.staged_state_dict,
                         checkpoint_request_id=obj.checkpoint_request_id,
@@ -303,6 +323,38 @@ class _AsyncCheckpointProcess:
                     logger.info(
                         f"Completed checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
                     )
+
+                    # in theory this manual gc should not be needed as we shouldn't be leaking anything from checkpointing process
+                    if (
+                        pg_init_info.disable_automatic_gc
+                        and not pg_init_info.disable_manual_gc
+                    ):
+                        del obj
+                        # Measure memory before garbage collection
+                        process = psutil.Process()
+                        mem_before_bytes = process.memory_info().rss
+
+                        collected_objects = gc.collect()
+
+                        # Measure memory after garbage collection and calculate freed memory
+                        mem_after_bytes = process.memory_info().rss
+                        mem_freed_mb = (mem_before_bytes - mem_after_bytes) / (
+                            1024 * 1024
+                        )
+
+                        logger.info(
+                            f"Manual garbage collection completed - collected {collected_objects} objects, "  # noqa: G004
+                            f"freed {mem_freed_mb:.2f} MB"  # noqa: G004
+                        )
+                        if first_request:
+                            # Freeze GC to not check GC for large checkpoint save plans
+                            # After freezing, subsequent gc.collect() calls will only scan
+                            # NEW objects created after this point, not the frozen save plan
+                            logger.info(
+                                "First checkpoint request completed - freezing gc"
+                            )
+                            gc.freeze()
+                    first_request = False
                 except BaseException as e:  # noqa: B036
                     logger.error(
                         f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004

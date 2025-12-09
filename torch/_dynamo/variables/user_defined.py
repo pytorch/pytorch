@@ -803,7 +803,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 and len(args) == 1
                 and isinstance(args[0], variables.ListVariable)
                 and len(args[0].items) > 1
-                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+                and all(x.is_tensor() for x in args[0].items)
             ):
                 # Stack FakeTensor
                 stacked = wrap_fx_proxy(
@@ -884,8 +884,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif self.value is random.Random:
-            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
-                seed = args[0].value
+            if len(args) == 1 and args[0].is_python_constant():
+                seed = args[0].as_python_constant()
             else:
                 seed = None
             random_object = random.Random(seed)
@@ -1938,9 +1938,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         elif (
             name == "__setattr__"
             and len(args) == 2
-            and isinstance(args[0], variables.ConstantVariable)
-            and args[0].value
-            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+            and args[0].is_constant_match(
+                "__cause__", "__context__", "__suppress_context__", "__traceback__"
+            )
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
         elif name == "with_traceback":
