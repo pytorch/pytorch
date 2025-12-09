@@ -119,7 +119,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -3115,14 +3115,14 @@ class SqueezeView(BaseView):
     @staticmethod
     def squeezer(
         size: Sequence[Expr],
-    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr, ...]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.S.Zero] * length
+            new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
