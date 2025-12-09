@@ -10,7 +10,7 @@ from collections.abc import Sequence
 # targets fail to typecheck with:
 #     TypeError: Cannot create a consistent method resolution order (MRO) for
 #     bases Iterable, Generic
-from typing import cast, Generic, Iterable, Optional, TypeVar, Union  # noqa: UP035
+from typing import cast, Generic, Iterable, TypeVar  # noqa: UP035
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
@@ -228,7 +228,7 @@ class StackDataset(Dataset[_T_stack]):
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
 
-    datasets: Union[tuple, dict]
+    datasets: tuple | dict
 
     def __init__(self, *args: Dataset[_T_co], **kwargs: Dataset[_T_co]) -> None:
         if args:
@@ -418,8 +418,8 @@ class Subset(Dataset[_T_co]):
 
 def random_split(
     dataset: Dataset[_T],
-    lengths: Sequence[Union[int, float]],
-    generator: Optional[Generator] = default_generator,
+    lengths: Sequence[int | float],
+    generator: Generator | None = default_generator,
 ) -> list[Subset[_T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.

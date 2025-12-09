@@ -1283,13 +1283,14 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_nested_context(self):
-        with dist_autograd.context():
-            # Nested contexts not supported.
-            with self.assertRaisesRegex(
+        with (
+            dist_autograd.context(),
+            self.assertRaisesRegex(
                 RuntimeError, "Already have an autograd context id for this thread"
-            ):
-                with dist_autograd.context():
-                    pass
+            ),
+            dist_autograd.context(),
+        ):
+            pass
 
     @dist_init
     def test_graph_for_builtin_call(self):

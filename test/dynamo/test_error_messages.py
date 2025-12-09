@@ -624,7 +624,30 @@ from user code:
     return mod.attr""",
         )
 
-    def test_generic_ctx_mgr_graph_break(self):
+    def test_generic_ctx_mgr_graph_break_fullgraph_true(self):
+        def fn():
+            with GenericCtxMgr():
+                torch._dynamo.graph_break()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    torch._dynamo.graph_break()""",
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_generic_ctx_mgr_graph_break_fullgraph_false(self, records):
         def fn():
             with GenericCtxMgr():
                 with GenericCtxMgr():
@@ -634,11 +657,21 @@ from user code:
                         pass
                     torch._dynamo.graph_break()
 
-        with self.assertRaises(Unsupported) as cm:
-            torch.compile(fn, backend="eager", fullgraph=True)()
+        torch.compile(fn, backend="eager")()
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.
+torch.compile will skip tracing the frame fn (test_error_messages.py line N) and fall back to eager.
+The graph break occurred in the following user code:
+  File "test_error_messages.py", line N, in fn
+    torch._dynamo.graph_break()
+""",
+        )
 
         self.assertExpectedInline(
-            munge_exc(cm.exception, suppress_suffix=True, skip=0),
+            munge_exc(records[0].exc_info[1], suppress_suffix=True, skip=0),
             """\
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
@@ -652,18 +685,6 @@ Graph break under GenericContextWrappingVariable
 from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()""",
-        )
-
-        self.assertExpectedInline(
-            munge_exc(cm.exception.__cause__, suppress_suffix=True, skip=0),
-            """\
-Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
-
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html""",
         )
 
     def test_load_build_class(self):
@@ -778,7 +799,9 @@ from user code:
             ),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -812,7 +835,9 @@ from user code:
         )
 
     def test_faketensor_nyi(self):
-        @torch.library.custom_op("mylib::foo", mutates_args=())
+        op_name = "mylib::error_messages_faketensor"
+
+        @torch.library.custom_op(op_name, mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.sin()
 
@@ -821,14 +846,14 @@ from user code:
             raise NotImplementedError
 
         def fn(x):
-            return torch.ops.mylib.foo(x)
+            return torch.ops.mylib.error_messages_faketensor(x)
 
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
             """\
 NotImplementedError/UnsupportedFakeTensorException when running FX node
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.foo(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.error_messages_faketensor(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
   Hint: If the op is a PyTorch op, please file an issue to PyTorch.
 
   Developer debug context:
@@ -837,7 +862,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return torch.ops.mylib.foo(x)""",
+    return torch.ops.mylib.error_messages_faketensor(x)""",
         )
 
     def test_data_dependent_branching_fullgraph(self):
@@ -952,7 +977,9 @@ User code traceback:
         self.assertExpectedInline(
             munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
-Graph break: skip: from user code at:
+Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.
+torch.compile will skip tracing the frame fn (test_error_messages.py line N) and fall back to eager.
+The graph break occurred in the following user code:
   File "test_error_messages.py", line N, in fn
     assert x is None
 """,
@@ -1050,7 +1077,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
         msg = re.sub(r"line (\d+)", "line N", msg)
         msg = re.sub(
             r"""(?s)Traceback \(most recent call last\):.*
-  File "exc.py", line N, in unimplemented_v2
+  File "exc.py", line N, in unimplemented
     raise Unsupported\(msg\)""",
             "<Internal traceback>\n",
             msg,
@@ -1079,6 +1106,50 @@ from user code:
         )
 
     @make_logging_test(graph_breaks=True)
+    def test_skip_frame_in_loop_message(self, records):
+        def fn(x):
+            for i in range(2):
+                with GenericCtxMgr():
+                    if x.sum() > 0:
+                        x = x + 1
+            return x
+
+        torch.compile(fn, backend="eager")(torch.randn(3))
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.
+torch.compile will skip tracing the frame fn (test_error_messages.py line N) and fall back to eager.
+The graph break occurred in the following user code:
+  File "test_error_messages.py", line N, in fn
+    if x.sum() > 0:
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_frame_empty_function_message(self, records):
+        def empty_fn(x):
+            pass
+
+        torch.compile(empty_fn, backend="eager")(torch.randn(3))
+        skip_messages = [
+            r
+            for r in records
+            if "intentionally decided to skip the frame" in r.getMessage()
+        ]
+        self.assertEqual(len(skip_messages), 1)
+        msg = munge_exc(skip_messages[0].getMessage(), suppress_suffix=True, skip=0)
+        msg = re.sub(r" (\d+)$", r" N", msg, flags=re.MULTILINE)
+
+        self.assertExpectedInline(
+            msg,
+            """\
+Skipping frame torch.compile intentionally decided to skip the frame empty_fn (test_error_messages.py line N) and fall back to eager.
+Reason: no content in function call empty_fn                 test_error_messages.py N""",
+        )
+
+    @make_logging_test(graph_breaks=True)
     def test_nested_compile_user_frames(self, records):
         def fn(x):
             gn(x + 1)
@@ -1096,7 +1167,9 @@ from user code:
             munge_exc(records[-1].getMessage(), skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1161,7 +1234,9 @@ from user code:
             s,
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1268,7 +1343,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
             post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
+Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1325,7 +1400,9 @@ Most recent bytecode instructions traced (max 20):
             munge_exc(records[-1].getMessage(), skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1582,7 +1659,7 @@ from user code:
             munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
+Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1622,6 +1699,263 @@ from user code:
   File "test_error_messages.py", line N, in __setattr__
     torch._dynamo.graph_break()""",
             )
+
+
+class NestedGraphBreakLoggingTests(
+    LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
+    @make_logging_test(graph_breaks=True)
+    def test_skipped_frame_with_verbose_traceback_nested(self, records):
+        global f1, f2, f3
+
+        class GenericCtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def f1(x):
+            with GenericCtxMgr():
+                torch._dynamo.graph_break()
+                return x + 1
+
+        def f2(x):
+            return f1(x + 2)
+
+        def f3(x):
+            return f2(x + 3)
+
+        torch.compile(f3, backend="eager")(torch.randn(3))
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
+Graph break under GenericContextWrappingVariable
+  Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
+  Hint: Move the offending context manager(s) to outside the compiled region.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr)]
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_skipped_frame_with_verbose_traceback_nested
+    torch.compile(f3, backend="eager")(torch.randn(3))
+  File "test_error_messages.py", line N, in f3
+    return f2(x + 3)
+  File "test_error_messages.py", line N, in f2
+    return f1(x + 2)
+  File "test_error_messages.py", line N, in f1
+    torch._dynamo.graph_break()
+""",
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_skip_frame_in_loop_message_nested(self, records):
+        global f1, f2, f3
+
+        class GenericCtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def f1(x):
+            for i in range(2):
+                with GenericCtxMgr():
+                    if x.sum() > 0:
+                        x = x + 1
+            return x
+
+        def f2(x):
+            return f1(x + 4)
+
+        def f3(x):
+            return f2(x + 5)
+
+        result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_skip_frame_in_loop_message_nested
+    result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
+  File "test_error_messages.py", line N, in f3
+    return f2(x + 5)
+  File "test_error_messages.py", line N, in f2
+    return f1(x + 4)
+  File "test_error_messages.py", line N, in f1
+    if x.sum() > 0:
+""",
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_try_block_with_graph_break_suppression(self, records):
+        global inner, middle_with_try, outer
+
+        def inner(x):
+            result = x + 1
+            torch._dynamo.graph_break()
+            return result + 1
+
+        def middle_with_try(x):
+            try:
+                return inner(x)
+            except Exception:
+                pass
+            return x
+
+        def outer(x):
+            return middle_with_try(x)
+
+        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+            torch.compile(outer, backend="eager")(torch.ones(3))
+
+        full_messages = [
+            r for r in records if "Graph break in user code" in r.getMessage()
+        ]
+        suppressed_messages = [
+            r
+            for r in records
+            if "user stack suppressed due to duplicate" in r.getMessage()
+        ]
+
+        self.assertEqual(
+            len(full_messages),
+            1,
+            f"Expected 1 full graph break message, got {len(full_messages)}",
+        )
+        self.assertEqual(
+            len(suppressed_messages),
+            1,
+            f"Expected at least 1 suppressed message, got {len(suppressed_messages)}",
+        )
+
+        self.assertExpectedInline(
+            munge_exc(full_messages[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_try_block_with_graph_break_suppression
+    torch.compile(outer, backend="eager")(torch.ones(3))
+  File "test_error_messages.py", line N, in outer
+    return middle_with_try(x)
+  File "test_error_messages.py", line N, in middle_with_try
+    return inner(x)
+  File "test_error_messages.py", line N, in inner
+    torch._dynamo.graph_break()
+""",
+        )
+
+        self.assertExpectedInline(
+            munge_exc(
+                suppressed_messages[0].getMessage(), suppress_suffix=True, skip=0
+            ),
+            """\
+Graph break (user stack suppressed due to duplicate graph break) in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html""",
+        )
+
+    @make_logging_test(graph_breaks=True)
+    def test_nested_graph_break_different_call_sites_not_suppressed(self, records):
+        global inner, outer
+
+        def inner(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def outer(x):
+            x = inner(x + 4) + 8
+            return inner(x) + 16
+
+        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+            outer(torch.ones(3))
+
+        self.assertEqual(
+            len(records),
+            2,
+            f"Expected 2 graph break messages (one per call site), got {len(records)}",
+        )
+
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_nested_graph_break_different_call_sites_not_suppressed
+    outer(torch.ones(3))
+  File "test_error_messages.py", line N, in outer
+    x = inner(x + 4) + 8
+  File "test_error_messages.py", line N, in inner
+    torch._dynamo.graph_break()
+""",
+        )
+
+        self.assertExpectedInline(
+            munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_nested_graph_break_different_call_sites_not_suppressed
+    outer(torch.ones(3))
+  File "test_error_messages.py", line N, in outer
+    return inner(x) + 16
+  File "test_error_messages.py", line N, in inner
+    torch._dynamo.graph_break()
+""",
+        )
 
 
 if __name__ == "__main__":

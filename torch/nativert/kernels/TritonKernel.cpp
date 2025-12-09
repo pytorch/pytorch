@@ -1,19 +1,12 @@
 #include <torch/nativert/kernels/TritonKernel.h>
 
-#include <fmt/ostream.h>
-
-#include <c10/util/Enumerate.h>
 #include <c10/util/Exception.h>
-
-#include <ATen/Tensor.h>
-#include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/nativert/executor/DelegateExecutor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty.h>
 #endif
 
 namespace torch::nativert {
@@ -167,8 +160,8 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
 
   // todo: check if this is redundant
   auto out_t = out.toTensorList();
-  for (const auto& i : output_indices_) {
-    out_t[i] = input(i, executionFrame).toTensor();
+  for (const auto i : c10::irange(output_indices_.size())) {
+    out_t[i] = input(output_indices_[i], executionFrame).toTensor();
   }
 }
 

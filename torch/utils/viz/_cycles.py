@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 import types
 import weakref
 import json
@@ -249,6 +249,8 @@ def object_annotation(obj):
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
         return f"frame\n{filename}:{obj.f_lineno}"
+    elif is_cuda_tensor(obj):
+        return f"object\n{type(obj).__module__}.{type(obj).__name__} ({obj.shape})"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
@@ -256,7 +258,7 @@ def object_annotation(obj):
 
 class Node(NamedTuple):
     label: str
-    context: Optional[str]
+    context: str | None
     root: bool
     referrents: list[tuple[str, int]]
 
@@ -498,7 +500,7 @@ def warn_tensor_cycles():
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 
     def write_and_log(html) -> None:
-        with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
+        with NamedTemporaryFile('w', suffix='.html') as f:
             f.write(html)
             logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
     return observe_tensor_cycles(write_and_log)

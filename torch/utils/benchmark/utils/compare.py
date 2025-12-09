@@ -3,7 +3,6 @@
 import collections
 import enum
 import itertools as it
-from typing import Optional
 
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
@@ -29,7 +28,7 @@ class Colorize(enum.Enum):
 class _Column:
     def __init__(
         self,
-        grouped_results: list[tuple[Optional[common.Measurement], ...]],
+        grouped_results: list[tuple[common.Measurement | None, ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
@@ -60,7 +59,7 @@ class _Column:
     def get_results_for(self, group):
         return self._grouped_results[group]
 
-    def num_to_str(self, value: Optional[float], estimated_sigfigs: int, spread: Optional[float]):
+    def num_to_str(self, value: float | None, estimated_sigfigs: int, spread: float | None):
         if value is None:
             return " " * len(self.num_to_str(1, estimated_sigfigs, None))
 
@@ -175,17 +174,17 @@ class Table:
         self.rows, self.columns = self.populate_rows_and_columns()
 
     @staticmethod
-    def row_fn(m: common.Measurement) -> tuple[int, Optional[str], str]:
+    def row_fn(m: common.Measurement) -> tuple[int, str | None, str]:
         return m.num_threads, m.env, m.as_row_name
 
     @staticmethod
-    def col_fn(m: common.Measurement) -> Optional[str]:
+    def col_fn(m: common.Measurement) -> str | None:
         return m.description
 
     def populate_rows_and_columns(self) -> tuple[tuple[_Row, ...], tuple[_Column, ...]]:
         rows: list[_Row] = []
         columns: list[_Column] = []
-        ordered_results: list[list[Optional[common.Measurement]]] = [
+        ordered_results: list[list[common.Measurement | None]] = [
             [None for _ in self.column_keys]
             for _ in self.row_keys
         ]
@@ -205,7 +204,7 @@ class Table:
         prior_num_threads = -1
         prior_env = ""
         row_group = -1
-        rows_by_group: list[list[list[Optional[common.Measurement]]]] = []
+        rows_by_group: list[list[list[common.Measurement | None]]] = []
         for (num_threads, env, _), row in zip(self.row_keys, ordered_results, strict=True):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:

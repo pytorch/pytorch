@@ -11,14 +11,21 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void incref(PyObject* pyobj) const override {} // do nothing
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
-  } // do nothing
+  void decref(PyObject* pyobj) const override {} // do nothing
+
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override {
+    return false;
+  }
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
       0,                      \
       "attempted to call " #m \
       " on a Tensor with nontrivial PyObject after corresponding interpreter died")
+
+  size_t refcnt(PyObject* pyobj) const override {
+    PANIC(refcnt);
+  }
 
   c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const override {
     PANIC(detach);
