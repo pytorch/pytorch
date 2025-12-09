@@ -50,7 +50,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -7882,9 +7881,11 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return False
-        return get_schema_info(self.op_overload).is_mutable()
+        from torch._library.utils import is_impure
+
+        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
+        # The check is done on the op_overload itself
+        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
