@@ -1,8 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
-
-import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -62,6 +59,7 @@ class TestPrefixSet(TestCase):
 
     def test_apply_to_modules_with_prefix_set(self):
         """Test that _apply_to_modules correctly uses prefix set for filtering."""
+
         # Create a simple model
         class SimpleModel(nn.Module):
             def __init__(self):
@@ -98,6 +96,7 @@ class TestPrefixSet(TestCase):
 
     def test_get_param_to_fqns_consistency(self):
         """Test that _get_param_to_fqns produces correct mappings."""
+
         class NestedModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -112,7 +111,7 @@ class TestPrefixSet(TestCase):
         param_to_fqns = _get_param_to_fqns(model)
 
         # Each parameter should map to exactly one FQN (singleton list)
-        for param, fqns in param_to_fqns.items():
+        for fqns in param_to_fqns.values():
             self.assertIsInstance(fqns, list)
             self.assertGreaterEqual(len(fqns), 1)
             for fqn in fqns:
@@ -123,6 +122,7 @@ class TestPrefixSet(TestCase):
 
     def test_get_param_to_fqns_shared_params(self):
         """Test _get_param_to_fqns with shared parameters."""
+
         class SharedParamModel(nn.Module):
             def __init__(self):
                 super().__init__()

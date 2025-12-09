@@ -397,8 +397,8 @@ def _build_prefix_set(fqns: list[str]) -> set[str]:
     for fqn in fqns:
         # add prefixes ending with '.'
         for i, ch in enumerate(fqn):
-            if ch == '.':
-                prefix_set.add(fqn[:i+1])
+            if ch == ".":
+                prefix_set.add(fqn[: i + 1])
         # add the full name without trailing '.'
         prefix_set.add(fqn)
     return prefix_set
