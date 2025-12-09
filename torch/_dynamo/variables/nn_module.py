@@ -112,9 +112,11 @@ def initialize_lazy_module(
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=str(e)
-                if str(e)
-                else "AttributeError during lazy module initialization",
+                args=[
+                    str(e)
+                    if str(e)
+                    else "AttributeError during lazy module initialization"
+                ],
             )
 
 
@@ -397,7 +399,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
+                    args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
         if name == "forward":
@@ -859,7 +861,7 @@ class NNModuleVariable(VariableTracker):
             # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    isinstance(args[0], variables.ConstantVariable)
+                    args[0].is_python_constant()
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(
@@ -963,10 +965,7 @@ class NNModuleVariable(VariableTracker):
         elif (
             name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
-            and all(
-                isinstance(x, variables.TensorVariable)
-                for x in itertools.chain(args, kwargs.values())
-            )
+            and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
             return generic_call_method_helper(name)
         else:
@@ -1208,8 +1207,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # This is reverse engineered by looking at nn module __setattr__
                 # logic.
                 if (
-                    isinstance(value, variables.TensorVariable)
-                    and value.python_type() is torch.nn.Parameter
+                    value.is_tensor() and value.python_type() is torch.nn.Parameter
                 ) or attr_name in self.value.__dict__["_parameters"]:
                     # Handle parameters
                     self.is_state_mutated = True
@@ -1330,7 +1328,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
             )
         assert out is not None
         return out

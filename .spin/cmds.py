@@ -1,8 +1,4 @@
-import glob
 import hashlib
-import os
-import os.path
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -196,7 +192,6 @@ SLOW_LINTERS = {
     "FLAKE8",
     "GB_REGISTRY",
     "PYFMT",
-    "PYLINT",
     "PYREFLY",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
@@ -413,27 +408,7 @@ def quicklint(ctx, *, lintrunner_args, apply_patches, **kwargs):
 @click.pass_context
 def quickfix(ctx, *, lintrunner_args, **kwargs):
     """Autofix changed files."""
-    ctx.invoke(quicklint, lintrunner_args=lintrunner_args, apply_patches=True)
-
-
-@click.command()
-def clean():
-    """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
-    ignores = Path(".gitignore").read_text(encoding="utf-8")
-    for wildcard in filter(None, ignores.splitlines()):
-        if wildcard.strip().startswith("#"):
-            if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                # Marker is found and stop reading .gitignore.
-                break
-            # Ignore lines which begin with '#'.
-        else:
-            # Don't remove absolute paths from the system
-            wildcard = wildcard.lstrip("./")
-            for filename in glob.iglob(wildcard):
-                try:
-                    os.remove(filename)
-                except OSError:
-                    shutil.rmtree(filename, ignore_errors=True)
+    ctx.invoke(quicklint, apply_patches=True)
 
 
 @click.command()
