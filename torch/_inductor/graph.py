@@ -390,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
+        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -410,6 +411,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.named_buffers: dict[str, torch.Tensor] = (
             const_module.named_buffers if const_module else {}
+        )
+        self.mutated_named_buffers: OrderedSet[torch.Tensor] = gm.meta.get(
+            "mutated_named_buffers", OrderedSet()
         )
         self.named_parameters: dict[str, torch.Tensor] = (
             const_module.named_parameters if const_module else {}
@@ -522,7 +526,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bw_donated_idxs = get_donated_idxs()
 
         # Cache for dep size hints to avoid expensive recomputation
-        self.dep_size_hint_cache: dict[Dep, int] = {}
+        self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -610,22 +614,25 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
 
-    def get_dep_size_hint(self, dep: Dep) -> int:
+    def get_dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         """
         Get the size hint for a dependency with caching to avoid expensive recomputation.
         """
-        if dep not in self.dep_size_hint_cache:
+        if (dep, count_bytes) not in self.dep_size_hint_cache:
             res = 0
             try:
                 if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
+                    if count_bytes:
+                        res = dep.numbytes_hint()
+                    else:
+                        res = dep.numel_hint()
             except KeyError:
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
                 # `has_unbacked_symbols()` throws an error.
                 pass
-            self.dep_size_hint_cache[dep] = res
-        return self.dep_size_hint_cache[dep]
+            self.dep_size_hint_cache[(dep, count_bytes)] = res
+        return self.dep_size_hint_cache[(dep, count_bytes)]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -1408,6 +1415,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
+            or target in self.mutated_named_buffers
         ):
             return self.add_tensor_constant(value, target)
 
@@ -2446,7 +2454,7 @@ class GraphLowering(torch.fx.Interpreter):
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
 
             tuning_code = (
-                '"""\n'
+                'r"""\n'
                 + "Compile-time auto-tuning block: \n"
                 + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
