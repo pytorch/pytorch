@@ -9,8 +9,9 @@ from functools import lru_cache
 from typing import Any, Optional
 
 import torch
-from torch._inductor.utils import clear_on_fresh_cache
-from torch._logging import getArtifactLogger
+import torch.fx as fx
+from torch._inductor.utils import clear_on_fresh_cache, tabulate_2d
+from torch._logging import getArtifactLogger, trace_structured
 from torch.fx.operator_schemas import normalize_function
 
 
@@ -82,6 +83,7 @@ def _benchmark_collective_with_cuda_events_impl(
         stride = [get_hint(s) for s in t.stride()]
 
         if any(s is None for s in itertools.chain(shape, stride)):
+            # This should not happen, as can_benhcmark_collective checks for unbacked
             raise ValueError("Cannot convert tensor with symbolic dimensions")
 
         return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
@@ -197,3 +199,127 @@ def benchmark_collective_with_cuda_events_impl(
     # Cache the result
     set_cached_runtime(key, runtime)
     return runtime, key
+
+
+def _log_compute_estimations(
+    compute_nodes: list[fx.Node],
+    benchmarked_estimations: list[float],
+    analytical_estimations: list[float],
+) -> None:
+    """Log compute node runtime estimations comparing benchmarked vs analytical."""
+    import torch.utils._pytree as pytree
+    from torch._inductor.fx_utils import count_flops_fx
+    from torch.utils._dtype_abbrs import dtype_abbrs
+
+    def _node_summary(n: fx.Node) -> str:
+        ret = str(n)
+        for arg in pytree.arg_tree_leaves(n.args, n.kwargs):
+            if not isinstance(arg, torch.fx.Node):
+                continue
+            if "val" in arg.meta:
+                t = arg.meta["val"]
+                ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
+        return ret
+
+    headers = [
+        "Node",
+        "Benchmarked Est(us)",
+        "Analytical Est(us)",
+        "Diff(%)",
+        "Diff(us)",
+        "Flops",
+    ]
+
+    rows = [
+        [
+            _node_summary(node)[:120],
+            est_b * 1e3,
+            est_a * 1e3,
+            (est_a / est_b) if est_b > 0 else 0,
+            (est_a - est_b) * 1e3,
+            count_flops_fx(node),
+        ]
+        for node, est_b, est_a in zip(
+            compute_nodes, benchmarked_estimations, analytical_estimations
+        )
+    ]
+
+    log_str = tabulate_2d(rows, headers)
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_compute_nodes_runtime_estimation",
+            "encoding": "string",
+        },
+        payload_fn=lambda: log_str,
+    )
+
+
+def _log_collective_benchmarks(
+    collective_nodes: list[fx.Node],
+    collective_keys: list[str],
+    benchmarked_medians: list[float],
+    world_size: int,
+) -> None:
+    """Log collective benchmarks with analytical comparisons for tlparse."""
+    headers = [
+        "Collective Key",
+        "Benchmarked(ms)",
+        "NCCL Est(ms)",
+        "Inductor Est(ms)",
+        "NCCL Diff(%)",
+        "Inductor Diff(%)",
+    ]
+
+    rows = []
+    collective_benchmarks = {}
+    for key, benchmarked_ms, coll_node in zip(
+        collective_keys, benchmarked_medians, collective_nodes
+    ):
+        # NCCL estimator (deterministic, no need to align)
+        nccl_ms = (
+            torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+                coll_node, None, use_nccl_estimator=True
+            )
+        )
+
+        # Inductor analytical (deterministic, no need to align)
+        inductor_ms = (
+            torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+                coll_node, None, use_nccl_estimator=False
+            )
+        )
+
+        collective_benchmarks[key] = {
+            "benchmarked_ms": benchmarked_ms,
+            "analytical_nccl_ms": nccl_ms,
+            "analytical_inductor_ms": inductor_ms,
+        }
+
+        # Compute percentage differences
+        nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+        inductor_diff_pct = (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+
+        rows.append(
+            [
+                key[:80],
+                f"{benchmarked_ms:.4f}",
+                f"{nccl_ms:.4f}",
+                f"{inductor_ms:.4f}",
+                f"{nccl_diff_pct:.2f}",
+                f"{inductor_diff_pct:.2f}",
+            ]
+        )
+
+    log_str = f"World size: {world_size}\n"
+    log_str += tabulate_2d(rows, headers)
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_collectives_node_runtime_estimation",
+            "encoding": "string",
+        },
+        payload_fn=lambda: log_str,
+    )
