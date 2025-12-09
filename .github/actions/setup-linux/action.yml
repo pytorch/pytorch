@@ -37,6 +37,17 @@ runs:
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
+    - name: Check if on Google Cloud runner
+      shell: bash
+      id: check_gcp_runner
+      run: |
+        runner_name_str="${{ runner.name }}"
+        if [[ $runner_name_str == *"gcp"* || $runner_name_str == *"google"* ]]; then
+          echo "IS_GCP_RUNNER=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "IS_GCP_RUNNER=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Start docker if docker daemon is not running
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
@@ -50,6 +61,7 @@ runs:
         fi
 
     - name: Log in to ECR
+      if: ${{ steps.check_gcp_runner.outputs.IS_GCP_RUNNER == 'false' }}
       uses: nick-fields/retry@v3.0.0
       env:
         AWS_RETRY_MODE: standard
