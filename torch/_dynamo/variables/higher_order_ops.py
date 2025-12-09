@@ -98,53 +98,6 @@ class OutputSpec:
             assert len(self.masks_to_filter_const_values) == len(self.const_values)
 
 
-def raise_hard_error_if_graph_break(hop_name: str):
-    """
-    Decorator that converts graph breaks inside HOPs into hard errors.
-
-    This decorator wraps Unsupported exceptions in UncapturedHigherOrderOpError,
-    which prevents graph breaking and requires the HOP to be fully captured.
-    The error message automatically includes HOP context from _get_current_hop_context()
-    in exc.py when available, or uses the provided hop_name as a fallback.
-
-    Args:
-        hop_name: The name of the HOP (e.g., "torch.cond", "torch.ops.higher_order.map")
-
-    Use this decorator for HOPs that cannot support partial capture (e.g., cond, map, scan).
-    Don't use it for HOPs that can gracefully handle graph breaks (e.g., checkpoint).
-    """
-
-    def decorator(fn):
-        @functools.wraps(fn)
-        def graph_break_as_hard_error(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except (Unsupported, ObservedException) as e:
-                import sys
-
-                if isinstance(e, Unsupported):
-                    msg = (
-                        "This higher order operator doesn't work unless it is "
-                        f"captured completely with torch.compile. Got:\n{e.msg}"
-                    )
-                    exc = UncapturedHigherOrderOpError(msg, e.real_stack)
-                else:
-                    hop_str = f"\n  Higher Order Operator: {hop_name}"
-
-                    msg = e.msg if hasattr(e, "msg") else type(e)
-                    real_stack = e.real_stack if hasattr(e, "real_stack") else None
-                    full_msg = (
-                        "This higher order operator doesn't work unless it is "
-                        f"captured completely with torch.compile. Got:\n{msg}{hop_str}"
-                    )
-                    exc = UncapturedHigherOrderOpError(full_msg, real_stack)
-                raise exc.with_traceback(sys.exc_info()[2]) from None
-
-        return graph_break_as_hard_error
-
-    return decorator
-
-
 # This function is a syntax sugar for creating a dummy new subtracer so that
 # newly added nodes are added to a separate subgraph in this subtracer instead of affecting
 # the main graph. This is useful for creating sample inputs for tracing the subgraph.
@@ -1778,6 +1731,60 @@ def make_attr(tx: "InstructionTranslator", name):
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
+    # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
+    _HOP_NAME: Optional[str] = None
+    # Set to False for HOPs that require full capture (e.g., cond, map, scan)
+    _ALLOW_GRAPH_BREAKS: bool = True
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # All subclasses must define _HOP_NAME
+        if cls._HOP_NAME is None:
+            raise TypeError(
+                f"{cls.__name__} must define _HOP_NAME class attribute. "
+                "All TorchHigherOrderOperatorVariable subclasses must specify "
+                "the name of the higher order operator they wrap."
+            )
+
+        # Automatically wrap call_function to add HOP context
+        original_call_function = cls.call_function
+
+        if not hasattr(original_call_function, "_hop_wrapped"):
+
+            @functools.wraps(original_call_function)
+            def wrapped_call_function(self, *args, **kwargs):
+                try:
+                    return original_call_function(self, *args, **kwargs)
+                except (Unsupported, ObservedException) as e:
+                    hop_name = self._HOP_NAME
+                    allow_graph_breaks = self._ALLOW_GRAPH_BREAKS
+
+                    # Only tag if not already tagged (reports deepest HOP only)
+                    if hasattr(e, "_hop_name"):
+                        raise
+
+                    if allow_graph_breaks:
+                        # Tag the exception with HOP name for later formatting in exc.py
+                        # NOTE: because nested graph breaks are NOT supported on HOPs, we will
+                        # NEVER log a HOP graph break before running this
+                        e._hop_name = hop_name  # type: ignore[attr-defined]
+
+                        raise
+                    else:
+                        msg = e.msg if hasattr(e, "msg") else str(type(e))
+                        real_stack = e.real_stack if hasattr(e, "real_stack") else None
+                        full_msg = (
+                            "This higher order operator doesn't work unless it is "
+                            f"captured completely with torch.compile. Got:\n{msg}"
+                        )
+                        exc = UncapturedHigherOrderOpError(full_msg, real_stack)
+                        exc._hop_name = hop_name  # type: ignore[attr-defined]
+                        raise exc.with_traceback(e.__traceback__) from None
+
+            wrapped_call_function._hop_wrapped = True
+            cls.call_function = wrapped_call_function
+
     def __init__(
         self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
     ) -> None:
@@ -1850,6 +1857,8 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     Wraps torch._functorch.autograd_function.custom_function_call
     """
 
+    _HOP_NAME = "torch.ops.higher_order.custom_function_call"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -1867,10 +1876,10 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.cond"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2090,6 +2099,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.call_torchbind"
+
     def __init__(self, hop, source, script_obj_var, method_name) -> None:
         super().__init__(hop, source)
         self.script_obj_var = script_obj_var
@@ -2149,10 +2160,10 @@ def validate_subgraph_output_types(output: VariableTracker):
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2166,10 +2177,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2183,10 +2194,10 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.associative_scan"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2416,10 +2427,10 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.scan"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2666,10 +2677,10 @@ def non_single_tensor_return_unsupported(api, ret):
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.map"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = False
     supports_aliasing = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2778,6 +2789,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.print"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2802,6 +2815,8 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.executorch_call_delegate"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2903,6 +2918,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.wrap"
     supports_input_mutation = True
     supports_aliasing = True
     allow_side_effects = False
@@ -3020,6 +3036,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
     after export as a post-processing step.
     """
 
+    _HOP_NAME = "torch.ops.higher_order.wrap_with_set_grad_enabled"
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3062,7 +3080,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
                 fn_var,
                 [*rest_args],
                 {},
-                "torch.ops.higher_order.wrap_with_set_grad_enabled",
+                self._HOP_NAME,
                 source_target=self.value,
                 set_subgraph_inputs="manual",
                 should_flatten_outputs=True,
@@ -3106,6 +3124,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
     This hop is not exposed to users but is inserted into the graph
     after export as a post-processing step.
     """
+
+    _HOP_NAME = "torch.ops.higher_order.wrap_with_autocast"
 
     def call_function(
         self,
@@ -3156,7 +3176,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 fn_var,
                 [*rest_args],
                 {},
-                "torch.ops.higher_order.wrap_with_autocast",
+                self._HOP_NAME,
                 source_target=self.value,
                 set_subgraph_inputs="manual",
                 should_flatten_outputs=True,
@@ -3198,6 +3218,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
+    _ALLOW_GRAPH_BREAKS = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -3207,7 +3228,6 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
         )
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -3276,6 +3296,8 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.out_dtype"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -3319,8 +3341,8 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.strict_mode"
+    _ALLOW_GRAPH_BREAKS = False
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -3395,6 +3417,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.utils.checkpoint.checkpoint"
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.allow_side_effects = (
@@ -3460,6 +3484,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.dynamo_bypassing_wrapper"
+
     def __init__(self, hop, source) -> None:
         super().__init__(hop, source)
 
@@ -3514,6 +3540,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order._export_tracepoint"
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3537,6 +3565,8 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.run_with_rng_state"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -3560,6 +3590,8 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.auto_functionalized"
+
     def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -3580,6 +3612,8 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
+
     def proxy_submod(self, tx, arg):
         assert isinstance(arg.source.base, DictGetItemSource)
         submod_name = tx.output.install_subgraph(arg.source.base.index, arg.value)
@@ -3635,6 +3669,8 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     here in the call to dynamo from compiled autograd.
     """
 
+    _HOP_NAME = "torch.ops.higher_order.trace_wrapped"
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -3647,6 +3683,8 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.flex_attention"
+
     @staticmethod
     def normalize_to_args(args, kwargs):
         # input signature is (query, key, value, score_mod, block_mask, *other_buffers),
@@ -3702,7 +3740,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 fn,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description=fn_name,
+                description=f"{self._HOP_NAME}: {fn_name}",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
@@ -4223,6 +4261,9 @@ def maybe_positional_arg_names(func):
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
+    # Generic fallback for BaseHOP instances not explicitly mapped
+    # The actual HOP name comes from self.value._name at runtime
+    _HOP_NAME = "torch.ops.higher_order.base_hop"
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -4262,6 +4303,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
+    _ALLOW_GRAPH_BREAKS = False
     supports_input_mutation = True
     supports_aliasing = False
     # TODO - make this true to support mutation
@@ -4327,7 +4369,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
-    @raise_hard_error_if_graph_break(_HOP_NAME)
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -4372,6 +4413,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
 
 class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
+    _HOP_NAME = "torch.ops.higher_order.local_map_hop"
     supports_input_mutation = False
     supports_aliasing = False
 
