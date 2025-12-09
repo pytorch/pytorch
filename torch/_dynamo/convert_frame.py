@@ -1916,6 +1916,7 @@ def _compile(
                     else _get_error_on_graph_break()
                 )
 
+
 class ConvertFrame:
     def __init__(
         self,

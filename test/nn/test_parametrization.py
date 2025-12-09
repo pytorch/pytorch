@@ -1,7 +1,5 @@
 # Owner(s): ["module: nn"]
 import pickle
-import sys
-import unittest
 from copy import deepcopy
 from itertools import product
 
