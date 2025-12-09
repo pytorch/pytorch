@@ -167,6 +167,12 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(expr.args[0])
         return f"metal::log2({x})"
 
+    def _print_Where(self, expr: sympy.Expr) -> str:
+        c, p, q = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
+        return f"{c} ? {p} : {q}"
+
 
 class MetalOverrides(OpOverrides):
     """Implements Metal-specific overrides for ops. Base class emits Python-friendly overrides."""
