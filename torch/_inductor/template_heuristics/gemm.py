@@ -15,4 +15,4 @@ class GemmMaxAutotuneTemplateConfigHeuristics(TemplateConfigHeuristics):
         """
         simple base override for GEMM family templates that run only in max-autotune
         """
-        return inductor_config.max_autotune or inductor_config.max_autotune_gemm
+        return inductor_config.max_autotune or inductor_config.max_autotune_gemm or inductor_config.origami
