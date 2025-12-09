@@ -80,6 +80,9 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
+    def is_python_hashable(self):
+        return is_opaque_value_type(type(self.value))
+
     def as_proxy(self):
         return self.value
 
