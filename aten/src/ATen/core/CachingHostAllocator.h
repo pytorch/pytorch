@@ -918,7 +918,7 @@ struct CachingHostAllocatorImpl {
   // and captures_underway_, as well as the use_count field of
   // PrivatePools in graph_pools_ and graph_pools_freeable_.  We use a
   // shared mutex because we want to allow for multiple private pools
-  // to be alloated to concurently.  Does not protect default_pool_,
+  // to be allocated to concurrently.  Does not protect default_pool_,
   // which has its own mutex.
   alignas(hardware_destructive_interference_size) mutable std::shared_mutex instance_mutex_;
 
