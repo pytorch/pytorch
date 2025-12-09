@@ -608,7 +608,7 @@ struct CachingHostAllocatorImpl {
     auto size = block->size_;
     auto index = size_index(size);
     {
-      std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_);
+      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       stats_.allocation_bucket_stats[index].increase(1);
       stats_.allocated_bytes_bucket_stats[index].increase(size);
       stats_.active_bucket_stats[index].increase(1);
@@ -623,8 +623,8 @@ struct CachingHostAllocatorImpl {
       B* block = pool.free_list_[index].list_.back();
       pool.free_list_[index].list_.pop_back();
       block->allocated_ = true;
-      stats_.allocation_bucket_stats[index].increase(1);
-      stats_.allocated_bytes_bucket_stats[index].increase(size);
+      stats_.active_bucket_stats[index].increase(1);
+      stats_.active_bytes_bucket_stats[index].increase(size);
       return block;
     }
     return nullptr;
