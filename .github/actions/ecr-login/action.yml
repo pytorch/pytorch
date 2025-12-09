@@ -30,7 +30,7 @@ runs:
       if: inputs.use-iam-profile-if-available == 'true'
       shell: bash
       run: |
-        if curl -s --connect-timeout 5 http://169.254.169.24.2/latest/meta-data/iam/info >/dev/null 2>&1; then
+        if curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/iam/info >/dev/null 2>&1; then
           echo "has_profile=true" >> "$GITHUB_OUTPUT"
         else
           echo "has_profile=false" >> "$GITHUB_OUTPUT"
@@ -45,7 +45,7 @@ runs:
         role-session-name: gha-ecr-login
         aws-region: ${{ inputs.aws-region }}
         role-duration-seconds: ${{ inputs.role-duration-seconds }}
-        disable-session-tagging: true
+        role-skip-session-tagging: true
 
     - name: Log in to ECR
       uses: nick-fields/retry@v3.0.0
