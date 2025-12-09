@@ -7,7 +7,7 @@ Hardware Prerequisite
 For Intel Data Center GPU
 
 .. list-table::
-   :widths: 40 20 20 20
+   :widths: 50 50 50 50
    :header-rows: 1
 
    * - Device
