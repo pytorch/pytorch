@@ -1328,7 +1328,9 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(8, requires_grad=False)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        # TODO: Improve error message to explain the aliasing/side-effect issue
+        # TODO When a filtered aliased intermediate is captured by side effects,
+        # it will fail later with "does not belong to this Graph" error
+        # because the proxy from the inner graph is used in the outer graph.
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
             "does not belong to this Graph",

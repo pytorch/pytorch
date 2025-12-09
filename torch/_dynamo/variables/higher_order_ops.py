@@ -528,10 +528,11 @@ def collect_intermediate_outputs(
         if not filter_aliased_intermediates:
             extra_outputs.append(out)
         else:
-            # TODO: We should detect when a filtered aliased intermediate is captured
-            # by side effects and raise a better error. Currently this will fail later
-            # with "does not belong to this Graph" error during compilation.
-            # See test_side_effect_with_aliased_intermediate for an example.
+            # Filter out intermediates that alias with inputs or outputs.
+            # This is needed for HOPs like invoke_subgraph that don't support aliasing.
+            # TODO: If a filtered intermediate is captured by side effects (e.g., appended
+            # to a list), it will fail later with "does not belong to this Graph" error
+            # when the outer graph tries to use it. See test_side_effect_with_aliased_intermediate.
             if tracker.check_and_track(proxy.node):
                 extra_outputs.append(out)
 
@@ -1401,6 +1402,41 @@ def speculate_subgraph_with_auto_output_flattening(
     # Controls whether to filter aliased intermediates when collecting extra outputs.
     # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
     # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
+    #
+    # Example where filtering is needed:
+    #
+    #   @invoke_subgraph
+    #   def gn(x):
+    #       view = x.view(2, 4)  # intermediate that aliases input x
+    #       y = torch.sin(view)
+    #       return torch.cos(view)
+    #
+    #   def fn(x):
+    #       res = gn(x)
+    #       return res + 4
+    #
+    # In this case, if we don't filter `view`, we would later error because some HOPs
+    # have strict aliasing checks on inputs/outputs.
+    #
+    # This does however introduce a subtle issue when we do something like:
+    #
+    #   captured = []
+    #
+    #   @invoke_subgraph
+    #   def gn(x):
+    #       view = x.view(2, 4)  # intermediate that aliases input x
+    #       y = torch.sin(view)
+    #       captured.append(view)
+    #       return torch.cos(view)
+    #
+    #   def fn(x):
+    #       res = gn(x)
+    #       return res + captured[0]
+    #
+    # In this case, we will not replay the side effect on `captured` in the graph,
+    # which fails with a not-so-nice error. We will address this in a follow-up PR
+    # because this case is rare. This is not a regression because side effects were
+    # never supported for invoke_subgraph anyway.
     filter_aliased_intermediates: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
@@ -4390,7 +4426,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
     allow_side_effects = True
-    # invoke_subgraph is NOT desugared, so we need strict aliasing filtering
+    # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
+    # shouldn't alias. For checkpoint HOP, we inline it so we don't need
+    # alias analysis as functionalization would just work on the flat graph.
     filter_aliased_intermediates = True
 
     def install_subgraph_in_output_graph(
