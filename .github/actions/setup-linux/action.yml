@@ -48,7 +48,7 @@ runs:
         fi
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@374b9305c53f17cee51e793c1234cdb1897489d5 # v7
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
         python-version: 3.12
