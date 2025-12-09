@@ -175,7 +175,7 @@ class SubprocPool:
 
         if log_path:
             # pyrefly: ignore [bad-assignment]
-            self.log_file = open(log_path, "w")
+            self.log_file = open(log_path, "w")  # noqa:SIM115
 
         self.process = subprocess.Popen(
             cmd,
@@ -321,7 +321,7 @@ class SubprocPool:
         self._send(MsgHeader.QUIESCE)
         if self.quiesce_waitcounter is None:
             self.quiesce_waitcounter = _WaitCounter(
-                "pytorch.wait_counter.subproc_pool.running"
+                "pytorch.wait_counter.subproc_pool.quiesced"
             ).guard()
             self.quiesce_waitcounter.__enter__()
 

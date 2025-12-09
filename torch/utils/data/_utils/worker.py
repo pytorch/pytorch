@@ -9,7 +9,7 @@ import os
 import queue
 import random
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch._utils import ExceptionWrapper
@@ -98,7 +98,7 @@ class WorkerInfo:
         return f"{self.__class__.__name__}({', '.join(items)})"
 
 
-def get_worker_info() -> Optional[WorkerInfo]:
+def get_worker_info() -> WorkerInfo | None:
     r"""Returns the information about the current
     :class:`~torch.utils.data.DataLoader` iterator worker process.
 
@@ -140,7 +140,7 @@ r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 @dataclass(frozen=True)
 class _ResumeIteration:
-    seed: Optional[int] = None
+    seed: int | None = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
@@ -349,7 +349,7 @@ def _worker_loop(
                 # processing steps.
                 continue
             idx, index = r
-            data: Union[_IterableDatasetStopIteration, ExceptionWrapper]
+            data: _IterableDatasetStopIteration | ExceptionWrapper
             if init_exception is not None:
                 data = init_exception
                 init_exception = None

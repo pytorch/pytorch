@@ -13,7 +13,6 @@ import contextlib
 import copy
 import re
 from collections.abc import Callable
-from typing import Optional, Union
 
 import torch
 
@@ -119,7 +118,7 @@ default_collate_err_msg_format = (
 def collate(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     r"""
     General collate function that handles collection type of element within each batch.
@@ -247,7 +246,7 @@ def collate(
 def collate_tensor_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     elem = batch[0]
     out = None
@@ -279,7 +278,7 @@ def collate_tensor_fn(
 def collate_numpy_array_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     elem = batch[0]
     # array of string classes and object
@@ -292,7 +291,7 @@ def collate_numpy_array_fn(
 def collate_numpy_scalar_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.as_tensor(batch)
 
@@ -300,7 +299,7 @@ def collate_numpy_scalar_fn(
 def collate_float_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.tensor(batch, dtype=torch.float64)
 
@@ -308,7 +307,7 @@ def collate_float_fn(
 def collate_int_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.tensor(batch)
 
@@ -316,12 +315,12 @@ def collate_int_fn(
 def collate_str_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return batch
 
 
-default_collate_fn_map: dict[Union[type, tuple[type, ...]], Callable] = {
+default_collate_fn_map: dict[type | tuple[type, ...], Callable] = {
     torch.Tensor: collate_tensor_fn
 }
 with contextlib.suppress(ImportError):

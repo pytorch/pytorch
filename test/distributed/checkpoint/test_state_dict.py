@@ -769,7 +769,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model_state_dict3 = copy.deepcopy(model_state_dict3)
         self.assertEqual(len(model_state_dict2), 2)
         self.assertEqual(len(model_state_dict3), 2)
-        for key in model_state_dict3.keys():
+        for key in model_state_dict3:
             full_fqn = f"l.{key}"
             value1 = model_state_dict1[full_fqn]
             value2 = model_state_dict2[full_fqn]

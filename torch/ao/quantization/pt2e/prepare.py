@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
@@ -316,14 +316,14 @@ def _get_obs_or_fq_map(
 
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
-    node: Union[Node, Any],
+    node: Node | Any,
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -420,7 +420,7 @@ def _maybe_insert_input_observers_for_node(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -473,8 +473,8 @@ def _maybe_insert_output_observer_for_node(
     graph: Graph,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
-) -> Optional[Node]:
+    model_device: torch.device | None = None,
+) -> Node | None:
     if node in obs_or_fq_map:
         output_act_obs_or_fq = obs_or_fq_map[node]
         new_output = _insert_obs_or_fq(
@@ -506,7 +506,7 @@ def _maybe_insert_input_and_output_observers_for_node(
     model: torch.fx.GraphModule,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ):
     this_node_quantization_annotation = node.meta.get("quantization_annotation", None)
     if this_node_quantization_annotation is None:

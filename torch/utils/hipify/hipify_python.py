@@ -35,7 +35,6 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
-from typing import Optional
 from collections.abc import Iterator
 from collections.abc import Mapping, Iterable
 from enum import Enum
@@ -530,11 +529,14 @@ RE_EXTERN_SHARED = re.compile(r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+
 
 
 def replace_extern_shared(input_string):
-    """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
-       https://github.com/ROCm/hip/blob/master/docs/markdown/hip_kernel_language.md#__shared__
-    Example:
-        "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
-        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+    """
+    Match 'extern __shared__ type foo[];' syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
+    See: https://github.com/ROCm/hip/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+    Examples:
+        "extern __shared__ char smemChar[];"
+            => "HIP_DYNAMIC_SHARED( char, smemChar)"
+        "extern __shared__ unsigned char smem[];"
+            => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
@@ -1044,14 +1046,12 @@ RE_INCLUDE = re.compile(r"#include .*\n")
 
 
 def extract_arguments(start, string):
-    """ Return the list of arguments in the upcoming function parameter closure.
-        Example:
-        string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
-        arguments (output):
-            '[{'start': 1, 'end': 7},
-            {'start': 8, 'end': 16},
-            {'start': 17, 'end': 19},
-            {'start': 20, 'end': 53}]'
+    """
+    Return the list of arguments in the upcoming function parameter closure.
+    Example:
+    string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
+    arguments (output): [{'start': 1, 'end': 7}, {'start': 8, 'end': 16}, \
+        {'start': 17, 'end': 19}, {'start': 20, 'end': 53}]
     """
 
     arguments = []
@@ -1115,7 +1115,7 @@ def hipify(
     hip_clang_launch: bool = False,
     is_pytorch_extension: bool = False,
     hipify_extra_files_only: bool = False,
-    clean_ctx: Optional[GeneratedFileCleaner] = None
+    clean_ctx: GeneratedFileCleaner | None = None
 ) -> HipifyFinalResult:
     if project_directory == "":
         project_directory = os.getcwd()

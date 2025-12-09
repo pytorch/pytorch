@@ -3,7 +3,7 @@
 
 import os
 import time
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 
@@ -733,9 +733,9 @@ class SummaryWriter:
         self,
         tag: str,
         figure: Union["Figure", list["Figure"]],
-        global_step: Optional[int] = None,
+        global_step: int | None = None,
         close: bool = True,
-        walltime: Optional[float] = None,
+        walltime: float | None = None,
     ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 

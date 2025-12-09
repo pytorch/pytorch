@@ -1,6 +1,7 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/MemPool.h>
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAFunctions.h>
 
@@ -13,7 +14,7 @@ static bool _cuda_graphs_debug = false;
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  return c10::cuda::MemPool::graph_pool_handle();
+  return at::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -90,7 +91,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   } else {
     // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
+    mempool_id_ = at::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
@@ -174,17 +175,24 @@ void CUDAGraph::instantiate() {
     // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
     // who prefer not to report error message through these arguments moving forward
     // (they prefer return value, or errors on api calls internal to the capture)
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
+    // ROCM appears to fail with HIP error: invalid argument
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && !defined(USE_ROCM)
+    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, cudaGraphInstantiateFlagUseNodePriority));
 #else
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
 #endif
 //Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
 //It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
   } else {
+#if !defined(USE_ROCM)
+    AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
+                                                graph_,
+                                                cudaGraphInstantiateFlagAutoFreeOnLaunch | cudaGraphInstantiateFlagUseNodePriority));
+#else
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
+#endif
   }
   has_graph_exec_ = true;
 }

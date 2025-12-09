@@ -2381,6 +2381,16 @@ class TestFX(JitTestCase):
 
         self.assertTrue("typing.List[float]" in str(graph))
 
+    def test_typename_print_union(self):
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=float|torch.Tensor|None
+        )
+        output: torch.fx.Node = graph.output(b)
+
+        self.assertTrue('float | torch.Tensor | None' in str(graph))
+
     def test_layout(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -3001,7 +3011,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             if node.op == "placeholder":
                 ph = node
-            elif node.op == "call_function" and node.target == wrapped_named_tup:
+            elif node.op == "call_function" and node.target is wrapped_named_tup:
                 node.update_arg(0, Pair(ph, 1.2))
                 node.update_kwarg("p2", Pair(3.4, ph))
                 call_func = node
@@ -3164,7 +3174,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={"y": False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert any(i.target == torch._assert for i in mod_true.graph.nodes)
+        assert any(i.target is torch._assert for i in mod_true.graph.nodes)
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -4783,7 +4793,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertEqual(len(gm.graph.nodes), 3)
         found = False
         for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target == side_effect_func:
+            if node.op == "call_function" and node.target is side_effect_func:
                 found = True
         self.assertTrue(found)
 
