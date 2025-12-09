@@ -1145,6 +1145,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
 
+    # https://github.com/pytorch/pytorch/issues/168381
+    def test_index_select_contiguous_with_compile(self):
+        def fn(x):
+            x = x.permute(1, 2, 0)
+            x = x.unsqueeze(2)
+            idx = torch.tensor([0], device=x.device)
+            x = torch.index_select(x, 0, idx)
+            return x
+
+        x = torch.randn(6, 3, 6)
+        eager_out = fn(x)
+        self.assertTrue(eager_out.is_contiguous())
+        compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        compiled_out = compiled_fn(x)
+        self.assertTrue(compiled_out.is_contiguous())
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
     # https://github.com/pytorch/pytorch/issues/109053
     def test_view_dtype_overload(self):
         def f(x):
@@ -7498,8 +7516,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             torch._dynamo.set_recursion_limit(20000)
             self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
         finally:
-            if old_dynamo_recursion_limit > 0:
-                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
             sys.setrecursionlimit(old_recursion_limit)
 
     @unittest.skipIf(
@@ -7527,8 +7544,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
         finally:
-            if old_dynamo_recursion_limit > 0:
-                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
 
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
