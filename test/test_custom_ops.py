@@ -2980,12 +2980,31 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     def test_mutated_no_warning(self):
-        def f():
-            @torch.library.custom_op("mylib::func", mutates_args=("x",))
-            def func(x: Tensor) -> None:
-                x.add_(1)
+        # Run in subprocess since the warning is emitted only once
+        script = """\
+import warnings
+import torch
+from torch import Tensor
 
-        self.assertNotWarn(f)
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    torch.set_warn_always(True)
+
+    @torch.library.custom_op("mylib::func", mutates_args=("x",))
+    def func(x: Tensor) -> None:
+        x.add_(1)
+
+    if len(w) > 0:
+        raise AssertionError(f"Unexpected warning: {w[0].message}")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
 
     def test_mutated_unknown(self):
         @torch.library.custom_op(
