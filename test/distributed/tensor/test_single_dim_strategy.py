@@ -193,7 +193,10 @@ class TestExpandPlaceholder(TestCase):
         )
         op_schema_replicate = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec_replicate, right_spec_replicate),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec_replicate)]),
+                OpStrategy([OpSpec(right_spec_replicate)]),
+            ),
             kwargs_schema={},
         )
 
@@ -221,7 +224,10 @@ class TestExpandPlaceholder(TestCase):
         )
         op_schema_shard = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec_shard, right_spec_shard),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec_shard)]),
+                OpStrategy([OpSpec(right_spec_shard)]),
+            ),
             kwargs_schema={},
         )
 
@@ -252,7 +258,10 @@ class TestExpandPlaceholder(TestCase):
         )
         op_schema_mixed = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec_mixed, right_spec_mixed),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec_mixed)]),
+                OpStrategy([OpSpec(right_spec_mixed)]),
+            ),
             kwargs_schema={},
         )
 

@@ -86,6 +86,9 @@ def _fill_single_dim_strategy_placeholders(
     ]
     """
     shard_builders: dict[str, Callable[[int], Placement]] = {}
+    assert len(op_schema.args_strategy) > 0, (
+        "Pass OpSchema instead of DTensorSpec in op_schema.args/kwargs"
+    )
     for strategy in op_schema.args_strategy:
         assert len(strategy.strategies) == 1
         assert isinstance(strategy.strategies[0], OpSpec)
@@ -183,7 +186,12 @@ def _expand_single_dim_strategy_to_mesh(
                 if any(
                     isinstance(p, (Shard, _StridedShard)) for p in arg_spec.placements
                 ):
-                    if not is_tensor_shardable(src_strategy.shape, arg_spec):
+                    # TODO(whc) it doesn't seem safe to me to allow_unbacked_sharding=True,
+                    # but it's what we did in matrix_ops so i added it for now to pass
+                    # TestDTensorCompile.test_dtensor_matmul_zero_size_shards
+                    if not is_tensor_shardable(
+                        src_strategy.shape, arg_spec, allow_unbacked_sharding=True
+                    ):
                         continue
             all_strategies.append(
                 OpSpec(
