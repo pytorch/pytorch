@@ -21,6 +21,7 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
+from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
@@ -532,27 +533,24 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
 
         # Sanity: lambda version should go through Dynamo
-        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
-        opt_lambda = torch.compile(lambda t: torch.exp(t), backend="eager")
+        lambda_counter = CompileCounter()
+        opt_lambda = torch.compile(lambda t: torch.exp(t), backend=lambda_counter)
         y_lambda = opt_lambda(x)
-        frame_count_mid = torch._dynamo.convert_frame.FRAME_COUNTER
-        self.assertTrue(
-            frame_count_mid > frame_count_before,
-            "Sanity check failed: lambda version did not produce a Dynamo graph",
+        self.assertEqual(
+            lambda_counter.frame_count,
+            1,
+            "Sanity check failed: lambda version did not compile through Dynamo exactly once.",
         )
-
         # Regression target: torch.compile(torch.exp)
-        opt_exp = torch.compile(torch.exp, backend="eager")
+        top_level_counter = CompileCounter()
+        opt_exp = torch.compile(torch.exp, backend=top_level_counter)
         y_exp = opt_exp(x)
-        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
-
-        # We expect an additional frame to be converted when compiling torch.exp
-        self.assertTrue(
-            frame_count_after > frame_count_mid,
-            "torch.compile(torch.exp) did not go through Dynamo (no new frame was converted)",
+        self.assertEqual(
+            top_level_counter.frame_count,
+            1,
+            "Expected torch.compile(torch.exp) to compile through Dynamo exactly once.",
         )
-
-        # And the numerical result should match the lambda-based version
+        # Numerical results should match
         self.assertTrue(torch.allclose(y_lambda, y_exp))
 
 
