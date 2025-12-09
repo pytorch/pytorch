@@ -80,6 +80,9 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
+    def is_python_hashable(self):
+        return is_opaque_value_type(type(self.value))
+
     def as_proxy(self):
         return self.value
 
@@ -99,7 +102,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             skip_code(self.value.__init__.__code__)
 
             unimplemented(
-                gb_type="Opaque object were created in the middle of the program.",
+                gb_type="An opaque object was created in the middle of the program.",
                 context=f"Opaque object type: {self.value}.",
                 explanation=(
                     "Opaque objects cannot be created inside the torch.compile region. "

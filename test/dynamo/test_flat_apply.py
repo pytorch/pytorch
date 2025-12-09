@@ -29,7 +29,7 @@ class Norm:
     typ: str
 
 
-torch._library.opaque_object.register_opaque_type(Norm, value_type=True)
+torch._library.opaque_object.register_opaque_type(Norm, typ="value")
 
 
 @dataclass
