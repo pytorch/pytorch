@@ -347,6 +347,17 @@ class OverlapPreservingBucketer:
 
         self.graph.lint()
 
+    def _compute_overlap_ratio(self, node: fx.Node) -> float:
+        """
+        Compute what fraction of the collective's time is hidden by compute.
+        Returns 0.0 for fully exposed, 1.0 for fully hidden.
+        """
+        info = self.collective_info[node]
+        if info.estimated_time_ms <= 0:
+            return 0.0
+        hidden_time = info.estimated_time_ms - info.exposed_time_ms
+        return hidden_time / info.estimated_time_ms
+
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
@@ -356,8 +367,14 @@ class OverlapPreservingBucketer:
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
 
-        # Sort collectives by node index for efficient distance checking
-        sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
+        # Sort by overlap ratio (ascending) to bucket least hidden collectives first.
+        # Exposed collectives benefit most from bucketing since their latency is on the
+        # critical path. Prioritizing them also preserves hiding relationships for
+        # already-hidden collectives, which have less to gain from bucketing.
+        sorted_collectives = sorted(
+            collective_group,
+            key=lambda n: (self._compute_overlap_ratio(n), self.node_idx[n]),
+        )
 
         for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
