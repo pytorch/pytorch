@@ -2198,6 +2198,7 @@ class CUDAGraphTreeManager:
                     _id = curr_node_id.id if curr_node_id else None
                     # unexpected_rerecord_reason is either a string (if debug was enabled)
                     # or a callable (if debug was disabled)
+                    assert unexpected_rerecord_reason is not None
                     reason = (
                         unexpected_rerecord_reason
                         if isinstance(unexpected_rerecord_reason, str)
