@@ -1042,7 +1042,7 @@ class MetalKernel(SIMDKernel):
         # TODO(malfet) Figure out how to do it for aoti
         if "error" in self.headers:
             args.append(
-                f"error_buf_idx={len([arg for arg in args if '=' not in arg]) + 1}"
+                f"error_buf_idx={len([arg for arg in args if '=' not in arg])}"
             )
 
         wrapper.generate_kernel_call(
