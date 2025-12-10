@@ -496,6 +496,11 @@ def format_graph_break_message(
 
   Developer debug context: {context}
 """
+    documentation_link = get_gbid_documentation_link(gb_type)
+
+    if documentation_link:
+        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
     return msg
 
 
@@ -572,11 +577,6 @@ def unimplemented(
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
-
-    documentation_link = get_gbid_documentation_link(gb_type)
-
-    if documentation_link:
-        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
