@@ -292,10 +292,12 @@ def _get_context_fn_cache_hash(context_fn):
     (or on the underlying policy function for functools.partial objects).
 
     Returns:
-        str: The cache hash if found
+        The cache hash if found
         None: If no hash is provided (caller should bypass caching)
     """
     import functools
+
+    from torch.utils.checkpoint import create_selective_checkpoint_contexts
 
     if hasattr(context_fn, "cache_hash"):
         return context_fn.cache_hash
@@ -303,16 +305,20 @@ def _get_context_fn_cache_hash(context_fn):
     if isinstance(context_fn, functools.partial):
         if hasattr(context_fn.func, "cache_hash"):
             return context_fn.func.cache_hash
-        for arg in context_fn.args:
-            if hasattr(arg, "cache_hash"):
-                return arg.cache_hash
-            if callable(arg) and hasattr(arg, "cache_hash"):
-                return arg.cache_hash
+        # Check for the specific create_selective_checkpoint_contexts builder
+        if context_fn.func is create_selective_checkpoint_contexts:
+            # The first argument is the policy_fn which should have the cache_hash
+            if context_fn.args and hasattr(context_fn.args[0], "cache_hash"):
+                # Incorporate builder function identity into the hash
+                return (
+                    create_selective_checkpoint_contexts,
+                    context_fn.args[0].cache_hash,
+                )
 
     return None
 
 
-def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
+def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list:
     """
     Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
 
@@ -330,10 +336,11 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
                 raise BypassAOTAutogradCache(
                     "SAC context_fn does not have a cache_hash attribute. "
                     "To enable caching with selective activation checkpointing, "
-                    "add a 'cache_hash' attribute to your policy function that uniquely "
-                    "identifies the checkpointing behavior (e.g., hash of ops_to_save list)."
+                    "add a 'cache_hash' attribute to your policy function. This can be "
+                    "a string or any hashable value that uniquely identifies the checkpointing "
+                    "behavior (e.g., based on source code hash and closed-over globals)."
                 )
-            hashes.append(str(cache_hash))
+            hashes.append(cache_hash)
     return hashes
 
 
@@ -422,7 +429,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
                 self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
             )
 
-        self.sac_context_fn_hashes: list[str] = _collect_context_fn_hashes(gm)
+        self.sac_context_fn_hashes: list = _collect_context_fn_hashes(gm)
 
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
