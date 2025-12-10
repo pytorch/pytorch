@@ -29,7 +29,7 @@ class Norm:
     typ: str
 
 
-pytree.register_constant(Norm)
+torch._library.opaque_object.register_opaque_type(Norm, typ="value")
 
 
 @dataclass
