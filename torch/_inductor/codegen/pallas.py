@@ -1278,14 +1278,19 @@ class PallasKernel(SIMDKernel):
                 mask_var = self._get_or_create_mask(name)
                 store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
             elif index_str == "...":
-                # When storing the full array, reshape to match the output shape.
+                # When storing the full array, we need to match the output shape.
                 # This handles:
                 # - Mixed indexing producing flat results needing reshape
                 # - Squeeze operations where value has more dims than output
-                # - If shapes already match, reshape is a no-op.
-                # Use the output array's shape at runtime to avoid issues with
-                # symbolic sizes not being defined in the kernel.
-                store_expr = f"{out}[...] = {value}.reshape({out}.shape)"
+                # - Scalar values that need to be broadcast to the output shape
+                # - If shapes already match, operations are no-ops.
+                # Use jnp.full for scalars (fills output with value),
+                # otherwise reshape for arrays with matching element count.
+                store_expr = (
+                    f"{out}[...] = (jnp.full({out}.shape, {value}) "
+                    f"if jnp.asarray({value}).ndim == 0 "
+                    f"else jnp.asarray({value}).reshape({out}.shape))"
+                )
             else:
                 # Direct indexed assignment
                 store_expr = f"{out}[{index_str}] = {value}"
