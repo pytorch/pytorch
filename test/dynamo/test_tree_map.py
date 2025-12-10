@@ -444,10 +444,7 @@ class TreeMapCompileTests(TestCase):
         my_dict = MyDict({"a": 1, "b": 2})
         tree = {"custom_dict": my_dict, "regular": {"x": 3}}
 
-        visited_nodes = []
-
         def mapper(node):
-            visited_nodes.append(node)
             if isinstance(node, MyDict):
                 result = MyDict()
                 for k, v in node.items():
@@ -459,13 +456,6 @@ class TreeMapCompileTests(TestCase):
             return tree_map_impl(mapper, arg)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-
-        # Run eager first
-        visited_nodes.clear()
-        fn(tree)
-
-        # Run compiled
-        visited_nodes.clear()
         result = compiled(tree)
 
         # The MyDict should be treated as a leaf, not traversed into
