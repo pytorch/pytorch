@@ -73,7 +73,6 @@ from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
@@ -106,6 +105,7 @@ DEBUG = False
 if TYPE_CHECKING:
     import concurrent
 
+    from torch._inductor.autotune_process import BenchmarkRequest
     from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
 
     from .codegen.common import CSE
@@ -2352,26 +2352,60 @@ class ExternKernelCaller(ChoiceCaller):
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
+        self.bmreq: Optional[BenchmarkRequest] = None
+
+        from torch._inductor.autotune_process import (
+            ExternKernelBenchmarkRequest,
+            ExternKernelCPUBenchmarkRequest,
+            ExternKernelGPUBenchmarkRequest,
+        )
+
+        # Determine if this is a GPU or CPU kernel
+        if self.layout:
+            device = self.layout.device
+        else:
+            device = None
+            for inp_node in self.input_nodes:
+                dev = inp_node.get_device()
+                if dev and dev.type != "cpu":
+                    device = dev
+                    break
+
+            if not device:
+                device = torch.device("cpu")
+
+        self.input_tensor_meta: Union[list[TensorMeta], TensorMeta]
+        self.output_tensor_meta: Union[list[TensorMeta], TensorMeta]
+        self.input_tensor_meta, self.output_tensor_meta = [], []
+        if device.type == "cpu":
+            benchmark_cls = ExternKernelCPUBenchmarkRequest
+        else:
+            try:
+                self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+                self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            except Exception:
+                log.warning(
+                    "Constructing input/output tensor meta failed for Extern Choice"
+                )
+
+            benchmark_cls = ExternKernelGPUBenchmarkRequest
+
+        self.bmreq: ExternKernelBenchmarkRequest = benchmark_cls(
+            kernel_name=self.choice.name,
+            input_tensor_meta=self.input_tensor_meta,
+            output_tensor_meta=self.output_tensor_meta,
+            extra_args=(),
+            callable_path=self.choice.call_name(),
+            kwargs=self.kwargs,
+            has_out_variant=self.has_out_variant,
+        )
 
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
-        if out.numel() == 0:
-            # no need to run the kerrnel of do benchmarking
-            return 0.0
-        if self.has_out_variant:
-            return super().benchmark(*args, out=out)
-        else:
-            algo = self.to_callable()
-            out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(
-                out_new, tuple(out.size()), tuple(out.stride())
-            )
-            out.copy_(out_new)  # for correctness checking
-            if config.profile_bandwidth_with_do_bench_using_profiling:
-                return do_bench_using_profiling(lambda: algo(*args))
-            return benchmarker.benchmark(algo, args, {})
+        # pyrefly: ignore [missing-attribute]
+        return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
         """
@@ -2387,10 +2421,8 @@ class ExternKernelCaller(ChoiceCaller):
             algo(*args)
 
     def to_callable(self):
-        fn = self.choice.to_callable()
-        if self.kwargs:
-            return functools.partial(fn, **self.kwargs)
-        return fn
+        # pyrefly: ignore [missing-attribute]
+        return self.bmreq.to_callable()
 
     def hash_key(self):
         return "-".join(
@@ -2751,7 +2783,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3663,9 +3695,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3676,9 +3706,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3841,7 +3869,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
@@ -3875,7 +3903,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
