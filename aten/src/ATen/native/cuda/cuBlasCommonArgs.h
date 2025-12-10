@@ -166,7 +166,8 @@ struct cublasCommonArgs {
     }
 
     // Prepare bias if it is different from result and beta != 0
-    if (self.has_value() && !c.is_same(*self) && beta->toComplexDouble() != 0.0) {
+    if (self.has_value() && !c.is_same(*self)
+        && (!beta.has_value() || beta->toComplexDouble() != 0.0)) {
       const bool can_use_bias_in_epilogue = (
           transpose_result // required so that bias properly broadcasts in epilogue
           && (!beta.has_value() || beta->toComplexDouble() == 1.0) // no scaling for bias in epilogue
