@@ -169,7 +169,11 @@ def fakify(
     sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
-    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
+    if (
+        _is_constant_argument(t)
+        or isinstance(t, (torch.ScriptObject, torch.nn.Module))
+        or is_opaque_type(type(t))
+    ):
         return t
 
     if isinstance(t, _IntWrapper):
