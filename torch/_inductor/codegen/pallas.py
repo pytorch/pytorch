@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import typing_extensions
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
@@ -883,26 +884,48 @@ class PallasKernel(SIMDKernel):
                 # Contiguous multi-dimensional access
                 return "..."
             else:
-                # Strided multi-dimensional access - requires advanced indexing
-                # For now, use ellipsis which may work for many cases
-                # TODO: Implement proper multi-dimensional strided indexing
+                # Strided multi-dimensional access
+                # Since we call .contiguous() on inputs before passing to JAX,
+                # strided tensors become contiguous and we can just use [...]
                 return "..."
 
-        # For complex cases, raise an error
-        return self._generate_index_array(index)
+        # For complex cases, use [...] since inputs are made contiguous
+        return "..."
+
+    def _generate_strided_index(self, index: sympy.Expr) -> str:
+        """
+        Generate JAX code to compute an index array for strided/complex indexing patterns.
+
+        For expressions like `2 * x3 + 32 * x2 + 256 * x1 + 1024 * x0`, we generate
+        code that computes the flattened index array using broadcasting.
+
+        The iteration variables (x0, x1, x2, x3) are already defined as jnp.arange arrays
+        in the kernel. We just need to convert the sympy expression to JAX code.
+        """
+        # Get iteration variables
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+        free_symbols = index.free_symbols
+
+        # Check that all free symbols are iteration variables (no indirect vars)
+        used_vars = free_symbols & iter_vars
+        if used_vars != free_symbols:
+            raise Unsupported(
+                f"Pallas backend does not yet support mixed index pattern: {index}"
+            )
+
+        # Convert sympy expression to Python/JAX code string
+        # The iteration variables are already defined as jnp.arange arrays
+        index_str = self.kexpr(index)
+
+        # Mark this as requiring flatten access
+        return index_str
 
     def _generate_index_array(self, index: sympy.Expr) -> str:
         """
         Generate JAX code to compute an index array for complex indexing patterns.
-
-        For very complex patterns that can't be expressed as simple slices,
-        we need to compute the indices explicitly. This is not yet fully implemented.
+        Delegates to _generate_strided_index.
         """
-        # For now, raise an error for complex patterns
-        # TODO: Implement advanced indexing support
-        raise Unsupported(
-            f"Pallas backend does not yet support complex indexing pattern: {index}"
-        )
+        return self._generate_strided_index(index)
 
     def _has_iteration_vars(self, index: sympy.Expr) -> bool:
         """Check if index expression contains iteration variables (x0, x1, etc.)."""
@@ -934,7 +957,10 @@ class PallasKernel(SIMDKernel):
         elif has_indirect:
             return self.kexpr(index), False
         else:
-            return self._get_index_str(index), False
+            index_str = self._get_index_str(index)
+            # Since inputs are made contiguous before passing to JAX,
+            # we can use direct indexing without flattening
+            return index_str, False
 
     def _determine_masked_ops_for_kernel(self) -> bool:
         """
@@ -1006,7 +1032,8 @@ class PallasKernel(SIMDKernel):
             self.tensor_masks[buf_name] = mask_var
         return self.tensor_masks[buf_name]
 
-    def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
+    @typing_extensions.override
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
@@ -1018,6 +1045,69 @@ class PallasKernel(SIMDKernel):
             self.use_masked_ops = self._determine_masked_ops_for_kernel()
 
         index_str, needs_flatten = self._get_index_expr(index)
+
+        # Check for buffer size mismatch when using full array access
+        # This happens with pooling operations where input/output have different sizes
+        # In this case, we need to use strided indexing even though _get_index_str
+        # returned "..." (because the index expression is strided)
+        if index_str == "..." and not needs_flatten:
+            try:
+                buf_obj = V.graph.get_buffer(name)
+                buf_size = buf_obj.get_size()
+                buf_numel = 1
+                for s in buf_size:
+                    buf_numel *= int(s) if hasattr(s, "__int__") else s
+
+                # Check if the index expression has non-unit strides
+                # If so, it's a genuine strided access pattern (like pooling)
+                # vs just a transposed tensor (which will be made contiguous)
+                iter_vars = OrderedSet(self.range_tree_nodes.keys())
+                used_vars = index.free_symbols & iter_vars
+
+                has_non_unit_stride = False
+                for var in used_vars:
+                    var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
+                        index, var
+                    )
+                    stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+                    if stride is not None and stride != 1:
+                        has_non_unit_stride = True
+                        break
+
+                # Compute the expected output size from iteration variables USED in the index
+                # Only multiply ranges of variables that appear in the index expression
+                used_range_lengths = []
+                for var in used_vars:
+                    if var in self.range_tree_nodes:
+                        entry = self.range_tree_nodes[var]
+                        try:
+                            length_val = (
+                                int(entry.length)
+                                if hasattr(entry.length, "__int__")
+                                else None
+                            )
+                        except (TypeError, ValueError):
+                            length_val = None
+                        if length_val is not None:
+                            used_range_lengths.append(length_val)
+
+                # Multiply ranges of used variables to get expected output size
+                output_numel = 1
+                for l in used_range_lengths:
+                    output_numel *= l
+
+                # Use strided indexing if:
+                # 1. Index has non-unit strides AND
+                # 2. Buffer size differs from expected output size
+                if (
+                    has_non_unit_stride
+                    and output_numel > 0
+                    and buf_numel != output_numel
+                ):
+                    index_str = self._generate_strided_index(index)
+                    needs_flatten = True
+            except (TypeError, ValueError, AttributeError):
+                pass
 
         # Build load expression using string concatenation
         use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
@@ -1566,19 +1656,39 @@ class PallasKernel(SIMDKernel):
                         except Exception:
                             pass
 
-                for var_sym, entry in self.range_tree_nodes.items():
+                # Collect all iteration variable info for broadcasting shape computation
+                var_items = list(self.range_tree_nodes.items())
+
+                # Count vars that are NOT the "total" var (which equals output numel)
+                # These are the actual iteration dimensions that need broadcasting
+                broadcast_vars = []
+                total_var_idx = None
+                for idx, (var_sym, entry) in enumerate(var_items):
+                    try:
+                        length_val = (
+                            int(entry.length)
+                            if hasattr(entry.length, "__int__")
+                            else None
+                        )
+                    except (TypeError, ValueError):
+                        length_val = None
+                    if length_val is not None and length_val == first_output_numel:
+                        total_var_idx = idx
+                    else:
+                        broadcast_vars.append((idx, var_sym, entry, length_val))
+
+                num_broadcast_dims = len(broadcast_vars)
+
+                for idx, (var_sym, entry) in enumerate(var_items):
                     var_name = str(var_sym)
                     length = entry.length
                     length_str = self.kexpr(length)
-                    # If the iteration variable length matches the output numel,
-                    # reshape it to match the output shape for proper broadcasting
                     try:
                         length_val = int(length) if hasattr(length, "__int__") else None
                     except (TypeError, ValueError):
                         length_val = None
 
                     # Skip symbolic lengths - jnp.arange requires concrete values
-                    # This happens with dynamic shapes
                     if length_val is None:
                         continue
 
@@ -1587,7 +1697,26 @@ class PallasKernel(SIMDKernel):
                         and len(first_output_shape) > 1
                         and length_val == first_output_numel
                     ):
+                        # This is the "total" variable - reshape to output shape
                         shape_str = ", ".join(str(s) for s in first_output_shape)
+                        code.writeline(
+                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                        )
+                    elif num_broadcast_dims > 1 and idx != total_var_idx:
+                        # Find position of this var among broadcast vars
+                        broadcast_idx = next(
+                            i
+                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
+                            if vidx == idx
+                        )
+                        # Reshape for broadcasting with other iteration vars
+                        # Order: outermost to innermost should match the output shape
+                        # Reverse the order so first var (smallest index) is innermost
+                        # and last var (largest index) is outermost
+                        reversed_idx = num_broadcast_dims - 1 - broadcast_idx
+                        shape_parts = ["1"] * num_broadcast_dims
+                        shape_parts[reversed_idx] = length_str
+                        shape_str = ", ".join(shape_parts)
                         code.writeline(
                             f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
                         )
