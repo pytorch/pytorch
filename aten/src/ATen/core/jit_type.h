@@ -2243,7 +2243,7 @@ static const TypeKind Kind = TypeKind::ScalarTypeType;
 static ScalarTypeTypePtr get();
 
 private:
-ScalarTypeType()  = default;
+ScalarTypeType() = default;
 };
 
 struct MemoryFormatType;
@@ -2257,7 +2257,7 @@ static const TypeKind Kind = TypeKind::MemoryFormatType;
 static MemoryFormatTypePtr get();
 
 private:
-MemoryFormatType()  = default;
+MemoryFormatType() = default;
 };
 
 struct LayoutType;
@@ -2271,7 +2271,7 @@ static const TypeKind Kind = TypeKind::LayoutType;
 static LayoutTypePtr get();
 
 private:
-LayoutType()  = default;
+LayoutType() = default;
 };
 
 namespace detail {

@@ -127,9 +127,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
-    : keyword_only(keyword_only),
-
-      default_scalar(0) {
+    : keyword_only(keyword_only), default_scalar(0) {
   auto space = fmt.find(' ');
   TORCH_CHECK(
       space != std::string::npos, "FunctionParameter(): missing type: " + fmt);
