@@ -2025,6 +2025,60 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_frozen_dataclass_pytree_output(self):
+        import dataclasses
+
+        from torch.utils._pytree import register_dataclass
+
+        @dataclasses.dataclass(frozen=True)
+        class InputNode:
+            x: torch.Tensor
+
+        @dataclasses.dataclass(frozen=True)
+        class OutputNode:
+            y: torch.Tensor
+
+        register_dataclass(InputNode)
+        register_dataclass(OutputNode)
+
+        class TinyMLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8)
+                self.fc2 = nn.Linear(8, 4)
+
+            def forward(self, inp: InputNode) -> OutputNode:
+                h = self.fc1(inp.x)
+                h = torch.nn.functional.silu(h)
+                y = self.fc2(h)
+                return OutputNode(y=y)
+
+        mlp = TinyMLP()
+
+        def checkpointed_forward(inp):
+            return torch.utils.checkpoint.checkpoint(
+                mlp.forward,
+                inp,
+                use_reentrant=False,
+                preserve_rng_state=True,
+            )
+
+        input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+        torch.manual_seed(0)
+        output_eager = checkpointed_forward(input_eager)
+        output_eager.y.sum().backward()
+
+        input_compiled = InputNode(
+            x=input_eager.x.detach().clone().requires_grad_(True)
+        )
+        torch.manual_seed(0)
+        compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+        output_compiled = compiled_fn(input_compiled)
+        output_compiled.y.sum().backward()
+
+        self.assertEqual(output_eager.y, output_compiled.y)
+        self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""

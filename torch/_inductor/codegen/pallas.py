@@ -333,6 +333,16 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.remainder({a}, {b})"
 
     @staticmethod
+    def truncdiv(a: str, b: str) -> str:
+        # Truncated division (rounds toward zero)
+        # For integers: sign(a)*sign(b) * (abs(a) // abs(b))
+        return f"(jnp.sign({a}) * jnp.sign({b}) * (jnp.abs({a}) // jnp.abs({b}))).astype({a}.dtype)"
+
+    @staticmethod
+    def floordiv(a: str, b: str) -> str:
+        return f"({a} // {b})"
+
+    @staticmethod
     def clamp(x: str, min_val: str, max_val: str) -> str:
         return f"jnp.clip({x}, {min_val}, {max_val})"
 
