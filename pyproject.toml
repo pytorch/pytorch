@@ -347,7 +347,6 @@ keep-runtime-typing = true
 "torchgen/**" = [
     "S101"
 ]
-"torch/__init__.py" = ["S101"]
 "torch/_custom_op/**" = ["S101"]
 "torch/_decomp/**" = ["S101"]
 "torch/_dispatch/python.py" = ["S101"]
