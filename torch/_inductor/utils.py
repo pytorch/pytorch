@@ -330,6 +330,7 @@ def _do_bench_using_profiling(
     # Estimate the runtime of the function
     start_event = device_interface.Event(enable_timing=True)
     end_event = device_interface.Event(enable_timing=True)
+
     start_event.record()
     for _ in range(5):
         cache.zero_()
