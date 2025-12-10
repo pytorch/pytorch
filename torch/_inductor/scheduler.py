@@ -237,6 +237,10 @@ class MixOrderReduction:
         if not config.triton.mix_order_reduction:
             return False
 
+        # TODO: Mix order reduction is not supported with cpp_wrapper yet
+        if V.graph.cpp_wrapper:
+            return False
+
         if not node1.is_gpu() or not node2.is_gpu():
             return False
         device_type = node1.get_device().type  # type: ignore[union-attr]
@@ -646,11 +650,18 @@ class BaseSchedulerNode:
         )
 
     def used_or_aliased_buffer_names(self) -> OrderedSet[str]:
+        """
+        Returns buffer names used by this node, including aliases.
+
+        Note: is_fake WeakDeps are excluded since they are purely for ordering
+        and should not affect buffer lifetime.
+        """
         used_names: OrderedSet[str] = OrderedSet()
 
         deps = [
             dep.name
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+            if not (isinstance(dep, WeakDep) and dep.is_fake)
         ]
         while len(deps) > 0:
             dep = deps.pop()
@@ -3178,7 +3189,9 @@ class Scheduler:
 
             for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
                 add_user(add_dep, node, is_weak=True)
-                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
+                # is_fake=True because these are control dependencies for ordering only,
+                # they should not extend buffer lifetimes
+                node.add_fake_dep(WeakDep(add_dep, node.get_name(), is_fake=True))
 
             for add_dep in V.graph.additional_star_deps[node.get_name()]:
                 add_user(add_dep, node, is_weak=False)  # Strong dependency
