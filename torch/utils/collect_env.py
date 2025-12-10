@@ -124,7 +124,7 @@ def run(command):
         is_posix = os.name == 'posix'
         command = shlex.split(command, posix=is_posix)
     p = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=False
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
     )
     raw_output, raw_err = p.communicate()
     rc = p.returncode
