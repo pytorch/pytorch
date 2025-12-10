@@ -22,6 +22,7 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -154,7 +155,7 @@ class DTensorRedistributePlanner:
     class DistState:
         placements: tuple[Placement, ...]
         tensor_dim_to_mesh_dim: ShardOrder
-        _hash: Optional[int] = dataclasses.field(
+        _hash: int | None = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
 
@@ -227,7 +228,7 @@ class DTensorRedistributePlanner:
         mesh: DeviceMesh,
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
-        src_shard_order: Optional[ShardOrder] = None,
+        src_shard_order: ShardOrder | None = None,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -557,9 +558,38 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        assert src_spec.shard_order is not None and dst_spec.shard_order is not None
-        src_state = self.DistState(src_spec.placements, src_spec.shard_order)
-        dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
+        # In case _StridedShard exists in placements, we let _StridedShard have
+        # higher priority to express shard_order.
+        if any(
+            isinstance(placement, _StridedShard) for placement in src_spec.placements
+        ):
+            src_placements, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_spec.placements, src_spec.mesh
+                )
+            )
+        else:
+            src_placements = src_spec.placements
+            src_shard_order = src_spec.shard_order
+        if any(
+            isinstance(placement, _StridedShard) for placement in dst_spec.placements
+        ):
+            dst_placements, dst_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    dst_spec.placements, dst_spec.mesh
+                )
+            )
+        else:
+            dst_placements = dst_spec.placements
+            dst_shard_order = dst_spec.shard_order
+        if src_shard_order is None or dst_shard_order is None:
+            raise NotImplementedError(
+                "Redistribution of _StridedShard placement is only supported for "
+                "_StridedShard that can be converted to ordered Shard placements. "
+                "Full _StridedShard redistribution support is not yet implemented."
+            )
+        src_state = self.DistState(src_placements, src_shard_order)
+        dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         for cur_state, nxt_state in itertools.pairwise(state_path):
@@ -712,7 +742,7 @@ class DTensorRedistributePlanner:
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     device_mesh = src_spec.device_mesh
     src_shard_order = src_spec.shard_order
@@ -720,7 +750,6 @@ def _gen_transform_infos_non_cached(
     # DTensorSpec should automatically generate shard_order, and it can be () if
     # no shard.
     assert src_shard_order is not None and dst_shard_order is not None
-
     # Determine which transform strategy to use:
     # 1. Non-standard device order → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
@@ -736,7 +765,6 @@ def _gen_transform_infos_non_cached(
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     elif use_graph_based_transform is None:
         use_graph_based_transform = False
-
     drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_graph_based_transform:
         transform_infos = drp.generate_graph_based_transform_infos(
@@ -751,7 +779,7 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, use_graph_based_transform
@@ -765,7 +793,7 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     is_backward: bool = False,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -919,8 +947,8 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype

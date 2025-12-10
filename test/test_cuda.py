@@ -5664,6 +5664,100 @@ class TestMemPool(TestCase):
 
         self._teardown_mempool_limited_memory_test()
 
+    @serialTest()
+    def test_mempool_no_split(self):
+        torch.cuda.empty_cache()
+
+        # Create two pools - one with no_split=True, one without
+        pool_split = torch.cuda.MemPool()  # default: no_split=False
+        pool_no_split = torch.cuda.MemPool(no_split=True)
+
+        # 1 MB in number of float32 elements
+        nelem_1mb = 1024 * 1024 // 4
+
+        # Allocate 4 MB in each pool - this should allocate a 20 MB segment
+        with torch.cuda.use_mem_pool(pool_split):
+            a_split = torch.randn(4 * nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_no_split):
+            a_no_split = torch.randn(4 * nelem_1mb, device="cuda")
+
+        # Now allocate another 4 MB - this should cause splitting in the normal
+        # pool but not in the no_split pool. Instead, the no_split pool should
+        # have a new segment.
+        with torch.cuda.use_mem_pool(pool_split):
+            b_split = torch.randn(4 * nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_no_split):
+            b_no_split = torch.randn(4 * nelem_1mb, device="cuda")
+
+        # assert the number of segments in the no_split pool is larger than that
+        # of the split pool
+        assert len(pool_no_split.snapshot()) > len(pool_split.snapshot()), (
+            f"Expected no_split pool to have more segments, "
+            f"but got {len(pool_no_split.snapshot())} vs {len(pool_split.snapshot())}"
+        )
+
+        # Specifically, the no_split pool should have exactly 1 block per segment
+        for seg in pool_no_split.snapshot():
+            assert len(seg["blocks"]) == 1, (
+                f"Expected 1 block in no_split segment, got {len(seg['blocks'])}"
+            )
+
+        # Count blocks in each pool
+        def count_blocks(pool):
+            total = 0
+            for seg in pool.snapshot():
+                total += len(seg["blocks"])
+            return total
+
+        blocks_split = count_blocks(pool_split)
+        blocks_no_split = count_blocks(pool_no_split)
+
+        # The pool with no_split should have fewer blocks because it doesn't
+        # have a remaining block representing the remaining memory in the segment.
+        self.assertLess(
+            blocks_no_split,
+            blocks_split,
+            f"Expected no_split pool to have fewer blocks, "
+            f"but got {blocks_no_split} vs {blocks_split}",
+        )
+
+    @serialTest()
+    def test_deleted_mempool_not_used_on_oom(self):
+        """
+        Test that a deleted mempool with use_on_oom=True is properly removed from use_on_oom_pools.
+        """
+        allocator, _ = self.get_dummy_allocator(check_vars=False)
+
+        nelem_1mb = 1024 * 1024 // 4
+
+        # set 40 mb total available memory
+        self._setup_mempool_limited_memory_test(40)
+
+        # Create many pools with use_on_oom=True, allocate memory, then delete the pools
+        for _ in range(10):
+            pool_use_on_oom = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
+            with torch.cuda.use_mem_pool(pool_use_on_oom):
+                a = torch.randn(40 * nelem_1mb, device="cuda")
+            del a
+            del pool_use_on_oom
+
+        # create new pool that we want to use_on_oom, all other pools should be deleted
+        # all available 40mb in use by mempool
+        new_pool_use_on_oom = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
+        with torch.cuda.use_mem_pool(new_pool_use_on_oom):
+            a = torch.randn(40 * nelem_1mb, device="cuda")
+        del a
+
+        # allocate tensors that will fallback to use_on_oom pool since all available 40mb in use by mempool
+        # tensors should only use valid pool and not deleted pools
+        b = torch.randn(20 * nelem_1mb, device="cuda")
+        c = torch.randn(20 * nelem_1mb, device="cuda")
+
+        del b
+        del c
+        del new_pool_use_on_oom
+        self._teardown_mempool_limited_memory_test()
+
     def test_mempool_multithread(self):
         pool_ids = []
 
@@ -5709,6 +5803,37 @@ class TestMemPool(TestCase):
         for p in pools:
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
+
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.cuda.empty_cache()
+        pool1 = torch.cuda.MemPool()
+        pool2 = torch.cuda.MemPool()
+        pool3 = torch.cuda.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="cuda")
+            data.append(x)
+
+        with torch.cuda.use_mem_pool(pool1):
+            allocate_data()
+            with torch.cuda.use_mem_pool(pool2):
+                allocate_data()
+                with torch.cuda.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.cuda.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.cuda.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.cuda.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -5856,15 +5981,31 @@ class TestMemPool(TestCase):
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
+        torch.cuda.empty_cache()
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool = torch.cuda.MemPool(allocator.allocator())
 
-        # torch.cuda.MemPool doesn't work with expandable segments
-        with self.assertRaises(RuntimeError):
-            nelem_1mb = 1024 * 1024 // 4
-            with torch.cuda.use_mem_pool(pool):
-                out_0 = torch.randn(nelem_1mb, device="cuda")
+        data = []
+        nelem = 1024 * 1024 // 4
+        with torch.cuda.use_mem_pool(pool):
+            data.append(torch.empty(nelem, device="cuda"))
+
+        # the second allocation should be in expandable segment
+        data.append(torch.empty(nelem, device="cuda"))
+
+        segments = torch.cuda.memory.memory_snapshot()
+
+        num_expandable_segments = 0
+        for segment in segments:
+            if segment["is_expandable"]:
+                num_expandable_segments += 1
+
+        self.assertEqual(len(segments), 2, "Expected to have 2 segment")
+        self.assertEqual(
+            num_expandable_segments, 1, "Expected to have 1 expandable segment only"
+        )
+
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
     @serialTest()
