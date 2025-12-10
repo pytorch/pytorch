@@ -23,7 +23,6 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>

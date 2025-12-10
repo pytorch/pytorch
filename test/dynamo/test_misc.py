@@ -1281,6 +1281,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_tensor_call_obj_hasattr_view(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output3 = getattr(x, "view", None)(10)
+            return output3
+
+        x = torch.randn(10)
+        self.assertEqual(x.view(10), fn(x))
+
     def test_mro_type_tensor_no_source(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -13302,6 +13311,16 @@ fn
         self.assertRaises(Unsupported, f, fake_arg=1)
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
+
+    def test_guard_string_escaped(self):
+        d = {frozenset({0}): {frozenset({0}): 1}}
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + d[frozenset({0})][frozenset({0})]
+
+        x = torch.ones(3)
+        self.assertEqual(x + 1, f(x))
 
     def test_compiled_class_graph_break(self):
         counter = CompileCounter()
