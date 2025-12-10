@@ -70,7 +70,7 @@ _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
-f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
@@ -1021,7 +1021,7 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -1038,7 +1038,7 @@ class TestFP8Matmul(TestCase):
         difference = torch.abs(out_fp32 - outb_fp32)
         self.assertEqual(difference, torch.tensor(4.0, device=device).expand_as(out_fp32))
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("bias", [True, False])
     def test_non_divisible_leading_dim(self, device, bias: bool) -> None:
@@ -1051,7 +1051,7 @@ class TestFP8Matmul(TestCase):
             input_bias = torch.rand((16,), device=device).to(torch.bfloat16)
         _ = scaled_mm_wrap(x, y, scale_a, scale_b, bias=input_bias)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -1064,7 +1064,7 @@ class TestFP8Matmul(TestCase):
         outb_fp32 = outb_fp8.to(torch.float32)
         self.assertEqual(outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32))
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -1073,8 +1073,8 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
-        # XPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
-        if "xpu" not in device:
+        # XPU and CPU support the case when out_dtype is fp32 + bias. So we just test it with normal run.
+        if "xpu" not in device and "cpu" not in device:
             self.assertRaisesRegex(
                 ValueError if torch.cuda.is_available() else RuntimeError,
                 "Bias is not supported when out_dtype is set to Float32",
@@ -1110,7 +1110,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=e4m3_type, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
@@ -1141,7 +1141,7 @@ class TestFP8Matmul(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "cpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1217,7 +1217,7 @@ class TestFP8Matmul(TestCase):
             (torch.cuda.is_available() and
              torch.cuda.get_device_capability() == (9, 0) and
              torch.version.cuda and
-             torch.version.cuda >= "12.9")):
+             torch.version.cuda >= "12.9") or torch.cpu.is_available()):
             out = e5m2()
             self.assertEqual(out, torch.ones_like(out) * 128.)
         else:
@@ -2401,7 +2401,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
