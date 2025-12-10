@@ -726,8 +726,7 @@ class CPUReproTests(TestCase):
             seq_len,
         )
 
-    @parametrize(
-        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+    _test_lstm_packed_change_input_sizes_cpu_params = list(
         itertools.product(
             *[
                 [False],
@@ -741,7 +740,12 @@ class CPUReproTests(TestCase):
                 [2],
                 [3],
             ]
-        ),
+        )
+    )
+
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        _test_lstm_packed_change_input_sizes_cpu_params,
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
@@ -2235,11 +2239,15 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
         vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
-        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
-        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
+        vec_avx512_vnni = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[2]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[3]
         self.assertTrue(vec_amx.bit_width() == 512)
         self.assertTrue(vec_amx.nelements() == 16)
         self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
+        self.assertTrue(vec_avx512_vnni.bit_width() == 512)
+        self.assertTrue(vec_avx512_vnni.nelements(torch.int8) == 64)
+        self.assertTrue(vec_avx512_vnni.nelements(torch.uint8) == 64)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -2269,6 +2277,8 @@ class CPUReproTests(TestCase):
             isa = cpu_vec_isa.pick_vec_isa()
             if vec_amx in isa_list:
                 self.assertTrue(isa == vec_amx)
+            elif vec_avx512_vnni in isa_list:
+                self.assertTrue(isa == vec_avx512_vnni)
             elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
@@ -2287,6 +2297,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2296,6 +2308,8 @@ class CPUReproTests(TestCase):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx2)
+                if vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx2)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx2)
@@ -2307,6 +2321,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2322,6 +2338,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2332,6 +2350,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -4445,16 +4465,17 @@ class CPUReproTests(TestCase):
             def forward(self, x):
                 return self.gn(x)
 
-        for dynamic in [True, False]:
-            torch._dynamo.reset()
-            metrics.reset()
-            mod = M().eval()
-            x = torch.randn(1, 32, 128, 128, 128)
-            with torch.no_grad():
-                expected = mod(x)
-                compiled_m = torch.compile(mod, dynamic=dynamic)
-                actual = compiled_m(x)
-                self.assertEqual(expected, actual)
+        for simdlen, dynamic in itertools.product([None, 0], [True, False]):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                mod = M().eval()
+                x = torch.randn(1, 32, 128, 128, 128)
+                with torch.no_grad():
+                    expected = mod(x)
+                    compiled_m = torch.compile(mod, dynamic=dynamic)
+                    actual = compiled_m(x)
+                    self.assertEqual(expected, actual)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -4696,6 +4717,23 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.rand(37)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            check_metrics_vec_kernel_count(1)
+            # Check that both main and tail loops are vectorized
+            if _can_check_vec_metrics():
+                FileCheck().check_count(
+                    "at::vec::VecMask<float,1>::from", 2, exactly=True
+                ).run(code)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_symbolic_shape_scalar_value_reduction(self):
@@ -4717,6 +4755,23 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randint(0, 100, (37, 37), dtype=torch.int32)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            check_metrics_vec_kernel_count(1)
+            # Check that both main and tail loops are vectorized
+            if _can_check_vec_metrics():
+                FileCheck().check_count(
+                    "at::vec::Vectorized<int32_t>::loadu", 2, exactly=True
+                ).run(code)
+
     def test_int32_reduction_vec(self):
         def fn(x):
             return x.sum(dim=1)
@@ -4725,6 +4780,23 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randint(0, 100, (37, 37), dtype=torch.int32)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            check_metrics_vec_kernel_count(1)
+            # Check that both main and tail loops are vectorized
+            if _can_check_vec_metrics():
+                FileCheck().check_count(
+                    "at::vec::Vectorized<int32_t>::loadu", 2, exactly=True
+                ).run(code)
 
     def test_uint32_pointwise_vec(self):
         def fn(x):
@@ -4755,6 +4827,23 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randint(0, 100, (37, 37), dtype=torch.int64)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            check_metrics_vec_kernel_count(1)
+            # Check that both main and tail loops are vectorized
+            if _can_check_vec_metrics():
+                FileCheck().check_count(
+                    "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
+                ).run(code)
+
     def test_int64_reduction_vec(self):
         def fn(x):
             return x.sum(dim=1)
@@ -4763,6 +4852,23 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randint(0, 100, (37, 37), dtype=torch.int64)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            check_metrics_vec_kernel_count(1)
+            # Check that both main and tail loops are vectorized
+            if _can_check_vec_metrics():
+                FileCheck().check_count(
+                    "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
+                ).run(code)
 
     def test_uint64_pointwise_vec(self):
         def fn(x):
@@ -5374,7 +5480,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            4,
+            8,
             exactly=True,
         ).run(code)
 

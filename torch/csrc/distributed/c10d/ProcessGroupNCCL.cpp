@@ -2016,7 +2016,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
           << pg_->logPrefix()
           << "ProcessGroupNCCL monitor thread is disabled, but would have terminated the process"
           << "after attempting to dump debug info, due to " << exitReason
-          << ".";
+          << '.';
     }
   }
 }
