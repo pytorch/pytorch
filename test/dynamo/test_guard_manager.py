@@ -101,7 +101,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(debug_info2.result)
         # user_stack should be None when not provided
         self.assertTrue(
-            debug_info2.user_stack is None or debug_info2.user_stack == py.none()
+            debug_info2.user_stack is None or debug_info2.user_stack == None
         )
 
     def test_global_state_guard(self):
@@ -116,7 +116,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 GuardDebugInfo(
 result=0,
 verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
-num_guards_executed=0)
+num_guards_executed=0,
+user_stack=None)
 """,
             )
         self.assertTrue(guard(None))
@@ -131,7 +132,8 @@ num_guards_executed=0)
 GuardDebugInfo(
 result=0,
 verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
-num_guards_executed=0)
+num_guards_executed=0,
+user_stack=None)
 """,
             )
         finally:

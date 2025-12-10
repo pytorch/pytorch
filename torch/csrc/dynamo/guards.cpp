@@ -1545,7 +1545,9 @@ class GuardDebugInfo {
 
   // This constructor is used when guard succeeds.
   GuardDebugInfo(bool result, int num_guards_executed)
-      : result(result), num_guards_executed(num_guards_executed), user_stack(py::none()) {}
+      : result(result),
+        num_guards_executed(num_guards_executed),
+        user_stack(py::none()) {}
 
   GuardDebugInfo(
       bool result,
@@ -1622,9 +1624,13 @@ std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
  */
 class LeafGuard {
  public:
-  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts, py::object user_stack = py::none())
+  LeafGuard(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack = py::none())
       : _root_guard_manager(root_guard_manager),
-        _verbose_code_parts(std::move(verbose_code_parts)), _user_stack(nullptr) {
+        _verbose_code_parts(std::move(verbose_code_parts)),
+        _user_stack(nullptr) {
     if (!user_stack.is_none()) {
       _user_stack = new py::object(std::move(user_stack));
     }
@@ -6712,8 +6718,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__str__", &GuardDebugInfo::to_string)
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
-      .def_readonly(
-          "num_guards_executed", &GuardDebugInfo::num_guards_executed)
+      .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
       .def_readonly("user_stack", &GuardDebugInfo::user_stack);
 
   // Leaf Guards
