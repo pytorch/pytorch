@@ -258,12 +258,24 @@ class ComboKernel(Kernel):
                guaranteed to not exceed CUDA limits for number of args (read/writes) and to have the same
                2D or 1D blocking strategy.
         """
+        # DEBUG: Log horizontal partition input
+        print(f"\nHORIZONTAL_PARTITION: {len(nodes)} nodes, custom_algorithm={custom_algorithm}")
+        for i, node in enumerate(nodes):
+            node_name = node.get_name() if hasattr(node, 'get_name') else str(node)
+            node_schedule, tiling, numel, rnumel = node_info_map[node]
+            print(f"  [{i}] {node_name}: numel={numel}, rnumel={rnumel}, tiling={tiling}")
+        
         if custom_algorithm:
             raw_partitions = _custom_combo_kernel_horizontal_partition_algorithm(
                 nodes, triton_scheduling, kernel_map, node_info_map
             )
         else:
             raw_partitions = [nodes]
+
+        print(f"  After custom_algorithm: {len(raw_partitions)} raw partition(s)")
+        for i, part in enumerate(raw_partitions):
+            node_names = [n.get_name() if hasattr(n, 'get_name') else str(n) for n in part]
+            print(f"    raw_partition[{i}]: {node_names}")
 
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
         for each subkernel node where each sublist is guaranteed to not exceed CUDA limits for number of args
@@ -275,6 +287,12 @@ class ComboKernel(Kernel):
                     raw_partition, triton_scheduling, node_info_map, custom_algorithm
                 )
             )
+        
+        print(f"  After _base_horizontal_partition: {len(all_partitions)} partition(s)")
+        for i, part in enumerate(all_partitions):
+            node_names = [n.get_name() if hasattr(n, 'get_name') else str(n) for n in part]
+            print(f"    final_partition[{i}]: {node_names}")
+        
         return all_partitions
 
     class SequentialDispatch:

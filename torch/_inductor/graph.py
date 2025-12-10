@@ -617,12 +617,15 @@ class GraphLowering(torch.fx.Interpreter):
         if dep not in self.dep_size_hint_cache:
             res = 0
             try:
-                if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
-            except KeyError:
+                # For unbacked symbols, we still want to compute a size hint
+                # using the runtime hint values. This is important for fusion
+                # decisions where we need to know relative sizes even for
+                # dynamic shapes.
+                res = dep.numbytes_hint()
+            except (KeyError, TypeError):
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
-                # `has_unbacked_symbols()` throws an error.
+                # `numbytes_hint()` throws an error.
                 pass
             self.dep_size_hint_cache[dep] = res
         return self.dep_size_hint_cache[dep]
@@ -992,6 +995,8 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
+        # import fbvscode
+        # fbvscode.set_trace()
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -1009,6 +1014,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if set_name:
             buffer.name = name
+        print("created buffer", name)
         return name
 
     def register_operation_list(self, operation_names: list[str]) -> str:

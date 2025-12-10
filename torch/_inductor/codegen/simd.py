@@ -784,8 +784,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
 
                 # Two-dimensional tiling
-                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
-                    size, remaining[current_group]
+                # Check if size > remaining[current_group], handling symbolic cases like
+                # 1536*u1 vs u1 where gt returns False (because u1 could be 0).
+                # We use "strict multiple" check: size is a multiple of remaining AND size != remaining
+                # This is equivalent to "size > remaining except when both are 0"
+                elif current_group + 1 < len(remaining) and (
+                    sv.statically_known_gt(size, remaining[current_group]) or
+                    (sv.statically_known_multiple_of(size, remaining[current_group]) and
+                     not sv.statically_known_equals(size, remaining[current_group]))
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
@@ -1335,6 +1341,7 @@ class SIMDScheduling(BaseScheduling):
             return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
+            pass
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 if not node2.is_template():
                     why(
@@ -1344,6 +1351,7 @@ class SIMDScheduling(BaseScheduling):
                         rnumel1,
                         rnumel2,
                     )
+                    pass
                     return False
                 else:
                     # prologue fusion input sizes differ from output group
@@ -1397,36 +1405,80 @@ class SIMDScheduling(BaseScheduling):
 
             return True
 
+
+
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
-            if numel1 == numel2 * rnumel2:
-                if not all(
-                    SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
-                    for n in node1.get_nodes()
-                ):
+            numel_product = numel2 * rnumel2
+            # For proper symbolic comparison including unbacked symbols,
+            # we try multiple approaches:
+            # 1. Direct statically_known_equals (works for backed symbols)
+            # 2. Simplified equality check (works for unbacked symbols where
+            #    expressions like 1536*u1 == u1*1536 should be equal after simplification)
+            numel_match = V.graph.sizevars.statically_known_equals(numel1, numel_product)
+            pass
+            if not numel_match:
+                # Try simplified equality - this handles cases where unbacked symbols
+                # have equivalent expressions that aren't recognized by statically_known_equals
+                simplified_numel1 = V.graph.sizevars.simplify(numel1)
+                simplified_product = V.graph.sizevars.simplify(numel_product)
+                numel_match = simplified_numel1 == simplified_product
+                pass
+            
+            pass
+            if numel_match:
+                try:
+                    is_compatible_result = all(
+                        SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
+                        for n in node1.get_nodes()
+                    )
+                    pass
+                except Exception as e:
+                    pass
+                    import traceback
+                    traceback.print_exc()
+                    why("is_compatible exception")
+                    return False
+                if not is_compatible_result:
                     why("nodes numel/rnumel incompatibility")
                     return False
                 if (
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    is_reduction_tiling_valid = tuple(
-                        self.select_tiling(node1.get_nodes(), numel1).values()
-                    ) in (
-                        (numel1, 1),
-                        (numel2, rnumel2, 1),
-                    )
+                    try:
+                        tiling = self.select_tiling(node1.get_nodes(), numel1)
+                        tiling_tuple = tuple(tiling.values())
+                        expected_tilings = (
+                            (numel1, 1),
+                            (numel2, rnumel2, 1),
+                        )
+                        is_reduction_tiling_valid = tiling_tuple in expected_tilings
+                        # print(f"  tiling_prevents_reduction_fusion check:", flush=True)
+                        # print(f"    tiling={tiling_tuple}", flush=True)
+                        # print(f"    expected={expected_tilings}", flush=True)
+                        # print(f"    is_valid={is_reduction_tiling_valid}", flush=True)
+                    except Exception as e:
+                        # print(f"  tiling check EXCEPTION: {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        why("tiling check exception")
+                        return False
                     if not is_reduction_tiling_valid:
                         why("invalid tiling for reduction")
+                    pass
                     return is_reduction_tiling_valid
+                pass
                 return True
 
+            pass
             if numel1 != numel2:
                 why("nodes numel incompatibility")
             return numel1 == numel2
 
         assert node1.is_reduction() and not node2.is_reduction()
         # swap args to hit the case above
+        pass
         return self.can_fuse_horizontal(node2, node1)
 
     can_fuse_vertical = can_fuse
@@ -2279,6 +2331,14 @@ class SIMDScheduling(BaseScheduling):
         # This is currently the only type supported by this method
         assert issubclass(self.kernel_type, TritonKernel)
 
+        # DEBUG: Log input subkernel nodes
+        print(f"\n{'='*60}")
+        print(f"COMBO_KERNEL_CODE: generate_combo_kernel_code called")
+        print(f"  num_subkernel_nodes={len(subkernel_nodes)}")
+        print(f"  custom_part_algorithm={custom_part_algorithm}")
+        print(f"  enable_autotune={enable_autotune}")
+        print(f"  mixed_sizes={mixed_sizes}")
+
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
@@ -2286,6 +2346,15 @@ class SIMDScheduling(BaseScheduling):
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling = self.select_tiling(node_schedule, numel, rnumel)
             node_schedule_map[pn] = node_schedule, tiling, numel, rnumel
+            
+            # DEBUG: Log each subkernel's numel/rnumel and check for unbacked symbols
+            has_unbacked_numel = free_unbacked_symbols([numel]) if numel != 1 else set()
+            has_unbacked_rnumel = free_unbacked_symbols([rnumel]) if rnumel != 1 else set()
+            print(f"  Subkernel {pn.get_name() if hasattr(pn, 'get_name') else pn}:")
+            print(f"    numel={numel}, rnumel={rnumel}")
+            print(f"    tiling={tiling}")
+            print(f"    has_unbacked_numel={has_unbacked_numel}, has_unbacked_rnumel={has_unbacked_rnumel}")
+            
             subkernel_map[pn] = ComboKernel.create_triton_kernel(
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
@@ -2300,13 +2369,20 @@ class SIMDScheduling(BaseScheduling):
             kernel_map=subkernel_map,
             node_info_map=node_schedule_map,
         )
+        
+        # DEBUG: Log partition results
+        print(f"  Partitions: {len(partitions)} partition(s)")
+        for i, part in enumerate(partitions):
+            node_names = [n.get_name() if hasattr(n, 'get_name') else str(n) for n in part]
+            print(f"    Partition[{i}]: {len(part)} nodes: {node_names}")
+        
         log.debug(
             "ComboKernels: %d nodes partitioned into %s groups",
             len(subkernel_nodes),
             [len(p) for p in partitions],
         )
         kernel_code_list = []
-        for node_group in partitions:
+        for part_idx, node_group in enumerate(partitions):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
@@ -2329,8 +2405,23 @@ class SIMDScheduling(BaseScheduling):
                 V.graph.removed_buffers |= subkernel.removed_buffers
                 V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
+            # DEBUG: Log combo kernel state before codegen
+            print(f"  ComboKernel for partition[{part_idx}]:")
+            print(f"    num_sub_kernels={len(kernel.sub_kernels)}")
+            print(f"    x_numels_list={kernel.x_numels_list}")
+            print(f"    min_x_blocks_list={kernel.min_x_blocks_list}")
+            print(f"    dynamic_shape_args={kernel.dynamic_shape_args}")
+            print(f"    dispatch_class={kernel.dispatch_class}")
+            
             src_code = kernel.codegen_kernel()
+            
+            # DEBUG: Log after codegen
+            print(f"    After codegen: dispatch_class={kernel.dispatch_class}")
+            
             kernel_code_list.append((src_code, kernel, node_group))
+        
+        print(f"  Total kernels generated: {len(kernel_code_list)}")
+        print(f"{'='*60}\n")
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):

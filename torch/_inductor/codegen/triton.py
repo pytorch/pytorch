@@ -2426,9 +2426,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return True
 
     def should_use_persistent_reduction(self) -> bool:
-        return self.inside_reduction and V.choices.should_use_persistent_reduction(
+        result = self.inside_reduction and V.choices.should_use_persistent_reduction(
             self.features, self.cooperative_reduction
         )
+        log.debug(
+            "TritonKernel.should_use_persistent_reduction: inside_reduction=%s, result=%s",
+            self.inside_reduction,
+            result,
+        )
+        return result
 
     def want_no_x_dim(self):
         return (
@@ -2597,6 +2603,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 if match_result is None:
                     return None
+
+
 
                 (
                     dims,
@@ -4938,7 +4946,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.symbolic_hint(numel)
+            numel_hint = V.graph.sizevars.symbolic_hint(numel, use_user_provided_hint_override=True)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since
@@ -5243,16 +5251,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @staticmethod
     def _get_persistent_RBLOCK(rnumel):
         rnumel = V.graph.sizevars.simplify(rnumel)
+        log.debug("_get_persistent_RBLOCK: rnumel=%s (type=%s)", rnumel, type(rnumel).__name__)
         if isinstance(rnumel, (sympy.Integer, int)):
             val = int(rnumel)
             val = next_power_of_2(val)
+            log.debug("_get_persistent_RBLOCK: concrete value, returning %s", val)
         else:
             val = 2
             while not V.graph.sizevars.statically_known_leq(rnumel, val):
                 if val > 16 * 1024:
+                    log.debug(
+                        "_get_persistent_RBLOCK: FAILED - could not find static RBLOCK for %s (val reached %s)",
+                        rnumel, val
+                    )
                     raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
                 val *= 2
-
+            log.debug("_get_persistent_RBLOCK: symbolic value, found upper bound %s for %s", val, rnumel)
             return val
 
         return val
@@ -5260,9 +5274,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
         try:
-            TritonKernel._get_persistent_RBLOCK(rnumel)
+            result = TritonKernel._get_persistent_RBLOCK(rnumel)
+            log.debug("has_persistent_RBLOCK: rnumel=%s -> True (RBLOCK=%s)", rnumel, result)
             return True
         except ValueError:
+            log.debug("has_persistent_RBLOCK: rnumel=%s -> False (no static RBLOCK)", rnumel)
             return False
 
     def codegen_static_numels(self, code):
