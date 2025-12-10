@@ -5205,6 +5205,10 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @unittest.skipIf(
+        IS_ARM64,
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/142134",
+    )
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
