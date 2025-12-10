@@ -279,6 +279,8 @@ def create_read_items_for_chunk_list(
         return read_items
 
     num_dims = len(local_chunks[0].offsets)
+
+    # Find sweep dimension (dimension with largest extent for better pruning)
     sweep_dim = 0
     if num_dims > 1:
         max_size = 0
@@ -291,14 +293,28 @@ def create_read_items_for_chunk_list(
                 max_size = dim_size
                 sweep_dim = dim
 
+    # Pre-compute bounds: (start, end) for each chunk in sweep dimension
+    # For 0-d tensors, use (0, 1) so all chunks overlap in the sweep line
+    if num_dims == 0:
+        saved_bounds = [(0, 1)] * len(saved_chunks)
+        local_bounds = [(0, 1)] * len(local_chunks)
+    else:
+        saved_bounds = [
+            (c.offsets[sweep_dim], c.offsets[sweep_dim] + c.sizes[sweep_dim])
+            for c in saved_chunks
+        ]
+        local_bounds = [
+            (c.offsets[sweep_dim], c.offsets[sweep_dim] + c.sizes[sweep_dim])
+            for c in local_chunks
+        ]
+
     saved_sorted_indices = sorted(
         range(len(saved_chunks)),
-        key=lambda idx: saved_chunks[idx].offsets[sweep_dim],
+        key=lambda idx: saved_bounds[idx][0],
     )
-
     local_sorted_indices = sorted(
         range(len(local_chunks)),
-        key=lambda idx: local_chunks[idx].offsets[sweep_dim],
+        key=lambda idx: local_bounds[idx][0],
     )
 
     active_saved: list[tuple[int, int]] = []
@@ -307,8 +323,7 @@ def create_read_items_for_chunk_list(
 
     for local_idx in local_sorted_indices:
         local_chunk = local_chunks[local_idx]
-        local_start = local_chunk.offsets[sweep_dim]
-        local_end = local_start + local_chunk.sizes[sweep_dim]
+        local_start, local_end = local_bounds[local_idx]
 
         cutoff = bisect_right(active_saved, (local_start, -1))
         if cutoff:
@@ -317,12 +332,11 @@ def create_read_items_for_chunk_list(
         while saved_ptr < num_saved:
             storage_idx = saved_sorted_indices[saved_ptr]
             storage_chunk = saved_chunks[storage_idx]
-            saved_start = storage_chunk.offsets[sweep_dim]
+            saved_start, saved_end = saved_bounds[storage_idx]
 
             if saved_start >= local_end:
                 break
 
-            saved_end = saved_start + storage_chunk.sizes[sweep_dim]
             insort(active_saved, (saved_end, storage_idx))
             saved_ptr += 1
 
