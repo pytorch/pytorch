@@ -72,6 +72,15 @@ def get_compile_fn(backend):
         return functools.partial(torch.compile, mode="reduce-overhead")
 
 
+def get_num_partitions(code):
+    """Get the number of cudagraph partitions from generated code."""
+    code = "".join(code)
+    found = re.search(r"partitions=\[(.*)\]", code)
+    assert found is not None, "Could not find partitions in generated code"
+    partitions = found.group(1)
+    return len([p for p in partitions.split(",") if p])
+
+
 class capture_stderr(list):
     """
     Replace sys.stderr with a temporary StringIO
@@ -531,6 +540,39 @@ if HAS_CUDA_AND_TRITON:
 
                 self.assertEqual(fn(*args()), out)
 
+        def test_index_put_boolean_fallback_partitions_cudagraphs(self):
+            """
+            Test that index_put_ with boolean indices (which uses fallback path)
+            properly partitions around the unsafe op. This tests the fix for
+            GitHub issue #169951.
+            """
+
+            def fn(x, mask, values):
+                result = x.clone() + 2
+                result.index_put_([mask], values)
+                return result
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+            x = torch.randn(4, 8, device="cuda")
+            mask = torch.tensor([True, False, True, False], device="cuda")
+            values = torch.randn(2, 8, device="cuda")
+
+            # Check that we partition (unsafe op runs inline, cudagraphable parts are partitioned)
+            _, code = run_and_get_code(fn_c, x, mask, values)
+            self.assertGreaterEqual(get_num_partitions(code), 1)
+
+            # Verify correctness
+            for _ in range(3):
+                x = torch.randn(4, 8, device="cuda")
+                mask = torch.tensor([True, False, True, False], device="cuda")
+                values = torch.randn(2, 8, device="cuda")
+                out = fn_c(x, mask, values)
+                expected = fn(x, mask, values)
+                self.assertEqual(out, expected)
+
+            # Should not skip cudagraphs entirely
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -916,14 +958,6 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_custom_rule(self):
-            def get_num_partitions(code):
-                code = "".join(code)
-                found = re.search(r"partitions=\[(.*)\]", code)
-                assert found is not None
-                partitions = found.group(1)
-                num_partitions = len([p for p in partitions.split(",") if p])
-                return num_partitions
-
             @torch.library.custom_op("mylib::bar", mutates_args=())
             def bar(x: torch.Tensor, flag: int) -> torch.Tensor:
                 return x.clone()
