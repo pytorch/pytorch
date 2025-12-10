@@ -854,7 +854,7 @@ class Redistribute(torch.autograd.Function):
         ctx.original_dtype = input._local_tensor.dtype
 
         if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
-            local_tensor = input._local_tensor.to(dtype=forward_dtype)
+            input = input.to(dtype=forward_dtype)
             current_spec = DTensorSpec(
                 mesh=device_mesh,
                 placements=input._spec.placements,
@@ -865,7 +865,6 @@ class Redistribute(torch.autograd.Function):
                 ),
             )
         else:
-            local_tensor = input._local_tensor
             current_spec = input._spec
 
         ctx.current_spec = current_spec
@@ -875,22 +874,13 @@ class Redistribute(torch.autograd.Function):
                 device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
-            output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, async_op=async_op
+            output = torch.ops.dtensor._redistribute(
+                input, current_spec, target_spec, async_op=async_op
             )
+            return output
         else:
-            # use the same local tensor if placements are the same.
-            output = local_tensor
-            target_spec = current_spec
-
-        # pyrefly: ignore [bad-argument-type]
-        return dtensor.DTensor(
-            # pyrefly: ignore [bad-argument-count]
-            output,
-            target_spec,
-            # pyrefly: ignore [unexpected-keyword]
-            requires_grad=input.requires_grad,
-        )
+            # No redistribution needed, just return input
+            return input
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
@@ -899,7 +889,7 @@ class Redistribute(torch.autograd.Function):
         backward_dtype = ctx.backward_dtype or ctx.original_dtype
 
         if backward_dtype != grad_output._local_tensor.dtype:
-            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+            grad_output = grad_output.to(dtype=backward_dtype)
             current_spec = DTensorSpec(
                 mesh=grad_output._spec.device_mesh,
                 placements=grad_output._spec.placements,
@@ -915,19 +905,7 @@ class Redistribute(torch.autograd.Function):
                 tensor_meta=current_spec.tensor_meta,
             )
         else:
-            local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
-
-        output = redistribute_local_tensor(
-            local_tensor,
-            current_spec,
-            previous_spec,
-            async_op=async_op,
-            is_backward=True,
-        )
-
-        if output.dtype != ctx.original_dtype:
-            output = output.to(ctx.original_dtype)
 
         # normalize the target placement to replicate if it is partial
         normalized_placements: list[Placement] = []
@@ -938,23 +916,23 @@ class Redistribute(torch.autograd.Function):
             else:
                 normalized_placements.append(previous_placement)
 
-        spec = DTensorSpec(
-            previous_spec.device_mesh,
-            tuple(normalized_placements),
-            tensor_meta=TensorMeta(
-                shape=grad_output.shape,
-                stride=grad_output.stride(),
-                dtype=output.dtype,
-            ),
+        previous_spec_normalized = DTensorSpec(
+            mesh=previous_spec.device_mesh,
+            placements=tuple(normalized_placements),
+            tensor_meta=previous_spec.tensor_meta,
         )
-        # pyrefly: ignore [bad-argument-type]
-        output_dtensor = dtensor.DTensor(
-            # pyrefly: ignore [bad-argument-count]
-            output,
-            spec,
-            # pyrefly: ignore [unexpected-keyword]
-            requires_grad=grad_output.requires_grad,
+
+        output_dtensor = torch.ops.dtensor._redistribute(
+            grad_output,
+            current_spec,
+            previous_spec_normalized,
+            async_op=async_op,
+            is_backward=True,
         )
+
+        # Handle dtype conversion
+        if output_dtensor.dtype != ctx.original_dtype:
+            output_dtensor = output_dtensor.to(ctx.original_dtype)
 
         return (
             output_dtensor,

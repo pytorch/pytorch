@@ -51,7 +51,6 @@ except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         register_pytree_node,
         tree_leaves,
-        tree_map_only,
         TreeSpec,
     )
 
@@ -513,12 +512,30 @@ class OpSchema:
             by sharding propagation rules to generate fake args for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(
-            DTensorSpec,
-            _rebuild_tensor_from_dtensor_meta,
-            self.args_schema,
-            is_leaf=lambda x: isinstance(x, DTensorSpec),
+        fake_args = []
+        schema_args = [arg for arg in self.op._schema.arguments if not arg.kwarg_only]
+        assert len(schema_args) == len(self.args_schema), (
+            f"Number of args in the operator {self.op} schema ({schema_args}) "
+            f"does not match the number of args in the OpSchema ({self.args_schema})"
         )
+        for actual_arg, schema_arg in zip(self.args_schema, schema_args):
+            arg_type = schema_arg.type
+            if isinstance(arg_type, torch.TensorType):
+                assert isinstance(actual_arg, DTensorSpec)
+                fake_args.append(_rebuild_tensor_from_dtensor_meta(actual_arg))
+            elif isinstance(arg_type, torch.ListType) and isinstance(
+                arg_type.getElementType(), torch.TensorType
+            ):
+                fake_args.append(
+                    [
+                        _rebuild_tensor_from_dtensor_meta(nested_arg)
+                        for nested_arg in actual_arg
+                    ]
+                )
+            else:
+                fake_args.append(actual_arg)
+
+        return fake_args
 
     def gen_fake_kwargs(self) -> KwargsType:
         """
@@ -526,12 +543,32 @@ class OpSchema:
             by sharding propagation rules to generate fake kwargs for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(
-            DTensorSpec,
-            _rebuild_tensor_from_dtensor_meta,
-            self.kwargs_schema,
-            is_leaf=lambda x: isinstance(x, DTensorSpec),
-        )
+        fake_kwargs = {}
+        schema_kwargs = {
+            kwarg.name: kwarg for kwarg in self.op._schema.arguments if kwarg.kwarg_only
+        }
+        for key, value in self.kwargs_schema.items():
+            assert key in schema_kwargs, (
+                f"Unknown kwarg {key} in operator {self.op}. "
+                f"OpSchema contains the following kwargs: {schema_kwargs.keys()}"
+            )
+            schema_kwarg = schema_kwargs[key]
+
+            kwarg_type = schema_kwarg.type
+            if isinstance(kwarg_type, torch.TensorType):
+                assert isinstance(value, DTensorSpec)
+                fake_kwargs[key] = _rebuild_tensor_from_dtensor_meta(value)
+            elif isinstance(kwarg_type, torch.ListType) and isinstance(
+                kwarg_type.getElementType(), torch.TensorType
+            ):
+                fake_kwargs[key] = [
+                    _rebuild_tensor_from_dtensor_meta(nested_arg)
+                    for nested_arg in value
+                ]
+            else:
+                fake_kwargs[key] = value
+
+        return fake_kwargs
 
     def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
         suggestion_args_spec = self.args_spec

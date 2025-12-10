@@ -573,6 +573,7 @@ class ShardingPropagator:
             new_output_spec = self._create_output_spec_with_new_tensor_meta(
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
+            print(output_sharding.output_spec, out_tensor_meta)
             output_sharding.output_spec = new_output_spec
 
             return output_sharding
