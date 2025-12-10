@@ -920,6 +920,10 @@ class MetalKernel(SIMDKernel):
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
+                # Add error buffer parameter if error header is used
+                if "error" in self.headers:
+                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
+
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -1034,6 +1038,13 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
+        # Add error buffer index if error reporting is used
+        # TODO(malfet) Figure out how to do it for aoti
+        if "error" in self.headers:
+            args.append(
+                f"error_buf_idx={len([arg for arg in args if '=' not in arg]) + 1}"
+            )
+
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1047,17 +1058,27 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         if not (lower or upper):
             return
-        # TODO(malfet): support asserts
-        # See https://github.com/pytorch/pytorch/issues/144634
+        # Add error header for error reporting
+        self.headers.add("error")
+
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
+        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        # Generate error reporting code
+        self.compute.splice(f"""if ({condition}) {{
+    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");
+    return;
+}}""")
 
 
 class MetalScheduling(SIMDScheduling):
