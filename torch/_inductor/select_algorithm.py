@@ -2380,8 +2380,15 @@ class ExternKernelCaller(ChoiceCaller):
             self.input_tensor_meta, self.output_tensor_meta = [], []
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
-            self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
-            self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            try:
+                self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+            except Exception:
+                self.input_tensor_meta = None
+            try:
+                self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            except Exception:
+                self.output_tensor_meta = None
+
             benchmark_cls = ExternKernelGPUBenchmarkRequest
 
         self.bmreq: ExternKernelBenchmarkRequest = benchmark_cls(
