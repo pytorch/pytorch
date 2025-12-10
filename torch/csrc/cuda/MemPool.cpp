@@ -17,11 +17,10 @@ void THCPMemPool_init(PyObject* module) {
       .def(
           py::init([](c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator,
                       bool is_user_created,
-                      bool use_on_oom,
-                      bool no_split) {
+                      bool use_on_oom) {
             torch::utils::device_lazy_init(at::kCUDA);
             return std::make_shared<::at::cuda::MemPool>(
-                allocator, is_user_created, use_on_oom, no_split);
+                allocator, is_user_created, use_on_oom);
           }))
       .def_property_readonly("id", &::at::cuda::MemPool::id)
       .def_property_readonly("allocator", &::at::cuda::MemPool::allocator)

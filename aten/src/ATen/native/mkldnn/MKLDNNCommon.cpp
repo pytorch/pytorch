@@ -6,7 +6,6 @@
 #if AT_MKLDNN_ENABLED()
 
 #include <ideep.hpp>
-#include <dnnl.hpp>
 
 namespace at::native {
 
@@ -42,26 +41,26 @@ using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
 
-dnnl::memory::data_type get_mkldnn_dtype(ScalarType type) {
+ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
   switch (type) {
     case ScalarType::Float:
-      return dnnl::memory::data_type::f32;
+      return ideep::tensor::data_type::f32;
     case ScalarType::QInt32:
-      return dnnl::memory::data_type::s32;
+      return ideep::tensor::data_type::s32;
     case ScalarType::QInt8:
     case ScalarType::Char:
-      return dnnl::memory::data_type::s8;
+      return ideep::tensor::data_type::s8;
     case ScalarType::QUInt8:
     case ScalarType::Byte:
-      return dnnl::memory::data_type::u8;
+      return ideep::tensor::data_type::u8;
     case ScalarType::BFloat16:
-      return dnnl::memory::data_type::bf16;
+      return ideep::tensor::data_type::bf16;
     case ScalarType::Half:
-      return dnnl::memory::data_type::f16;
+      return ideep::tensor::data_type::f16;
     case ScalarType::Float8_e4m3fn:
-      return dnnl::memory::data_type::f8_e4m3;
+      return ideep::tensor::data_type::f8_e4m3;
     case ScalarType::Float8_e5m2:
-      return dnnl::memory::data_type::f8_e5m2;
+      return ideep::tensor::data_type::f8_e5m2;
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
@@ -83,11 +82,11 @@ at::Tensor mkldnn_tensor_from_data_ptr(
   std::vector<uint8_t> vector_serialized_md{
       opaque_metadata, opaque_metadata + opaque_metadata_size};
   ideep::tensor::desc deserialized_ideep_desc;
-#if DNNL_PREREQ(3, 4, 1)
+#if IDEEP_PREREQ(3, 4, 1, 2)
   // groups is needed for grouped conv
   deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);
 #else
-  TORCH_CHECK(false, "Unexpected oneDNN version to do weight deserialization.");
+  TORCH_CHECK(false, "Unexpected IDeep version to do weight deserialization.");
 #endif
 
   auto a = ideep::tensor(deserialized_ideep_desc, data_ptr);
