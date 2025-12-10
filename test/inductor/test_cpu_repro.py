@@ -3701,6 +3701,10 @@ class CPUReproTests(TestCase):
                     self.common(m, (x,))
                     check_metrics_vec_kernel_count(6)
 
+    @unittest.skipIf(
+        IS_ARM64,
+        "Fails on AArch64, see https://github.com/pytorch/pytorch/issues/169958",
+    )
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
