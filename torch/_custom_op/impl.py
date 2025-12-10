@@ -163,9 +163,7 @@ class CustomOp:
 
     def _register_autograd_kernel_indirection(self):
         if self._registered_autograd_kernel_indirection:
-            raise AssertionError(
-                "autograd kernel indirection already registered"
-            )
+            raise AssertionError("autograd kernel indirection already registered")
         self._lib.impl(
             self._opname, autograd_kernel_indirection(weakref.proxy(self)), "Autograd"
         )
@@ -177,7 +175,7 @@ class CustomOp:
     def _register_impl(self, kind, func, stacklevel=2):
         if self._has_impl(kind):
             func_and_location = self._impls[kind]
-            if func_and_location is None:  # Pacify mypy
+            if func_and_location is None:
                 raise AssertionError("func_and_location is unexpectedly None")
             location = func_and_location.location
             raise RuntimeError(
