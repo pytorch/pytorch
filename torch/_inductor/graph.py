@@ -421,6 +421,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, Union[torch._C.ScriptObject, FakeScriptObject]
         ] = {}
+        self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
         self.removed_operations: OrderedSet[str] = OrderedSet()
@@ -526,7 +527,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bw_donated_idxs = get_donated_idxs()
 
         # Cache for dep size hints to avoid expensive recomputation
-        self.dep_size_hint_cache: dict[Dep, int] = {}
+        self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -614,22 +615,25 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
 
-    def get_dep_size_hint(self, dep: Dep) -> int:
+    def get_dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         """
         Get the size hint for a dependency with caching to avoid expensive recomputation.
         """
-        if dep not in self.dep_size_hint_cache:
+        if (dep, count_bytes) not in self.dep_size_hint_cache:
             res = 0
             try:
                 if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
+                    if count_bytes:
+                        res = dep.numbytes_hint()
+                    else:
+                        res = dep.numel_hint()
             except KeyError:
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
                 # `has_unbacked_symbols()` throws an error.
                 pass
-            self.dep_size_hint_cache[dep] = res
-        return self.dep_size_hint_cache[dep]
+            self.dep_size_hint_cache[(dep, count_bytes)] = res
+        return self.dep_size_hint_cache[(dep, count_bytes)]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -1298,7 +1302,9 @@ class GraphLowering(torch.fx.Interpreter):
                     #
                     # TODO: should really switch to "needs_fixed_stride" constraint on these
                     # and identify them one by one.
-                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                    decided_constraint: Optional[Callable[..., tuple[Any, Any]]] = (
+                        require_contiguous
+                    )
                 else:
                     default_tag: torch._C.Tag = get_layout_constraint_tag(
                         target, with_default=True
@@ -2451,7 +2457,7 @@ class GraphLowering(torch.fx.Interpreter):
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
 
             tuning_code = (
-                '"""\n'
+                'r"""\n'
                 + "Compile-time auto-tuning block: \n"
                 + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
@@ -2496,7 +2502,11 @@ class GraphLowering(torch.fx.Interpreter):
                 key,
                 path,
                 linemap=linemap,  # type: ignore[arg-type]
-                attrs={**self.constants, **self.torchbind_constants},
+                attrs={
+                    **self.constants,
+                    **self.torchbind_constants,
+                    **self.opaque_value_type_classes,
+                },
             )
         self.cache_key = key
         self.cache_path = path
