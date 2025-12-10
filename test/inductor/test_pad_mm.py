@@ -429,7 +429,7 @@ class PadMMTest(TestCase):
         size = [61, 61]
         mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
-        self.assertTrue(len(local_cache) == 2)
+        self.assertEqual(len(local_cache), 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
             repr(local_cache)
         )
@@ -441,7 +441,7 @@ class PadMMTest(TestCase):
         mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
-        self.assertTrue(len(local_cache) == 3)
+        self.assertEqual(len(local_cache), 3)
 
         FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
             repr(local_cache)
