@@ -474,7 +474,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_nccl()
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
@@ -3048,7 +3047,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm_multiprocess
     def test_grad_layout_2devicemodule(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         dev0 = torch.device("cuda:" + str(int_devices[0]))
@@ -3792,7 +3790,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_send_recv_non_dense_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device("cuda", self.rank % torch.cuda.device_count())
@@ -3848,7 +3845,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking(self):
         self._reduce_timeout()
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -3963,7 +3959,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
-    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
         self._reduce_timeout()
@@ -6267,7 +6262,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         return pg
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6336,7 +6331,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6397,7 +6392,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             return None
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6406,7 +6401,6 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
