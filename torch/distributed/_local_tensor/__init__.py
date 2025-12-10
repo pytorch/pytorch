@@ -1355,7 +1355,7 @@ class LocalTensorMode(TorchDispatchMode):
                 # re-disable if the yield messed
                 # with the state
                 self.disable_()
-                return  # noqa: B012
+            return
 
         self.disable_()
         try:
