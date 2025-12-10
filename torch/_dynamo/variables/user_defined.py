@@ -1013,6 +1013,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # rid of these workarounds here and in `GetAttrVariable`.
         self.attrs_directly_modifed_on_dict = set()
 
+        # Cache inspect.getattr_static outputs for the same name. This is fine
+        # because if there is a mutation for the name, we use side-effects infra
+        # to early return the mutated value.
+        self._looked_up_attrs: dict[str, object] = {}
+
+        # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
+        self._subobj_from_class: dict[str, object] = {}
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1336,6 +1344,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
 
     def _getattr_static(self, name):
+        if name in self._looked_up_attrs:
+            return self._looked_up_attrs[name]
+
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
@@ -1359,6 +1370,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # AttributeError.
             raise AttributeError
 
+        self._looked_up_attrs[name] = subobj
         return subobj
 
     def should_skip_descriptor_setter(self, attr_name):
@@ -1542,9 +1554,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if subobj is torch.nn.Module.__init__:
             subobj = unpatched_nn_module_init
 
-        subobj_from_class = inspect.getattr_static(
-            self.value.__class__, name, NO_SUCH_SUBOBJ
-        )
+        # Check if its already saved, avoids inspect getattr_static call
+        if name in self._subobj_from_class:
+            subobj_from_class = self._subobj_from_class[name]
+        else:
+            subobj_from_class = inspect.getattr_static(
+                self.value.__class__, name, NO_SUCH_SUBOBJ
+            )
+            self._subobj_from_class[name] = subobj_from_class
+
         is_accessible_from_type_mro = (
             subobj_from_class is subobj
             and self.cls_source is not None
