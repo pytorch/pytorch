@@ -1,5 +1,0 @@
-ERROR
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/lax/lax.py", line 136, in _try_broadcast_shapes
-    raise TypeError(f'{name} got incompatible shapes for broadcasting: '
-TypeError: broadcast_shapes got incompatible shapes for broadcasting: (2, 4, 16, 16), (1, 1, 1, 7).
