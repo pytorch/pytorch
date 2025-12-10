@@ -423,7 +423,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     from torch.utils._sympy.value_ranges import bound_sympy
 
                     sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
-                    if not math.isinf(sym_range.lower):
+                    if config.aot_inductor.check_lowerbound and not math.isinf(
+                        sym_range.lower
+                    ):
                         self.prefix.splice(
                             f"""
                                 if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
@@ -824,7 +826,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].dtype = static_cast<int32_t>({self.codegen_dtype(tensor.dtype)});"
+                    f"constants_info_[{idx}].dtype = {self.codegen_dtype(tensor.dtype)};"
                 )
                 # Mixed-device constants are only supported when the secondary device is CPU
                 if tensor.device.type != self.device and tensor.device.type != "cpu":
@@ -836,7 +838,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # device_index is not needed because it can be set at runtime
                 device_type, _ = self.codegen_device(tensor.device).split(", ")
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].device_type = static_cast<int32_t>({device_type});"
+                    f"constants_info_[{idx}].device_type = {device_type};"
                 )
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"

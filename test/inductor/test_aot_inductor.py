@@ -2464,6 +2464,45 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_cond_cpu_predicate_cuda_operands(self, max_autotune):
+        """
+        Test torch.cond with CPU predicate and CUDA operands.
+        This is a regression test for the bug where inductor incorrectly
+        determined device from [predicate] + operands, causing CPU predicates
+        to force CUDA outputs onto CPU during autotuning.
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, input_dim=4, hidden_dim=8):
+                super().__init__()
+                self.true_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.false_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.another_linear = torch.nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+            def forward(self, predicate: torch.Tensor, x: torch.Tensor):
+                def true_fn(x):
+                    return self.true_linear(x) * 2.0
+
+                def false_fn(x):
+                    return self.false_linear(x) + 1.0
+
+                res = torch.cond(predicate, true_fn, false_fn, (x,))
+                return self.another_linear(res)
+
+        # Predicate on CPU, data on CUDA
+        predicate = torch.tensor(True, dtype=torch.bool, device="cpu")
+        x = torch.randn(4, 4, device=self.device)
+        example_inputs = (predicate, x)
+
+        with config.patch({"max_autotune": max_autotune}):
+            self.check_model(
+                Model().to(self.device),
+                example_inputs=example_inputs,
+            )
+
     def test_while_loop_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -7714,6 +7753,30 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
+    @requires_gpu
+    def test_constant_int_kernel_input(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                device = x.device
+
+                inp = torch.zeros(u0, device=device)
+                inp_rand0 = inp + torch.rand(u0, device=device)
+                inp_rand1 = inp_rand0 - torch.rand(u0, device=device)
+                return torch.where(
+                    torch.rand(u0, device=device) > 0.5,
+                    inp_rand0 + inp_rand1,
+                    inp_rand0 - inp_rand1,
+                )
+
+        example_inputs = (torch.tensor(6, dtype=torch.int64, device=self.device),)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            AOTIRunnerUtil.run(Model(), example_inputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -7970,6 +8033,52 @@ copy_tests(
     "mps",
     MPS_TEST_FAILURES,
 )
+
+
+class TestCheckLowerboundConfig(TestCase):
+    def test_aoti_check_lowerbound_codegen(self):
+        """
+        Test that check_lowerbound config controls lowerbound check codegen.
+        When check_lowerbound=False, no lowerbound checks should be generated.
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model()
+        batch = Dim("batch", min=2, max=10)
+        example_inputs = (torch.randn(4, 3),)
+
+        # Test with check_lowerbound=True (default)
+        with config.patch({"aot_inductor.check_lowerbound": True}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                1,
+                exactly=True,
+            ).run(code)
+
+        # Test with check_lowerbound=False
+        with config.patch({"aot_inductor.check_lowerbound": False}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should NOT have lowerbound checks
+            FileCheck().check_count(
+                "dim value is too small",
+                0,
+                exactly=True,
+            ).run(code)
 
 
 if __name__ == "__main__":

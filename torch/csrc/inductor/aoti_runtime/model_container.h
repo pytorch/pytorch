@@ -456,6 +456,22 @@ class AOTInductorModelContainer {
       assert_all_constants(constants_map);
     }
 
+    // update_constant_buffer does not support mixed CPU/CUDA constants
+    int32_t model_device_type = models_[0]->get_device_type();
+    for (const auto& kv : constants_map) {
+      int32_t tensor_device_type = 0;
+      aoti_torch_get_device_type(kv.second, &tensor_device_type);
+      if (tensor_device_type != model_device_type) {
+        throw std::runtime_error(
+            "update_constant_buffer does not support mixed device constants. "
+            "Constant '" +
+            kv.first + "' has device type " +
+            std::to_string(tensor_device_type) +
+            " but model expects device type " +
+            std::to_string(model_device_type));
+      }
+    }
+
     ConstantState& const_folded = use_inactive == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;

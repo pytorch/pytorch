@@ -299,8 +299,11 @@ class CustomConstantType:
         # custom hash ignores b
         return hash(self.a)
 
+    def __repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
-pytree.register_constant(CustomConstantType)
+
+torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -1476,7 +1479,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.skipTest("Torch distributed is not available")
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1501,6 +1504,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}
@@ -1526,7 +1530,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         if not dist.is_available():
             self.skipTest("Torch distributed is not available")
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa:SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1558,6 +1562,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_function_with_wrong_fqn(self):
         def foo(inputs):
@@ -1645,7 +1650,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def foo(inputs):
             return inputs.x + 1
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo",
             init_method=f"file://{tmpfile.name}",
@@ -1660,6 +1665,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"inputs": Inputs(x, pg)}, True)
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_unserializable_submodule(self):
         def foo(mod, x):
@@ -1802,7 +1808,7 @@ class SimpleModule(torch.nn.Module):
         return z
 
 
-if not IS_MACOS:
+if torch.distributed.is_available() and not IS_MACOS:
     from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 
     @torch._dynamo.config.patch({"strict_precompile": True})
