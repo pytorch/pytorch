@@ -3722,5 +3722,26 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0368": [
+    {
+      "Gb_type": "Frozen dataclass with __post_init__",
+      "Context": "dataclass={dataclass_cls.__name__}",
+      "Explanation": "Cannot reconstruct frozen dataclass with __post_init__ method, as it may have side effects that would be incorrectly replayed.",
+      "Hints": [
+        "Remove the __post_init__ method from the frozen dataclass.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0369": [
+    {
+      "Gb_type": "Frozen dataclass with missing field",
+      "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
+      "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
