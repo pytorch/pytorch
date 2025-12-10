@@ -44,6 +44,7 @@ from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 
 from .. import graph_break_hints, variables
@@ -357,14 +358,129 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     )
 
 
-def _collect_intermediate_outputs(tx, subtracer, graph_output_vts):
+def get_tensor_storages(tensor: torch.Tensor) -> set[StorageWeakRef]:
     """
-    Collect intermediate outputs for side effects support.
+    Get storage references from a tensor.
 
-    Returns all tracked tensor/symint variables that are not already in graph_output_vts.
+    Handles regular tensors. Raises NotImplementedError for sparse tensors
+    and traceable wrapper subclasses.
+
+    Args:
+        tensor: The tensor to extract storages from
+
+    Returns:
+        Set of StorageWeakRef objects for the tensor's storage(s)
     """
+    from torch.multiprocessing.reductions import StorageWeakRef
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    storages: set[StorageWeakRef] = set()
+
+    if not isinstance(tensor, torch.Tensor):
+        return storages
+
+    if tensor.is_sparse or tensor.is_sparse_csr:
+        raise NotImplementedError("get_tensor_storages does not support sparse tensors")
+
+    if is_traceable_wrapper_subclass(tensor):
+        raise NotImplementedError(
+            "get_tensor_storages does not support traceable wrapper subclasses"
+        )
+    else:
+        storages.add(StorageWeakRef(tensor._typed_storage()))
+
+    return storages
+
+
+class StorageAliasingTracker:
+    """
+    Tracks storage references to detect aliasing between tensors.
+
+    This class encapsulates the logic for collecting storages from tensors
+    and checking for aliasing conflicts. Used to filter intermediate outputs
+    that would create input-output or output-output aliasing.
+    """
+
+    def __init__(self):
+        self.excluded_storages: set = set()
+
+    def _collect_storages_from_tensor(self, example_value):
+        self.excluded_storages.update(get_tensor_storages(example_value))
+
+    def collect_from_inputs(self, tx):
+        """Collect storages from graph input placeholders."""
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        for node in tx.output.graph.nodes:
+            if node.op == "placeholder":
+                example_value = _collect_fake_inputs([node])[0]
+                if isinstance(example_value, torch.Tensor):
+                    self._collect_storages_from_tensor(example_value)
+            else:
+                break
+
+    def collect_from_outputs(self, graph_output_vts):
+        """Collect storages from existing graph outputs."""
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        for vt in graph_output_vts:
+            proxy = vt.as_proxy()
+            example_value = _collect_fake_inputs([proxy.node])[0]
+            if isinstance(example_value, torch.Tensor):
+                self._collect_storages_from_tensor(example_value)
+
+    def check_and_track(self, proxy_node) -> bool:
+        """
+        Check if a tensor can be added as a subgraph output without causing aliasing issues.
+
+        Given a proxy node, extracts its example tensor value and checks if its storage
+        aliases with any previously tracked storages (from inputs or other outputs).
+        If there's no aliasing conflict, the tensor's storage is added to the tracked set.
+
+        Args:
+            proxy_node: An FX proxy node whose example_value is the tensor to check.
+
+        Returns:
+            True if the tensor doesn't alias with tracked storages (safe to add as output),
+            False if it aliases (should be filtered out).
+        """
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+        from torch.multiprocessing.reductions import StorageWeakRef
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        example_value = _collect_fake_inputs([proxy_node])[0]
+
+        # Non-tensor outputs (e.g., symints) don't have aliasing concerns
+        if not isinstance(example_value, torch.Tensor):
+            return True
+
+        # Check if any storage aliases with existing inputs/outputs
+        tensor_storages = get_tensor_storages(example_value)
+        if tensor_storages & self.excluded_storages:
+            return False
+
+        # Track this tensor's storage (for wrapper subclasses, inner storages were already checked)
+        if not is_traceable_wrapper_subclass(example_value):
+            if not (example_value.is_sparse or example_value.is_sparse_csr):
+                self.excluded_storages.add(
+                    StorageWeakRef(example_value._typed_storage())
+                )
+
+        return True
+
+
+def collect_intermediate_outputs(
+    tx, subtracer, graph_output_vts, filter_aliased_intermediates=False
+):
     extra_outputs = []
     existing_out_proxies = {vt.as_proxy() for vt in graph_output_vts}
+
+    # Build the aliasing tracker if we're filtering
+    tracker = None
+    if filter_aliased_intermediates:
+        tracker = StorageAliasingTracker()
+        tracker.collect_from_inputs(tx)
+        tracker.collect_from_outputs(graph_output_vts)
 
     for out in subtracer.tracked_tensor_or_symint_vt:
         proxy = out.as_proxy()
@@ -377,7 +493,16 @@ def _collect_intermediate_outputs(tx, subtracer, graph_output_vts):
         if isinstance(out, SymNodeVariable) and out.python_type() is float:
             continue
 
-        extra_outputs.append(out)
+        if not filter_aliased_intermediates:
+            extra_outputs.append(out)
+        else:
+            # Filter out intermediates that alias with inputs or outputs.
+            # This is needed for HOPs like invoke_subgraph that don't support aliasing.
+            # TODO: If a filtered intermediate is captured by side effects (e.g., appended
+            # to a list), it will fail later with "does not belong to this Graph" error
+            # when the outer graph tries to use it. See test_side_effect_with_aliased_intermediate.
+            if tracker.check_and_track(proxy.node):
+                extra_outputs.append(out)
 
     return extra_outputs
 
@@ -1240,6 +1365,46 @@ def speculate_subgraph_with_auto_output_flattening(
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
+    # Controls whether to filter aliased intermediates when collecting extra outputs.
+    # This is only relevant when allow_side_effects=True.
+    # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
+    # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
+    #
+    # Example where filtering is needed:
+    #
+    #   @invoke_subgraph
+    #   def gn(x):
+    #       view = x.view(2, 4)  # intermediate that aliases input x
+    #       y = torch.sin(view)
+    #       return torch.cos(view)
+    #
+    #   def fn(x):
+    #       res = gn(x)
+    #       return res + 4
+    #
+    # In this case, if we don't filter `view`, we would later error because some HOPs
+    # have strict aliasing checks on inputs/outputs.
+    #
+    # This does however introduce a subtle issue when we do something like:
+    #
+    #   captured = []
+    #
+    #   @invoke_subgraph
+    #   def gn(x):
+    #       view = x.view(2, 4)  # intermediate that aliases input x
+    #       y = torch.sin(view)
+    #       captured.append(view)
+    #       return torch.cos(view)
+    #
+    #   def fn(x):
+    #       res = gn(x)
+    #       return res + captured[0]
+    #
+    # In this case, we will not replay the side effect on `captured` in the graph,
+    # which fails with a not-so-nice error. We will address this in a follow-up PR
+    # because this case is rare. This is not a regression because side effects were
+    # never supported for invoke_subgraph anyway.
+    filter_aliased_intermediates: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1454,8 +1619,8 @@ def speculate_subgraph_with_auto_output_flattening(
                 or tx.output.current_tracer.traced_with_externally_visible_side_effects
             )
             if allow_side_effects:
-                extra_outputs = _collect_intermediate_outputs(
-                    tx, subtracer, graph_output_vts
+                extra_outputs = collect_intermediate_outputs(
+                    tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
                 graph_output_vts = graph_output_vts + tuple(extra_outputs)
 
@@ -1738,7 +1903,7 @@ def add_hop_context(cls):
     """
     Class decorator that adds HOP context to exceptions raised in call_function.
 
-    Requires the class to have _HOP_NAME and _ALLOW_GRAPH_BREAKS set.
+    Requires the class to have _HOP_NAME and _ALLOW_FALLBACK_TO_EAGER set.
     """
 
     if hasattr(cls.call_method, "_hop_wrapped"):
@@ -1746,9 +1911,9 @@ def add_hop_context(cls):
 
     if cls._HOP_NAME is None:
         raise TypeError(f"{cls.__name__} must define _HOP_NAME class attribute.")
-    if cls._ALLOW_GRAPH_BREAKS is None:
+    if cls._ALLOW_FALLBACK_TO_EAGER is None:
         raise TypeError(
-            f"{cls.__name__} must define _ALLOW_GRAPH_BREAKS class attribute."
+            f"{cls.__name__} must define _ALLOW_FALLBACK_TO_EAGER class attribute."
         )
 
     original_call_function = cls.call_function
@@ -1762,7 +1927,7 @@ def add_hop_context(cls):
             if hasattr(e, "_hop_name"):
                 raise
 
-            if self._ALLOW_GRAPH_BREAKS:
+            if self._ALLOW_FALLBACK_TO_EAGER:
                 # Tag the exception with HOP name for later formatting in exc.py
                 # NOTE: because nested graph breaks are NOT supported on HOPs, we will
                 # NEVER log a HOP graph break before running this
@@ -1788,8 +1953,9 @@ def add_hop_context(cls):
 class TorchHigherOrderOperatorVariable(VariableTracker):
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
     _HOP_NAME: Optional[str] = None
-    # Set to False for HOPs that require full capture (e.g., cond, map, scan)
-    _ALLOW_GRAPH_BREAKS: bool = True
+    # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
+    # HOPs will fall back to eager.
+    _ALLOW_FALLBACK_TO_EAGER: bool = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -1886,7 +2052,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.cond"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2177,7 +2343,7 @@ def validate_subgraph_output_types(output: VariableTracker):
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2194,7 +2360,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2211,7 +2377,7 @@ class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.associative_scan"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2444,7 +2610,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.scan"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2692,7 +2858,7 @@ def non_single_tensor_return_unsupported(api, ret):
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.map_impl"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = False
     supports_aliasing = False
 
@@ -2967,6 +3133,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             allow_side_effects=self.allow_side_effects,
+            filter_aliased_intermediates=getattr(
+                self, "filter_aliased_intermediates", False
+            ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -3230,7 +3399,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -3353,7 +3522,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.strict_mode"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
 
     def _call_function(
         self,
@@ -3853,7 +4022,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 @add_hop_context
 class AutogradFunctionApplyVariable(VariableTracker):
     _HOP_NAME: str = "autograd.Function"
-    _ALLOW_GRAPH_BREAKS = True
+    _ALLOW_FALLBACK_TO_EAGER = True
 
     def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -4326,11 +4495,14 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
-    _ALLOW_GRAPH_BREAKS = False
+    _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = True
     supports_aliasing = False
-    # TODO - make this true to support mutation
-    allow_side_effects = False
+    allow_side_effects = True
+    # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
+    # shouldn't alias. For checkpoint HOP, we inline it so we don't need
+    # alias analysis as functionalization would just work on the flat graph.
+    filter_aliased_intermediates = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
