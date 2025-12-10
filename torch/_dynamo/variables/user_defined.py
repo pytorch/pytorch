@@ -1019,6 +1019,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if pytree.is_constant_class(self.value_type) and self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
 
+        self._object_has_getattribute = object_has_getattribute(self.value)
+
     def __str__(self) -> str:
         inner = self.value_type.__name__
         if inner in [
@@ -1340,7 +1342,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         # NOTE we assume the following descriptors are side-effect-free as far
         # as Dynamo tracing is concerned.
-        if not object_has_getattribute(self.value) and (
+        if not self._object_has_getattribute and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
             or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
@@ -1349,7 +1351,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = type(self.value).__getattribute__(self.value, name)
-        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+        elif self._object_has_getattribute and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
             # call getattr_static only when the __getattribute__ tracing fails
@@ -1442,7 +1444,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         source = AttrSource(self.source, name) if self.source else None
 
-        if object_has_getattribute(self.value):
+        if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
