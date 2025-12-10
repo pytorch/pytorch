@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
