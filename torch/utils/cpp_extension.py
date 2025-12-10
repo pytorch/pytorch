@@ -464,7 +464,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0])
+        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0], compiler, compiler)
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
