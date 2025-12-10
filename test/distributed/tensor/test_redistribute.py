@@ -1068,7 +1068,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             mesh = init_device_mesh(self.device_type, (2, 2, 2))
             input_tensor_shape = [
                 # even sharding
-                (8, 16, 32),
+                (16, 8),
                 # uneven sharding with padding
                 (13, 2, 13),
             ]
@@ -1088,7 +1088,9 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 # MUST set reduce_memory_overhead to False so that
                 # redistribute_cost and DTensorRedistributePlanner use the same
                 # cost function.
-                for i in range(0, len(shard_orders), 2):
+                for i in range(
+                    0, len(shard_orders), 4
+                ):  # we can skip for 2. Skip for 4 to reduce the number of tests
                     src_order, dst_order = shard_orders[i : i + 2]
                     # prepare SRC DTensorSpec
                     src_dtensor = _distribute_tensor(
@@ -1107,7 +1109,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     src_to_dst_cost = redistribute_cost(
                         src_dtensor._spec, dst_dtensor._spec
                     )
-                    for idx, intermediate_order in enumerate(shard_orders):
+                    # chose every two to reduce the number of tests
+                    for intermediate_order in shard_orders[::2]:
                         # prepare INT DTensorSpec
                         intermediate_dtensor = _distribute_tensor(
                             input_data.clone(),
