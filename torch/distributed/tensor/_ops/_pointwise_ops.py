@@ -25,6 +25,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.types import _Number
 from torch.utils._typing_utils import not_none
 
 
@@ -466,6 +467,7 @@ def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
         f"no strategy to follow for {op_schema}!"
     )
     return common_pointwise_strategy(
+        op_schema.op,
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
@@ -490,6 +492,7 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def common_pointwise_strategy(
+    op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
@@ -531,10 +534,18 @@ def common_pointwise_strategy(
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
+                redistribute_partial_ops = [aten.add.Tensor, aten.add_.Tensor]
+                scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
+
+                safe_avoid_redistribution = False
+
+                if op not in redistribute_partial_ops or not scalar_arg:
+                    safe_avoid_redistribution = True
+
                 # note that only partial-sum and partial-avg are supported for linearity
-                partial_supports_linearity = placement.is_partial(
-                    "sum"
-                ) or placement.is_partial("avg")
+                partial_supports_linearity = (
+                    placement.is_partial("sum") or placement.is_partial("avg")
+                ) and safe_avoid_redistribution
                 if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -749,6 +760,7 @@ def list_pointwise_strategy(
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            op_schema.op,
             args_schema,
             child_strtgy,
             linearity,
