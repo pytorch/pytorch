@@ -110,12 +110,28 @@ class SizeStore:
         return self.size + 1
 
 
+class NestedValueSize:
+    def __init__(self, size: SizeStore, config: ValueConfig):
+        self.size = size
+        self.config = config
+
+    def __eq__(self, other):
+        return self.size == other.size and self.config == other.config
+
+    def __hash__(self):
+        return hash(self.size) ^ hash(self.config)
+
+    def __repr__(self):
+        return f"NestedValueSize(size={self.size!r}, config={self.config!r})"
+
+
 register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(RNGState, typ="reference")
 register_opaque_type(Counter, typ="reference")
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(SizeStore, typ="value")
+register_opaque_type(NestedValueSize, typ="value")
 
 
 class TestOpaqueObject(TestCase):
@@ -236,6 +252,37 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::process_with_config", lib=self.lib
         )
         def process_with_config_fake(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::process_nested_config",
+            f"(Tensor x, {get_opaque_type_name(NestedValueSize)} config) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::process_nested_config",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def process_nested_config_impl(
+            x: torch.Tensor, config: NestedValueSize
+        ) -> torch.Tensor:
+            assert isinstance(config, NestedValueSize)
+            if config.config.mode == "square":
+                return x * x
+            elif config.config.mode == "double":
+                return x + x
+            else:
+                return x
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::process_nested_config", lib=self.lib
+        )
+        def process_nested_config_fake(
             x: torch.Tensor, config: ValueConfig
         ) -> torch.Tensor:
             return torch.empty_like(x)
@@ -847,6 +894,30 @@ def forward(self, arg0_1):
         # Verify that the class is no longer registered
         for opaque_info in _OPAQUE_TYPES.values():
             self.assertFalse(tmp_class_name in opaque_info.class_name)
+
+    def test_value_type_nested(self):
+        def foo(x, config):
+            size = SizeStore(x.shape[0])
+            cfg = NestedValueSize(size, ValueConfig(config))
+            return torch.ops._TestOpaqueObject.process_nested_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        opt_f(x, "square")
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_nested_config = torch.ops._TestOpaqueObject.process_nested_config.default(arg0_1, NestedValueSize(size=SizeStore(size=3), config=ValueConfig(mode='square')));  arg0_1 = None
+    return (process_nested_config,)""",  # noqa: B950
+        )
+
+        opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        self.assertEqual(opt_f(x, "square"), foo(x, "square"))
+        self.assertEqual(opt_f(x, "double"), foo(x, "double"))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
