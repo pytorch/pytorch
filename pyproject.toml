@@ -347,7 +347,7 @@ keep-runtime-typing = true
 "torchgen/**" = [
     "S101"
 ]
-"torch/_decomp/**" = ["S101"]
+"torch/_decomp/decompositions.py" = ["S101"]
 "torch/_dynamo/**" = ["S101"]
 "torch/_export/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
