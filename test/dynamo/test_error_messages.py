@@ -1620,6 +1620,13 @@ from user code:
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
 
+Call to `torch._dynamo.step_unsupported()`
+  Explanation: User-inserted step_unsupported.
+  Hint: Remove the `torch._dynamo.step_unsupported()` call.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4636.html
 
 User code traceback:
   File "test_error_messages.py", line N, in test_step_graph_break
