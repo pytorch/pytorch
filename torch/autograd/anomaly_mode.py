@@ -84,12 +84,15 @@ class detect_anomaly:
         self.mixed_stack = mixed_stack
         self.prev_check_nan = torch.is_anomaly_check_nan_enabled()
         self.prev_mixed_stack = torch.is_anomaly_mixed_stack_enabled()
-        warnings.warn(
-            "Anomaly Detection has been enabled. "
-            "This mode will increase the runtime "
-            "and should only be enabled for debugging.",
-            stacklevel=2,
-        )
+        # If we don't check nan and use mixed stack, the overhead is minimal, so removing
+        # the warning in that case.
+        if not mixed_stack and check_nan:
+            warnings.warn(
+                "Anomaly Detection has been enabled. "
+                "This mode will increase the runtime "
+                "and should only be enabled for debugging.",
+                stacklevel=2,
+            )
 
     def __enter__(self) -> None:  # noqa: D105
         torch.set_anomaly_enabled(True, self.check_nan, self.mixed_stack)
