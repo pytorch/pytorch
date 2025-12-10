@@ -254,9 +254,14 @@ class MemoryDep(Dep):
 
     def numbytes_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-                V.graph.get_dtype(self.name)
-            )
+            numel = self.get_numel()
+            hint = V.graph.sizevars.size_hint(numel, fallback=0)
+            dtype_size = get_dtype_size(V.graph.get_dtype(self.name))
+            result = hint * dtype_size
+            # Debug: check if this is returning a symbolic expression
+            if not isinstance(result, (int, sympy.Integer)):
+                print(f"NUMBYTES_HINT symbolic: name={self.name}, numel={numel}, hint={hint}, result={result}")
+            return result
         except NotImplementedError:  # NoneLayout
             return 0
 
