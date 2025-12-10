@@ -324,6 +324,10 @@ bool launchGemmAndBiasCublasLt(
     if (args.bias_ld.has_value()) {
       std::cout << " bias ld: " << *args.bias_ld << std::endl;
     } else {
+      // Fails test
+      // pytest -sv test/test_matmul_cuda.py -k test_addmm_baddmm_dtype_overload_float16_M_64_N_64_K_64_batch_size0_broadcast_self_True_high_precision_self_True_backend_cublaslt_cuda
+      // This is because bias is float and not of the reduced type
+      // INVESTIGATE
       self_ptr = args.bias.value()->const_data_ptr<scalar_t>();
     }
   }
