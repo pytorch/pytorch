@@ -380,10 +380,8 @@ pointwise_ops = [
     aten.square.out,
     aten.square_.default,
     aten.sub.Scalar,
-    aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Scalar,
-    aten.sub_.Tensor,
     aten.tan.default,
     aten.tan.out,
     aten.tan_.default,
@@ -418,6 +416,8 @@ linear_pointwise_ops = {
     aten.to.dtype: 0,
     aten.add.Tensor: 1,
     aten.add_.Tensor: 1,
+    aten.sub.Tensor: 1,
+    aten.sub_.Tensor: 1,
     aten.div.Scalar: 0,
     aten.div_.Scalar: 0,
     aten.mul.Scalar: 0,
@@ -641,7 +641,12 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-redistribute_partial_ops = [aten.add.Tensor, aten.add_.Tensor]
+redistribute_partial_ops = [
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+]
 
 
 norm_partial_avoidable_redistribute_ops = [

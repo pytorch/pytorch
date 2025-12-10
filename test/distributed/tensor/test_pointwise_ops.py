@@ -505,7 +505,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_replicate())
 
     @with_comms
-    def test_add_scalar_partial(self):
+    def test_add_sub_scalar_partial(self):
         mesh = self.build_device_mesh()
 
         rank = self.rank
@@ -521,6 +521,21 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res, 7)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
+        # regular partial - scalar -> replicate
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = dt - 1
+        self.assertEqual(res, 5)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        res = 7 - dt
+        self.assertEqual(res, 1)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
         # regular partial + regular partial -> partial
         res = dt + dt
         self.assertEqual(res.to_local(), rank + rank)
@@ -528,8 +543,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         self.assertEqual(res, 12)
 
+        # regular partial - regular partial -> partial
+        res = dt - dt
+        self.assertEqual(res.to_local(), rank - rank)
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 0)
+
     @with_comms
-    def test_add_scalar_norm_partial(self):
+    def test_add_sub_scalar_norm_partial(self):
         mesh = self.build_device_mesh()
 
         # norm partial + scalar
