@@ -1162,12 +1162,16 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(
-    gm: torch.fx.GraphModule,
-) -> Optional[torch.fx.Node]:
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+@functools.cache
+def get_forbidden_cudagraph_ops() -> OrderedSet[str]:
+    """
+    Returns a set of operation names that are incompatible with CUDA graphs.
 
-    forbidden_set = OrderedSet(
+    These are ops that will fail during CUDA graph capture due to operations
+    that are not permitted while a stream is capturing (e.g., CPU synchronization,
+    dynamic memory allocation, etc.).
+    """
+    forbidden = OrderedSet(
         [
             "aten._fused_moving_avg_obs_fq_helper.default",
             "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -1184,7 +1188,7 @@ def get_first_incompatible_cudagraph_node(
         ]
     )
     if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update(
+        forbidden.update(
             (
                 "aten._unsafe_index_put.default",
                 "aten._unsafe_masked_index_put_accumulate.default",
@@ -1200,6 +1204,15 @@ def get_first_incompatible_cudagraph_node(
                 "aten.scatter_reduce.two_out",
             )
         )
+    return forbidden
+
+
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    forbidden_set = get_forbidden_cudagraph_ops()
 
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
@@ -3642,20 +3655,67 @@ def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
 
 
+def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node is cudagraph-unsafe based on its input arguments.
+
+    Some ops are only cudagraph-unsafe depending on their inputs (e.g., index_put
+    with boolean indices triggers .nonzero() during capture, but integer indices
+    are safe).
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    target = fx_node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+
+    # index_put with boolean indices triggers .nonzero() during capture
+    if target in (
+        torch.ops.aten.index_put.default,
+        torch.ops.aten.index_put_.default,
+        torch.ops.aten._unsafe_index_put.default,
+    ):
+        _, kwargs = normalize_function(
+            target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
+        )  # type: ignore[misc]
+        indices = kwargs["indices"]
+        for idx in indices:
+            if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
+                return True
+
+    return False
+
+
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     Returns True if the node is an op that is not cudagraphable.
-    Usually only custom ops have this tag.
+    This includes:
+    - Ops with the cudagraph_unsafe tag
+    - Ops in the forbidden cudagraph ops list
+    - index_put_ with boolean indices (triggers .nonzero() during capture)
+    - Control flow nodes (Conditional, WhileLoop)
     """
     from . import ir
 
-    if not isinstance(node, ir.FallbackKernel):
+    # Control flow nodes are cudagraph-unsafe
+    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+        return True
+
+    if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
         return False
 
-    if (
-        isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
-    ):
+    fx_node = getattr(node, "fx_node", None)
+    if fx_node is not None and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node):
+        return True
+
+    op = node.op_overload
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+
+    if torch._C.Tag.cudagraph_unsafe in node.op_overload.tags:  # type: ignore[attr-defined]
+        return True
+
+    if str(node.op_overload) in get_forbidden_cudagraph_ops():
         return True
 
     return False

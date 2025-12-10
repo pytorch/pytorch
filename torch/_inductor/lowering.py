@@ -3902,6 +3902,28 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 def index_put_fallback(self, indices, values, accumulate):
     op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
     ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
+    # Only disable cudagraphs for boolean indices, which trigger .nonzero()
+    # during capture. Integer index fallbacks (e.g., due to deterministic mode)
+    # are cudagraph-safe.
+    from torch.fx.operator_schemas import normalize_function
+
+    fx_node = V.graph.current_node
+    target = fx_node.target
+    if (
+        isinstance(target, torch._ops.OpOverload)
+        and not V.graph.disable_cudagraphs_reason
+    ):
+        _, kwargs = normalize_function(
+            target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
+        )  # type: ignore[misc]
+        fx_indices = kwargs["indices"]
+        for idx in fx_indices:
+            if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
+                msg = "index_put_ fallback is not compatible with CUDA graphs"
+                if stack_trace := fx_node.meta.get("stack_trace", None):
+                    msg = f"{msg} Found from : \n {stack_trace}"
+                V.graph.disable_cudagraphs_reason = msg
+                break
     return self
 
 
