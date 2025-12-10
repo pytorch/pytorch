@@ -231,6 +231,7 @@ exclude_patterns = [
     'c10/util/SmallVector.h',
     'c10/util/win32-headers.h',
     'c10/test/**/*.h',
+    'c10/test/**/*.cpp',
     'third_party/**/*',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*.cu',
@@ -258,6 +259,59 @@ command = [
     'tools/linter/adapters/clangtidy_linter.py',
     '--binary=.lintbin/clang-tidy',
     '--build_dir=./build',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'CLANGTIDY_EXECUTORCH_COMPATIBILITY'
+include_patterns = [
+    # c10 headers that must be C++17 compatible
+    'c10/macros/Export.h',
+    'c10/macros/Macros.h',
+    'c10/macros/cmake_macros.h',
+    'c10/util/BFloat16.h',
+    'c10/util/BFloat16-inl.h',
+    'c10/util/BFloat16-math.h',
+    'c10/util/Half.h',
+    'c10/util/Half-inl.h',
+    'c10/util/TypeSafeSignMath.h',
+    'c10/util/bit_cast.h',
+    'c10/util/complex.h',
+    'c10/util/floating_point_utils.h',
+    'c10/util/irange.h',
+    'c10/util/llvmMathExtras.h',
+    'c10/util/overflows.h',
+    'c10/util/safe_numerics.h',
+    # torch/headeronly headers that must be C++17 compatible
+    'torch/headeronly/macros/cmake_macros.h',
+    'torch/headeronly/macros/Export.h',
+    'torch/headeronly/macros/Macros.h',
+    'torch/headeronly/util/BFloat16.h',
+    'torch/headeronly/util/Half.h',
+    'torch/headeronly/util/TypeSafeSignMath.h',
+    'torch/headeronly/util/bit_cast.h',
+    'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/floating_point_utils.h',
+]
+exclude_patterns = [
+    '**/fb/**',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-tidy',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-tidy',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/clangtidy_linter.py',
+    '--binary=.lintbin/clang-tidy',
+    '--build_dir=./build',
+    '--std=c++17',
     '--',
     '@{{PATHSFILE}}'
 ]
