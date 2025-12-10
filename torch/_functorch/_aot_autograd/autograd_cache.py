@@ -297,23 +297,19 @@ def _get_context_fn_cache_hash(context_fn):
     """
     import functools
 
-    from torch.utils.checkpoint import create_selective_checkpoint_contexts
-
     if hasattr(context_fn, "cache_hash"):
         return context_fn.cache_hash
 
     if isinstance(context_fn, functools.partial):
         if hasattr(context_fn.func, "cache_hash"):
             return context_fn.func.cache_hash
-        # Check for the specific create_selective_checkpoint_contexts builder
-        if context_fn.func is create_selective_checkpoint_contexts:
-            # The first argument is the policy_fn which should have the cache_hash
-            if context_fn.args and hasattr(context_fn.args[0], "cache_hash"):
-                # Incorporate builder function identity into the hash
-                return (
-                    create_selective_checkpoint_contexts,
-                    context_fn.args[0].cache_hash,
-                )
+        # Check if the first positional argument has a cache_hash (e.g., a policy function).
+        # Include the wrapped function identity in the hash to distinguish different builders.
+        # Use the function's qualified name for pickle safety.
+        if context_fn.args and hasattr(context_fn.args[0], "cache_hash"):
+            func = context_fn.func
+            func_id = f"{func.__module__}.{func.__qualname__}"
+            return (func_id, context_fn.args[0].cache_hash)
 
     return None
 
