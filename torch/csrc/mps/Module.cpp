@@ -14,7 +14,6 @@
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
@@ -446,8 +445,7 @@ void initModule(PyObject* module) {
               // Set error buffer if error_buf_idx is provided
               if (!error_buf_idx.is_none()) {
                 auto error_idx = error_buf_idx.cast<unsigned>();
-                auto stream = ::at::mps::getCurrentMPSStream();
-                self.setBuffer(error_idx, stream->getErrorBuffer());
+                self.setErrorBufferIndex(error_idx);
               }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
