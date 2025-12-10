@@ -1709,6 +1709,33 @@ from user code:
     torch._dynamo.graph_break()""",
             )
 
+    def test_runtime_error_readable_shape_mismatch(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4)
+        y = torch.randn(10, 10)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        from torch._dynamo.exc import TorchRuntimeError
+
+        def post_munge(s):
+            s = re.sub(r"s\d+: hint = 10", "s94: hint = 10", s)
+            return s
+
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
+            """\
+Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return x + y""",
+            post_munge=post_munge,
+        )
+
     def test_hop_side_effect_error_includes_hop_context(self):
         # Test that graph breaks inside HOPs include the HOP context
         stack = []
@@ -1729,7 +1756,7 @@ from user code:
 HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
-  Hint: If the HOP is activation checkpointing, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
@@ -1777,7 +1804,7 @@ Graph Break Reason: Encountered graph break when attempting to trace CALL: a fun
 HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
-  Hint: If the HOP is activation checkpointing, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
@@ -1816,7 +1843,7 @@ User code traceback:
 HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
-  Hint: If the HOP is activation checkpointing, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
