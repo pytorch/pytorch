@@ -6262,7 +6262,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         return pg
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6331,7 +6331,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6392,7 +6392,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             return None
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
