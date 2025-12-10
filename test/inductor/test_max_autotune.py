@@ -1209,8 +1209,8 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
         comprehensive_padding=False,
         shape_padding=False,
-        triton.enable_decompose_k=True,
     )
+    @config.patch({"triton.enable_decompose_k": True})
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -1365,8 +1365,8 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        triton.enable_decompose_k=True,
     )
+    @config.patch({"triton.enable_decompose_k": True})
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
         def f(a, b):
             # 256 * s0
@@ -1416,8 +1416,8 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        triton.enable_decompose_k=True,
     )
+    @config.patch({"triton.enable_decompose_k": True})
     def test_max_autotune_decompose_k_output_stride(self):
         def f(a, b):
             a = a.transpose(0, 1)
@@ -1993,8 +1993,8 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
-        triton.enable_decompose_k: True,
     )
+    @config.patch({"triton.enable_decompose_k": True})
     @parametrize("num_decompose_k_splits", (0, 5, 20))
     @parametrize("decompose_k_threshold", (8, 16))
     def test_max_autotune_decompose_k_envvars(
