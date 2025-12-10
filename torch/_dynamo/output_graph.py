@@ -1690,7 +1690,9 @@ class OutputGraph(OutputGraphCommon):
                                 vt.as_python_constant(),
                             )
                         else:
-                            assert f"Encountered unrecognized type {vt} at output {idx}"  # noqa: PLW0129
+                            raise AssertionError(
+                                f"Encountered unrecognized type {vt} at output {idx}"
+                            )
 
                     self.export_metadata.out_spec = out_spec.as_python_constant()
 

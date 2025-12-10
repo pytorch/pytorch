@@ -161,6 +161,36 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
+    def test_export_blockmask(self):
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, BlockMask]:
+                block_mask = create_block_mask(
+                    causal_mask,
+                    B=x.shape[0],
+                    H=1,
+                    Q_LEN=x.shape[1],
+                    KV_LEN=x.shape[1],
+                    device=x.device,
+                )
+                return x * 2, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = SimpleModule()
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertNotEqual(mask_eager.mask_mod, mask_compiled.mask_mod)
+
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 

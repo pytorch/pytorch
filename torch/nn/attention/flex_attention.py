@@ -35,7 +35,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import GetAttrKey, tree_map_only
+from torch.utils._pytree import GetAttrKey, register_pytree_node, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -964,6 +964,60 @@ class BlockMask:
             (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
         )
         return tensors, context
+
+
+def _blockmask_flatten(block_mask: BlockMask):
+    """Flatten BlockMask for pytree."""
+    tensors = tuple(getattr(block_mask, attr) for attr in BlockMask._TENSOR_ATTRS)
+    # TODO During tracing, mask_mod is a NestedUserFunctionVariable and can't be included
+    # in the pytree context (not a valid constant) or as a leaf (not a valid output type).
+    # Use None and restore to noop_mask in unflatten.
+    #
+    # Note: When flex_attention is called with this BlockMask, the HOP captures mask_mod
+    # separately via speculate_subgraph, so the attention computation is correct.
+    # This limitation only affects cases where BlockMask is exported and then used with
+    # a different flex_attention call outside the exported graph.
+    if torch.compiler.is_compiling():
+        context = (block_mask.seq_lengths, block_mask.BLOCK_SIZE, None)
+    else:
+        context = (block_mask.seq_lengths, block_mask.BLOCK_SIZE, block_mask.mask_mod)
+    return tensors, context
+
+
+def _blockmask_unflatten(tensors, context):
+    """Unflatten tensors and context back into a BlockMask."""
+    seq_lengths, BLOCK_SIZE, mask_mod = context
+    if mask_mod is None:
+        mask_mod = noop_mask
+    kwargs = {
+        "seq_lengths": seq_lengths,
+        "BLOCK_SIZE": BLOCK_SIZE,
+        "mask_mod": mask_mod,
+        **dict(zip(BlockMask._TENSOR_ATTRS, tensors)),
+    }
+    return BlockMask(**kwargs)
+
+
+def _blockmask_flatten_with_keys(block_mask: BlockMask):
+    """Flatten BlockMask with keys for better tracing."""
+    tensors = tuple(
+        (GetAttrKey(attr), getattr(block_mask, attr))
+        for attr in BlockMask._TENSOR_ATTRS
+    )
+    if torch.compiler.is_compiling():
+        context = (block_mask.seq_lengths, block_mask.BLOCK_SIZE, None)
+    else:
+        context = (block_mask.seq_lengths, block_mask.BLOCK_SIZE, block_mask.mask_mod)
+    return tensors, context
+
+
+# Register BlockMask as a pytree node
+register_pytree_node(
+    BlockMask,
+    _blockmask_flatten,
+    _blockmask_unflatten,
+    flatten_with_keys_fn=_blockmask_flatten_with_keys,
+)
 
 
 def _broadcast_to_dim(x, dim):
