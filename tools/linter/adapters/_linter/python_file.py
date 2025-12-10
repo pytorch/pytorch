@@ -36,7 +36,6 @@ class PythonFile:
     def contents(self) -> str:
         if self._contents is not None:
             return self._contents
-
         return self.path.read_text() if self.path else ""
 
     @cached_property
