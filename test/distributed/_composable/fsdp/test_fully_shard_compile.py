@@ -568,10 +568,10 @@ autograd.grad with compiled autograd
   Explanation: torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.
   Hint: Disable compiled autograd, or move the autograd.grad() call outside the compiled region.
 
-  Developer debug context:
+  Developer debug context: torch.autograd.grad()
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0370.html""",  # noqa: B950
-                    )  # noqa: W291
+                    )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res

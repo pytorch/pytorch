@@ -3774,6 +3774,14 @@
   "GB0370": [
     {
       "Gb_type": "autograd.grad with compiled autograd",
+      "Context": "torch.autograd.grad()",
+      "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.",
+      "Hints": [
+        "Disable compiled autograd, or move the autograd.grad() call outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with compiled autograd",
       "Context": "",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.",
       "Hints": [

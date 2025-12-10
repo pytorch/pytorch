@@ -1467,7 +1467,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if compiled_autograd.compiled_autograd_enabled:
                 unimplemented(
                     gb_type="autograd.grad with compiled autograd",
-                    context="",
+                    context="torch.autograd.grad()",
                     explanation=(
                         "torch.autograd.grad() inside torch.compile is not supported when "
                         "compiled autograd is enabled."
