@@ -3908,7 +3908,7 @@ def index_put_fallback(self, indices, values, accumulate):
     # because boolean indices trigger .nonzero() during CUDA graph capture
     fx_node = V.graph.current_node
     if fx_node is not None and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node):
-        msg = "index_put_ fallback is not compatible with CUDA graphs"
+        msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
         if stack_trace := fx_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
