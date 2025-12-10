@@ -21,6 +21,8 @@ _device_t = Union[_device, str, int]
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
 Stream = torch.Stream
+# Default generators are initialized inside _mtia_init
+default_generators: tuple[torch._C.Generator, ...] = ()  # type: ignore[assignment]
 
 _initialized = False
 _queued_calls: list[
@@ -303,7 +305,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
-                self.idx = -1  # pyrefly: ignore  # bad-assignment
+                self.idx = -1  # pyrefly: ignore [bad-assignment]
 
         self.src_prev_stream = (
             None if not torch.jit.is_scripting() else torch.mtia.default_stream(None)
@@ -396,6 +398,7 @@ def set_rng_state(
 
 
 from .memory import *  # noqa: F403
+from .mtia_graph import *  # noqa: F403
 
 
 __all__ = [
@@ -424,4 +427,7 @@ __all__ = [
     "set_rng_state",
     "get_rng_state",
     "is_bf16_supported",
+    "MTIAGraph",
+    "graph",
+    "graph_pool_handle",
 ]

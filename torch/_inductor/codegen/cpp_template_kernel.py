@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Iterable
+from typing import Any, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -411,6 +411,7 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
+                    # pyrefly: ignore [bad-argument-type]
                     dst,
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
@@ -422,6 +423,7 @@ class CppTemplateKernel(CppKernel):
                 copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
+                    # pyrefly: ignore [bad-argument-type]
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
@@ -435,7 +437,7 @@ class CppTemplateKernel(CppKernel):
         epilogue_nodes: Optional[list[ir.IRNode]] = None,
         offsets: Optional[list[Any]] = None,
         reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
+        multi_output_buffers: Optional[tuple[ir.MultiOutput, ...]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))

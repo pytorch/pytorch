@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
@@ -217,7 +217,7 @@ def _get_edge_or_node_to_group_id(
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
     shared_with_map: dict[EdgeOrNode, EdgeOrNode] = {
-        k: k for k in edge_or_node_to_qspec.keys()
+        k: k for k in edge_or_node_to_qspec
     }
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
         if isinstance(edge_or_node, torch.fx.Node):
@@ -229,7 +229,10 @@ def _get_edge_or_node_to_group_id(
                 qspec, edge_or_node_to_qspec, shared_with_map
             )
 
-            assert isinstance(input_edge, tuple)
+            if not isinstance(input_edge, tuple):
+                raise AssertionError(
+                    f"input_edge must be a tuple (arg, user), got {type(input_edge)}"
+                )
             arg, n = input_edge
             if n.meta["quantization_annotation"].allow_implicit_sharing:
                 # NOTE: the order is important here, we first share with other users and then share with previous
@@ -279,7 +282,7 @@ def _get_edge_or_node_to_group_id(
     # now that we get the sharing relations between all edges and nodes, we can assign group ids
     cur_group_id = 0
     edge_or_node_to_group_id: dict[EdgeOrNode, int] = {}
-    for edge_or_node in shared_with_map.keys():
+    for edge_or_node in shared_with_map:
         root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
@@ -313,14 +316,14 @@ def _get_obs_or_fq_map(
 
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
-    node: Union[Node, Any],
+    node: Node | Any,
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -346,7 +349,10 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     if not isinstance(arg, Node):
         return arg
-    assert isinstance(arg, Node)
+    if not isinstance(arg, Node):
+        raise AssertionError(
+            f"expect original argument to be a Node, but got: {type(arg)}"
+        )
     # default (no observer)
     new_arg = arg
 
@@ -354,9 +360,10 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     original_arg = arg
     while _is_activation_post_process_node(original_arg, named_modules):
         original_arg = original_arg.args[0]  # type: ignore[assignment]
-    assert isinstance(original_arg, Node), (
-        f"expect original argument to be a Node, but got: {type(original_arg)}"
-    )
+    if not isinstance(original_arg, Node):
+        raise AssertionError(
+            f"expect original argument to be a Node, but got: {type(original_arg)}"
+        )
 
     input_edge = (original_arg, node)
     if input_edge not in obs_or_fq_map:
@@ -366,7 +373,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     if input_edge_obs_or_fq is None:
         return new_arg
 
-    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg, None)
+    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg)
     # the arg is observed as the output and is using the same instance as the input_edge
     # we'll reuse the inserted observer/fake_quant
     if arg_as_output_obs_or_fq is not None and id(arg_as_output_obs_or_fq) == id(
@@ -384,14 +391,17 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # instead of inserting new observers we will have:
     # conv1 -> obs1 -> existing_obs -> conv2
     #                            \ -> conv3
-    for maybe_obs_node in arg.users.keys():
+    for maybe_obs_node in arg.users:
         if not _is_activation_post_process_node(maybe_obs_node, named_modules):
             continue
         maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
         if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
             return maybe_obs_node
 
-    assert isinstance(model.graph, Graph)
+    if not isinstance(model.graph, Graph):
+        raise AssertionError(
+            f"Expected model.graph to be a torch.fx.Graph, got {type(model.graph)}"
+        )
     new_arg = _insert_obs_or_fq(
         arg,
         input_edge_obs_or_fq,
@@ -410,7 +420,7 @@ def _maybe_insert_input_observers_for_node(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -444,12 +454,13 @@ def _maybe_insert_input_observers_for_node(
     # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
     # gelu has a has an approximate kwarg that persist in exported graph.
     # This is just a work around for these.
-    assert (
-        node.target == torch.ops.aten.clone.default
-        or node.target == torch.ops.aten.zeros_like.default
-        or node.target == torch.ops.aten.gelu.default
+    if not (
+        node.target is torch.ops.aten.clone.default
+        or node.target is torch.ops.aten.zeros_like.default
+        or node.target is torch.ops.aten.gelu.default
         or len(node.kwargs) == 0
-    ), " expecting kwargs for aten op IR to be empty"
+    ):
+        raise AssertionError(" expecting kwargs for aten op IR to be empty")
 
     # assign the new args to the node, inplace
     node.args = tuple(new_args)
@@ -462,8 +473,8 @@ def _maybe_insert_output_observer_for_node(
     graph: Graph,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
-) -> Optional[Node]:
+    model_device: torch.device | None = None,
+) -> Node | None:
     if node in obs_or_fq_map:
         output_act_obs_or_fq = obs_or_fq_map[node]
         new_output = _insert_obs_or_fq(
@@ -495,13 +506,9 @@ def _maybe_insert_input_and_output_observers_for_node(
     model: torch.fx.GraphModule,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ):
-    this_node_quantization_annotation = (
-        node.meta["quantization_annotation"]
-        if "quantization_annotation" in node.meta
-        else None
-    )
+    this_node_quantization_annotation = node.meta.get("quantization_annotation", None)
     if this_node_quantization_annotation is None:
         return
 

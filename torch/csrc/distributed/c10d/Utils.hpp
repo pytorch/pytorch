@@ -48,14 +48,14 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
-  ss << "(";
+  ss << '(';
   for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
     ss << l[i];
   }
-  ss << ")";
+  ss << ')';
   return ss.str();
 }
 
@@ -444,9 +444,7 @@ inline at::Tensor newLikeFlat(
       sizes, strides, t.options().memory_format(std::nullopt));
 }
 
-inline at::Tensor newLikeFlat(
-    std::vector<at::Tensor>& tensors,
-    bool preserve_strides = true) {
+inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
@@ -454,20 +452,7 @@ inline at::Tensor newLikeFlat(
   at::DeviceGuard gpuGuard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  if (t.is_contiguous() ||
-      !preserve_strides) { // we are checking for memory format, so tensor might
-    // not be contiguous
-    // TODO handle all non-overlapping-and-dense, although if the strides
-    // disagree in ranks we are opening a door for more bugs than currently
-    // where channels-last might disagree between ranks
-    // fast path, don't call empty_strided
-    return at::empty(sizes, t.options());
-  } else {
-    // memory-dense, but not necessarily contiguous tensor
-    std::vector<int64_t> strides{t.numel()};
-    strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-    return at::empty_strided(sizes, strides, t.options());
-  }
+  return at::empty(sizes, t.options());
 }
 
 inline std::vector<std::vector<int64_t>> getSizes(

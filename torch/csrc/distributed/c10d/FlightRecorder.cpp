@@ -7,7 +7,10 @@ namespace c10d {
 void DebugInfoWriter::write(const std::string& trace) {
   std::string filename = filename_;
   if (enable_dynamic_filename_) {
-    filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""), rank_);
+    LOG(INFO) << "Writing Flight Recorder debug info to a dynamic file name";
+    filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""));
+  } else {
+    LOG(INFO) << "Writing Flight Recorder debug info to a static file name";
   }
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.

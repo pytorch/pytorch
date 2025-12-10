@@ -157,9 +157,15 @@ constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::Negative,
   DispatchKey::Conjugate,
   DispatchKey::XLA,
+  DispatchKey::XPU,
+  DispatchKey::HPU,
   DispatchKey::CUDA,
   DispatchKey::CPU,
   DispatchKey::PrivateUse1,
+  DispatchKey::SparseCPU,
+  DispatchKey::SparseCUDA,
+  DispatchKey::SparseCsrCPU,
+  DispatchKey::SparseCsrCUDA,
 });
 
 inline DispatchKeySet getKeysToPropagateToWrapper(const Tensor& tensor, DispatchKeySet to_propagate=kKeysToPropagateToWrapper) {
