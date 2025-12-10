@@ -20,6 +20,7 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -525,17 +526,24 @@ def common_pointwise_strategy(
 
         out_placements: list[Placement] = []
         for placement in spec_to_follow.placements:
-            if isinstance(placement, Shard):
+            if isinstance(placement, Shard | _StridedShard):
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
-                out_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, _StridedShard):
+                    out_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
+                else:
+                    out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 # note that only partial-sum and partial-avg are supported for linearity
                 partial_supports_linearity = placement.is_partial(
                     "sum"
                 ) or placement.is_partial("avg")
-                if linearity > 0 and partial_supports_linearity:
+                if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
                 else:
