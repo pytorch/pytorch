@@ -174,7 +174,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import supported_comparison_ops, SymNodeVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -548,7 +548,6 @@ explain = False
 # There are 4 possible graph break cases that InstructionTranslatorBase handles:
 #   1. Regular graph breaks from CALL, BINARY_SUBSCR, etc. (implemented by break_graph_if_unsupported)
 #   2. Data-dependent condition graph breaks (implemented by generic_jump)
-#   3. STORE_ATTR graph breaks (implemented in InstructionTranslatorBase.STORE_ATTR)
 #   4. All other unhandled graph breaks - unsupported step graph breaks (implemented in InstructionTranslatorBase.step)
 #
 # Graph breaks are handled in the following manner:
@@ -680,7 +679,7 @@ def generic_jump(
             # assert related instructions as we don't need them anymore.
 
             # if we see Tensor as assert statement, no need to call scalar_tensor
-            if isinstance(value, TensorVariable):
+            if value.is_tensor():
                 self.output.create_proxy(
                     "call_function",
                     torch._assert_async,
@@ -735,9 +734,7 @@ def generic_jump(
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
+        elif value.is_tensor() and self.should_compile_partial_graph():
             jump_graph_break(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
@@ -761,10 +758,15 @@ def generic_jump(
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
-                if isinstance(result, ConstantVariable) and isinstance(
-                    result.value, (bool, int)
-                ):
-                    if truth_fn(result.value):
+                method_name = getattr(getattr(x, "fn", None), "__name__", None)
+                if result.is_python_constant():
+                    result_value = result.as_python_constant()
+                    if method_name == "__bool__" and not isinstance(result_value, bool):
+                        msg = variables.ConstantVariable.create(
+                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        )
+                        exc.raise_observed_exception(TypeError, self, args=[msg])
+                    if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
                         self.jump(inst)
@@ -787,9 +789,7 @@ def generic_jump(
                     if push:
                         self.push(value)
                     self.jump(inst)
-        elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
-            self
-        ):
+        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 if push:
                     self.push(value)
@@ -840,8 +840,13 @@ def generic_jump(
     return inner
 
 
+# NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
+# with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
+# into a sequence of simpler instructions, or file an issue for consultation.
+# There is an additional requirement that if the instruction causes a function call, e.g. STORE_ATTR,
+# nothing should happen to the result of the function call.
 def break_graph_if_unsupported(
-    *, push: int
+    *, push: bool, msg_prefix: str
 ) -> Callable[
     [Callable[..., None]], Callable[[InstructionTranslatorBase, Instruction], None]
 ]:
@@ -850,8 +855,11 @@ def break_graph_if_unsupported(
     ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
         @functools.wraps(inner_fn)
         def wrapper(self: InstructionTranslatorBase, inst: Instruction) -> None:
+            prev_push = self.current_instruction_push
+            self.current_instruction_push = push
             speculation = self.speculate()
             if speculation.failed(self):
+                # no need to restore current_instruction_push if speculation failed
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
@@ -884,7 +892,7 @@ def break_graph_if_unsupported(
 
                 self.log_graph_break(
                     self.code_options,
-                    reason=str(excp),
+                    reason=f"{msg_prefix}:\n\n{str(excp)}",
                     user_stack=excp.real_stack,
                 )
 
@@ -899,6 +907,8 @@ def break_graph_if_unsupported(
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
+            finally:
+                self.current_instruction_push = prev_push
             speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
@@ -920,7 +930,7 @@ def break_graph_if_unsupported(
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
-                self, reason=reason, stack_pops=push - stack_effect
+                self, reason=reason, stack_pops=int(push) - stack_effect
             )
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
@@ -967,8 +977,8 @@ def break_graph_if_unsupported(
 
             self.output.add_output_instructions(cleanup)
 
-            self.popn(push - stack_effect)
-            for _ in range(push):
+            self.popn(int(push) - stack_effect)
+            if push:
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
@@ -1119,6 +1129,7 @@ class InstructionTranslatorBase(
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
+    current_instruction_push: bool
     block_stack: list[BlockStackEntry]
     lineno: int
     kw_names: Optional[ConstantVariable]
@@ -2493,13 +2504,19 @@ class InstructionTranslatorBase(
     def GET_ITER(self, inst: Instruction) -> None:
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION: a call to a regular function, e.g. f(x, y)",
+    )
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_EX: a variadic function call, e.g. f(*args)",
+    )
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
         kwargsvars: VariableTracker
         if inst.argval == 0:
@@ -2564,7 +2581,11 @@ class InstructionTranslatorBase(
         # pyrefly: ignore [unbound-name, missing-attribute]
         self.call_function(fn, argsvars.items, kwargsvars)
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_KW: "
+        "a function call with keyword arguments, e.g. f(x=True)",
+    )
     def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
         argnames = self.pop()
         args = self.popn(inst.argval)
@@ -2631,63 +2652,16 @@ class InstructionTranslatorBase(
                 return
         self._load_attr(inst.argval)
 
+    @break_graph_if_unsupported(
+        push=False,
+        msg_prefix="Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y",
+    )
     def STORE_ATTR(self, inst: Instruction) -> None:
-        speculation = self.speculate()
-        if speculation.failed(self):
-            return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
-
-        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
-            # We don't allow side effects during export on non-constant values
-            # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, (
-                f"Mutating module attribute {inst.argval} during export."
-            )
-
-        try:
-            BuiltinVariable(setattr).call_function(
-                self,  # type: ignore[arg-type]
-                [obj, ConstantVariable.create(inst.argval), val],
-                {},
-            )
-            return
-        except Unsupported as e:
-            if not self.should_compile_partial_graph():
-                raise
-            reason = f"Encountered graph break when attempting to store an object's attribute (STORE_ATTR):\n\n{str(e)}"
-            self.log_graph_break(
-                self.code_options,
-                reason=reason,
-                user_stack=e.real_stack,
-            )
-            e.remove_from_stats()
-            e.add_to_stats("graph_break")
-        speculation.fail_and_restart_analysis(self.error_on_graph_break)
-
-    def store_attr_graph_break(self, inst: Instruction) -> None:
-        if not self.should_compile_partial_graph():
-            unimplemented(
-                gb_type="Should not compile partial graph (STORE_ATTR)",
-                context="",
-                explanation="Dynamo has determined when encountering an unsupported "
-                "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
-                hints=[],
-            )
-        log.debug("STORE_ATTR triggered compile")
-        all_stack_locals_metadata = self.output.compile_subgraph(
-            self,
-            reason=GraphCompileReason("store_attr", [self.frame_summary()]),
-            stack_pops=2,
-        )
-        inst_copy = copy.copy(inst)
-        inst_copy.exn_tab_entry = None
-        self.output.add_output_instructions([inst_copy])
-        self.popn(2)
-        self.output.add_output_instructions(
-            self.create_call_resume_at(
-                self.next_instruction,
-                all_stack_locals_metadata,
-            )
+        BuiltinVariable(setattr).call_function(
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval), val],
+            {},
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
@@ -2890,6 +2864,7 @@ class InstructionTranslatorBase(
             tuple(meta.locals_ctx_args),
             tuple(meta.stack_null_idxes),
             tuple(resume_codes),
+            not self.current_instruction_push,
         )
 
         # Add original GraphModule context to the resume function to handle
@@ -3227,7 +3202,10 @@ class InstructionTranslatorBase(
             and self.output.current_tracer.parent is None
         )
 
-    @break_graph_if_unsupported(push=0)
+    @break_graph_if_unsupported(
+        push=False,
+        msg_prefix="Encountered graph break when attempting to trace STORE_SUBSCR: trying to store subscript, e.g. x[key] = y",
+    )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
         obj.call_method(self, "__setitem__", [key, val], {})
@@ -3396,9 +3374,9 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if isinstance(seq, TensorVariable):
+        if seq.is_tensor():
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
+        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
@@ -3450,7 +3428,9 @@ class InstructionTranslatorBase(
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
-    @break_graph_if_unsupported(push=0)
+    @break_graph_if_unsupported(
+        push=False, msg_prefix="Encountered intentional debugging graph break"
+    )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
         if self.is_leaf_tracer:
             unimplemented(
@@ -3552,7 +3532,7 @@ class InstructionTranslatorBase(
         kwargs: dict[str, VariableTracker] = {}
         assert inst.arg is not None
         for part in self.popn(inst.arg):
-            if isinstance(part, ConstantVariable):
+            if part.is_python_constant():
                 format_string_parts.append("{}")
                 args.append(part)
             elif isinstance(part, variables.StringFormatVariable):
@@ -3720,7 +3700,10 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
+    BINARY_SUBSCR = break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
+    )(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
@@ -3816,7 +3799,10 @@ class InstructionTranslatorBase(
         finally:
             self.kw_names = None
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y)",
+    )
     def CALL(self, inst: Instruction) -> None:
         self._call(inst)
 
@@ -3993,7 +3979,11 @@ class InstructionTranslatorBase(
     # 3.13 opcodes
     # fused instructions LOAD_FAST_LOAD_FAST, STORE_FAST_STORE_FAST, STORE_FAST_LOAD_FAST
     # are broken down.
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace CALL_KW: "
+        "a function call with keyword arguments, e.g. f(x=True)",
+    )
     def CALL_KW(self, inst: Instruction) -> None:
         self._call(inst, call_kw=True)
 
@@ -4335,6 +4325,7 @@ class InstructionTranslatorBase(
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
+        self.current_instruction_push = True
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
@@ -4984,10 +4975,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
                 args = []
-                if not (
-                    isinstance(self.symbolic_result, ConstantVariable)
-                    and self.symbolic_result.value is None
-                ):
+                if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]
                 exc.raise_observed_exception(StopIteration, self, args=args)
             else:
@@ -4995,7 +4983,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             if is_generator(code):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
-                assert self.symbolic_result.as_python_constant() is None
+                assert self.symbolic_result.is_constant_none()
                 return ListIteratorVariable(
                     self.generated_items,
                     mutation_type=ValueMutationNew(),
@@ -5227,7 +5215,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if not (isinstance(val, ConstantVariable) and val.value is None):
+        if not val.is_constant_none():
             # invoke send
             # Unreachable code - if you hit this, you are implementing generator support and have
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
@@ -5269,7 +5257,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
-            if isinstance(val, ConstantVariable) and val.value is None:
+            if val.is_constant_none():
                 try:
                     val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
