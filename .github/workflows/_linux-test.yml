@@ -429,6 +429,8 @@ jobs:
             -e VBAR_CONTROL_SERVICE_URL \
             -e CHIPS_PER_HOST_BOUNDS \
             -e TPU_WORKER_HOSTNAMES \
+            --privileged \
+            --network=host \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
