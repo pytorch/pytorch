@@ -917,10 +917,6 @@ class MetalKernel(SIMDKernel):
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
-                # Add error buffer parameter if error header is used
-                if "error" in self.headers:
-                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
-
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -1035,13 +1031,6 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
-        # Add error buffer index if error reporting is used
-        # TODO(malfet) Figure out how to do it for aoti
-        if "error" in self.headers and not V.graph.cpp_wrapper:
-            args.append(
-                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
-            )
-
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1055,13 +1044,11 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         if not (lower or upper):
             return
-        # Add error header for error reporting
-        self.headers.add("error")
-
+        # TODO(malfet): support asserts
+        # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
         size_str = self.index_to_str(size)
 
-        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
         if lower and upper:
             # Check both lower and upper bounds
@@ -1074,11 +1061,7 @@ class MetalKernel(SIMDKernel):
         if self._load_mask:
             condition = f"{condition} && {self._load_mask}"
 
-        # Generate error reporting code
-        self.compute.splice(f"""if ({condition}) {{
-    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");
-    return;
-}}""")
+        self.cse.generate(self.compute, f"if ({condition}) return", assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
