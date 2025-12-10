@@ -85,7 +85,7 @@ jobs:
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.10
         with:
           no-sudo: true
 
@@ -104,12 +104,12 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.10
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.10
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -332,7 +332,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.10
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
