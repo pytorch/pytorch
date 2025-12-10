@@ -148,7 +148,7 @@ struct Workspace {
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace& operator=(Workspace&&) = delete;
   ~Workspace() {
     if (data) {
       c10::cuda::CUDACachingAllocator::raw_delete(data);
