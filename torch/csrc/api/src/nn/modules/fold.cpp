@@ -1,6 +1,8 @@
 #include <torch/nn/modules/fold.h>
 
 #include <torch/expanding_array.h>
+#include <torch/types.h>
+#include <torch/utils.h>
 
 namespace F = torch::nn::functional;
 

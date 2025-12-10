@@ -1,3 +1,4 @@
+#include <c10/core/TensorOptions.h>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 namespace c10d {
