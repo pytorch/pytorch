@@ -117,6 +117,7 @@ if typing.TYPE_CHECKING:
     )
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
+    from torch._subclasses import FakeTensorMode
 
 
 try:
@@ -3403,6 +3404,41 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: Optional[FakeTensorMode]
+) -> str:
+    """
+    Replace symbolic size expressions (like 's0', 's94') in error messages
+    with their concrete runtime values for better readability.
+
+    Example: "size (s94)" -> "size (s94: hint= 10)" if s94's value is 10.
+    """
+    import re
+
+    from sympy.core.numbers import Integer
+
+    if fake_mode is None:
+        return msg
+
+    pattern = r"\(s(\d+)\)"
+    assert fake_mode.shape_env is not None
+    shape_env = fake_mode.shape_env
+    var_to_val = shape_env.var_to_val
+
+    def replace_sym(match):
+        sym_name = f"s{match.group(1)}"
+        val = next(
+            (v for k, v in var_to_val.items() if k.name == sym_name),
+            None,
+        )
+        if isinstance(val, (int, Integer)):
+            return f"({sym_name}: hint = {str(val)})"
+        return match.group(0)
+
+    msg = re.sub(pattern, replace_sym, msg)
+    return msg
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -3586,8 +3622,8 @@ def get_fake_value(
                 explanation="",
                 hints=[],
             )
-
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        raise TorchRuntimeError(msg).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
