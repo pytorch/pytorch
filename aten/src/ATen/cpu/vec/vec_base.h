@@ -1500,7 +1500,7 @@ inline Vectorized<T> flip(const Vectorized<T>& data) {
 // `ld_src` is the leading dimension of `src` and `ld_dst` is the leading
 // dimension of `dst`.
 template <typename T>
-inline void transpose_mxn(
+inline void __attribute__((optimize("no-tree-vectorize"))) transpose_mxn(
     const T* src,
     int64_t ld_src,
     T* dst,
