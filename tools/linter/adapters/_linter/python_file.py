@@ -173,12 +173,6 @@ class PythonFile:
         block = self.blocks_by_line_number.get(line)
         return block.full_name if block else ""
 
-    @cached_property
-    def python_parts(self) -> tuple[str, ...]:
-        assert self.path
-        parts = self.path.with_suffix("").parts
-        return parts[:-1] if parts[-1] == "__init__" else parts
-
 
 class OmittedLines:
     """Read lines textually and find comment lines that end in 'noqa {linter_name}'"""
