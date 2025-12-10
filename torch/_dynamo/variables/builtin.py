@@ -1007,15 +1007,90 @@ class BuiltinVariable(VariableTracker):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyVariableTracker
+        from .lazy import (
+            ComputedLazyConstantVariable,
+            LazyConstantVariable,
+            LazyVariableTracker,
+        )
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
         if any(issubclass(t, LazyVariableTracker) for t in arg_types):
-            return lambda tx, args, kwargs: obj.call_function(
-                tx, [v.realize() for v in args], kwargs
+            # Check if we can handle this lazily (all args are lazy/computed lazy constants
+            # or regular constants, and the op can be constant-folded)
+            all_constant_like = all(
+                issubclass(
+                    t,
+                    (
+                        LazyConstantVariable,
+                        ComputedLazyConstantVariable,
+                        ConstantVariable,
+                    ),
+                )
+                for t in arg_types
             )
+            # Comparison operators should NOT be lazy - they typically affect control flow
+            # and need to trigger realization to install guards
+            is_comparison_op = fn in supported_comparison_ops.values()
+            if (
+                all_constant_like
+                and obj.can_constant_fold_through()
+                and not has_kwargs
+                and not is_comparison_op
+            ):
+                # Return a ComputedLazyConstantVariable instead of realizing
+                def handle_lazy_constant(tx, args, kwargs):
+                    # If specialize_int/specialize_float is False, those types may become
+                    # SymNodeVariable on realization, which would give incorrect results
+                    # if we cache the computed value. So we must realize in that case.
+                    def should_realize_lazy(arg: VariableTracker) -> bool:
+                        if not isinstance(arg, LazyConstantVariable):
+                            return False
+                        if arg.is_realized():
+                            arg_type = arg.python_type()
+                        else:
+                            arg_type = arg.peek_type()
+                        if arg_type is int and not config.specialize_int:
+                            return True
+                        if arg_type is float and not config.specialize_float:
+                            return True
+                        return False
+
+                    if any(should_realize_lazy(arg) for arg in args):
+                        return obj.call_function(
+                            tx,
+                            [
+                                v.realize() if isinstance(v, LazyVariableTracker) else v
+                                for v in args
+                            ],
+                            kwargs,
+                        )
+                    try:
+                        return ComputedLazyConstantVariable.create(fn, list(args))
+                    except Exception:
+                        # Fall back to realizing all args if constant folding fails
+                        # (e.g., invalid args like complex(1, 1, 1))
+                        return obj.call_function(
+                            tx,
+                            [
+                                v.realize() if isinstance(v, LazyVariableTracker) else v
+                                for v in args
+                            ],
+                            kwargs,
+                        )
+
+                return handle_lazy_constant
+            else:
+                # Fall back to realizing all args
+                return lambda tx, args, kwargs: obj.call_function(
+                    tx,
+                    [
+                        v.realize() if isinstance(v, LazyVariableTracker) else v
+                        for v in args
+                    ],
+                    kwargs,
+                )
 
         if inspect.isclass(fn) and (
             issubclass(fn, Exception)
