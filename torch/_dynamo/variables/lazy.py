@@ -467,14 +467,11 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         VariableTracker.__init__(self, **kwargs)
         self._cache = _cache
 
-    def peek_type(self) -> type[Any]:
-        return type(self._cache.value)
-
-    def peek_value(self) -> Any:
-        return self._cache.value
-
     def python_type(self) -> type:
         """Return the Python type of the computed result."""
+        if self.is_realized():
+            assert self._cache.vt is not None
+            return self._cache.vt.python_type()
         return type(self._cache.value)
 
     def is_tensor(self) -> bool:
@@ -482,6 +479,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         return False
 
     def is_constant_none(self) -> bool:
+        if self.is_realized():
+            assert self._cache.vt is not None
+            return self._cache.vt.is_constant_none()
         return self._cache.value is None
 
     def lazy_isinstance(self, cls: type) -> bool:
@@ -490,20 +490,12 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
         return issubclass(cls, ConstantVariable)
 
-    def as_python_constant(self) -> Any:
-        """Get the Python constant value without necessarily realizing."""
-        return self._cache.value
-
     def is_python_constant(self) -> bool:
         return True
 
     def original_source(self) -> Any:
         # ComputedLazyConstantVariable has no source
         return None
-
-    def original_value(self) -> Any:
-        # Return the value without realizing
-        return self._cache.value
 
     def __repr__(self) -> str:
         if self.is_realized():
