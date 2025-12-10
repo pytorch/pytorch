@@ -12,6 +12,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
@@ -25,6 +26,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.types import _Number
 from torch.utils._typing_utils import not_none
 
 
@@ -466,6 +468,7 @@ def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
         f"no strategy to follow for {op_schema}!"
     )
     return common_pointwise_strategy(
+        op_schema.op,
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
@@ -490,6 +493,7 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def common_pointwise_strategy(
+    op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
@@ -532,9 +536,55 @@ def common_pointwise_strategy(
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 # note that only partial-sum and partial-avg are supported for linearity
-                partial_supports_linearity = placement.is_partial(
-                    "sum"
-                ) or placement.is_partial("avg")
+                safe_avoid_redistribution = False
+                if isinstance(placement, _NormPartial):
+                    if (
+                        op
+                        in [
+                            aten.div.Scalar,
+                            aten.div_.Scalar,
+                            aten.mul.Scalar,
+                            aten.mul_.Scalar,
+                        ]
+                        and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
+                    ):
+                        safe_avoid_redistribution = True
+                        """
+                        Proof:
+                        dt: _NormPartial
+                        rank 0: a₁ b₁
+                        rank 1: a₂ b₂
+                        1.
+                        res = dt * c, where c >= 0
+                        with_redistribution = c√(a₁² + a₂²), c√(b₁² + b₂²)
+                        without redistribution
+                        rank 0: ca₁ cb₁
+                        rank 1: ca₂ cb₂
+                        redistribute = √((ca₁)² + (ca₂)²), √((cb₁)² + (cb₂)²)
+                        = √(c²a₁² + c²a₂²), √(c²b₁² + c²b₂²)
+                        = √(c²(a₁² + a₂²)), √(c²(b₁² + b₂²))
+                        = c√(a₁² + a₂²), c√(b₁² + b₂²)
+                        with_redistribution == redistribute
+                        2.
+                        res = dt * c, where c < 0
+                        with_redistribution = -c√(a₁² + a₂²), -c√(b₁² + b₂²)
+                        without redistribution
+                        rank 0: -ca₁ -cb₁
+                        rank 1: -ca₂ -cb₂
+                        redistribute = √((-ca₁)² + (-ca₂)²), √((-cb₁)² + (-cb₂)²)
+                        = √(c²a₁² + c²a₂²), √(c²b₁² + c²b₂²)
+                        = √(c²(a₁² + a₂²)), √(c²(b₁² + b₂²))
+                        = c√(a₁² + a₂²), c√(b₁² + b₂²)
+                        with_redistribute != redistribute
+                        """
+                elif isinstance(placement, Partial):
+                    if op not in [aten.add.Tensor, aten.add_.Tensor] or not any(
+                        isinstance(arg, _Number) for arg in args_schema
+                    ):
+                        safe_avoid_redistribution = True
+                partial_supports_linearity = (
+                    placement.is_partial("sum") or placement.is_partial("avg")
+                ) and safe_avoid_redistribution
                 if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -619,10 +669,24 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
+# Scalar ops that need the scalar value in the cache key for _NormPartial handling
+# (the sign of the scalar affects whether we can avoid redistribution)
+_scalar_ops_needing_value_in_cache = {
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+}
+
 for op in linear_pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        linear_pointwise_strategy
-    )
+    if op in _scalar_ops_needing_value_in_cache:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
+    else:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
@@ -749,6 +813,7 @@ def list_pointwise_strategy(
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            op_schema.op,
             args_schema,
             child_strtgy,
             linearity,

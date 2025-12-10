@@ -17,12 +17,14 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     LocalDTensorOpTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -438,9 +440,97 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # Inplace ops that require placement changes (Partial -> Replicate) should error
         with self.assertRaisesRegex(
             RuntimeError,
-            "in-place operations that require placement changes are not supporte",
+            "in-place operations that require placement changes are not supported",
         ):
             partial_dt.clamp_(max=10)
+
+    @with_comms
+    def test_add_partial_scalar(self):
+        mesh = self.build_device_mesh()
+
+        rank = self.rank
+
+        # regular partial + scalar
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = dt + 1
+        self.assertEqual(res, 7)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        # norm partial + scalar
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        norm = norm + 1
+
+        self.assertEqual(norm, 11)
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+
+    @with_comms
+    def test_mult_div_partial_scalar(self):
+        aten = torch.ops.aten
+
+        mesh = self.build_device_mesh()
+
+        # regular partial *,/ scalar
+        local_tensor = map_local_for_rank(self.rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = aten.mul.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank * 2])),
+        )
+
+        # After mul by 2, each rank has [2*rank], verify by redistributing and checking sum
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        # sum of 2*rank for ranks 0,1,2,3 = 0+2+4+6 = 12
+        self.assertEqual(res, 12)
+
+        res = aten.div.Scalar(dt, 2)
+
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank / 2])),
+        )
+        # After div by 2, each rank has [rank/2], verify by redistributing and checking sum
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        # sum of rank/2 for ranks 0,1,2,3 = 0+0.5+1+1.5 = 3
+        self.assertEqual(res, 3)
+
+        # norm partial *,/ scalar
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+
+        res = aten.mul.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 20)
+
+        res = aten.div.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 5)
+
+        res = aten.mul.Scalar(norm, -2)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        res = aten.div.Scalar(norm, -2)
+        self.assertEqual(res, -5)
+        self.assertTrue(res._spec.placements[0].is_replicate())
 
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
