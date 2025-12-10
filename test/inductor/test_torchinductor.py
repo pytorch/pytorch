@@ -4293,7 +4293,6 @@ class CommonTemplate:
                 (v,),
             )
 
-    @skipIfRocm
     @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
@@ -4344,7 +4343,12 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check("convolution(").run(code[0])
+                if config.cpp_wrapper:
+                    # with cpp_wrapper, the pattern is .run( and then .convolution(
+                    FileCheck().check(".run(").check("convolution(").run(code[0])
+                else:
+                    # without cpp_wrapper, the pattern is .convolution( and then .run(
+                    FileCheck().check("convolution(").check(".run(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
