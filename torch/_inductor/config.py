@@ -1602,7 +1602,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 32 if torch.version.hip else 16
+    spill_threshold: int = 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
