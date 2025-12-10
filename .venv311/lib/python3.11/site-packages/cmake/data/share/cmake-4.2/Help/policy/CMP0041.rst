@@ -1,0 +1,28 @@
+CMP0041
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Error on relative include with generator expression.
+
+Diagnostics in CMake 2.8.12 and lower silently ignored an entry in the
+:prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of a target if it contained a generator
+expression at any position.
+
+The path entries in that target property should not be relative. High-level
+API should ensure that by adding either a source directory or a install
+directory prefix, as appropriate.
+
+As an additional diagnostic, the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` generated
+on an :prop_tgt:`IMPORTED` target for the install location should not contain
+paths in the source directory or the build directory.
+
+The ``OLD`` behavior for this policy is to ignore relative path entries if they
+contain a generator expression. The ``NEW`` behavior for this policy is to report
+an error if a generator expression appears in another location and the path is
+relative.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

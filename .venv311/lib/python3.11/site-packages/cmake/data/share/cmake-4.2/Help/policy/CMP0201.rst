@@ -1,0 +1,30 @@
+CMP0201
+-------
+
+.. versionadded:: 4.2
+
+``Python::NumPy`` does not depend on ``Python::Development.Module``.
+
+:module:`FindPython3`, :module:`FindPython2`, and :module:`FindPython` provide
+``Python{3,2,}::NumPy`` and ``Python{3,2,}::Development.Module`` targets when
+the corresponding components are requested.
+
+In CMake 4.1 and below, requesting the ``NumPy`` component implies the
+``Development.Module`` component, and the provided ``Python{3,2,}::NumPy``
+targets depend on the provided ``Python{3,2,}::Development.Module`` targets.
+This dependency is not necessary.
+In CMake 4.2 and above, requesting the ``NumPy`` component does not imply the
+``Development.Module`` component, and the provided ``Python{3,2,}::NumPy``
+targets do not depend on the provided ``Python{3,2,}::Development.Module``
+targets.
+This policy provides compatibility with projects that expect the legacy
+behavior.
+
+The ``OLD`` behavior for this policy makes ``NumPy`` depend on
+``Development.Module``.  The ``NEW`` behavior for this policy does not.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

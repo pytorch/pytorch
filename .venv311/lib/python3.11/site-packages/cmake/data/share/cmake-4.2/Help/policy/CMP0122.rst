@@ -1,0 +1,16 @@
+CMP0122
+-------
+
+.. versionadded:: 3.21
+
+:module:`UseSWIG` use library name conventions for ``CSharp`` language.
+
+Starting with CMake 3.21, :module:`UseSWIG` generates now a library using
+default naming conventions. This policy provides compatibility with projects
+that expect the legacy behavior.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

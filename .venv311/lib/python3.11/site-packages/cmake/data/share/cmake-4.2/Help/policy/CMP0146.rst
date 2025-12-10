@@ -1,0 +1,28 @@
+CMP0146
+-------
+
+.. versionadded:: 3.27
+
+The :module:`FindCUDA` module is removed.
+
+The :module:`FindCUDA` module has been deprecated since CMake 3.10.
+CMake 3.27 and above prefer to not provide the module.
+This policy provides compatibility for projects that have not been
+ported away from it.
+
+Projects using the :module:`FindCUDA` module should be updated to use
+CMake's first-class ``CUDA`` language support.  List ``CUDA`` among the
+languages named in the top-level call to the :command:`project` command,
+or call the :command:`enable_language` command with ``CUDA``.
+Then one can add CUDA (``.cu``) sources directly to targets,
+similar to other languages.
+
+The ``OLD`` behavior of this policy is for ``find_package(CUDA)`` to
+load the deprecated module.  The ``NEW`` behavior is for uses of the
+module to fail as if it does not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

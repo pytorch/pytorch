@@ -1,0 +1,28 @@
+CMP0148
+-------
+
+.. versionadded:: 3.27
+
+The :module:`FindPythonInterp` and :module:`FindPythonLibs` modules are removed.
+
+These modules have been deprecated since CMake 3.12.
+CMake 3.27 and above prefer to not provide the modules.
+This policy provides compatibility for projects that have not been
+ported away from them.
+
+Projects using the :module:`FindPythonInterp` and/or :module:`FindPythonLibs`
+modules should be updated to use one of their replacements:
+
+* :module:`FindPython3`
+* :module:`FindPython2`
+* :module:`FindPython`
+
+The ``OLD`` behavior of this policy is for ``find_package(PythonInterp)``
+and ``find_package(PythonLibs)`` to load the deprecated modules.  The ``NEW``
+behavior is for uses of the modules to fail as if they do not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

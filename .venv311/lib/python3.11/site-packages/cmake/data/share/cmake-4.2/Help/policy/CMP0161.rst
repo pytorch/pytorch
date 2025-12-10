@@ -1,0 +1,36 @@
+CMP0161
+-------
+
+.. versionadded:: 3.29
+
+The :variable:`CPACK_PRODUCTBUILD_DOMAINS` variable defaults to true.
+
+Before CMake 3.29, the :variable:`CPACK_PRODUCTBUILD_DOMAINS` variable is
+unset by default.  When using the :cpack_gen:`CPack productbuild Generator`,
+this disables the use of the ``domains`` attribute in the productbuild
+Distribution XML, and falls back to the ``auth`` attribute instead.
+These attributes control where a productbuild package is allowed to be
+installed.  But the ``auth`` attribute has been deprecated by Apple,
+so projects should migrate to using ``domains`` instead.
+
+CMake 3.29 and above prefer to use a default value of true for
+:variable:`CPACK_PRODUCTBUILD_DOMAINS`, which means ``domains`` will be used
+by default unless the project explicitly sets
+:variable:`CPACK_PRODUCTBUILD_DOMAINS` to false.
+This policy provides compatibility with projects that enabled the
+:cpack_gen:`CPack productbuild Generator`, but did not explicitly set
+:variable:`CPACK_PRODUCTBUILD_DOMAINS`.
+
+The ``OLD`` behavior for this policy is to leave
+:variable:`CPACK_PRODUCTBUILD_DOMAINS` unset if it hasn't been set.
+The ``NEW`` behavior for this policy is to use a default value of true for
+:variable:`CPACK_PRODUCTBUILD_DOMAINS`.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.29
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+Note that a warning will only be emitted if the
+:variable:`CPACK_BINARY_PRODUCTBUILD <CPACK_BINARY_<GENNAME>>` variable is
+set to true and the project is being built for an Apple platform.
+
+.. include:: include/DEPRECATED.rst

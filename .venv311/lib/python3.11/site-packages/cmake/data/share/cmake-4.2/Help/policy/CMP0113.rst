@@ -1,0 +1,43 @@
+CMP0113
+-------
+
+.. versionadded:: 3.19
+
+:ref:`Makefile Generators` do not repeat custom commands from target
+dependencies.
+
+Consider a chain of custom commands split across two dependent targets:
+
+.. code-block:: cmake
+
+  add_custom_command(OUTPUT output-not-created
+    COMMAND ... DEPENDS ...)
+  set_property(SOURCE output-not-created PROPERTY SYMBOLIC 1)
+  add_custom_command(OUTPUT output-created
+    COMMAND ... DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/output-not-created)
+  add_custom_target(first DEPENDS output-not-created)
+  add_custom_target(second DEPENDS output-created)
+  add_dependencies(second first)
+
+In CMake 3.18 and lower, the Makefile generators put a copy of both custom
+commands in the Makefile for target ``second`` even though its dependency on
+target ``first`` ensures that the first custom command runs before the second.
+Running ``make second`` would cause the first custom command to run once in
+the ``first`` target and then again in the ``second`` target.
+
+CMake 3.19 and above prefer to not duplicate custom commands in a target that
+are already generated in other targets on which the target depends (directly or
+indirectly).  This policy provides compatibility for projects that have not
+been updated to expect the new behavior.  In particular, projects that relied
+on the duplicate execution or that did not properly set the :prop_sf:`SYMBOLIC`
+source file property may be affected.
+
+The ``OLD`` behavior for this policy is to duplicate custom commands in
+dependent targets.  The ``NEW`` behavior of this policy is to not duplicate
+custom commands in dependent targets.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.19
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

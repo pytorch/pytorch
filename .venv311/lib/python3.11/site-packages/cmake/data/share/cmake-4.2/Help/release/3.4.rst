@@ -1,0 +1,273 @@
+CMake 3.4 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.3 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* The :generator:`Visual Studio 14 2015` generator learned to select
+  a Windows 10 SDK based on the value of the :variable:`CMAKE_SYSTEM_VERSION`
+  variable and the SDKs available on the host.
+
+* CMake learned rudimentary support for the Apple Swift language.  When using
+  the :generator:`Xcode` generator with Xcode 6.1 or higher, one may enable
+  the ``Swift`` language with the :command:`enable_language` command or the
+  :command:`project` command (this is an error with other generators or when
+  Xcode is too old).  Then one may list ``.swift`` source files in targets
+  for compilation.
+
+Commands
+--------
+
+* The :command:`find_program` command learned a ``NAMES_PER_DIR``
+  option to consider all given ``NAMES`` in each directory before
+  moving on to the next directory.
+
+* The :command:`get_filename_component` command learned a new ``BASE_DIR``
+  subcommand.  This is used to specify a base directory when calculating an
+  absolute path from a relative path.
+
+* The :command:`if` command learned a new ``TEST`` operator that evaluates
+  to true if a given test name has been defined by the :command:`add_test`
+  command.  See policy :policy:`CMP0064`.
+
+* The :command:`install(DIRECTORY)` command ``DESTINATION`` option learned to
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :command:`install(FILES)` command ``DESTINATION`` option learned to
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :command:`string` command learned a new ``APPEND`` subcommand.
+
+Variables
+---------
+
+* The :ref:`Makefile Generators` and the :generator:`Ninja` generator
+  learned to add compiler launcher tools like distcc and ccache along
+  with the compiler for ``C`` and ``CXX`` languages.  See the
+  :variable:`CMAKE_<LANG>_COMPILER_LAUNCHER` variable and
+  :prop_tgt:`<LANG>_COMPILER_LAUNCHER` target property for details.
+
+* New :variable:`CMAKE_LINK_SEARCH_START_STATIC` and
+  :variable:`CMAKE_LINK_SEARCH_END_STATIC` variables were
+  introduced to initialize the
+  :prop_tgt:`LINK_SEARCH_START_STATIC` and
+  :prop_tgt:`LINK_SEARCH_END_STATIC` target properties,
+  respectively.
+
+Properties
+----------
+
+* :ref:`Visual Studio Generators` learned to support additional
+  target properties to customize projects for NVIDIA Nsight
+  Tegra Visual Studio Edition:
+
+  * :prop_tgt:`ANDROID_ANT_ADDITIONAL_OPTIONS`
+  * :prop_tgt:`ANDROID_ARCH`
+  * :prop_tgt:`ANDROID_ASSETS_DIRECTORIES`
+  * :prop_tgt:`ANDROID_JAR_DEPENDENCIES`
+  * :prop_tgt:`ANDROID_JAR_DIRECTORIES`
+  * :prop_tgt:`ANDROID_JAVA_SOURCE_DIR`
+  * :prop_tgt:`ANDROID_NATIVE_LIB_DEPENDENCIES`
+  * :prop_tgt:`ANDROID_NATIVE_LIB_DIRECTORIES`
+  * :prop_tgt:`ANDROID_PROCESS_MAX`
+  * :prop_tgt:`ANDROID_PROGUARD`
+  * :prop_tgt:`ANDROID_PROGUARD_CONFIG_PATH`
+  * :prop_tgt:`ANDROID_SECURE_PROPS_PATH`
+  * :prop_tgt:`ANDROID_SKIP_ANT_STEP`
+  * :prop_tgt:`ANDROID_STL_TYPE`
+
+* The :prop_tgt:`ARCHIVE_OUTPUT_DIRECTORY`,
+  :prop_tgt:`LIBRARY_OUTPUT_DIRECTORY`, and
+  :prop_tgt:`RUNTIME_OUTPUT_DIRECTORY` target properties learned to
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`SOURCE_DIR` and :prop_tgt:`BINARY_DIR` target properties
+  were introduced to allow project code to query where a target is defined.
+
+* The :prop_tgt:`OUTPUT_NAME` target property and its variants learned to
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* A :prop_gbl:`TARGET_MESSAGES` global property was added to tell the
+  :ref:`Makefile Generators` whether to generate commands to print output
+  after each target is completed.
+
+* On Windows with MS-compatible tools, CMake learned to optionally
+  generate a module definition (``.def``) file for ``SHARED`` libraries.
+  See the :prop_tgt:`WINDOWS_EXPORT_ALL_SYMBOLS` target property.
+
+Modules
+-------
+
+* The :module:`ExternalProject` module :command:`ExternalProject_Add`
+  function ``GIT_SUBMODULES`` option now also limits the set of
+  submodules that are initialized in addition to the prior behavior
+  of limiting the set of submodules that are updated.
+
+* The :module:`ExternalProject` module learned new ``USES_TERMINAL``
+  arguments for giving steps exclusive terminal access.  This is
+  useful with the :generator:`Ninja` generator to monitor CMake
+  superbuild progress and prevent CPU oversubscription.
+
+* The :module:`FindBISON` module ``bison_target()`` command learned a
+  new ``DEFINES_FILE`` option to specify a custom output header
+  to be generated.
+
+* The :module:`FindHDF5` module learend a new ``HDF5_PREFER_PARALLEL``
+  option allowing users to specify that a parallel HDF5 tool is
+  preferred if both are available.
+
+* The :module:`FindIce` module now provides imported targets.
+
+* The :module:`FindJava` module learned to optionally find
+  the ``idlj`` and ``jarsigner`` tools.
+
+* The :module:`FindOpenSSL` module now provides imported targets.
+
+* The :module:`FindOpenSSL` module learned a new ``OPENSSL_USE_STATIC_LIBS``
+  option to search only for static libraries.
+
+* The :module:`FindPkgConfig` learned a new :command:`pkg_get_variable`
+  command which may be used to query for arbitrary variables from a package
+  (such as for related tools or data and plugin install paths).
+
+* The :module:`FindProtobuf` module gained a new
+  :command:`protobuf_generate_python` command to generate Python
+  sources from ``.proto`` files.
+
+* The :module:`FindTIFF` module learned to search separately for
+  debug and release variants.
+
+* The :module:`FindwxWidgets` module learned to support version requests.
+
+* The :module:`FindXercesC` module learned to search separately for
+  debug and release variants.
+
+* The :module:`FindZLIB` module learned to search separately for
+  debug and release variants.
+
+* The :module:`GNUInstallDirs` module learned special default values
+  for certain installation prefixes according to the `GNU Coding
+  Standards`_ and the `Filesystem Hierarchy Standard`_.
+
+* The :module:`UseJava` module ``add_jar`` function learned
+  to support response files (e.g. ``@srcs.txt``) for source
+  specification.
+
+* The :module:`UseJava` module ``install_jar`` function learned
+  new ``DESTINATION`` and ``COMPONENT`` options to specify
+  the corresponding :command:`install` command options.
+
+* The :module:`UseJava` module gained a new ``create_javah``
+  function to create C headers from Java classes.
+
+.. _`GNU Coding Standards`: https://www.gnu.org/prep/standards/html_node/Directory-Variables.html
+.. _`Filesystem Hierarchy Standard`: https://refspecs.linuxfoundation.org/FHS_3.0/fhs/index.html
+
+Generator Expressions
+---------------------
+
+* A new ``$<SHELL_PATH:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  has been added.
+
+CTest
+-----
+
+* CTest learned to optionally measure the CPU load during parallel
+  testing and avoid starting tests that may cause the load to exceed
+  a given threshold.  See the :manual:`ctest(1)` command ``--test-load``
+  option, the ``TestLoad`` setting of the :ref:`CTest Test Step`,
+  the :variable:`CTEST_TEST_LOAD` variable, and the ``TEST_LOAD``
+  option of the :command:`ctest_test` command.
+
+* :manual:`ctest(1)` learned options
+  ``--test-output-size-passed`` and ``--test-output-size-failed``
+  to customize the limit on test output size submitted when
+  running as a :ref:`Dashboard Client`.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DEB Generator` learned to set package dependencies
+  per component.  See variables:
+
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_BREAKS`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_CONFLICTS`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_ENHANCES`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_PREDEPENDS`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_PROVIDES`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_RECOMMENDS`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_REPLACES`
+  * :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_SUGGESTS`
+
+* The :module:`CPack` module learned to package empty directories.
+
+* The :module:`CPack` module gained a new setting, ``CPACK_VERBATIM_VARIABLES``,
+  which can be used to ensure the cpack program receives the settings' values
+  exactly as they were set, even if they contain CMake-special characters.
+  For compatibility, it's off by default.
+
+Other
+-----
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of features supported by GNU C compilers on Windows.
+
+* CMake learned to honor ``*.manifest`` source files with MSVC tools.
+  Manifest files named as sources of ``.exe`` and ``.dll`` targets
+  will be merged with linker-generated manifests and embedded in the
+  binary.
+
+* The Concurrent Fortran 77 compiler is now supported.
+  Its :variable:`compiler id <CMAKE_<LANG>_COMPILER_ID>` is ``CCur``.
+
+* :manual:`cmake(1)` gained a new ``--trace-expand`` command line option
+  that is like ``--trace`` but expands variable references in the output.
+
+Deprecated and Removed Features
+===============================
+
+* The :module:`CMakeExpandImportedTargets` module is now documented
+  as deprecated.  See module documentation for an explanation.
+
+* The :variable:`CMAKE_USE_RELATIVE_PATHS` variable no longer has any
+  effect.  Previously it was partially implemented and unreliable.
+
+Other Changes
+=============
+
+* The :module:`CheckFunctionExists`, :module:`CheckLibraryExists`,
+  :module:`CheckSymbolExists`, and :module:`FindThreads` modules learned to
+  work in environments where only CXX is enabled.
+
+* The :cpack_gen:`CPack DEB Generator` now correctly excludes symlinks
+  during package checksum calculation.
+
+* The :cpack_gen:`CPack DEB Generator` no longer uses fakeroot and
+  system tar program for packaging.
+
+* The :module:`CPack` module no longer mangles settings with CMake-special
+  characters when they're used as defaults for other settings. The macro
+  ``cpack_set_if_not_set``, which was responsible for this, is now deprecated.
+
+* CMake no longer links executables with flags to export symbols
+  unless the :prop_tgt:`ENABLE_EXPORTS` target property is set.
+  See policy :policy:`CMP0065`.
+
+* The ``SONAME`` field is no longer set for ``MODULE`` libraries
+  created with the :command:`add_library` command.  ``MODULE``
+  libraries are meant for explicit dynamic loading at runtime.
+  They cannot be linked so ``SONAME`` is not useful.
+
+* The internal :variable:`CMAKE_<LANG>_COMPILE_OBJECT` rule variable now
+  substitutes compiler include flags in a separate ``<INCLUDES>`` placeholder
+  instead of the main ``<FLAGS>`` placeholder.

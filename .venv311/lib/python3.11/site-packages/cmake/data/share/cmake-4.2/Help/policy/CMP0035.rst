@@ -1,0 +1,13 @@
+CMP0035
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`variable_requires` command should not be called.
+
+This command was introduced in November 2001 to perform some conditional
+logic.  It has long been replaced by the :command:`if` command.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst

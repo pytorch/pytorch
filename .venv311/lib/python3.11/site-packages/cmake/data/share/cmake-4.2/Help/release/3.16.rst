@@ -1,0 +1,324 @@
+CMake 3.16 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.15 include the following.
+
+New Features
+============
+
+Languages
+---------
+
+* CMake learned to support the Objective C (``OBJC``) and Objective C++
+  (``OBJCXX``) languages.  They may be enabled via the :command:`project`
+  and :command:`enable_language` commands.  When ``OBJC`` or ``OBJCXX``
+  is enabled, source files with the ``.m`` or ``.mm``, respectively,
+  will be compiled as Objective C or C++.  Otherwise they will be treated
+  as plain C++ sources as they were before.
+
+Compilers
+---------
+
+* The ``Clang`` compiler is now supported on ``Solaris``.
+
+Platforms
+---------
+
+* On AIX, executables using the :prop_tgt:`ENABLE_EXPORTS` target property
+  now produce a linker import file with a ``.imp`` extension in addition
+  to the executable file.  Plugins (created via :command:`add_library` with
+  the ``MODULE`` option) that use :command:`target_link_libraries` to link
+  to the executable for its symbols are now linked using the import file.
+  The :command:`install(TARGETS)` command now installs the import file as
+  an ``ARCHIVE`` artifact.
+
+* On AIX, runtime linking is no longer enabled by default.  CMake provides
+  the linker enough information to resolve all symbols up front.
+  One may manually enable runtime linking for shared libraries and/or
+  loadable modules by adding ``-Wl,-G`` to their link flags
+  (e.g. in the :variable:`CMAKE_SHARED_LINKER_FLAGS` or
+  :variable:`CMAKE_MODULE_LINKER_FLAGS` variable).
+  One may manually enable runtime linking for executables by adding
+  ``-Wl,-brtl`` to their link flags (e.g. in the
+  :variable:`CMAKE_EXE_LINKER_FLAGS` variable).
+
+Command-Line
+------------
+
+* :manual:`cmake(1)` ``-E`` now supports ``true`` and ``false`` commands,
+  which do nothing while returning exit codes of 0 and 1, respectively.
+
+* :manual:`cmake(1)` gained a ``--trace-redirect=<file>`` command line
+  option that can be used to redirect ``--trace`` output to a file instead
+  of ``stderr``.
+
+* The :manual:`cmake(1)` ``--loglevel`` command line option has been
+  renamed to ``--log-level`` to make it consistent with the naming of other
+  command line options.  The ``--loglevel`` option is still supported to
+  preserve backward compatibility.
+
+Commands
+--------
+
+* The :command:`add_test` command learned the option ``COMMAND_EXPAND_LISTS``
+  which causes lists in the ``COMMAND`` argument to be expanded, including
+  lists created by generator expressions.
+
+* The :command:`file` command learned a new sub-command,
+  ``GET_RUNTIME_DEPENDENCIES``, which allows you to recursively get the list of
+  libraries linked by an executable or library. This sub-command is intended as
+  a replacement for :module:`GetPrerequisites`.
+
+* The :command:`find_file`, :command:`find_library`, :command:`find_path`,
+  :command:`find_package`, and :command:`find_program` commands have learned to
+  check the following variables to control the default behavior for groups of
+  search locations:
+
+  * :variable:`CMAKE_FIND_USE_PACKAGE_ROOT_PATH` - Controls the default
+    behavior of searching the :variable:`<PackageName>_ROOT` variables.
+
+  * :variable:`CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH` - Controls the default
+    behavior of searching the CMake-specific environment variables.
+
+  * :variable:`CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH` - Controls the default
+    behavior of searching the standard system environment variables.
+
+  * :variable:`CMAKE_FIND_USE_CMAKE_PATH` - Controls the default behavior of
+    searching the CMake-specific cache variables.
+
+  * :variable:`CMAKE_FIND_USE_CMAKE_SYSTEM_PATH` - Controls the default
+    behavior of searching the platform-specific CMake variables.
+
+* The :command:`find_package` command has learned to check the
+  :variable:`CMAKE_FIND_USE_PACKAGE_REGISTRY` variable to control the default
+  behavior of searching the CMake user package registry and to check the
+  :variable:`CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY` variable to control
+  the default behavior of searching the CMake system package registry.
+
+* The :command:`message` command learned indentation control with the new
+  :variable:`CMAKE_MESSAGE_INDENT` variable.
+
+* The :command:`target_precompile_headers` command was added to specify
+  a list of headers to precompile for faster compilation times.
+
+Variables
+---------
+
+* The :variable:`CMAKE_CUDA_RESOLVE_DEVICE_SYMBOLS` variable has been
+  introduced to optionally initialize the
+  :prop_tgt:`CUDA_RESOLVE_DEVICE_SYMBOLS` target property.
+
+* The :variable:`CMAKE_ECLIPSE_RESOURCE_ENCODING` variable was added to
+  specify the resource encoding for the the :generator:`Eclipse CDT4` extra
+  generator.
+
+* The :variable:`CMAKE_UNITY_BUILD` variable was added to initialize the
+  :prop_tgt:`UNITY_BUILD` target property to tell generators to batch
+  include source files for faster compilation times.
+
+Properties
+----------
+
+* The :prop_tgt:`BUILD_RPATH` and :prop_tgt:`INSTALL_RPATH` target properties
+  now support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`INSTALL_REMOVE_ENVIRONMENT_RPATH` target property was
+  added to remove compiler-defined ``RPATH`` entries from a target.
+  This property is initialized by the
+  :variable:`CMAKE_INSTALL_REMOVE_ENVIRONMENT_RPATH` variable.
+
+* The :prop_tgt:`PRECOMPILE_HEADERS` target property was added to specify
+  a list of headers to precompile for faster compilation times.
+  Set it using the :command:`target_precompile_headers` command.
+
+* The :prop_tgt:`UNITY_BUILD` target property was added to tell
+  generators to batch include source files for faster compilation
+  times.
+
+* The :prop_tgt:`VS_CONFIGURATION_TYPE` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`VS_DPI_AWARE` target property was added to tell
+  :ref:`Visual Studio Generators` to set the ``EnableDpiAwareness``
+  property in ``.vcxproj`` files.
+
+* The :prop_tgt:`XCODE_SCHEME_DEBUG_DOCUMENT_VERSIONING` target property was
+  added to tell the :generator:`Xcode` generator to set the value of the
+  ``Allow debugging when using document Versions Browser`` schema option.
+
+Modules
+-------
+
+* The :module:`FindDoxygen` module :command:`doxygen_add_docs` command
+  gained a new ``USE_STAMP_FILE`` option.  When this option present,
+  the custom target created by the command will only re-run Doxygen if
+  any of the source files have changed since the last successful run.
+
+* The :module:`FindGnuTLS` module now provides an imported target.
+
+* The :module:`FindPackageHandleStandardArgs` module
+  :command:`find_package_handle_standard_args` command gained
+  a new ``REASON_FAILURE_MESSAGE`` option to specify a message
+  giving the reason for the failure.
+
+* The :module:`FindPkgConfig` module :command:`pkg_search_module` command
+  now defines a ``<prefix>_MODULE_NAME`` result variable containing the
+  first matching module name.
+
+* The :module:`FindPython3` and :module:`FindPython` modules gained
+  options to control which ``ABIs`` will be searched.
+
+* The :module:`FindPython3`, :module:`FindPython2`, and :module:`FindPython`
+  modules now support direct specification of artifacts via cache entries.
+
+Autogen
+-------
+
+* When using :prop_tgt:`AUTOMOC`, the new :variable:`CMAKE_AUTOMOC_PATH_PREFIX`
+  variable or :prop_tgt:`AUTOMOC_PATH_PREFIX` target property may be enabled
+  to generate the ``-p`` path prefix
+  option for ``moc``.  This ensures that ``moc`` output files are identical
+  on different build setups (given, that the headers compiled by ``moc`` are
+  in an :command:`include directory <target_include_directories>`).
+  Also it ensures that ``moc`` output files will compile correctly when the
+  source and/or build directory is a symbolic link.
+
+CTest
+-----
+
+* :manual:`ctest(1)` now has the ability to schedule tests based on resource
+  requirements for each test. See :ref:`ctest-resource-allocation` for
+  details.
+
+* A new test property, :prop_test:`SKIP_REGULAR_EXPRESSION`, has been added.
+  This property is similar to :prop_test:`FAIL_REGULAR_EXPRESSION` and
+  :prop_test:`PASS_REGULAR_EXPRESSION`, but with the same meaning as
+  :prop_test:`SKIP_RETURN_CODE`. This is useful, for example, in cases where
+  the user has no control over the return code of the test. For example, in
+  Catch2, the return value is the number of assertion failed, therefore it is
+  impossible to use it for :prop_test:`SKIP_RETURN_CODE`.
+
+CPack
+-----
+
+* :manual:`cpack(1)` learned support for multiple configurations for ``-C``
+  option.
+
+* The :cpack_gen:`CPack DEB Generator` is now able to format generic text
+  (usually used as the description for multiple CPack generators) according
+  to the `Debian Policy Manual`_.  See the
+  :variable:`CPACK_PACKAGE_DESCRIPTION_FILE` and
+  :variable:`CPACK_DEBIAN_<COMPONENT>_DESCRIPTION` variables.
+
+* The :cpack_gen:`CPack Archive Generator` learned to generate ``.tar.zst``
+  packages with Zstandard compression.
+
+.. _`Debian Policy Manual`: https://www.debian.org/doc/debian-policy/ch-controlfields.html#description
+
+Deprecated and Removed Features
+===============================
+
+* An explicit deprecation diagnostic was added for policy ``CMP0067``
+  (``CMP0066`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+* The :variable:`CMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY` variable has been
+  deprecated.  Use the :variable:`CMAKE_FIND_USE_PACKAGE_REGISTRY` variable
+  instead.
+
+* The :module:`GetPrerequisites` module has been deprecated, as it has been
+  superseded by :command:`file(GET_RUNTIME_DEPENDENCIES)`.
+
+* The ``CPACK_INSTALL_SCRIPT`` variable has been deprecated in favor of the
+  new, more accurately named :variable:`CPACK_INSTALL_SCRIPTS` variable.
+
+Other Changes
+=============
+
+* The :manual:`cmake(1)` ``-C <initial-cache>`` option now evaluates the
+  initial cache script with :variable:`CMAKE_SOURCE_DIR` and
+  :variable:`CMAKE_BINARY_DIR` set to the top-level source and build trees.
+
+* The :manual:`cmake(1)` ``-E remove_directory`` command-line tool,
+  when given the path to a symlink to a directory, now removes just
+  the symlink.  It no longer removes content of the linked directory.
+
+* The :manual:`ctest(1)`  ``--build-makeprogram`` command-line option now
+  specifies the make program used when configuring a project with the
+  :generator:`Ninja` generator or the :ref:`Makefile Generators`.
+
+* The :module:`ExternalProject` module :command:`ExternalProject_Add` command
+  has been updated so that ``GIT_SUBMODULES ""`` initializes no submodules.
+  See policy :policy:`CMP0097`.
+
+* The :module:`FindGTest` module has been updated to recognize
+  MSVC build trees generated by GTest 1.8.1.
+
+* The :command:`project` command no longer strips leading zeros in version
+  components.  See policy :policy:`CMP0096`.
+
+* The Qt Compressed Help file is now named ``CMake.qch``, which no longer
+  contains the release version in the file name.  When CMake is upgraded
+  in-place, the name and location of this file will remain constant.
+  Tools such as IDEs, help viewers, etc. should now be able to refer to this
+  file at a fixed location that remains valid across CMake upgrades.
+
+* ``RPATH`` entries are properly escaped in the generated CMake scripts
+  used for installation.  See policy :policy:`CMP0095`.
+
+* When using :variable:`CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` on Windows the
+  auto-generated exports are now updated only when the object files
+  providing the symbols are updated.
+
+Updates
+=======
+
+Changes made since CMake 3.16.0 include the following.
+
+3.16.2
+------
+
+* CMake 3.16.0 and 3.16.1 processed ``.hh`` files with :prop_tgt:`AUTOMOC`.
+  This was a behavior change from CMake 3.15 and below that can break
+  existing projects, so it has been reverted as of 3.16.2.
+
+3.16.5
+------
+
+* The :module:`FindPython`, :module:`FindPython2`, and :module:`FindPython3`
+  modules no longer create cache entries for ``Python{,2,3}_LIBRARY_RELEASE``
+  and ``Python{,2,3}_LIBRARY_DEBUG``.  Those values are always computed from
+  other results and so should not be cached.  The entries were created by
+  CMake 3.16.0 through 3.16.4 but were always ``FORCE``-set and could not
+  be meaningfully edited by users.
+
+  Additionally, the modules no longer expose their internal ``_Python*``
+  cache entries publicly.  CMake 3.16.0 through 3.16.4 accidentally
+  made them visible as advanced cache entries.
+
+3.16.7
+------
+
+* Selection of the Objective C or C++ compiler now considers the
+  :envvar:`CC` or :envvar:`CXX` environment variable if the
+  :envvar:`OBJC` or :envvar:`OBJCXX` environment variable is not set.
+
+* The :module:`FindPkgConfig` module now extracts include directories
+  prefixed with ``-isystem`` into the ``*_INCLUDE_DIRS`` variables and
+  :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` target properties.
+  Previously they would be places in ``*_CFLAGS_OTHER`` variables and
+  :prop_tgt:`INTERFACE_COMPILE_OPTIONS` target properties.
+
+3.16.9
+------
+
+* The default value of :variable:`CMAKE_AUTOMOC_PATH_PREFIX` was changed to
+  ``OFF`` because this feature can break existing projects that have
+  identically named header files in different include directories.
+  This restores compatibility with behavior of CMake 3.15 and below.

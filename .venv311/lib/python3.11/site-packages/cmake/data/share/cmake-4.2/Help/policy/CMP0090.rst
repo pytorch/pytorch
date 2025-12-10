@@ -1,0 +1,28 @@
+CMP0090
+-------
+
+.. versionadded:: 3.15
+
+:command:`export(PACKAGE)` does not populate package registry by default.
+
+In CMake 3.14 and below the :command:`export(PACKAGE)` command populated the
+user package registry by default and users needed to set the
+:variable:`CMAKE_EXPORT_NO_PACKAGE_REGISTRY` to disable it, e.g. in automated
+build and packaging environments.  Since the user package registry is stored
+outside the build tree, this side effect should not be enabled by default.
+Therefore CMake 3.15 and above prefer that :command:`export(PACKAGE)` does
+nothing unless an explicit :variable:`CMAKE_EXPORT_PACKAGE_REGISTRY` variable
+is set to enable it.  This policy provides compatibility with projects that
+have not been updated.
+
+The ``OLD`` behavior for this policy is for :command:`export(PACKAGE)` command
+to populate the user package registry unless
+:variable:`CMAKE_EXPORT_NO_PACKAGE_REGISTRY` is enabled.
+The ``NEW`` behavior is for :command:`export(PACKAGE)` command to do nothing
+unless the :variable:`CMAKE_EXPORT_PACKAGE_REGISTRY` is enabled.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.15
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

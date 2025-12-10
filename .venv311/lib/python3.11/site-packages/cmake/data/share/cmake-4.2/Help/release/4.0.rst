@@ -1,0 +1,315 @@
+CMake 4.0 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.31 include the following.
+
+New Features
+============
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field has
+  been updated to 2.8.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object
+  gained a new ``debugger`` field.
+
+Command-Line
+------------
+
+* The :option:`cmake --link-no-warning-as-error` option was added to suppress
+  the effects of the :prop_tgt:`LINK_WARNING_AS_ERROR` target property and
+  :variable:`CMAKE_LINK_WARNING_AS_ERROR` variable.
+
+* The :option:`cmake --project-file` option was added to specify an alternate
+  filename for ``CMakeLists.txt`` files.  This is intended for temporary use
+  by developers during an incremental transition and not for publication of a
+  final product.  CMake will always emit a warning when the project file is
+  anything other than ``CMakeLists.txt``.
+
+Commands
+--------
+
+* The :command:`target_link_libraries` command now supports the ``LINKER:``
+  prefix.
+
+Variables
+---------
+
+* The :variable:`AIX` and :variable:`CMAKE_HOST_AIX` variables are
+  now set to true when the target or host system is AIX, respectively.
+
+* Linker flag variables learned to support the ``LINKER:`` prefix:
+
+  * :variable:`CMAKE_EXE_LINKER_FLAGS`
+  * :variable:`CMAKE_EXE_LINKER_FLAGS_<CONFIG>`
+  * :variable:`CMAKE_SHARED_LINKER_FLAGS`
+  * :variable:`CMAKE_SHARED_LINKER_FLAGS_<CONFIG>`
+  * :variable:`CMAKE_MODULE_LINKER_FLAGS`
+  * :variable:`CMAKE_MODULE_LINKER_FLAGS_<CONFIG>`
+
+  See policy :policy:`CMP0181`.
+
+* The :variable:`CMAKE_EXECUTE_PROCESS_COMMAND_ERROR_IS_FATAL` variable
+  was added to specify the :command:`execute_process` command's
+  default ``COMMAND_ERROR_IS_FATAL`` behavior.
+
+* The :variable:`CMAKE_<LANG>_LINK_MODE` and
+  :variable:`CMAKE_<LANG>_DEVICE_LINK_MODE` variables were added to provide
+  information on how the link step is done.
+
+* The :variable:`CMAKE_LINK_WARNING_AS_ERROR` variable and corresponding
+  :prop_tgt:`LINK_WARNING_AS_ERROR` target property were added to link
+  using a linker-specific flag to treat warnings as errors.
+
+* The :variable:`CMAKE_MSVC_RUNTIME_CHECKS` variable and
+  :prop_tgt:`MSVC_RUNTIME_CHECKS` target property were introduced
+  to select runtime checks for compilers targeting the MSVC ABI.
+  See policy :policy:`CMP0184`.
+
+* The :variable:`CMAKE_POLICY_VERSION_MINIMUM` variable was added to
+  help packagers and end users try to configure existing projects that
+  have not been updated to work with supported CMake versions.
+  The :envvar:`CMAKE_POLICY_VERSION_MINIMUM` environment variable was
+  added to initialize it.
+
+* The :variable:`CMAKE_UNITY_BUILD_RELOCATABLE` variable and corresponding
+  :prop_tgt:`UNITY_BUILD_RELOCATABLE` target property were added to make
+  sources generated for :variable:`CMAKE_UNITY_BUILD` to ``#include`` the
+  original source files using relative paths where possible.
+
+* The :variable:`CMAKE_XCODE_SCHEME_LLDB_INIT_FILE` variable and corresponding
+  :prop_tgt:`XCODE_SCHEME_LLDB_INIT_FILE` target property were added to tell
+  the :generator:`Xcode` generator what to put in the scheme's "LLDB Init File"
+  setting.
+
+* The :variable:`CMAKE_XCODE_SCHEME_TEST_CONFIGURATION` variable and corresponding
+  :prop_tgt:`XCODE_SCHEME_TEST_CONFIGURATION` target property were added to tell
+  the :generator:`Xcode` generator what to put in the scheme's "Build Configuration"
+  setting for the test action.
+
+Properties
+----------
+
+* The :prop_tgt:`DEBUGGER_WORKING_DIRECTORY` target property and corresponding
+  :variable:`CMAKE_DEBUGGER_WORKING_DIRECTORY` variable were added to tell
+  generators what debugger working directory should be set for targets.
+
+* The :prop_tgt:`STATIC_LIBRARY_OPTIONS` target property now supports an
+  ``ARCHIVER:`` prefix to pass options to the archiver through the compiler
+  driver in a portable way.
+
+* The :prop_tgt:`Swift_MODULE_DIRECTORY` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_sf:`VS_CUSTOM_COMMAND_DISABLE_PARALLEL_BUILD` source file property
+  was added to tell :ref:`Visual Studio Generators` not to run a custom command
+  in parallel.
+
+* The :prop_dir:`VS_SOLUTION_ITEMS` directory property was added
+  to tell :ref:`Visual Studio Generators` to attach files directly
+  to the Solution (``.sln``).
+
+Modules
+-------
+
+* The :module:`ExternalData` module gained a
+  :variable:`ExternalData_HTTPHEADERS` variable to specify HTTP headers.
+
+* The :module:`ExternalProject` module's :command:`ExternalProject_Add`
+  command gained an ``INSTALL_JOB_SERVER_AWARE`` option to enable
+  integration of the GNU Make job server when using an explicit
+  ``INSTALL_COMMAND`` with :ref:`Makefile Generators`.
+
+* The :module:`FeatureSummary` module :command:`add_feature_info`
+  command now supports full :ref:`Condition Syntax`.
+  See policy :policy:`CMP0183`.
+
+* The :module:`FindBISON` module :command:`bison_target` command gained an
+  ``OPTIONS`` option to specify Bison command-line options.
+
+* The :module:`FindCURL` module now provides a ``CURL_VERSION`` result
+  variable to match upstream cURL's CMake package.
+
+* The :module:`FindFLEX` module :command:`flex_target` command gained an
+  ``OPTIONS`` option to specify Flex command-line options.
+
+* The :module:`FindPatch` module now supports running in
+  :ref:`cmake -P <Script Processing Mode>` script mode by skipping
+  the creation of the imported target.
+
+* The :module:`FindProtobuf` module :command:`protobuf_generate` command
+  gained a ``PROTOC_EXE`` option to specify a custom ``protoc`` executable.
+
+* The :module:`FindPython`, :module:`FindPython2`, and :module:`FindPython3`
+  modules gained the possibility to do multiple calls in the same directory by
+  using, respectively, the variables ``Python_ARTIFACTS_PREFIX``,
+  ``Python2_ARTIFACTS_PREFIX``, and ``Python3_ARTIFACTS_PREFIX``.
+
+* The :module:`FindRuby` module learned to find rbenv-provided installations.
+
+Generator Expressions
+---------------------
+
+* The :genex:`$<PATH>` generator expression gained the ``NATIVE_PATH``
+  operation to convert a CMake path into a native one.
+
+CTest
+-----
+
+* The :option:`ctest --interactive-debug-mode` option on Windows
+  now enables Windows Error Reporting by default in test processes,
+  allowing them to creating debug popup windows and core dumps.
+  This restores behavior previously removed by CMake 3.11 after
+  updates to ``libuv`` made it possible.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack Archive Generator` learned to generate ``.tar``
+  packages without compression.
+
+* The :cpack_gen:`CPack Archive Generator` now honors the
+  :variable:`CPACK_ARCHIVE_FILE_NAME` variable for all packages.
+  Previously, this variable worked only for component-based packages.
+
+Deprecated and Removed Features
+===============================
+
+* Compatibility with versions of CMake older than 3.5 has been removed.
+  Calls to :command:`cmake_minimum_required` or :command:`cmake_policy`
+  that set the policy version to an older value now issue an error.
+  Note that calls to those commands can still support older versions of
+  CMake by using their ``VERSION`` arguments' ``<min>...<max>`` syntax.
+  This requires only the ``<min>`` version of CMake, but when running a
+  newer version, sets policies up to the ``<max>`` version.
+
+* The :generator:`Visual Studio 14 2015` and :generator:`Visual Studio 15 2017`
+  generators no longer support specifying a platform as part of the generator
+  name.  See :ref:`Visual Studio Platform Selection`.
+
+* The :variable:`CMAKE_<LANG>_USING_LINKER_MODE` variable is no longer used to
+  determine the type of the contents of the
+  :variable:`CMAKE_<LANG>_USING_LINKER_<TYPE>` variable. The
+  :variable:`CMAKE_<LANG>_LINK_MODE` variable, set by CMake, is used instead.
+
+* The :module:`FindGDAL` module is now deprecated in favor of upstream
+  GDAL's official CMake package configuration file. Port projects to
+  the latter by calling ``find_package(GDAL CONFIG)``.  For further
+  details, see `GDAL's documentation on CMake integration
+  <https://gdal.org/en/latest/development/cmake.html>`_.
+
+* The :module:`FindRuby` module no longer provides variables with the
+  upper-case ``RUBY_`` prefix.  See policy :policy:`CMP0185`.
+
+* CTest's undocumented declarative scripting mode has been removed.
+  This mode used to be triggered by a :option:`ctest -S` script which did not
+  call any :ref:`CTest Commands` unless :variable:`CTEST_RUN_CURRENT_SCRIPT`
+  was explicitly set to ``OFF``.
+
+* The :command:`ctest_run_script` command may no longer be called without any
+  arguments.
+
+Other Changes
+=============
+
+* On macOS with :ref:`Ninja Generators` and :ref:`Makefile Generators`, when
+  a compiler is found in ``/usr/bin``, it is now used as-is and is no longer
+  mapped to the corresponding compiler inside Xcode.  The mapping was
+  introduced by CMake 3.2 to allow build trees to continue to work with their
+  original compiler even when ``xcode-select`` switches to a different
+  Xcode installation.  However, the compilers inside Xcode cannot be used
+  without explicit ``-isysroot`` flags and are therefore not suitable for
+  passing to arbitrary third-party build systems.  Furthermore, the mapping
+  behavior can override user-specified compiler paths.  Therefore, this
+  behavior has been reverted.
+
+* In builds targeting macOS, :variable:`CMAKE_OSX_SYSROOT` now defaults to
+  empty, deferring to the compiler's default macOS SDK selection.  In order
+  to pass an explicit macOS SDK via the compiler's ``-isysroot`` flag, users
+  may configure their build tree with ``-DCMAKE_OSX_SYSROOT=macosx``, or
+  ``export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"`` in their
+  environment.
+
+  Notes:
+
+  * macOS compilers in ``/usr/bin``, when not invoked with ``-isysroot``,
+    search for headers in ``/usr/local/include`` before system SDK paths,
+    matching the convention on many platforms.  Users on macOS-x86_64 hosts
+    with Homebrew installed in ``/usr/local`` should pass an explicit SDK,
+    as described above, when not building with Homebrew tools.
+
+  * Some Clang compilers have no default macOS SDK selection.  For these,
+    if :variable:`CMAKE_OSX_SYSROOT` is empty, CMake will automatically pass
+    ``-isysroot`` with the macOS SDK printed by ``xcrun --show-sdk-path``.
+
+* On Windows, file paths named in project code, e.g., in ``CMakeLists.txt``,
+  are no longer automatically converted to their on-disk upper/lower case.
+  Projects are expected to spell source file paths consistently using
+  their canonical case, e.g., in calls to :command:`add_library`,
+  :command:`set_property(SOURCE)`, or :command:`set_source_files_properties`.
+  This matches the behavior on platforms with case-sensitive filesystems.
+
+* On AIX, ``SHARED`` library targets now produce a shared library archive
+  by default.  See policy :policy:`CMP0182`.
+
+* The :option:`cmake --preset` command no longer outputs a summary of the
+  preset's CMake cache and environment variables by default.  That summary is
+  now only shown when the message log level is set to ``VERBOSE``, ``DEBUG``,
+  or ``TRACE`` via the   :option:`cmake --log-level` option or the
+  :variable:`CMAKE_MESSAGE_LOG_LEVEL` cache variable.
+
+* Precompiled SunOS ``sparc64`` and ``x86_64`` binaries are now provided
+  on `cmake.org`_.
+
+.. _`cmake.org`: https://cmake.org/download/
+
+Updates
+=======
+
+Changes made since CMake 4.0.0 include the following.
+
+4.0.1
+-----
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+4.0.2
+-----
+
+* When building for macOS with a Clang that has no default macOS SDK,
+  if :variable:`CMAKE_OSX_SYSROOT` is empty, CMake now automatically passes
+  ``-isysroot`` with the macOS SDK printed by ``xcrun --show-sdk-path``.
+  This restores support for using LLVM/Clang on macOS without manually
+  setting ``CMAKE_OSX_SYSROOT``, which was broken by CMake 4.0.0's
+  removal of a default value.
+
+* The :prop_tgt:`DEBUGGER_WORKING_DIRECTORY` target property is now
+  used by the :generator:`Xcode` generator as a fallback for the
+  :prop_tgt:`XCODE_SCHEME_WORKING_DIRECTORY` target property.
+
+4.0.3, 4.0.4
+------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+4.0.5
+-----
+
+* When building for macOS with the :generator:`Xcode` generator,
+  :variable:`CMAKE_OSX_DEPLOYMENT_TARGET` once again defaults to the
+  host's macOS version if it is older than the macOS SDK version,
+  as it did in CMake versions prior to 4.0.
+
+* The :command:`execute_process` command once again terminates child
+  processes when its ``TIMEOUT`` is reached.  This was accidentally
+  regressed by CMake 3.29.

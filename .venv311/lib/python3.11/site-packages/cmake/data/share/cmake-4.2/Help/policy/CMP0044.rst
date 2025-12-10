@@ -1,0 +1,22 @@
+CMP0044
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Case sensitive ``<LANG>_COMPILER_ID`` generator expressions
+
+CMake 2.8.12 introduced the ``<LANG>_COMPILER_ID``
+:manual:`generator expressions <cmake-generator-expressions(7)>` to allow
+comparison of the :variable:`CMAKE_<LANG>_COMPILER_ID` with a test value.  The
+possible valid values are lowercase, but the comparison with the test value
+was performed case-insensitively.
+
+The ``OLD`` behavior for this policy is to perform a case-insensitive comparison
+with the value in the ``<LANG>_COMPILER_ID`` expression. The ``NEW`` behavior
+for this policy is to perform a case-sensitive comparison with the value in
+the ``<LANG>_COMPILER_ID`` expression.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

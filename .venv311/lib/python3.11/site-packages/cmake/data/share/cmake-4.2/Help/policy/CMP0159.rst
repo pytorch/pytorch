@@ -1,0 +1,23 @@
+CMP0159
+-------
+
+.. versionadded:: 3.29
+
+:command:`file(STRINGS)` with ``REGEX`` updates :variable:`CMAKE_MATCH_<n>`.
+
+In CMake 3.28 and below the :command:`file(STRINGS)` command's ``REGEX``
+option does not affect :variable:`CMAKE_MATCH_<n>` variables.  CMake 3.29
+and above prefer to update the :variable:`CMAKE_MATCH_<n>` variables using
+captures from the last match in the file, similar to the
+:command:`string(REGEX MATCHALL)` command.  This policy provides
+compatibility for projects that have not been updated to expect the behavior.
+
+The ``OLD`` behavior for this policy is for :command:`file(STRINGS)` with
+``REGEX`` to not store capture groups in :variable:`CMAKE_MATCH_<n>`
+variables.  The ``NEW`` behavior is to store the capture groups.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.29
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

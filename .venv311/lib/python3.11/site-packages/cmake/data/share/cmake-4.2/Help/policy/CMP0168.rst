@@ -1,0 +1,72 @@
+CMP0168
+-------
+
+.. versionadded:: 3.30
+
+The :module:`FetchContent` module implements steps directly instead of through
+a sub-build.
+
+CMake 3.29 and below implement FetchContent as a separate sub-build.
+This required configuring that separate project and using a build tool.
+This approach can be very slow with some generators and operating systems.
+CMake 3.30 and above prefer to implement the download, update, and patch
+steps directly as part of the main project.
+
+The ``NEW`` behavior has the following characteristics:
+
+* No sub-build is used. All operations are implemented directly from the
+  main project's CMake configure step. When running in CMake script mode,
+  no build tool needs to be available.
+* Generator expressions and GNU Make variables of the form ``$(SOMEVAR)`` are
+  not supported. They should not be used in any argument to
+  :command:`FetchContent_Declare` or :command:`FetchContent_Populate`.
+* All ``LOG_...`` and ``USES_TERMINAL_...`` options, the ``QUIET`` option, and
+  the :variable:`FETCHCONTENT_QUIET` variable are ignored.
+  :module:`FetchContent` output is always part of the main project's configure
+  output. This also means it now respects the message logging level (see
+  :variable:`CMAKE_MESSAGE_LOG_LEVEL` and
+  :option:`--log-level <cmake --log-level>`). The default message log level
+  should be comparable to using ``QUIET`` with the ``OLD`` policy setting,
+  except that warnings will now be shown.
+* The ``PREFIX``, ``TMP_DIR``, ``STAMP_DIR``, ``LOG_DIR``, and ``DOWNLOAD_DIR``
+  options and their associated directory properties are ignored. The
+  :module:`FetchContent` module controls those locations internally.
+* :option:`cmake --fresh` will remove the stamp and script files used for
+  tracking and populating the dependency. This will force the dependency's
+  download, update, and patch steps to be re-executed. The directory used for
+  downloads is not affected by :option:`cmake --fresh`, so any previously
+  downloaded files for the ``URL`` download method can still be reused.
+
+The ``OLD`` behavior has the following characteristics:
+
+* A sub-build is always used to implement the download, update, and patch
+  steps. A build tool must be available, even when using
+  :command:`FetchContent_Populate` in CMake script mode.
+* Generator expressions and GNU Make variables of the form ``$(SOMEVAR)`` can
+  be used, although such use is almost always inappropriate. They are evaluated
+  in the sub-build, so they do not see any information from the main build.
+* All logging, terminal control, and directory options related to the download,
+  update, or patch steps are supported.
+* If the ``QUIET`` option is used, or the :variable:`FETCHCONTENT_QUIET`
+  variable is set to true, warnings will not be shown in the output.
+* :option:`cmake --fresh` has no effect on the dependency's stamp or script
+  files. Previously executed steps will only re-run if details about the
+  dependency have changed.
+
+There's a reasonably good chance that users can set the
+:variable:`CMAKE_POLICY_DEFAULT_CMP0168 <CMAKE_POLICY_DEFAULT_CMP<NNNN>>`
+variable to ``NEW`` to globally switch to the ``NEW`` behavior while waiting
+for the project and its dependencies to be updated use the ``NEW`` policy
+setting by default. Projects don't typically make use of the features that the
+``NEW`` behavior no longer supports, and even those projects that do will often
+still work fine when those options are ignored. Before setting this behavior
+globally, check whether any :command:`FetchContent_Declare` or
+:command:`FetchContent_Populate` calls use the ignored options in a way that
+would change observable behavior, other than putting temporary or
+internally-generated files in different locations.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

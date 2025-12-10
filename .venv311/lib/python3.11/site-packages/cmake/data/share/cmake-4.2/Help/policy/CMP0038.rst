@@ -1,0 +1,19 @@
+CMP0038
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Targets may not link directly to themselves.
+
+CMake 2.8.12 and lower allowed a build target to link to itself directly with
+a :command:`target_link_libraries` call. This is an indicator of a bug in
+user code.
+
+The ``OLD`` behavior for this policy is to ignore targets which list themselves
+in their own link implementation.  The ``NEW`` behavior for this policy is to
+report an error if a target attempts to link to itself.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

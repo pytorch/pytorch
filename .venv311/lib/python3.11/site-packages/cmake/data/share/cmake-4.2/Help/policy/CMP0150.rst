@@ -1,0 +1,39 @@
+CMP0150
+-------
+
+.. versionadded:: 3.27
+
+:command:`ExternalProject_Add` and :command:`FetchContent_Declare` commands
+treat relative ``GIT_REPOSITORY`` paths as being relative to the parent
+project's remote.
+
+Earlier versions of these commands always treated relative paths in
+``GIT_REPOSITORY`` as local paths, but the base directory it was treated
+as relative to was both undocumented and unintuitive.  The ``OLD`` behavior
+for this policy is to interpret relative paths used for ``GIT_REPOSITORY``
+as local paths relative to the following:
+
+* The parent directory of ``SOURCE_DIR`` for :command:`ExternalProject_Add`.
+* ``FETCHCONTENT_BASE_DIR`` for :command:`FetchContent_Declare`.
+
+The ``NEW`` behavior is to determine the remote from the parent project and
+interpret the path relative to that remote.  The value of
+:variable:`CMAKE_CURRENT_SOURCE_DIR` when :command:`ExternalProject_Add` or
+:command:`FetchContent_Declare` is called determines the parent project.
+The remote is selected according to the following (the first match is used):
+
+* If the parent project is checked out on a branch with an upstream remote
+  defined, use that remote.
+* If only one remote is defined, use that remote.
+* If multiple remotes are defined and one of them is named ``origin``, use
+  ``origin``'s remote but also issue a warning.
+
+If an appropriate remote cannot be determined from the above, a fatal error
+will be raised.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace::
+   warns when a relative path is encountered
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,2 @@
+# TODO Check if `CPack.distribution.dist.in` could use spaces
+CPack.distribution.dist.in tab-indent

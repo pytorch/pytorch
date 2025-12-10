@@ -1,0 +1,2 @@
+set(ENV{PATH} "@MINGW_PATH@\;$ENV{PATH}")
+execute_process(COMMAND "@CMAKE_COMMAND@" --build . )

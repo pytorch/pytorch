@@ -1,0 +1,20 @@
+CMP0015
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+:command:`link_directories` treats paths relative to the source dir.
+
+In CMake 2.8.0 and lower the :command:`link_directories` command passed
+relative paths unchanged to the linker.  In CMake 2.8.1 and above the
+:command:`link_directories` command prefers to interpret relative paths with
+respect to ``CMAKE_CURRENT_SOURCE_DIR``, which is consistent with
+:command:`include_directories` and other commands.  The ``OLD`` behavior for
+this policy is to use relative paths verbatim in the linker command.  The
+``NEW`` behavior for this policy is to convert relative paths to absolute
+paths by appending the relative path to ``CMAKE_CURRENT_SOURCE_DIR``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.1
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

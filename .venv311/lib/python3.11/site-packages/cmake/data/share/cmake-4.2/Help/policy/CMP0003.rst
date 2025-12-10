@@ -1,0 +1,105 @@
+CMP0003
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Libraries linked via full path no longer produce linker search paths.
+
+This policy affects how libraries whose full paths are NOT known are
+found at link time, but was created due to a change in how CMake deals
+with libraries whose full paths are known.  Consider the code
+
+.. code-block:: cmake
+
+  target_link_libraries(myexe /path/to/libA.so)
+
+CMake 2.4 and below implemented linking to libraries whose full paths
+are known by splitting them on the link line into separate components
+consisting of the linker search path and the library name.  The
+example code might have produced something like
+
+::
+
+  ... -L/path/to -lA ...
+
+in order to link to library A.  An analysis was performed to order
+multiple link directories such that the linker would find library A in
+the desired location, but there are cases in which this does not work.
+CMake versions 2.6 and above use the more reliable approach of passing
+the full path to libraries directly to the linker in most cases.  The
+example code now produces something like
+
+::
+
+  ... /path/to/libA.so ....
+
+Unfortunately this change can break code like
+
+.. code-block:: cmake
+
+  target_link_libraries(myexe /path/to/libA.so B)
+
+where ``B`` is meant to find ``/path/to/libB.so``.  This code is wrong
+because the user is asking the linker to find library B but has not
+provided a linker search path (which may be added with the
+link_directories command).  However, with the old linking
+implementation the code would work accidentally because the linker
+search path added for library A allowed library B to be found.
+
+In order to support projects depending on linker search paths added by
+linking to libraries with known full paths, the ``OLD`` behavior for this
+policy will add the linker search paths even though they are not
+needed for their own libraries.  When this policy is set to ``OLD``, CMake
+will produce a link line such as
+
+::
+
+  ... -L/path/to /path/to/libA.so -lB ...
+
+which will allow library B to be found as it was previously.  When
+this policy is set to NEW, CMake will produce a link line such as
+
+::
+
+  ... /path/to/libA.so -lB ...
+
+which more accurately matches what the project specified.
+
+The setting for this policy used when generating the link line is that
+in effect when the target is created by an add_executable or
+add_library command.  For the example described above, the code
+
+.. code-block:: cmake
+
+  cmake_policy(SET CMP0003 OLD) # or cmake_policy(VERSION 2.4)
+  add_executable(myexe myexe.c)
+  target_link_libraries(myexe /path/to/libA.so B)
+
+will work and suppress the warning for this policy.  It may also be
+updated to work with the corrected linking approach:
+
+.. code-block:: cmake
+
+  cmake_policy(SET CMP0003 NEW) # or cmake_policy(VERSION 2.6)
+  link_directories(/path/to) # needed to find library B
+  add_executable(myexe myexe.c)
+  target_link_libraries(myexe /path/to/libA.so B)
+
+Even better, library B may be specified with a full path:
+
+.. code-block:: cmake
+
+  add_executable(myexe myexe.c)
+  target_link_libraries(myexe /path/to/libA.so /path/to/libB.so)
+
+When all items on the link line have known paths CMake does not check
+this policy so it has no effect.
+
+Note that the warning for this policy will be issued for at most one
+target.  This avoids flooding users with messages for every target
+when setting the policy once will probably fix all targets.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

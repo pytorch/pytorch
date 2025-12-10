@@ -1,0 +1,7 @@
+#!/Users/joshuasward/pytorch/.venv311/bin/python
+import sys
+from cmake import ctest
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(ctest())

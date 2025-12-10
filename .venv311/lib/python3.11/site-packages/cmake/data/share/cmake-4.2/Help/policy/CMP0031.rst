@@ -1,0 +1,16 @@
+CMP0031
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`load_command` command should not be called.
+
+This command was added in August 2002 to allow projects to add
+arbitrary commands implemented in C or C++.  However, it does
+not work when the toolchain in use does not match the ABI of
+the CMake process.  It has been mostly superseded by the
+:command:`macro` and :command:`function` commands.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst

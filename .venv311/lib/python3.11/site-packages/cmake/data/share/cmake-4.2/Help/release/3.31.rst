@@ -1,0 +1,282 @@
+CMake 3.31 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.30 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` files may now include comments using the key
+  ``$comment`` at any level within the JSON object to provide documentation.
+
+* :manual:`cmake-presets(7)` files may now request graphviz output using
+  the ``graphviz`` key in a configure preset.
+
+Generators
+----------
+
+* The :ref:`Ninja Generators` and :ref:`Makefile Generators` now produce
+  a ``codegen`` build target.  See policy :policy:`CMP0171`.  It drives a
+  subset of the build graph sufficient to run custom commands created with
+  :command:`add_custom_command`'s new ``CODEGEN`` option.
+
+Command-Line
+------------
+
+* The :option:`cmake --workflow` mode now accepts a preset name as the first
+  argument, allowing the simpler command line
+  :option:`cmake --workflow \<preset\> <cmake--workflow --preset>`.
+
+* The :option:`cmake -LR[A][H]` option was added to list cache entries
+  whose names match a regular expression.
+
+Compilers
+---------
+
+* The LFortran compiler is now supported with
+  :variable:`compiler id <CMAKE_<LANG>_COMPILER_ID>` ``LFortran``.
+
+Commands
+--------
+
+* The :command:`add_custom_command` command gained a ``CODEGEN`` option
+  to mark a custom command's outputs as dependencies of a ``codegen`` target.
+  See policy :policy:`CMP0171`.
+
+* The :command:`cmake_pkg_config` command was added as an endpoint for using
+  CMake's native pkg-config format parser. The only supported option in this
+  release is ``EXTRACT``, which provides low-level access to the values
+  produced by parsing a pkg-config file. For most users, this is not yet a
+  suitable replacement for the :module:`FindPkgConfig` module.
+
+* The :command:`file(ARCHIVE_CREATE)` command gained a ``WORKING_DIRECTORY``
+  option to specify a working directory for the archiving process.
+
+* The :command:`file(MAKE_DIRECTORY)` command gained a ``RESULT`` option
+  to capture failure in a result variable.
+
+* The :command:`install(FILES)` and :command:`install(DIRECTORY)` commands'
+  ``TYPE`` argument gained support for a ``LIBEXEC`` type.
+
+Variables
+---------
+
+* The :variable:`CMAKE_AIX_SHARED_LIBRARY_ARCHIVE` variable and corresponding
+  :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE` target property were added to
+  create shared libraries on AIX as shared library archives.
+
+* The :variable:`CMAKE_EXPORT_BUILD_DATABASE` variable, a corresponding
+  :envvar:`CMAKE_EXPORT_BUILD_DATABASE` environment variable, and an
+  :prop_tgt:`EXPORT_BUILD_DATABASE` target property, were added to
+  enable exporting C++ module compile commands.
+  This is only supported with :ref:`Ninja Generators`.
+
+* The :variable:`CMAKE_HOST_EXECUTABLE_SUFFIX` variable was added to
+  provide the suffix for executable names on the host platform.
+
+* The :variable:`CMAKE_<LANG>_HOST_COMPILER_ID` and
+  :variable:`CMAKE_<LANG>_HOST_COMPILER_VERSION` variables were added,
+  where ``<LANG>`` is either ``CUDA`` or ``HIP``.  They are populated
+  when :variable:`CMAKE_<LANG>_COMPILER_ID` is ``NVIDIA`` to identify
+  NVCC's host compiler.
+
+* The :variable:`CMAKE_<LANG>_STANDARD_LINK_DIRECTORIES` variable was added.
+  Toolchain files can set this variable to control which link library directory
+  paths are always passed to the compiler for the specified language.
+
+* The :variable:`CMAKE_LINK_LIBRARIES_STRATEGY` variable and
+  corresponding :prop_tgt:`LINK_LIBRARIES_STRATEGY` target
+  property were added to optionally specify the strategy
+  CMake uses to generate link lines.
+
+* The :envvar:`CMAKE_CONFIG_DIR` environment variable was added to specify a
+  CMake user-wide configuration directory for :manual:`cmake-file-api(7)`
+  queries.
+
+Properties
+----------
+
+* The :prop_tgt:`MACOSX_FRAMEWORK_BUNDLE_NAME <MACOSX_FRAMEWORK_INFO_PLIST>`
+  target property was added to set the ``CFBundleName`` key in an Apple
+  :prop_tgt:`FRAMEWORK`'s ``Info.plist`` file.
+
+* The :prop_tgt:`UNITY_BUILD` target property now supports the
+  ``CUDA`` language.
+
+* The :prop_tgt:`VS_FRAMEWORK_REFERENCES` target property was added
+  to tell :ref:`Visual Studio Generators` to add framework references.
+
+Modules
+-------
+
+* Check modules now support a ``CMAKE_REQUIRED_LINK_DIRECTORIES`` variable.
+  The following modules gained this support:
+
+  * :module:`CMakePushCheckState`
+  * :module:`CheckCCompilerFlag`
+  * :module:`CheckCSourceCompiles`
+  * :module:`CheckCSourceRuns`
+  * :module:`CheckCXXCompilerFlag`
+  * :module:`CheckCXXSourceCompiles`
+  * :module:`CheckCXXSourceRuns`
+  * :module:`CheckCXXSymbolExists`
+  * :module:`CheckCompilerFlag`
+  * :module:`CheckFortranCompilerFlag`
+  * :module:`CheckFortranFunctionExists`
+  * :module:`CheckFortranSourceCompiles`
+  * :module:`CheckFortranSourceRuns`
+  * :module:`CheckFunctionExists`
+  * :module:`CheckIncludeFile`
+  * :module:`CheckIncludeFileCXX`
+  * :module:`CheckIncludeFiles`
+  * :module:`CheckOBJCCompilerFlag`
+  * :module:`CheckLibraryExists`
+  * :module:`CheckOBJCCompilerFlag`
+  * :module:`CheckOBJCSourceCompiles`
+  * :module:`CheckOBJCSourceRuns`
+  * :module:`CheckOBJCXXCompilerFlag`
+  * :module:`CheckOBJCXXSourceCompiles`
+  * :module:`CheckOBJCXXSourceRuns`
+  * :module:`CheckPrototypeDefinition`
+  * :module:`CheckSourceCompiles`
+  * :module:`CheckSourceRuns`
+  * :module:`CheckStructHasMember`
+  * :module:`CheckSymbolExists`
+  * :module:`CheckTypeSize`
+  * :module:`CheckVariableExists`
+
+* The :module:`CMakePackageConfigHelpers` module's
+  :command:`generate_apple_platform_selection_file` function
+  gained support for iOS Mac Catalyst.
+
+* The :module:`GoogleTest` module :command:`gtest_discover_tests` command
+  gained a new ``DISCOVERY_EXTRA_ARGS`` keyword.  It allows extra arguments
+  to be appended to the command line when querying for the list of tests.
+
+* The :module:`FindCUDAToolkit` module now provides a ``CUDA::nvml_static``
+  target.
+
+* The :module:`FindOpenMP` module gained support for the ``CUDA`` language.
+
+CTest
+-----
+
+* The :command:`ctest_submit` command and :option:`ctest -T Submit <ctest -T>`
+  step now verify TLS server certificates for connections to ``https://`` URLs
+  by default.  See the :variable:`CTEST_TLS_VERIFY` variable for details.
+
+* The :command:`ctest_submit` command and :option:`ctest -T Submit <ctest -T>`
+  step now require TLS 1.2 or higher for connections to ``https://`` URLs by
+  default.  See the :variable:`CTEST_TLS_VERSION` variable for details.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DEB Generator` gained a
+  :variable:`CPACK_DEBIAN_PACKAGE_MULTIARCH` option
+  to support multi-arch packages.
+
+* The :cpack_gen:`CPack IFW Generator` gained the new
+  :variable:`CPACK_IFW_PACKAGE_PRODUCT_IMAGE_URLS` variable to
+  specify images associated with entries of
+  :variable:`CPACK_IFW_PACKAGE_PRODUCT_IMAGES`.
+  This feature is available for QtIFW 4.0 and newer.
+
+* The :cpack_gen:`CPack RPM Generator` gained support for ``zstd`` as a
+  :variable:`CPACK_RPM_COMPRESSION_TYPE` value.
+
+* The :module:`CPack` module enables per-machine installation by default
+  in the :cpack_gen:`CPack WIX Generator`.  See policy :policy:`CMP0172`
+  and the :variable:`CPACK_WIX_INSTALL_SCOPE` variable.
+
+Deprecated and Removed Features
+===============================
+
+* Compatibility with versions of CMake older than 3.10 is now deprecated
+  and will be removed from a future version.  Calls to
+  :command:`cmake_minimum_required` or :command:`cmake_policy` that set
+  the policy version to an older value now issue a deprecation diagnostic.
+
+* The :module:`CMakeFindFrameworks` module has been deprecated via
+  :policy:`CMP0173`. Projects should use :command:`find_library` instead.
+
+* The :generator:`Visual Studio 12 2013` generator has been removed.
+
+Other Changes
+=============
+
+* When static libraries on link lines are de-duplicated (by policy
+  :policy:`CMP0156`), the first occurrence is now kept on all platforms.
+  See policy :policy:`CMP0179`.
+
+* Empty list elements in the :prop_tgt:`TEST_LAUNCHER` and
+  :prop_tgt:`CROSSCOMPILING_EMULATOR` target properties are now preserved by:
+
+  * The :command:`add_test` command.
+  * The :command:`ExternalData_Add_Test` command from the
+    :module:`ExternalData` module.
+  * The :command:`gtest_add_tests` and :command:`gtest_discover_tests`
+    commands from the :module:`GoogleTest` module.
+    Empty list elements after the ``EXTRA_ARGS`` keyword of these
+    two commands are also now preserved.
+
+  See policy :policy:`CMP0178`.
+
+* The :command:`execute_process` command's ``ENCODING`` option,
+  meaningful on Windows, now defaults to ``UTF-8``.
+  See policy :policy:`CMP0176`.
+
+* The :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands now
+  verify TLS server certificates for connections to ``https://`` URLs by
+  default.  See the :variable:`CMAKE_TLS_VERIFY` variable for details.
+  This change was made without a policy so that users are protected
+  even when building projects that have not been updated.
+  Users may set the :envvar:`CMAKE_TLS_VERIFY` environment
+  variable to ``0`` to restore the old default.
+
+* The :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands now
+  require TLS 1.2 or higher for connections to ``https://`` URLs by default.
+  See the :variable:`CMAKE_TLS_VERSION` variable for details.
+
+* The :command:`file(GET_RUNTIME_DEPENDENCIES)` command was updated
+  to more closely match the dynamic loader's behavior on Linux.
+
+* The :command:`install` command's ``DESTINATION`` arguments are
+  now :ref:`normalized <Normalization>`, with the exception
+  of ``INCLUDES DESTINATION`` arguments in :command:`install(TARGETS)`.
+  See policy :policy:`CMP0177`.
+
+* The :command:`project` command now always sets
+  :variable:`<PROJECT-NAME>_SOURCE_DIR`, :variable:`<PROJECT-NAME>_BINARY_DIR`,
+  and :variable:`<PROJECT-NAME>_IS_TOP_LEVEL` as both normal variables and
+  cache entries.  See policy :policy:`CMP0180`.
+
+* The :command:`cmake_parse_arguments(PARSE_ARGV)` command now defines a
+  variable for an empty string after a single-value keyword. See policy
+  :policy:`CMP0174`.
+
+Updates
+=======
+
+Changes made since CMake 3.31.0 include the following.
+
+3.31.1, 3.31.2, 3.31.3, 3.31.4, 3.31.5, 3.31.6, 3.31.7, 3.31.8, 3.31.9
+----------------------------------------------------------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.31.10
+-------
+
+* The :command:`execute_process` command once again terminates child
+  processes when its ``TIMEOUT`` is reached.  This was accidentally
+  regressed by CMake 3.29.

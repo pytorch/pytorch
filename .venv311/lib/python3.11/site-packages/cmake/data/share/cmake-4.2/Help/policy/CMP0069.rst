@@ -1,0 +1,93 @@
+CMP0069
+-------
+
+.. versionadded:: 3.9
+
+:prop_tgt:`INTERPROCEDURAL_OPTIMIZATION` is enforced when enabled.
+
+CMake 3.9 and newer prefer to add IPO flags whenever the
+:prop_tgt:`INTERPROCEDURAL_OPTIMIZATION` target property is enabled and
+produce an error if flags are not known to CMake for the current compiler.
+Since a given compiler may not support IPO flags in all environments in which
+it is used, it is now the project's responsibility to use the
+:module:`CheckIPOSupported` module to check for support before enabling the
+:prop_tgt:`INTERPROCEDURAL_OPTIMIZATION` target property.  This approach
+allows a project to conditionally activate IPO when supported.  It also
+allows an end user to set the :variable:`CMAKE_INTERPROCEDURAL_OPTIMIZATION`
+variable in an environment known to support IPO even if the project does
+not enable the property.
+
+Since CMake 3.8 and lower only honored :prop_tgt:`INTERPROCEDURAL_OPTIMIZATION`
+for the Intel compiler on Linux, some projects may unconditionally enable the
+target property.  Policy ``CMP0069`` provides compatibility with such projects.
+
+This policy takes effect whenever the IPO property is enabled.  The ``OLD``
+behavior for this policy is to add IPO flags only for Intel compiler on Linux.
+The ``NEW`` behavior for this policy is to add IPO flags for the current
+compiler or produce an error if CMake does not know the flags.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.9
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst
+
+Examples
+^^^^^^^^
+
+Behave like CMake 3.8 and do not apply any IPO flags except for Intel compiler
+on Linux:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.8)
+  project(foo)
+
+  # ...
+
+  set_property(TARGET ... PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+Use the :module:`CheckIPOSupported` module to detect whether IPO is
+supported by the current compiler, environment, and CMake version.
+Produce a fatal error if support is not available:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.9) # CMP0069 NEW
+  project(foo)
+
+  include(CheckIPOSupported)
+  check_ipo_supported()
+
+  # ...
+
+  set_property(TARGET ... PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+Apply IPO flags only if compiler supports it:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.9) # CMP0069 NEW
+  project(foo)
+
+  include(CheckIPOSupported)
+
+  # ...
+
+  check_ipo_supported(RESULT result)
+  if(result)
+    set_property(TARGET ... PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+
+Apply IPO flags without any checks.  This may lead to build errors if IPO
+is not supported by the compiler in the current environment.  Produce an
+error if CMake does not know IPO flags for the current compiler:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.9) # CMP0069 NEW
+  project(foo)
+
+  # ...
+
+  set_property(TARGET ... PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

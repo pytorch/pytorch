@@ -1,0 +1,117 @@
+CMP0200
+-------
+
+.. versionadded:: 4.2
+
+Location and configuration selection for imported targets is more consistent.
+
+The way CMake historically selected the configuration to use for imported
+targets prioritized selection based on location properties for a candidate
+configuration and only considered :prop_tgt:`IMPORTED_CONFIGURATIONS` as a
+fallback.  This could result in incorrect configuration selection especially
+for ``INTERFACE`` libraries.
+
+CMake 4.2 and above consider :prop_tgt:`IMPORTED_CONFIGURATIONS` to be a
+definitive list of available configurations, regardless of whether a
+configuration specific location is provided for the library.  Additionally,
+CMake will respect non-configuration-specific locations when a configuration
+specific location is not specified.
+
+This policy provides compatibility with projects that rely on the historical
+behavior.  The policy setting applies to targets and is recorded at the point
+an imported target is created.  Accordingly, imported packages may override the
+policy set by the consumer for targets they create.  In particular, targets
+imported from |CPS| packages always use the ``NEW`` behavior.
+
+The ``OLD`` behavior for this policy is to retain the historic behavior.
+The ``NEW`` behavior prioritizes selection based on the advertised list of
+available configurations.  Both behaviors are described in detail below.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst
+
+Mapped configuration selection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>` (where ``<CONFIG>`` is the
+configuration of the consuming target) is set on an imported target, CMake
+would historically select from that list the first configuration which provides
+a configuration-specific location.  If no such configuration exists, CMake
+would selects the consuming target's configuration, if the imported target is
+an ``INTERFACE`` library.  Otherwise, CMake considers the target as not having
+a suitable configuration.
+
+For ``INTERFACE`` libraries which do not provide a location, this results in
+CMake always selecting the consuming target's configuration and effectively
+ignoring :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>`.  This behavior is not
+consistent with configuration selection for imported targets which provide a
+location.
+
+Under the ``NEW`` behavior, CMake selects the first configuration from the
+mapping which appears in :prop_tgt:`IMPORTED_CONFIGURATIONS`.  If
+:prop_tgt:`IMPORTED_CONFIGURATIONS` is not set, CMake selects the first
+configuration from the mapping which is "usable".  For non-``INTERFACE``
+libraries, "usable" means that a location (either configuration-specific or
+configuration-agnostic) is available.  ``INTERFACE`` libraries are always
+considered "usable".
+
+If no match is found, CMake considers the target as not having a suitable
+configuration.
+
+Non-mapped configuration selection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>` is *not* set, CMake would
+historically select the first configuration which provides a location out of
+the following:
+
+- The consuming target's configuration, or
+
+- The empty configuration, or
+
+- The list of configurations in :prop_tgt:`IMPORTED_CONFIGURATIONS`.
+
+As an implementation artifact, this results in CMake selecting the *last*
+configuration in :prop_tgt:`IMPORTED_CONFIGURATIONS` for ``INTERFACE``
+libraries which do not provide a location.  Again, this behavior is not
+consistent with configuration selection for imported targets which provide a
+location.
+
+Under the ``NEW`` behavior, if :prop_tgt:`IMPORTED_CONFIGURATIONS` is set,
+CMake will select the consuming target's configuration if present therein,
+otherwise CMake will select the first imported configuration.  If
+:prop_tgt:`IMPORTED_CONFIGURATIONS` is *not* set, CMake will select the
+consuming target's configuration if it is "usable" (as defined in the previous
+section); otherwise, CMake considers the target as not having a suitable
+configuration.
+
+Examples
+^^^^^^^^
+
+Consider the following imported library:
+
+.. code-block:: cmake
+
+  add_library(test INTERFACE IMPORTED)
+  set_target_properties(test PROPERTIES
+    IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
+    INTERFACE_COMPILE_DEFINITIONS "$<$<CONFIG:debug>:DEBUG>"
+  )
+
+Under the ``OLD`` policy, CMake will select the ``DEBUG`` configuration of
+``test`` (and thus define the symbol ``DEBUG``) for any target linking to
+``test``, because CMake does not consider any configuration "valid", and, as
+an implementation artifact, the last configuration considered is accepted.
+
+Under the ``NEW`` policy, the ``RELEASE`` configuration will be selected
+if the consuming project is built in any configuration other than ``Debug``
+(keeping in mind that configuration matching is case-insensitive).  This is
+because ``DEBUG`` will be preferred if the consumer's configuration is also
+``DEBUG``, but ``RELEASE`` will be preferred otherwise because it appears
+first in :prop_tgt:`IMPORTED_CONFIGURATIONS`, and its appearance therein makes
+it a "valid" configuration for an ``INTERFACE`` library.
+
+.. |CPS| replace:: Common Package Specification

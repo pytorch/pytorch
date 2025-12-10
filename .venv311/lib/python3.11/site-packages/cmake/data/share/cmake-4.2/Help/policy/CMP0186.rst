@@ -1,0 +1,43 @@
+CMP0186
+-------
+
+.. versionadded:: 4.1
+
+Regular expressions match ``^`` at most once in repeated searches.
+
+This policy affects commands that perform multiple regular expression
+searches:
+
+* :command:`string(REGEX MATCHALL)`
+* :command:`string(REGEX REPLACE)`
+* :command:`list(TRANSFORM REPLACE)`
+
+and the generator expression :genex:`$<LIST:TRANSFORM,list,REPLACE>`.
+
+CMake 4.0 and below match the ``^`` anchor at the start of every
+successive search, leading to multiple matches:
+
+.. code-block:: cmake
+
+  string(REGEX REPLACE "^a" "b" result "aaaa") # result="bbbb"
+  string(REGEX MATCHALL "^a" result "aaaa")    # result="a;a;a;a"
+
+CMake 4.1 and above prefer to match the ``^`` anchor at most once,
+at the start of the input string:
+
+.. code-block:: cmake
+
+  string(REGEX REPLACE "^a" "b" result "aaaa") # result="abbb"
+  string(REGEX MATCHALL "^a" result "aaaa")    # result="a"
+
+This policy provides compatibility for projects that have not been updated.
+
+The ``OLD`` behavior for this policy is to match ``^`` multiple times,
+at the start of each search.  The ``NEW`` behavior for this policy is
+to match ``^`` at most once, at the start of the input string.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

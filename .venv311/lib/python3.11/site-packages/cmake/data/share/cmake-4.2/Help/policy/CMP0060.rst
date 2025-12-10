@@ -1,0 +1,70 @@
+CMP0060
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+Link libraries by full path even in implicit directories.
+
+Policy :policy:`CMP0003` was introduced with the intention of always
+linking library files by full path when a full path is given to the
+:command:`target_link_libraries` command.  However, on some platforms
+(e.g. HP-UX) the compiler front-end adds alternative library search paths
+for the current architecture (e.g. ``/usr/lib/<arch>`` has alternatives
+to libraries in ``/usr/lib`` for the current architecture).
+On such platforms the :command:`find_library` may find a library such as
+``/usr/lib/libfoo.so`` that does not belong to the current architecture.
+
+Prior to policy :policy:`CMP0003` projects would still build in such
+cases because the incorrect library path would be converted to ``-lfoo``
+on the link line and the linker would find the proper library in the
+arch-specific search path provided by the compiler front-end implicitly.
+At the time we chose to remain compatible with such projects by always
+converting library files found in implicit link directories to ``-lfoo``
+flags to ask the linker to search for them.  This approach allowed existing
+projects to continue to build while still linking to libraries outside
+implicit link directories via full path (such as those in the build tree).
+
+CMake does allow projects to override this behavior by using an
+:ref:`IMPORTED library target <Imported Targets>` with its
+:prop_tgt:`IMPORTED_LOCATION` property set to the desired full path to
+a library file.  In fact, many :ref:`Find Modules` are learning to provide
+:ref:`Imported Targets` instead of just the traditional ``Foo_LIBRARIES``
+variable listing library files.  However, this makes the link line
+generated for a library found by a Find Module depend on whether it
+is linked through an imported target or not, which is inconsistent.
+Furthermore, this behavior has been a source of confusion because the
+generated link line for a library file depends on its location.  It is
+also problematic for projects trying to link statically because flags
+like ``-Wl,-Bstatic -lfoo -Wl,-Bdynamic`` may be used to help the linker
+select ``libfoo.a`` instead of ``libfoo.so`` but then leak dynamic linking
+to following libraries.  (See the :prop_tgt:`LINK_SEARCH_END_STATIC`
+target property for a solution typically used for that problem.)
+
+When the special case for libraries in implicit link directories was first
+introduced the list of implicit link directories was simply hard-coded
+(e.g. ``/lib``, ``/usr/lib``, and a few others).  Since that time, CMake
+has learned to detect the implicit link directories used by the compiler
+front-end.  If necessary, the :command:`find_library` command could be
+taught to use this information to help find libraries of the proper
+architecture.
+
+For these reasons, CMake 3.3 and above prefer to drop the special case
+and link libraries by full path even when they are in implicit link
+directories.  Policy ``CMP0060`` provides compatibility for existing
+projects.
+
+The ``OLD`` behavior for this policy is to ask the linker to search for
+libraries whose full paths are known to be in implicit link directories.
+The ``NEW`` behavior for this policy is to link libraries by full path even
+if they are in implicit link directories.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: did *not* warn by default
+.. include:: include/REMOVED_EPILOGUE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0060 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning in CMake versions before 4.0.

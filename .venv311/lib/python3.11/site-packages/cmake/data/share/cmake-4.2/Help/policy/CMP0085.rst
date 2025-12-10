@@ -1,0 +1,22 @@
+CMP0085
+-------
+
+.. versionadded:: 3.14
+
+``$<IN_LIST:...>`` handles empty list items.
+
+In CMake 3.13 and lower, the ``$<IN_LIST:...>`` generator expression always
+returned ``0`` if the first argument was empty, even if the list contained an
+empty item. This behavior is inconsistent with the ``IN_LIST`` behavior of
+:command:`if`, which this generator expression is meant to emulate. CMake 3.14
+and later handles this case correctly.
+
+The ``OLD`` behavior of this policy is for ``$<IN_LIST:...>`` to always return
+``0`` if the first argument is empty. The ``NEW`` behavior is to return ``1``
+if the first argument is empty and the list contains an empty item.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.14
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

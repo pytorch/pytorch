@@ -1,0 +1,27 @@
+CMP0132
+-------
+
+.. versionadded:: 3.24
+
+Do not set compiler environment variables on first run.
+
+Apart from when using the :generator:`Xcode` generator and some :ref:`Visual
+Studio Generators`, CMake 3.23 and below will set environment variables like
+:envvar:`CC`, :envvar:`CXX`, etc. when the corresponding language is enabled.
+This only occurs on the very first time CMake is run in a build directory,
+and the environment variables are only defined at configure time, not build
+time. On subsequent CMake runs, these environment variables are not set,
+opening up the opportunity for different behavior between the first and
+subsequent CMake runs. CMake 3.24 and above prefer to not set these
+environment variables when a language is enabled, even on the first run in
+a build directory.
+
+The ``OLD`` behavior for this policy sets the relevant environment variable
+on the first run when a language is enabled. The ``NEW`` behavior for this
+policy does not set any such environment variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

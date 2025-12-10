@@ -1,0 +1,6 @@
+      program hello
+      @MPI_Fortran_INCLUDE_LINE@
+      integer@MPI_Fortran_INTEGER_LINE@ ierror
+      call MPI_INIT(ierror)
+      call MPI_FINALIZE(ierror)
+      end program

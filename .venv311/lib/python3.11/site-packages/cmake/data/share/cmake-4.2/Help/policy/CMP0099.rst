@@ -1,0 +1,34 @@
+CMP0099
+-------
+
+.. versionadded:: 3.17
+
+Link properties are transitive over private dependencies of static libraries.
+
+In CMake 3.16 and below, evaluation of target properties
+:prop_tgt:`INTERFACE_LINK_OPTIONS`, :prop_tgt:`INTERFACE_LINK_DIRECTORIES`,
+and :prop_tgt:`INTERFACE_LINK_DEPENDS` during buildsystem generation does not
+follow private dependencies of static libraries, which appear in their
+:prop_tgt:`INTERFACE_LINK_LIBRARIES` guarded by :genex:`LINK_ONLY` generator
+expressions.
+Only the libraries themselves are propagated to link the dependent binary.
+
+CMake 3.17 and later prefer to propagate all interface link properties.
+This policy provides compatibility for projects that have not been updated
+to expect the new behavior.
+
+The ``OLD`` behavior for this policy is to not propagate interface link
+properties. The ``NEW`` behavior of this policy is to propagate interface link
+properties.
+
+.. versionadded:: 3.30
+
+  Policy :policy:`CMP0166` makes :genex:`TARGET_PROPERTY` evaluation of
+  these three transitive link properties follow private dependencies of
+  static libraries too.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

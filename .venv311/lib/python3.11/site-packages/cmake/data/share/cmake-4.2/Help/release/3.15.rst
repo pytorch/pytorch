@@ -1,0 +1,392 @@
+CMake 3.15 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.14 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* The :generator:`Xcode` generator now supports per-target schemes.
+  See the :variable:`CMAKE_XCODE_GENERATE_SCHEME` variable and
+  :prop_tgt:`XCODE_GENERATE_SCHEME` target property.
+
+* The :generator:`Green Hills MULTI` generator has been updated:
+
+  * It now supports the :command:`add_custom_command` and
+    :command:`add_custom_target` commands.
+
+  * It is now available on Linux.
+
+Languages
+---------
+
+* Preliminary support for the ``Swift`` language was added to the
+  :generator:`Ninja` generator:
+
+  * Use the :envvar:`SWIFTC` environment variable to specify a compiler.
+
+  * The :prop_tgt:`Swift_DEPENDENCIES_FILE` target property and
+    :prop_sf:`Swift_DEPENDENCIES_FILE` source file property were added
+    to customize dependency files.
+
+  * The :prop_tgt:`Swift_MODULE_NAME` target property was added to
+    customize the Swift module name.
+
+  * The :prop_sf:`Swift_DIAGNOSTICS_FILE` source property was added to
+    indicate where to write the serialized Swift diagnostics.
+
+  The Swift support is experimental, not considered stable, and may change
+  in future releases of CMake.
+
+Compilers
+---------
+
+* The ``Clang`` compiler variant on Windows that targets the MSVC ABI
+  but has a GNU-like command line is now supported.
+
+* Support for the Clang-based ARM compiler was added with compiler id
+  ``ARMClang``.
+
+* Support was added for the IAR compiler architectures Renesas RX,
+  RL78, RH850 and Texas Instruments MSP430.
+
+* Support was added for the IAR compilers built for Linux (IAR BuildLx).
+
+Command-Line
+------------
+
+* The :envvar:`CMAKE_GENERATOR` environment variable was added
+  to specify a default generator to use when :manual:`cmake(1)` is
+  run without a ``-G`` option.  Additionally, environment variables
+  :envvar:`CMAKE_GENERATOR_PLATFORM`, :envvar:`CMAKE_GENERATOR_TOOLSET`,
+  and :envvar:`CMAKE_GENERATOR_INSTANCE` were created to configure
+  the generator.
+
+* The :manual:`cmake(1)` ``--build`` tool ``--target`` parameter gained support
+  for multiple targets, e.g. ``cmake --build . --target Library1 Library2``.
+  It now also has a short form ``-t`` alias, e.g.
+  ``cmake --build . -t Library1 Library2``.
+
+* The :manual:`cmake(1)` command gained a new ``--install`` option.
+  This may be used after building a project to run installation without
+  using the generated build system or the native build tool.
+
+* The :manual:`cmake(1)` command learned a new CLI option ``--loglevel``.
+
+* The :manual:`cmake(1)` ``-E remove_directory`` command-line tool learned
+  to support removing multiple directories.
+
+* The :manual:`cmake(1)` ``-E tar`` tool has been improved:
+
+  * It now continues adding files to an archive even if some of the files
+    are not readable.  This behavior is more consistent with the
+    classic ``tar`` tool.
+
+  * It now parses all flags, and if an invalid flag was provided, a
+    warning is issued.
+
+  * It now displays an error if no action flag was specified, along with a
+    list of possible actions: ``t`` (list), ``c`` (create) or ``x`` (extract).
+
+  * It now supports extracting (``-x``) or listing (``-t``) only specific
+    files or directories.
+
+  * It now supports Zstandard compression with a ``--zstd`` option.
+    Zstandard was designed to give a compression ratio comparable to that
+    of the DEFLATE (zip) algorithm, but faster, especially for decompression.
+
+Commands
+--------
+
+* The :command:`add_custom_command` and :command:`add_custom_target` commands
+  gained a new ``JOB_POOL`` option that works with the :generator:`Ninja`
+  generator to set the pool variable on the build statement.
+
+* The :command:`add_library` command ``ALIAS`` option learned to support
+  import libraries of the ``UNKNOWN`` type.
+
+* The :command:`cmake_parse_arguments` command gained an additional
+  ``<prefix>_KEYWORDS_MISSING_VALUES`` output variable to report
+  keyword arguments that were given by the caller with no values.
+
+* The :command:`execute_process` command gained a ``COMMAND_ECHO`` option
+  and supporting :variable:`CMAKE_EXECUTE_PROCESS_COMMAND_ECHO` variable
+  to enable echoing of the command-line string before execution.
+
+* The :command:`file(INSTALL)` command learned a new argument,
+  ``FOLLOW_SYMLINK_CHAIN``, which can be used to recursively resolve and
+  install symlinks.
+
+* :command:`list` learned new sub-commands:
+  ``PREPEND``, ``POP_FRONT`` and ``POP_BACK``.
+
+* The :command:`message` command learned new types:
+  ``NOTICE``, ``VERBOSE``, ``DEBUG`` and ``TRACE``.
+
+* The :command:`string` learned a new sub-command ``REPEAT``.
+
+Variables
+---------
+
+* The :variable:`CMAKE_CROSSCOMPILING_EMULATOR` variable and corresponding
+  :prop_tgt:`CROSSCOMPILING_EMULATOR` target property learned to support
+  arguments to the emulator.
+
+* The :variable:`CMAKE_FIND_PACKAGE_PREFER_CONFIG` variable was added to tell
+  :command:`find_package` calls to look for a package configuration
+  file first even if a find module is available.
+
+* The :variable:`CMAKE_FRAMEWORK` variable was added to initialize the
+  :prop_tgt:`FRAMEWORK` property on all targets.
+
+* The :variable:`CMAKE_VS_JUST_MY_CODE_DEBUGGING` variable and
+  :prop_tgt:`VS_JUST_MY_CODE_DEBUGGING` target property were added to
+  enable the Just My Code feature of the Visual Studio Debugger when
+  compiling with MSVC cl 19.05 and higher.
+
+* The :variable:`CMAKE_MSVC_RUNTIME_LIBRARY` variable and
+  :prop_tgt:`MSVC_RUNTIME_LIBRARY` target property were introduced to
+  select the runtime library used by compilers targeting the MSVC ABI.
+  See policy :policy:`CMP0091`.
+
+* The :variable:`CMAKE_PROJECT_INCLUDE` and
+  :variable:`CMAKE_PROJECT_INCLUDE_BEFORE` variables were added to allow
+  injection of custom code at the sites of :command:`project` calls
+  without knowing the project name a priori.
+
+Properties
+----------
+
+* The :prop_tgt:`ADDITIONAL_CLEAN_FILES` target property and
+  :prop_dir:`ADDITIONAL_CLEAN_FILES` directory property were added.
+  They allow to register additional files that should be removed during
+  the clean stage.
+
+* The :prop_tgt:`PUBLIC_HEADER` and :prop_tgt:`PRIVATE_HEADER` properties
+  may now be set on :ref:`Interface Libraries`. The headers specified by those
+  properties can be installed using the :command:`install(TARGETS)` command by
+  passing the ``PUBLIC_HEADER`` and ``PRIVATE_HEADER`` arguments respectively.
+
+* The :prop_tgt:`VS_PACKAGE_REFERENCES` target property was added to
+  tell :ref:`Visual Studio Generators` to add references to ``nuget``
+  packages.
+
+* The :prop_tgt:`VS_PROJECT_IMPORT` target property was added to allow
+  managed Visual Studio project files to import external ``.props`` files.
+
+* The :prop_tgt:`VS_NO_SOLUTION_DEPLOY` target property was added to
+  tell :ref:`Visual Studio Generators` whether to deploy an artifact
+  to the WinCE or Windows Phone target device.
+
+Modules
+-------
+
+* The :module:`FindBoost` module was reworked to expose a more consistent
+  user experience between its "Config" and "Module" modes and with other
+  find modules in general.
+
+  * A new imported target ``Boost::headers`` is now defined (same
+    as ``Boost::boost``).
+
+  * New output variables ``Boost_VERSION_MACRO``,
+    ``Boost_VERSION_MAJOR``, ``Boost_VERSION_MINOR``,
+    ``Boost_VERSION_PATCH``, and ``Boost_VERSION_COUNT``
+    were added.
+
+  * The ``QUIET`` argument passed to :command:`find_package` is no
+    longer ignored in config mode.  Note that the CMake package shipped with
+    Boost ``1.70.0`` ignores the ``QUIET`` argument passed to
+    :command:`find_package`.  This is fixed in the next Boost release.
+
+  * The input switch ``Boost_DETAILED_FAILURE_MSG`` was removed.
+
+  * ``Boost_VERSION`` now reports the version in ``x.y.z``
+    format in module mode.  See policy :policy:`CMP0093`.
+
+* The :module:`FindCups` module now provides imported targets.
+
+* The :module:`FindEnvModules` module was added to use Lua- and TCL-based
+  environment modules in :ref:`CTest Scripts <CTest Script>`.
+
+* The :module:`FindGLEW` module now provides an interface more consistent
+  with what upstream GLEW provides in its own CMake package files.
+
+* The :module:`FindPkgConfig` now populates :prop_tgt:`INTERFACE_LINK_OPTIONS`
+  property of imported targets with other (non-library) linker flags.
+
+* The :module:`FindPostgreSQL` module learned to find debug and release
+  variants separately.
+
+* Modules :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  gained additional lookup strategies and controls, and a new default.
+  See policy :policy:`CMP0094`.
+
+* Modules :module:`FindPython`, :module:`FindPython2` and :module:`FindPython3`
+  gain a new target (respectively ``Python::Module``, ``Python2::Module``
+  and ``Python3::Module``) which can be used to develop Python modules.
+
+* Modules :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  gain capability to control how virtual environments are handled.
+
+* The :module:`UseSWIG` module learned to manage alternate library names
+  by passing ``-interface <library_name>`` for ``python`` language or
+  ``-dllimport <library_name>`` for ``CSharp`` language to the ``SWIG``
+  compiler.
+
+Generator Expressions
+---------------------
+
+* The generator expressions :genex:`$<C_COMPILER_ID>`,
+  :genex:`$<CXX_COMPILER_ID>`, :genex:`$<CUDA_COMPILER_ID>`,
+  :genex:`$<Fortran_COMPILER_ID>`, :genex:`$<COMPILE_LANGUAGE>`,
+  :genex:`$<COMPILE_LANG_AND_ID>`, and :genex:`$<PLATFORM_ID>` learned to
+  support matching one value from a comma-separated list.
+
+* The :genex:`$<CUDA_COMPILER_ID:...>` and :genex:`$<CUDA_COMPILER_VERSION:...>`
+  generator expressions were added.
+
+* The :genex:`$<COMPILE_LANG_AND_ID:...>` generator expression was introduced to
+  allow specification of compile options for target files based on the
+  :variable:`CMAKE_<LANG>_COMPILER_ID` and :prop_sf:`LANGUAGE` of
+  each source file.
+
+* A :genex:`$<FILTER:list,INCLUDE|EXCLUDE,regex>` generator expression has
+  been added.
+
+* A :genex:`$<REMOVE_DUPLICATES:list>` generator expression has been added.
+
+* The :genex:`$<SHELL_PATH:...>` generator expression gained support for a
+  list of paths.
+
+* New ``$<TARGET_FILE*>`` :manual:`generator expressions
+  <cmake-generator-expressions(7)>` were added to retrieve the prefix, base
+  name, and suffix of the file names of various artifacts:
+
+  * :genex:`$<TARGET_FILE_PREFIX:...>`
+  * :genex:`$<TARGET_FILE_BASE_NAME:...>`
+  * :genex:`$<TARGET_FILE_SUFFIX:...>`
+  * :genex:`$<TARGET_LINKER_FILE_PREFIX:...>`
+  * :genex:`$<TARGET_LINKER_FILE_BASE_NAME:...>`
+  * :genex:`$<TARGET_LINKER_FILE_SUFFIX:...>`
+  * :genex:`$<TARGET_PDB_FILE_BASE_NAME:...>`
+
+* The :genex:`$<TARGET_OBJECTS:...>` generator expression is now supported
+  on ``SHARED``, ``STATIC``, ``MODULE`` libraries and executables.
+
+CTest
+-----
+
+* The :command:`ctest_submit` command learned a new option: ``BUILD_ID``.
+  This can be used to store the ID assigned to this build by CDash to a
+  variable.
+
+* The :command:`ctest_update` command learned to honor a new variable:
+  :variable:`CTEST_UPDATE_VERSION_OVERRIDE`. This can be used to specify
+  the current version of your source tree rather than using the update
+  command to discover the current version that is checked out.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack IFW Generator` gained a new
+  :variable:`CPACK_IFW_PACKAGE_STYLE_SHEET` variable to customize the
+  installer stylesheet.
+
+Deprecated and Removed Features
+===============================
+
+* The :manual:`cmake-server(7)` mode has been deprecated and will be
+  removed from a future version of CMake.  Please port clients to use
+  the :manual:`cmake-file-api(7)` instead.
+
+* The :prop_dir:`ADDITIONAL_MAKE_CLEAN_FILES` directory property is now
+  deprecated.  Use the :prop_dir:`ADDITIONAL_CLEAN_FILES` directory property
+  instead.
+
+* The variable :variable:`CMAKE_AUTOMOC_RELAXED_MODE` is considered
+  deprecated.  Support still exists but will be removed in future versions.
+
+* The :command:`export(PACKAGE)` command now does nothing unless
+  enabled via :variable:`CMAKE_EXPORT_PACKAGE_REGISTRY`.
+  See policy :policy:`CMP0090`.
+
+* The :generator:`Xcode` generator now requires at least Xcode 5.
+
+* An explicit deprecation diagnostic was added for policy ``CMP0066``
+  (``CMP0065`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+Other Changes
+=============
+
+* If a feature specified by :command:`target_compile_features` is available
+  in the compiler's default standard level, CMake 3.14 and below incorrectly
+  added unnecessary ``-std=`` flags that could lower the standard level.
+  This bug has been fixed in CMake 3.15.  This behavior change may expose
+  bugs in existing projects that were relying on undocumented implementation
+  details.  Specifying compile features only ensures that the compiler runs
+  in a mode that has those features, not that any specific standard level is
+  used or explicit ``-std=`` flag passed.
+
+* CMake learned how to compile C++14 with the IBM AIX XL compiler
+  and the SunPro compiler and to compile C++20 with the AppleClang compiler.
+
+* With MSVC-like compilers the value of :variable:`CMAKE_<LANG>_FLAGS`
+  no longer contains warning flags like ``/W3`` by default.
+  See policy :policy:`CMP0092`.
+
+* IBM Clang-based XL compilers that define ``__ibmxl__`` now use the
+  compiler id ``XLClang`` instead of ``XL``.  See policy :policy:`CMP0089`.
+
+* The :command:`file(REMOVE)` and :command:`file(REMOVE_RECURSE)` commands
+  were changed to ignore empty arguments with a warning instead of treating
+  them as a relative path and removing the contents of the current directory.
+
+Updates
+=======
+
+Changes made since CMake 3.15.0 include the following.
+
+3.15.1
+------
+
+* In CMake 3.15.0 support for the GNU-like ``Clang`` compiler targeting the
+  MSVC ABI implemented :variable:`CMAKE_CXX_STANDARD` values 98 and 11 using
+  the corresponding ``-std=`` flags.  However, these modes do not work with
+  the MSVC standard library.  Therefore CMake 3.15.1 passes C++14 standard
+  flags even for C++98 and C++11.  This is consistent with MSVC itself which
+  always runs in a mode aware of C++14.
+
+* Preliminary Swift support added in 3.15.0 has been updated.
+
+3.15.2
+------
+
+* In CMake 3.15.0 and 3.15.1 the :variable:`CMAKE_FIND_PACKAGE_PREFER_CONFIG`
+  variable caused the :command:`find_package` command to fail on a missing
+  package even without the ``REQUIRED`` option.  This has been fixed.
+
+3.15.3
+------
+
+* ``CrayPrgEnv`` compiler wrapper support has been updated for the 19.06
+  release of the Cray Programming Environment for which the default linking
+  mode on XC Cray systems is now dynamic instead of static.
+
+3.15.4
+------
+
+* In CMake 3.15.0 through 3.15.3, the :prop_dir:`EXCLUDE_FROM_ALL`
+  directory property was regressed from pre-3.14 behavior and caused
+  targets within the directory to be excluded even from its own "all".
+  This has been fixed.
+  The bug also existed in 3.14.0 through 3.14.6 and is fixed in 3.14.7.

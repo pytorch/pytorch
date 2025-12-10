@@ -1,0 +1,8 @@
+#!gbuild
+@bsp_name@
+@os_dir@
+primaryTarget=@ghs_primary_target@
+[Project]
+     {isdefined(GHS_BSP)} -bsp $GHS_BSP
+     {isdefined(GHS_OS)} -os_dir $GHS_OS
+GHS_lib.gpj [Library]

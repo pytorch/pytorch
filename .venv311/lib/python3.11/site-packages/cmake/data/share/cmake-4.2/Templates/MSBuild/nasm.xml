@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ProjectSchemaDefinitions xmlns="http://schemas.microsoft.com/build/2009/properties" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+  <Rule Name="NASM" PageTemplate="tool" DisplayName="Netwide Assembler" Order="200">
+    <Rule.DataSource>
+      <DataSource Persistence="ProjectFile" ItemType="NASM"/>
+    </Rule.DataSource>
+    <Rule.Categories>
+      <Category Name="General">
+        <Category.DisplayName>
+          <sys:String>General</sys:String>
+        </Category.DisplayName>
+      </Category>
+      <Category Name="Preprocessor">
+        <Category.DisplayName>
+          <sys:String>Preprocessing Options</sys:String>
+        </Category.DisplayName>
+      </Category>
+      <Category Name="Assembler Options">
+        <Category.DisplayName>
+          <sys:String>Assembler Options</sys:String>
+        </Category.DisplayName>
+      </Category>
+      <Category Name="Advanced">
+        <Category.DisplayName>
+          <sys:String>Advanced </sys:String>
+        </Category.DisplayName>
+      </Category>
+      <Category Name="Command Line" Subtype="CommandLine">
+        <Category.DisplayName>
+          <sys:String>Command Line</sys:String>
+        </Category.DisplayName>
+      </Category>
+    </Rule.Categories>
+    <StringProperty Name="Inputs" Category="Command Line" IsRequired="true">
+      <StringProperty.DataSource>
+        <DataSource Persistence="ProjectFile" ItemType="NASM" SourceType="Item"/>
+      </StringProperty.DataSource>
+    </StringProperty>
+    <StringProperty Name="OutputFormat" Category="Assembler Options" HelpUrl="http://www.nasm.us/doc/" DisplayName="Output File Name" Description="Specify Output Filename.-o [value]" Switch="-o &quot;[value]&quot;"/>
+    <BoolProperty Name="tasmmode" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="SciTech TASM compatible mode" Description="assemble in SciTech TASM compatible mode" Switch="-t"/>
+    <EnumProperty Name="Outputswitch" Category="Assembler Options" HelpUrl="http://www.nasm.us/doc/" DisplayName="Output Switch" Description="Select the type of output format required. Linking Should be disabled for ELF and Binary ,else error will popup">
+      <EnumValue Name="0" DisplayName="Object File win32" Switch="-fwin32"/>
+      <EnumValue Name="1" DisplayName="Object File win64" Switch="-fwin64"/>
+      <EnumValue Name="2" DisplayName="ELF32 (i386) object files (e.g. Linux)" Switch="-felf32"/>
+      <EnumValue Name="3" DisplayName="ELF64 (x86_64) object files (e.g. Linux)" Switch="-felf64"/>
+    </EnumProperty>
+    <StringListProperty Name="AssembledCodeListingFile" Category="Assembler Options" DisplayName="Assembled Code Listing File" Description="Generates an assembled code listing file.     (-l [file])" HelpUrl="http://www.nasm.us/doc/" Switch="-l &quot;[value]&quot;"/>
+    <BoolProperty Name="GenerateDebugInformation" Category="Assembler Options" DisplayName="Generate Debug Information" Description="Generates Debug Information.     (-g)" HelpUrl="http://www.nasm.us/doc/" Switch="-g"/>
+    <StringListProperty Name="ErrorReporting" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Redirect Error Messages to File" Description="Drops the error Message on specified device" Switch="-Z &quot;[value]&quot;"/>
+    <StringListProperty Name="IncludePaths" Category="General" DisplayName="Include Paths" Description="Sets path for include file.     (-I[path])" HelpUrl="http://www.nasm.us/doc/" Switch="-I&quot;[value]&quot;"/>
+    <StringListProperty Name="PreprocessorDefinitions" Category="Preprocessor" HelpUrl="http://www.nasm.us/doc/" DisplayName="Preprocessor Definitions" Description="Defines a text macro with the given name.     (-D[symbol])" Switch="-D&quot;[value]&quot;"/>
+    <StringListProperty Name="UndefinePreprocessorDefinitions" Category="Preprocessor" HelpUrl="http://www.nasm.us/doc/" DisplayName="Undefine Preprocessor Definitions" Description="Undefines a text macro with the given name.     (-U[symbol])" Switch="-U&quot;[value]&quot;"/>
+    <EnumProperty Name="ErrorReportingFormat" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Error Reporting Format" Description="Select the error reporting format ie. GNU or VC">
+      <EnumValue Name="0" DisplayName="-Xgnu GNU format: Default format" Switch="-Xgnu"/>
+      <EnumValue Name="1" DisplayName="-Xvc Style used by Microsoft Visual C++" Switch="-Xvc"/>
+    </EnumProperty>
+    <BoolProperty Name="TreatWarningsAsErrors" Category="Assembler Options" DisplayName="Treat Warnings As Errors" Description="Returns an error code if warnings are generated.     (-Werror)" HelpUrl="http://www.nasm.us/doc/" Switch="-Werror"/>
+    <BoolProperty Name="floatunderflow" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="float-underflow" Description="floating point underflow (default off)" Switch="-w+float-underflow"/>
+    <BoolProperty Name="macrodefaults" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable macro-defaults" Description="macros with more default than optional parameters (default on)" Switch="-w-macro-defaults"/>
+    <BoolProperty Name="user" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable user" Description="%warning directives (default on)" Switch="-w-user"/>
+    <BoolProperty Name="floatoverflow" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable float-overflow" Description="floating point overflow (default on)" Switch="-w-float-overflow"/>
+    <BoolProperty Name="floatdenorm" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="float-denorm" Description="floating point denormal (default off)" Switch="-w+float-denorm"/>
+    <BoolProperty Name="numberoverflow" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable number-overflow" Description="numeric constant does not fit (default on)" Switch="-w-number-overflow"/>
+    <BoolProperty Name="macroselfref" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="macro-selfref" Description="cyclic macro references (default off)" Switch="-w+macro-selfref"/>
+    <BoolProperty Name="floattoolong" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable float-toolong" Description=" too many digits in floating-point number (default on)" Switch="-w-float-toolong"/>
+    <BoolProperty Name="orphanlabels" Category="Advanced" HelpUrl="http://www.nasm.us/doc/" DisplayName="Disable orphan-labels" Description="labels alone on lines without trailing `:' (default on)" Switch="-w-orphan-labels"/>
+    <StringProperty Name="CommandLineTemplate" DisplayName="Command Line" Visible="False" IncludeInCommandLine="False"/>
+    <DynamicEnumProperty Name="NASMBeforeTargets" Category="General" EnumProvider="Targets" IncludeInCommandLine="False">
+      <DynamicEnumProperty.DisplayName>
+        <sys:String>Execute Before</sys:String>
+      </DynamicEnumProperty.DisplayName>
+      <DynamicEnumProperty.Description>
+        <sys:String>Specifies the targets for the build customization to run before.</sys:String>
+      </DynamicEnumProperty.Description>
+      <DynamicEnumProperty.ProviderSettings>
+        <NameValuePair Name="Exclude" Value="^NASMBeforeTargets|^Compute"/>
+      </DynamicEnumProperty.ProviderSettings>
+      <DynamicEnumProperty.DataSource>
+        <DataSource Persistence="ProjectFile" ItemType="" HasConfigurationCondition="true"/>
+      </DynamicEnumProperty.DataSource>
+    </DynamicEnumProperty>
+    <DynamicEnumProperty Name="NASMAfterTargets" Category="General" EnumProvider="Targets" IncludeInCommandLine="False">
+      <DynamicEnumProperty.DisplayName>
+        <sys:String>Execute After</sys:String>
+      </DynamicEnumProperty.DisplayName>
+      <DynamicEnumProperty.Description>
+        <sys:String>Specifies the targets for the build customization to run after.</sys:String>
+      </DynamicEnumProperty.Description>
+      <DynamicEnumProperty.ProviderSettings>
+        <NameValuePair Name="Exclude" Value="^NASMAfterTargets|^Compute"/>
+      </DynamicEnumProperty.ProviderSettings>
+      <DynamicEnumProperty.DataSource>
+        <DataSource Persistence="ProjectFile" ItemType="" HasConfigurationCondition="true"/>
+      </DynamicEnumProperty.DataSource>
+    </DynamicEnumProperty>
+    <StringProperty Name="ExecutionDescription" DisplayName="Execution Description" IncludeInCommandLine="False" Visible="False"/>
+    <StringListProperty Name="AdditionalDependencies" DisplayName="Additional Dependencies" IncludeInCommandLine="False" Visible="False"/>
+    <StringProperty Subtype="AdditionalOptions" Name="AdditionalOptions" Category="Command Line">
+      <StringProperty.DisplayName>
+        <sys:String>Additional Options</sys:String>
+      </StringProperty.DisplayName>
+      <StringProperty.Description>
+        <sys:String>Additional Options</sys:String>
+      </StringProperty.Description>
+    </StringProperty>
+  </Rule>
+  <ItemType Name="NASM" DisplayName="Netwide Assembler"/>
+  <FileExtension Name="*.asm" ContentType="NASM"/>
+  <ContentType Name="NASM" DisplayName="Netwide Assembler" ItemType="NASM"/>
+</ProjectSchemaDefinitions>

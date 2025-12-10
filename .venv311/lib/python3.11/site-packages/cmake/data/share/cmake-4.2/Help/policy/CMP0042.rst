@@ -1,0 +1,22 @@
+CMP0042
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+:prop_tgt:`MACOSX_RPATH` is enabled by default.
+
+CMake 2.8.12 and newer has support for using ``@rpath`` in a target's install
+name.  This was enabled by setting the target property
+:prop_tgt:`MACOSX_RPATH`.  The ``@rpath`` in an install name is a more
+flexible and powerful mechanism than ``@executable_path`` or ``@loader_path``
+for locating shared libraries.
+
+CMake 3.0 and later prefer this property to be ON by default.  Projects
+wanting ``@rpath`` in a target's install name may remove any setting of
+the :prop_tgt:`INSTALL_NAME_DIR` and :variable:`CMAKE_INSTALL_NAME_DIR`
+variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

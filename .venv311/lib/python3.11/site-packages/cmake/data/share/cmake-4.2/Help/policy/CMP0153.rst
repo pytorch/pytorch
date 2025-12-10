@@ -1,0 +1,14 @@
+CMP0153
+-------
+
+.. versionadded:: 3.28
+
+The :command:`exec_program` command should not be called.
+
+This command has long been superseded by the :command:`execute_process`
+command and has been deprecated since CMake 3.0.
+
+.. |disallowed_version| replace:: 3.28
+.. include:: include/DISALLOWED_COMMAND.rst
+
+.. include:: include/DEPRECATED.rst

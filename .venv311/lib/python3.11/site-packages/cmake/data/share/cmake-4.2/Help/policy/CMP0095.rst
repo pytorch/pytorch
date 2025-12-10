@@ -1,0 +1,32 @@
+CMP0095
+-------
+
+.. versionadded:: 3.16
+
+``RPATH`` entries are properly escaped in the intermediary CMake install script.
+
+In CMake 3.15 and earlier, ``RPATH`` entries set via
+:variable:`CMAKE_INSTALL_RPATH` or via :prop_tgt:`INSTALL_RPATH` have not been
+escaped before being inserted into the ``cmake_install.cmake`` script. Dynamic
+linkers on ELF-based systems (e.g. Linux and FreeBSD) allow certain keywords in
+``RPATH`` entries, such as ``${ORIGIN}`` (More details are available in the
+``ld.so`` man pages on those systems). The syntax of these keywords can match
+CMake's variable syntax. In order to not be substituted (usually to an empty
+string) already by the intermediary ``cmake_install.cmake`` script, the user had
+to double-escape such ``RPATH`` keywords, e.g.
+``set(CMAKE_INSTALL_RPATH "\\\${ORIGIN}/../lib")``. Since the intermediary
+``cmake_install.cmake`` script is an implementation detail of CMake, CMake 3.16
+and later will make sure ``RPATH`` entries are inserted literally by escaping
+any coincidental CMake syntax.
+
+The ``OLD`` behavior of this policy is to not escape ``RPATH`` entries in the
+intermediary ``cmake_install.cmake`` script. The ``NEW`` behavior is to properly
+escape coincidental CMake syntax in ``RPATH`` entries when generating the
+intermediary ``cmake_install.cmake`` script.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.16
+.. |WARNS_OR_DOES_NOT_WARN| replace::
+   warns when it detects use of CMake-like syntax
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

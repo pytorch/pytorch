@@ -1,0 +1,146 @@
+[
+  {
+    "name":  "AdditionalCompilerOptions",
+    "switch": "Xcompiler=",
+    "comment": "Host compiler options",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SpaceAppendable"
+    ]
+  },
+  {
+    "name":  "AdditionalCompilerOptions",
+    "switch": "Xcompiler",
+    "comment": "Host compiler options",
+    "value": "",
+    "flags": [
+      "UserFollowing",
+      "SpaceAppendable"
+    ]
+  },
+  {
+    "name":  "AdditionalCompilerOptions",
+    "switch": "-compiler-options=",
+    "comment": "Host compiler options",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SpaceAppendable"
+    ]
+  },
+  {
+    "name":  "AdditionalCompilerOptions",
+    "switch": "-compiler-options",
+    "comment": "Host compiler options",
+    "value": "",
+    "flags": [
+      "UserFollowing",
+      "SpaceAppendable"
+    ]
+  },
+  {
+    "name":  "CudaRuntime",
+    "switch": "cudart=none",
+    "comment": "No CUDA runtime library",
+    "value": "None",
+    "flags": []
+  },
+  {
+    "name":  "CudaRuntime",
+    "switch": "cudart=shared",
+    "comment": "Shared/dynamic CUDA runtime library",
+    "value": "Shared",
+    "flags": []
+  },
+  {
+    "name":  "CudaRuntime",
+    "switch": "cudart=static",
+    "comment": "Static CUDA runtime library",
+    "value": "Static",
+    "flags": []
+  },
+  {
+    "name":  "CudaRuntime",
+    "switch": "cudart",
+    "comment": "CUDA runtime library",
+    "value": "",
+    "flags": [
+      "UserFollowing"
+    ]
+  },
+  {
+    "name":  "FastMath",
+    "switch": "use_fast_math",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "FastMath",
+    "switch": "-use_fast_math",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "GPUDebugInfo",
+    "switch": "G",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "GPUDebugInfo",
+    "switch": "-device-debug",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "HostDebugInfo",
+    "switch": "g",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "HostDebugInfo",
+    "switch": "-debug",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "Keep",
+    "switch": "keep",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "Keep",
+    "switch": "-keep",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "MaxRegCount",
+    "switch": "maxrregcount=",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name":  "MaxRegCount",
+    "switch": "maxrregcount",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserFollowing"
+    ]
+  }
+]

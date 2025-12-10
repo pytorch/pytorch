@@ -1,0 +1,20 @@
+CMP0039
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Utility targets may not have link dependencies.
+
+CMake 2.8.12 and lower allowed using utility targets in the left hand side
+position of the :command:`target_link_libraries` command. This is an indicator
+of a bug in user code.
+
+The ``OLD`` behavior for this policy is to ignore attempts to set the link
+libraries of utility targets.  The ``NEW`` behavior for this policy is to
+report an error if an attempt is made to set the link libraries of a
+utility target.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

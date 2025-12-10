@@ -1,0 +1,5 @@
+'cppdap' is a C++11 library implementation of the Debug Adapter Protocol.
+Version as of 2023-01-06
+Copyright Google LLC
+
+This product includes software developed at Google.

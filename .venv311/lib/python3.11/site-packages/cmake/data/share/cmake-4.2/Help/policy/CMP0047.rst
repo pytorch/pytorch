@@ -1,0 +1,31 @@
+CMP0047
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Use ``QCC`` compiler id for the qcc drivers on QNX.
+
+CMake 3.0 and above recognize that the QNX qcc compiler driver is
+different from the GNU compiler.
+CMake now prefers to present this to projects by setting the
+:variable:`CMAKE_<LANG>_COMPILER_ID` variable to ``QCC`` instead
+of ``GNU``.  However, existing projects may assume the compiler id for
+QNX qcc is just ``GNU`` as it was in CMake versions prior to 3.0.
+Therefore this policy determines for QNX qcc which compiler id to
+report in the :variable:`CMAKE_<LANG>_COMPILER_ID` variable after
+language ``<LANG>`` is enabled by the :command:`project` or
+:command:`enable_language` command.  The policy must be set prior
+to the invocation of either command.
+
+The ``OLD`` behavior for this policy is to use the ``GNU`` compiler id
+for the qcc and QCC compiler drivers. The ``NEW`` behavior for this policy
+is to use the ``QCC`` compiler id for those drivers.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: did *not* warn by default
+.. include:: include/REMOVED_EPILOGUE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0047 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning in CMake versions before 4.0.

@@ -1,0 +1,49 @@
+CMP0136
+-------
+
+.. versionadded:: 3.24
+
+Watcom runtime library flags are selected by an abstraction.
+
+Compilers targeting the Watcom ABI have flags to select the Watcom runtime
+library.
+
+In CMake 3.23 and below, Watcom runtime library selection flags are added to
+the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache entries by CMake
+automatically.  This allows users to edit their cache entries to adjust the
+flags.  However, the presence of such default flags is problematic for
+projects that want to choose a different runtime library programmatically.
+In particular, it requires string editing of the
+:variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` variables with knowledge of the
+CMake builtin defaults so they can be replaced.
+
+CMake 3.24 and above prefer to leave the Watcom runtime library selection flags
+out of the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` values and instead
+offer a first-class abstraction.  The :variable:`CMAKE_WATCOM_RUNTIME_LIBRARY`
+variable and :prop_tgt:`WATCOM_RUNTIME_LIBRARY` target property may be set to
+select the Watcom runtime library.  If they are not set then CMake uses the
+default value ``MultiThreadedDLL`` on Windows and ``SingleThreaded`` on other
+platforms, which is equivalent to the original flags.
+
+This policy provides compatibility with projects that have not been updated
+to be aware of the abstraction.  The policy setting takes effect as of the
+first :command:`project` or :command:`enable_language` command that enables
+a language whose compiler targets the Watcom ABI.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project, that choice
+  must be used throughout the tree.  In projects that have nested projects
+  in subdirectories, be sure to convert everything together.
+
+The ``OLD`` behavior for this policy is to place Watcom runtime library
+flags in the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache
+entries and ignore the :variable:`CMAKE_WATCOM_RUNTIME_LIBRARY` abstraction.
+The ``NEW`` behavior for this policy is to *not* place Watcom runtime
+library flags in the default cache entries and use the abstraction instead.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

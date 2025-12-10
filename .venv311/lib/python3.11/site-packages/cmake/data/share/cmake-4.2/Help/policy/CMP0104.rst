@@ -1,0 +1,57 @@
+CMP0104
+-------
+
+.. versionadded:: 3.18
+
+Initialize :variable:`CMAKE_CUDA_ARCHITECTURES` when
+:variable:`CMAKE_CUDA_COMPILER_ID <CMAKE_<LANG>_COMPILER_ID>` is ``NVIDIA``.
+Raise an error if :prop_tgt:`CUDA_ARCHITECTURES` is empty.
+
+:variable:`CMAKE_CUDA_ARCHITECTURES` introduced in CMake 3.18 is used to
+initialize :prop_tgt:`CUDA_ARCHITECTURES`, which passes correct code generation
+flags to the CUDA compiler.
+
+Previous to this users had to manually specify the code generation flags. This
+policy is for backwards compatibility with manually specifying code generation
+flags.
+
+The ``OLD`` behavior for this policy is to not initialize
+:variable:`CMAKE_CUDA_ARCHITECTURES` when
+:variable:`CMAKE_CUDA_COMPILER_ID <CMAKE_<LANG>_COMPILER_ID>` is ``NVIDIA``.
+Empty :prop_tgt:`CUDA_ARCHITECTURES` is allowed.
+
+The ``NEW`` behavior of this policy is to initialize
+:variable:`CMAKE_CUDA_ARCHITECTURES` when
+:variable:`CMAKE_CUDA_COMPILER_ID <CMAKE_<LANG>_COMPILER_ID>` is ``NVIDIA``
+and raise an error if :prop_tgt:`CUDA_ARCHITECTURES` is empty during generation.
+
+If :prop_tgt:`CUDA_ARCHITECTURES` is set to a false value no architectures
+flags are passed to the compiler. This is intended to support packagers and
+the rare cases where full control over the passed flags is required.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.18
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst
+
+Examples
+^^^^^^^^
+
+.. code-block:: cmake
+
+  set_target_properties(tgt PROPERTIES CUDA_ARCHITECTURES "35;50;72")
+
+Generates code for real and virtual architectures ``30``, ``50`` and ``72``.
+
+.. code-block:: cmake
+
+  set_property(TARGET tgt PROPERTY CUDA_ARCHITECTURES 70-real 72-virtual)
+
+Generates code for real architecture ``70`` and virtual architecture ``72``.
+
+.. code-block:: cmake
+
+  set_property(TARGET tgt PROPERTY CUDA_ARCHITECTURES OFF)
+
+CMake will not pass any architecture flags to the compiler.

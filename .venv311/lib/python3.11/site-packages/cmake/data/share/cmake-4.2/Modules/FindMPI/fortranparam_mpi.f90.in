@@ -1,0 +1,4 @@
+      program mpi_ver
+      @MPI_Fortran_INCLUDE_LINE@
+      print *, 'INFO:SUBARRAYS[', MPI_SUBARRAYS_SUPPORTED, ']-ASYNCPROT[', MPI_ASYNC_PROTECTS_NONBLOCKING, ']'
+      end program mpi_ver

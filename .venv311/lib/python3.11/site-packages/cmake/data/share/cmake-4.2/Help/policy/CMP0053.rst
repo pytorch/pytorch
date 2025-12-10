@@ -1,0 +1,52 @@
+CMP0053
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.1
+
+Simplify variable reference and escape sequence evaluation.
+
+CMake 3.1 introduced a much faster implementation of evaluation of the
+:ref:`Variable References` and :ref:`Escape Sequences` documented in the
+:manual:`cmake-language(7)` manual.  While the behavior is identical
+to the legacy implementation in most cases, some corner cases were
+cleaned up to simplify the behavior.  Specifically:
+
+* Expansion of ``@VAR@`` reference syntax defined by the
+  :command:`configure_file` and :command:`string(CONFIGURE)`
+  commands is no longer performed in other contexts.
+
+* Literal ``${VAR}`` reference syntax may contain only
+  alphanumeric characters (``A-Z``, ``a-z``, ``0-9``) and
+  the characters ``_``, ``.``, ``/``, ``-``, and ``+``.
+  Note that ``$`` is technically allowed in the ``NEW`` behavior, but is
+  invalid for ``OLD`` behavior.  This is due to an oversight during the
+  implementation of ``CMP0053`` and its use as a literal variable
+  reference is discouraged for this reason.
+  Variables with other characters in their name may still
+  be referenced indirectly, e.g.
+
+  .. code-block:: cmake
+
+    set(varname "otherwise & disallowed $ characters")
+    message("${${varname}}")
+
+* The setting of policy :policy:`CMP0010` is not considered,
+  so improper variable reference syntax is always an error.
+
+* More characters are allowed to be escaped in variable names.
+  Previously, only ``()#" \@^`` were valid characters to
+  escape. Now any non-alphanumeric, non-semicolon, non-NUL
+  character may be escaped following the ``escape_identity``
+  production in the :ref:`Escape Sequences` section of the
+  :manual:`cmake-language(7)` manual.
+
+The ``OLD`` behavior for this policy is to honor the legacy behavior for
+variable references and escape sequences.  The ``NEW`` behavior is to
+use the simpler variable expansion and escape sequence evaluation rules.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.1
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

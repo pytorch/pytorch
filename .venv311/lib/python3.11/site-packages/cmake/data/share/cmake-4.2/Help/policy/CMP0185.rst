@@ -1,0 +1,25 @@
+CMP0185
+-------
+
+.. versionadded:: 4.0
+
+:module:`FindRuby` no longer provides upper-case ``RUBY_*`` variables.
+
+:module:`FindRuby` in CMake 3.31 and below provided result variables
+named with an upper-case ``RUBY_`` prefix.  CMake 3.18 renamed them
+with a ``Ruby_`` prefix to match the name of the package, but continued
+to provide the upper-case ``RUBY_`` variables for compatibility.
+
+CMake 4.0 and above prefer to provide only ``Ruby_`` variables and no
+longer provide ``RUBY_`` variables.  This policy provides compatibility
+with projects that have not been updated.
+
+The ``OLD`` behavior for this policy is to provide both ``Ruby_`` and
+``RUBY_`` variables.  The ``NEW`` behavior for this policy is to provide
+only ``Ruby_`` variables and not ``RUBY_`` variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.0
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

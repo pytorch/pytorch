@@ -1,0 +1,39 @@
+CMP0092
+-------
+
+.. versionadded:: 3.15
+
+MSVC warning flags are not in :variable:`CMAKE_<LANG>_FLAGS` by default.
+
+When using MSVC-like compilers in CMake 3.14 and below, warning flags
+like ``/W3`` are added to :variable:`CMAKE_<LANG>_FLAGS` by default.
+This is problematic for projects that want to choose a different warning
+level programmatically.  In particular, it requires string editing of the
+:variable:`CMAKE_<LANG>_FLAGS` variables with knowledge of the
+CMake builtin defaults so they can be replaced.
+
+CMake 3.15 and above prefer to leave out warning flags from the value of
+:variable:`CMAKE_<LANG>_FLAGS` by default.
+
+This policy provides compatibility with projects that have not been updated
+to expect the lack of warning flags.  The policy setting takes effect as of
+the first :command:`project` or :command:`enable_language` command that
+initializes :variable:`CMAKE_<LANG>_FLAGS` for a given language ``<LANG>``.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project for a given
+  language, that choice must be used throughout the tree for that language.
+  In projects that have nested projects in subdirectories, be sure to
+  convert everything together.
+
+The ``OLD`` behavior for this policy is to place MSVC warning flags in the
+default :variable:`CMAKE_<LANG>_FLAGS` cache entries.  The ``NEW`` behavior
+for this policy is to *not* place MSVC warning flags in the default cache
+entries.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.15
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

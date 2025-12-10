@@ -1,0 +1,30 @@
+CMP0025
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Compiler id for Apple Clang is now ``AppleClang``.
+
+CMake 3.0 and above recognize that Apple Clang is a different compiler
+than upstream Clang and that they have different version numbers.
+CMake now prefers to present this to projects by setting the
+:variable:`CMAKE_<LANG>_COMPILER_ID` variable to ``AppleClang`` instead
+of ``Clang``.  However, existing projects may assume the compiler id for
+Apple Clang is just ``Clang`` as it was in CMake versions prior to 3.0.
+Therefore this policy determines for Apple Clang which compiler id to
+report in the :variable:`CMAKE_<LANG>_COMPILER_ID` variable after
+language ``<LANG>`` is enabled by the :command:`project` or
+:command:`enable_language` command.  The policy must be set prior
+to the invocation of either command.
+
+The ``OLD`` behavior for this policy is to use compiler id ``Clang``.  The
+``NEW`` behavior for this policy is to use compiler id ``AppleClang``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: did *not* warn by default
+.. include:: include/REMOVED_EPILOGUE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0025 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning in CMake versions before 4.0.

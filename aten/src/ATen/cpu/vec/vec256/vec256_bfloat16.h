@@ -268,6 +268,117 @@ LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
+    !defined(CPU_CAPABILITY_SVE256)
+// Upcasts bf16 tiles to fp32, transposes them with NEON lane shuffles, and
+// downcasts back to bf16 to keep bf16 transpose results consistent on AArch64.
+template <>
+inline void transpose_mxn<BFloat16>(
+    const BFloat16* src,
+    int64_t ld_src,
+    BFloat16* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
+  if (M <= 0 || N <= 0) {
+    return;
+  }
+
+  constexpr int kBlock = 8;
+  if (M <= kBlock && N <= kBlock) {
+    auto load_row = [N](const BFloat16* row_ptr, int row_idx, int rows) {
+      return row_idx < rows
+          ? Vectorized<BFloat16>::loadu(row_ptr, N)
+          : at_vdupq_n_bf16(0);
+    };
+
+    at_bfloat16x8_t rows[kBlock];
+    for (int i = 0; i < kBlock; ++i) {
+      rows[i] = load_row(src + i * ld_src, i, M);
+    }
+
+    auto bf16_to_f32 = [](at_bfloat16x8_t v,
+                          float32x4_t& lo,
+                          float32x4_t& hi) {
+#ifdef __ARM_FEATURE_BF16
+      lo = vcvt_f32_bf16(at_vget_low_bf16(v));
+      hi = vcvt_f32_bf16(at_vget_high_bf16(v));
+#else
+      lo = vreinterpretq_f32_u32(vshll_n_u16(at_vget_low_bf16(v), 16));
+      hi = vreinterpretq_f32_u32(vshll_n_u16(at_vget_high_bf16(v), 16));
+#endif
+    };
+
+    auto f32_to_bf16 = [](float32x4_t lo, float32x4_t hi) {
+#ifdef __ARM_FEATURE_BF16
+      return at_vcombine_bf16(vcvt_bf16_f32(lo), vcvt_bf16_f32(hi));
+#else
+      auto round_vec = [](float32x4_t v) {
+        const uint32x4_t as_u32 = vreinterpretq_u32_f32(v);
+        const uint32x4_t lsb =
+            vandq_u32(vshrq_n_u32(as_u32, 16), vdupq_n_u32(1));
+        const uint32x4_t bias = vaddq_u32(lsb, vdupq_n_u32(0x7FFF));
+        const uint32x4_t rounded = vaddq_u32(as_u32, bias);
+        uint16x4_t bf16 = vshrn_n_u32(rounded, 16);
+        const uint32x4_t nan_mask =
+            vmvnq_u32(vreinterpretq_u32_f32(vceqq_f32(v, v)));
+        const uint16x4_t bf16_nan = vdup_n_u16(0x7FC0);
+        bf16 = vbsl_u16(vmovn_u32(nan_mask), bf16_nan, bf16);
+        return bf16;
+      };
+      return at_vcombine_bf16(round_vec(lo), round_vec(hi));
+#endif
+    };
+
+    auto transpose4x4 = [](float32x4_t& x0,
+                           float32x4_t& x1,
+                           float32x4_t& x2,
+                           float32x4_t& x3) {
+      const float32x4_t t0 = vtrn1q_f32(x0, x1);
+      const float32x4_t t1 = vtrn2q_f32(x0, x1);
+      const float32x4_t t2 = vtrn1q_f32(x2, x3);
+      const float32x4_t t3 = vtrn2q_f32(x2, x3);
+
+      x0 = vcombine_f32(vget_low_f32(t0), vget_low_f32(t2));
+      x1 = vcombine_f32(vget_low_f32(t1), vget_low_f32(t3));
+      x2 = vcombine_f32(vget_high_f32(t0), vget_high_f32(t2));
+      x3 = vcombine_f32(vget_high_f32(t1), vget_high_f32(t3));
+    };
+
+    float32x4_t a0, a1, a2, a3, a4, a5, a6, a7;
+    float32x4_t b0, b1, b2, b3, b4, b5, b6, b7;
+    bf16_to_f32(rows[0], a0, b0);
+    bf16_to_f32(rows[1], a1, b1);
+    bf16_to_f32(rows[2], a2, b2);
+    bf16_to_f32(rows[3], a3, b3);
+    bf16_to_f32(rows[4], a4, b4);
+    bf16_to_f32(rows[5], a5, b5);
+    bf16_to_f32(rows[6], a6, b6);
+    bf16_to_f32(rows[7], a7, b7);
+
+    transpose4x4(a0, a1, a2, a3); // A^T
+    transpose4x4(a4, a5, a6, a7); // C^T
+    transpose4x4(b0, b1, b2, b3); // B^T
+    transpose4x4(b4, b5, b6, b7); // D^T
+
+    float32x4_t left[] = {a0, a1, a2, a3, b0, b1, b2, b3};
+    float32x4_t right[] = {a4, a5, a6, a7, b4, b5, b6, b7};
+
+    for (int row = 0; row < N; ++row) {
+      Vectorized<BFloat16>(f32_to_bf16(left[row], right[row]))
+          .store(dst + row * ld_dst, M);
+    }
+    return;
+  }
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      dst[j * ld_dst + i] = src[i * ld_src + j];
+    }
+  }
+}
+#endif
+
 #if !(                                                                      \
     defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
     !defined(CPU_CAPABILITY_SVE256))

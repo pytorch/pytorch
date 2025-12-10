@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
+
+message(VERBOSE "Executing @step_name@ step for @name@")
+
+block(SCOPE_FOR VARIABLES)
+
+@step_script_contents@
+
+endblock()

@@ -1,0 +1,313 @@
+CMake 3.27 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.26 include the following.
+
+New Features
+============
+
+Debugger
+--------
+
+* :manual:`cmake(1)` now supports interactive debugging of the CMake language.
+  See the :option:`--debugger <cmake --debugger>` option.
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` files now support schema version ``7``.
+
+* :manual:`cmake-presets(7)` now supports ``$penv{}`` macro expansion
+  in ``include`` fields.
+
+Generators
+----------
+
+* The :ref:`Makefile <Makefile Generators>` and :ref:`Ninja <Ninja Generators>`
+  generators now support using the ``--dependency-file`` linker flag,
+  added by GNU Binutils 2.35 and LLVM's LLD 12.0.0, so that files read by the
+  linker will cause a relink if they change (typically modified timestamps).
+  See the :variable:`CMAKE_LINK_DEPENDS_USE_LINKER` variable.
+
+* The :ref:`Visual Studio Generators` for VS 14 (2015) and above learned to
+  select the Windows SDK version explicitly using a ``version=`` field
+  in the :variable:`CMAKE_GENERATOR_PLATFORM` variable.
+  See :ref:`Visual Studio Platform Selection`.
+
+Languages
+---------
+
+* The ``CXX`` language now treats source file extensions
+  ``.ccm``, ``.cxxm``, and ``.c++m`` as C++.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field has
+  been updated to 2.6.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object gained
+  a new "frameworks" field in the "compileGroups" objects.
+
+Platforms
+---------
+
+* Apple text-based stubs (i.e. ``.tbd`` files) may now be created for shared
+  libraries on macOS.  See the :prop_tgt:`ENABLE_EXPORTS` property.
+
+Commands
+--------
+
+* The :command:`add_custom_command` command gained a new
+  ``DEPENDS_EXPLICIT_ONLY`` option to tell the :ref:`Ninja Generators`
+  not to add any dependencies implied by the target to which it is
+  attached.  The :variable:`CMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY`
+  variable was added to enable ``DEPENDS_EXPLICIT_ONLY`` on all calls to
+  :command:`add_custom_command` command.
+
+* The :command:`cmake_file_api` command was added for projects to add
+  :manual:`CMake file API <cmake-file-api(7)>` queries for the current
+  CMake run.
+
+* The :command:`find_package` command now searches prefixes specified by
+  upper-case :variable:`<PACKAGENAME>_ROOT` CMake variables and upper-case
+  :envvar:`<PACKAGENAME>_ROOT` environment variables.
+  See policy :policy:`CMP0144`.
+
+* The :command:`install(CODE)` and :command:`install(SCRIPT)` commands
+  now support the :genex:`$<INSTALL_PREFIX>` generator expression.
+
+Variables
+---------
+
+* The :variable:`CMAKE_DLL_NAME_WITH_SOVERSION` variable and associated
+  :prop_tgt:`DLL_NAME_WITH_SOVERSION` target property were added to
+  optionally append the :prop_tgt:`SOVERSION` to the filename of the
+  ``.dll`` part of a shared library on Windows.
+
+* Variables :variable:`CMAKE_VS_DEBUGGER_COMMAND`,
+  :variable:`CMAKE_VS_DEBUGGER_COMMAND_ARGUMENTS`,
+  :variable:`CMAKE_VS_DEBUGGER_ENVIRONMENT`, and
+  :variable:`CMAKE_VS_DEBUGGER_WORKING_DIRECTORY` were added to initialize
+  corresponding target properties.
+
+* The :variable:`CMAKE_VS_WINDOWS_TARGET_PLATFORM_MIN_VERSION` variable
+  was added to initialize the :prop_tgt:`VS_WINDOWS_TARGET_PLATFORM_MIN_VERSION`
+  target property on all targets when they are created.
+
+Properties
+----------
+
+* A :prop_tgt:`CUDA_CUBIN_COMPILATION` target property was added to
+  :ref:`Object Libraries` to support compiling to ``.cubin`` files
+  instead of host object files. Currently only supported with NVIDIA.
+
+* A :prop_tgt:`CUDA_FATBIN_COMPILATION` target property was added to
+  :ref:`Object Libraries` to support compiling to ``.fatbin`` files
+  instead of host object files. Currently only supported with NVIDIA.
+
+* A :prop_tgt:`CUDA_OPTIX_COMPILATION` target property was added to
+  :ref:`Object Libraries` to support compiling to ``.optixir`` files
+  instead of host object files. Currently only supported with NVIDIA.
+
+* The :prop_tgt:`<LANG>_CLANG_TIDY`, :prop_tgt:`<LANG>_CPPCHECK`,
+  :prop_tgt:`<LANG>_CPPLINT`, and :prop_tgt:`<LANG>_INCLUDE_WHAT_YOU_USE`,
+  target properties now support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`<LANG>_LINKER_LAUNCHER` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_sf:`SKIP_LINTING` source file property was added to suppress
+  target-wide code checks on specific sources.
+
+Modules
+-------
+
+* The :module:`FindCUDAToolkit` module now provides an imported target for
+  ``cudla``, and imported targets for CUPTI's ``nvperf`` and ``pcsampling``
+  components.
+
+* The :module:`FindDoxygen` module's :command:`doxygen_add_docs` command gained
+  a ``CONFIG_FILE`` option to specify a custom doxygen configuration file.
+
+* The :module:`FindOpenGL` module gained support for components
+  ``GLES2`` and ``GLES3``.
+
+* The :module:`FindwxWidgets` module now provides an imported target.
+
+Generator Expressions
+---------------------
+
+* The :genex:`COMPILE_ONLY` generator expression was added to specify
+  compilation usage requirements without any linking requirements.
+
+* ``$<LIST:...>`` generator expressions were added for
+  :ref:`query <GenEx List Queries>`,
+  :ref:`transformation <GenEx List Transformations>`, and
+  :ref:`ordering <GenEx List Ordering>` operations on
+  :ref:`lists <CMake Language Lists>`.
+
+* ``$<PATH:...>`` generator expressions for
+  :ref:`decomposition <GenEx Path Decomposition>` and
+  :ref:`transformation <GenEx Path Transformations>` operations learned
+  to process :ref:`lists <CMake Language Lists>` of paths element-wise.
+
+* The :genex:`TARGET_IMPORT_FILE`, :genex:`TARGET_IMPORT_FILE_BASE_NAME`,
+  :genex:`TARGET_IMPORT_FILE_PREFIX`, :genex:`TARGET_IMPORT_FILE_SUFFIX`,
+  :genex:`TARGET_IMPORT_FILE_NAME`, and :genex:`TARGET_IMPORT_FILE_DIR`
+  generator expressions were added.  These expand to details about the
+  linker import file for a target.
+
+* The :genex:`TARGET_RUNTIME_DLL_DIRS` generator expression was added.
+  It expands to a list of the directories containing DLLs in
+  :genex:`TARGET_RUNTIME_DLLS`.
+
+Autogen
+-------
+
+* The :variable:`CMAKE_AUTOMOC_EXECUTABLE`,
+  :variable:`CMAKE_AUTORCC_EXECUTABLE`, and
+  :variable:`CMAKE_AUTOUIC_EXECUTABLE` variables were added to initialize the
+  corresponding target properties as targets are created.
+
+* The :prop_tgt:`AUTOGEN_USE_SYSTEM_INCLUDE` target property and
+  corresponding :variable:`CMAKE_AUTOGEN_USE_SYSTEM_INCLUDE` variable were
+  added to explicitly control whether autogen headers are
+  considered system headers.
+
+* The :prop_tgt:`INTERFACE_AUTOMOC_MACRO_NAMES` target property was added to
+  specify macro names for ``moc`` as a transitive usage requirement.
+
+CTest
+-----
+
+* The :prop_test:`TIMEOUT_SIGNAL_NAME` and
+  :prop_test:`TIMEOUT_SIGNAL_GRACE_PERIOD` test properties were added
+  to specify a POSIX signal to send to a test process when its timeout
+  is reached.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack Inno Setup Generator` was added to package using
+  Inno Setup.
+
+Deprecated and Removed Features
+===============================
+
+* Compatibility with versions of CMake older than 3.5 is now deprecated
+  and will be removed from a future version.  Calls to
+  :command:`cmake_minimum_required` or :command:`cmake_policy` that set
+  the policy version to an older value now issue a deprecation diagnostic.
+
+* The :ref:`Extra Generators` have been deprecated.  IDEs may use the
+  :manual:`cmake-file-api(7)` to view CMake-generated project build trees.
+
+* The :module:`FindCUDA` module, which has been deprecated since CMake 3.10,
+  has been removed by policy :policy:`CMP0146`.  Port projects to CMake's
+  first-class ``CUDA`` language support.
+
+* The :module:`FindPythonInterp` and :module:`FindPythonLibs` modules,
+  which have been deprecated since CMake 3.12, have been removed by
+  policy :policy:`CMP0148`.  Port projects to :module:`FindPython3`,
+  :module:`FindPython2`, or :module:`FindPython`.
+
+* The :module:`Dart` and :module:`FindDart` modules have been deprecated via
+  policy :policy:`CMP0145`.  Port projects to the :module:`CTest` module.
+
+* The :generator:`Visual Studio 9 2008` generator is now deprecated
+  and will be removed in a future version of CMake.
+
+Other Changes
+=============
+
+* ``cmake --build $dir --verbose`` will now print the working directory and
+  command line used to perform the build.
+
+* The :module:`ExternalProject` and :module:`FetchContent` modules
+  now resolve relative ``GIT_REPOSITORY`` paths as relative to the
+  parent project's remote, not as a relative local file system path.
+  See :policy:`CMP0150`.
+
+* The :module:`ExternalProject` ``configure`` step no longer re-runs on
+  every build when the ``UPDATE_DISCONNECTED`` option is enabled.
+  It will only re-run if details of the ``download``, ``update``,
+  or ``patch`` step change.
+
+* The :module:`ExternalProject` ``update`` and ``patch`` steps now always
+  re-run if any of their details change, even if the ``UPDATE_DISCONNECTED``
+  option is enabled.  If using the ``GIT`` download method, and the ``GIT_TAG``
+  is changed to a commit that is not already known locally, an error is now
+  issued instead of silently using the previous ``GIT_TAG``.
+
+* The :module:`FindPython`, :module:`FindPython2` and :module:`FindPython3`
+  modules now support the Windows ARM64 platform.
+
+* The :command:`file(GET_RUNTIME_DEPENDENCIES)` command now case-preserves
+  DLL names reported on Windows.  They are still converted to lowercase
+  for filter matching.
+
+* The :prop_tgt:`SYSTEM` target property is now honored for Apple Frameworks.
+
+* :ref:`Visual Studio Generators`, for VS 15.8 (2017) and newer, now
+  build custom commands in parallel.  See policy :policy:`CMP0147`.
+
+* :ref:`Visual Studio Generators` for VS 14 (2015) and above now prefer
+  to select the latest Windows SDK version.  See policy :policy:`CMP0149`.
+
+Updates
+=======
+
+Changes made since CMake 3.27.0 include the following.
+
+3.27.1
+------
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.27.2
+------
+
+* :ref:`Visual Studio Generators` for VS 14 (2015) and above now prefer to
+  select the latest Windows SDK, as documented by policy :policy:`CMP0149`,
+  when targeting any version of Windows.  In CMake 3.27.[0-1] the
+  preference was limited to targeting Windows 10 and above.
+
+* :ref:`Visual Studio Generators` for VS 14 (2015) and above now support
+  using ``version=8.1`` in the :variable:`CMAKE_GENERATOR_PLATFORM` variable
+  to select the Windows 8.1 SDK.  In CMake 3.27.[0-1] the ``version=`` field
+  was limited to selecting Windows 10 SDKs.
+
+3.27.3, 3.27.4, 3.27.5, 3.27.6, 3.27.7, 3.27.8
+----------------------------------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.27.9
+------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object
+  ``fileSets`` field was introduced by CMake 3.26.0 with entries of its
+  ``baseDirectories`` member incorrectly expressed as absolute paths
+  even if they are inside the top-level source directory.  This was
+  fixed in CMake 3.26.6 and has now been fixed in 3.27.9.  Clients must
+  be updated to expect relative paths under the top-level source directory.
+
+* Fortran module dependency scanning in :ref:`Ninja Generators` was updated
+  by CMake 3.27.0 to use exact collation dependencies.  This was supposed
+  to fix subtle rebuild failures when moving module sources among targets.
+  Since then, several cases have been found in which exact collation
+  dependencies were incorrectly computed when using :ref:`Object Libraries`.
+  Some of these cases were incrementally fixed through the 3.27.x patch
+  series, but additional more subtle cases have since been found.  In order
+  to avoid further churn in the 3.27 release series, the original change has
+  been reverted and deferred to a future version of CMake.

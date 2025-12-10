@@ -1,0 +1,14 @@
+CMP0034
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`utility_source` command should not be called.
+
+This command was introduced in March 2001 to help build executables used to
+generate other files.  This approach has long been replaced by
+:command:`add_executable` combined with :command:`add_custom_command`.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst

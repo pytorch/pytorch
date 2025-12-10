@@ -1,0 +1,41 @@
+CMP0192
+-------
+
+.. versionadded:: 4.1
+
+:module:`GNUInstallDirs` uses absolute ``SYSCONFDIR``, ``LOCALSTATEDIR``,
+and ``RUNSTATEDIR`` in special prefixes.
+
+The :module:`GNUInstallDirs` module documents
+:ref:`special cases <GNUInstallDirs special cases>`
+for ``SYSCONFDIR``, ``LOCALSTATEDIR``, and ``RUNSTATEDIR``.
+When :variable:`CMAKE_INSTALL_PREFIX` is a special prefix, e.g., ``/usr``,
+the absolute paths for these directories may be outside the prefix, e.g.,
+``/etc``, ``/var``, and ``/var/run``.
+
+In CMake 4.0 and below, the default values for the ``CMAKE_INSTALL_<dir>``
+variables, for ``<dir>`` equal to ``SYSCONFDIR``, ``LOCALSTATEDIR``, and
+``RUNSTATEDIR``, always used relative paths (``etc``, ``var``, ``var/run``),
+and the special cases were implemented only when computing absolute paths
+for the ``CMAKE_INSTALL_FULL_<dir>`` variables.
+CMake 4.1 and above prefer to default ``CMAKE_INSTALL_<dir>`` variables to
+absolute paths, for ``<dir>`` equal to ``SYSCONFDIR``, ``LOCALSTATEDIR``,
+and ``RUNSTATEDIR``, when :variable:`CMAKE_INSTALL_PREFIX` is a special
+prefix.  This policy provides compatibility for projects that have not
+been updated to expect this behavior.
+
+The ``OLD`` behavior for this policy is to default ``CMAKE_INSTALL_<dir>``
+variables to relative paths.  The ``NEW`` behavior for this policy is to
+default ``CMAKE_INSTALL_<dir>`` variables to absolute paths, for ``<dir>``
+equal to ``SYSCONFDIR``, ``LOCALSTATEDIR``, and ``RUNSTATEDIR``, when
+:variable:`CMAKE_INSTALL_PREFIX` is a special prefix.
+
+This policy takes effect at the first call of ``include(GNUInstallDirs)``.
+Subsequent calls of ``include(GNUInstallDirs)`` reuse cached
+``CMAKE_INSTALL_<dir>`` values from the first call.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

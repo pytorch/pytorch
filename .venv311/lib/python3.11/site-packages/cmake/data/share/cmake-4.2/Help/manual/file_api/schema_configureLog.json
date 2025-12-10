@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake configureLog object kind",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "path",
+    "eventKindNames"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "configureLog"
+    },
+    "version": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 1
+        },
+        "minor": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "path": {
+      "type": "string",
+      "description": "Path to the configure log file. Clients must read the log file from this path, which may be different to the path in CMake's documentation. The log file specified by this path might not exist if no events have been logged."
+    },
+    "eventKindNames": {
+      "type": "array",
+      "description": "Names of versioned event kinds included in the configure log. Other event kinds might be present in the configure log, but clients must ignore those not listed in this array.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "message-v1",
+          "try_compile-v1",
+          "try_run-v1",
+          "find-v1",
+          "find_package-v1"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

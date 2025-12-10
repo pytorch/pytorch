@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>@CPACK_FILE_ASSOCIATION_EXTENSION@</string>
+      </array>
+      <key>CFBundleTypeName</key>
+      <string>@CPACK_FILE_ASSOCIATION_TYPE@</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+    </dict>
+  </array>
+	<key>CFBundleExecutable</key>
+	<string>@CPACK_PACKAGE_FILE_NAME@</string>
+	<key>CFBundleGetInfoString</key>
+	<string>@CPACK_APPLE_GUI_INFO_STRING@</string>
+	<key>CFBundleIconFile</key>
+	<string>@CPACK_APPLE_GUI_ICON@</string>
+	<key>CFBundleIdentifier</key>
+	<string>@CPACK_APPLE_GUI_IDENTIFIER@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleLongVersionString</key>
+	<string>@CPACK_APPLE_GUI_LONG_VERSION_STRING@</string>
+	<key>CFBundleName</key>
+	<string>@CPACK_APPLE_GUI_BUNDLE_NAME@</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@CPACK_APPLE_GUI_SHORT_VERSION_STRING@</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>@CPACK_APPLE_GUI_BUNDLE_VERSION@</string>
+	<key>CSResourcesFileMapped</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>@CPACK_APPLE_GUI_COPYRIGHT@</string>
+</dict>
+</plist>

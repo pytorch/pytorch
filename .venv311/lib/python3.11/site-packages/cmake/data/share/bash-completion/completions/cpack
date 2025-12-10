@@ -1,0 +1,90 @@
+# bash completion for cpack(1)                             -*- shell-script -*-
+
+_cpack()
+{
+    local cur prev words cword
+    if type -t _comp_initialize >/dev/null; then
+        _comp_initialize -n = || return
+    elif type -t _init_completion >/dev/null; then
+        _init_completion -n = || return
+    else
+        # manual initialization for older bash completion versions
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    fi
+
+    case "$prev" in
+        -G)
+            COMPREPLY=( $( compgen -W '$( cpack --help 2>/dev/null |
+                sed -e "1,/^Generators/d" -e "s|^ *\([^ ]*\) .*$|\1|" \
+                2>/dev/null )' -- "$cur" ) )
+            return
+            ;;
+        -C)
+            COMPREPLY=( $( compgen -W 'Debug Release RelWithDebInfo
+                MinSizeRel' -- "$cur" ) )
+            return
+            ;;
+        -D)
+            [[ $cur == *=* ]] && return # no completion for values
+            COMPREPLY=( $( compgen -W '$( cpack --help-variable-list \
+                2>/dev/null | grep -v "^cpack version " )' -S = -- "$cur" ) )
+            compopt -o nospace
+            return
+            ;;
+        -P|-R|--vendor)
+            # argument required but no completions available
+            return
+            ;;
+        -B)
+            _filedir -d
+            return
+            ;;
+        --config)
+            _filedir
+            return
+            ;;
+        --help-command)
+            COMPREPLY=( $( compgen -W '$( cpack --help-command-list 2>/dev/null|
+                grep -v "^cpack version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-manual)
+            COMPREPLY=( $( compgen -W '$( cpack --help-manual-list 2>/dev/null|
+                grep -v "^cpack version " | sed -e "s/([0-9])$//" )' -- "$cur" ) )
+            return
+            ;;
+        --help-module)
+            COMPREPLY=( $( compgen -W '$( cpack --help-module-list 2>/dev/null|
+                grep -v "^cpack version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-policy)
+            COMPREPLY=( $( compgen -W '$( cpack --help-policy-list 2>/dev/null |
+                grep -v "^cpack version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-property)
+            COMPREPLY=( $( compgen -W '$( cpack --help-property-list \
+                2>/dev/null | grep -v "^cpack version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-variable)
+            COMPREPLY=( $( compgen -W '$( cpack --help-variable-list \
+                2>/dev/null | grep -v "^cpack version " )' -- "$cur" ) )
+            return
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W '$( _parse_help "$1" --help )' -- ${cur}) )
+        [[ $COMPREPLY == *= ]] && compopt -o nospace
+        [[ $COMPREPLY ]] && return
+    fi
+
+    _filedir
+} &&
+complete -F _cpack cpack
+
+# ex: ts=4 sw=4 et filetype=sh

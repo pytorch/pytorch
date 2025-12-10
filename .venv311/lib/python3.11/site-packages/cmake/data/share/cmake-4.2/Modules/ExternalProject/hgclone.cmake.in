@@ -1,0 +1,62 @@
+# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
+# file LICENSE.rst or https://cmake.org/licensing for details.
+
+cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
+
+if(EXISTS "@hgclone_stampfile@" AND EXISTS "@hgclone_infofile@" AND
+  "@hgclone_stampfile@" IS_NEWER_THAN "@hgclone_infofile@")
+  message(VERBOSE
+    "Avoiding repeated hg clone, stamp file is up to date: "
+    "'@hgclone_stampfile@'"
+  )
+  return()
+endif()
+
+# Even at VERBOSE level, we don't want to see the commands executed, but
+# enabling them to be shown for DEBUG may be useful to help diagnose problems.
+cmake_language(GET_MESSAGE_LOG_LEVEL active_log_level)
+if(active_log_level MATCHES "DEBUG|TRACE")
+  set(maybe_show_command COMMAND_ECHO STDOUT)
+else()
+  set(maybe_show_command "")
+endif()
+
+execute_process(
+  COMMAND ${CMAKE_COMMAND} -E rm -rf "@source_dir@"
+  RESULT_VARIABLE error_code
+  ${maybe_show_command}
+)
+if(error_code)
+  message(FATAL_ERROR "Failed to remove directory: '@source_dir@'")
+endif()
+
+execute_process(
+  COMMAND "@hg_EXECUTABLE@" clone -U "@hg_repository@" "@src_name@"
+  WORKING_DIRECTORY "@work_dir@"
+  RESULT_VARIABLE error_code
+  ${maybe_show_command}
+)
+if(error_code)
+  message(FATAL_ERROR "Failed to clone repository: '@hg_repository@'")
+endif()
+
+execute_process(
+  COMMAND "@hg_EXECUTABLE@" update @hg_tag@
+  WORKING_DIRECTORY "@work_dir@/@src_name@"
+  RESULT_VARIABLE error_code
+  ${maybe_show_command}
+)
+if(error_code)
+  message(FATAL_ERROR "Failed to checkout tag: '@hg_tag@'")
+endif()
+
+# Complete success, update the script-last-run stamp file:
+#
+execute_process(
+  COMMAND ${CMAKE_COMMAND} -E copy "@hgclone_infofile@" "@hgclone_stampfile@"
+  RESULT_VARIABLE error_code
+  ${maybe_show_command}
+)
+if(error_code)
+  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '@hgclone_stampfile@'")
+endif()

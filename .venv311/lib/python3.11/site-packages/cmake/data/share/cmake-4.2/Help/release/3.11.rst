@@ -1,0 +1,307 @@
+CMake 3.11 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.10 include the following.
+
+New Features
+============
+
+Platforms
+---------
+
+* TI C/C++ compilers are now supported by the :generator:`Ninja` generator.
+
+Generators
+----------
+
+* The :generator:`CodeBlocks` extra generator learned to check a
+  :variable:`CMAKE_CODEBLOCKS_COMPILER_ID` variable for a custom
+  compiler identification value to place in the project file.
+
+* The :ref:`Makefile Generators` and the :generator:`Ninja` generator learned
+  to add compiler launcher tools along with the compiler for the ``Fortran``
+  language (``C``, ``CXX``, and ``CUDA`` were supported previously).
+  See the :variable:`CMAKE_<LANG>_COMPILER_LAUNCHER` variable and
+  :prop_tgt:`<LANG>_COMPILER_LAUNCHER` target property for details.
+
+* :ref:`Visual Studio Generators` learned to support the ``COMPILE_LANGUAGE``
+  :manual:`generator expression <cmake-generator-expressions(7)>` in
+  target-wide :prop_tgt:`COMPILE_DEFINITIONS`,
+  :prop_tgt:`INCLUDE_DIRECTORIES`, :prop_tgt:`COMPILE_OPTIONS`, and
+  :command:`file(GENERATE)`.  See generator expression documentation
+  for caveats.
+
+* The :generator:`Xcode` generator learned to support the ``COMPILE_LANGUAGE``
+  :manual:`generator expression <cmake-generator-expressions(7)>` in
+  target-wide :prop_tgt:`COMPILE_DEFINITIONS` and
+  :prop_tgt:`INCLUDE_DIRECTORIES`.  It previously supported only
+  :prop_tgt:`COMPILE_OPTIONS` and :command:`file(GENERATE)`.
+  See generator expression documentation for caveats.
+
+Commands
+--------
+
+* :command:`add_library` and :command:`add_executable` commands can now be
+  called without any sources and will not complain as long as sources are
+  added later via the :command:`target_sources` command.
+
+* The :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands
+  gained ``NETRC`` and ``NETRC_FILE`` options to specify use of a
+  ``.netrc`` file.
+
+* The :command:`target_compile_definitions` command learned to set the
+  :prop_tgt:`INTERFACE_COMPILE_DEFINITIONS` property on
+  :ref:`Imported Targets`.
+
+* The :command:`target_compile_features` command learned to set the
+  :prop_tgt:`INTERFACE_COMPILE_FEATURES` property on :ref:`Imported Targets`.
+
+* The :command:`target_compile_options` command learned to set the
+  :prop_tgt:`INTERFACE_COMPILE_OPTIONS` property on :ref:`Imported Targets`.
+
+* The :command:`target_include_directories` command learned to set the
+  :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` property on
+  :ref:`Imported Targets`.
+
+* The :command:`target_sources` command learned to set the
+  :prop_tgt:`INTERFACE_SOURCES` property on :ref:`Imported Targets`.
+
+* The :command:`target_link_libraries` command learned to set the
+  :prop_tgt:`INTERFACE_LINK_LIBRARIES` property on :ref:`Imported Targets`.
+
+Variables
+---------
+
+* A :variable:`CMAKE_GENERATOR_INSTANCE` variable was introduced
+  to hold the selected instance of the generator's corresponding
+  native tools if multiple are available.  This is used by the
+  :generator:`Visual Studio 15 2017` generator to hold the
+  selected instance of Visual Studio persistently.
+
+* A :variable:`CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS` variable was added
+  to enable setting of default permissions for directories created implicitly
+  during installation of files by :command:`install` and
+  :command:`file(INSTALL)`, e.g. during ``make install``.
+
+* A :variable:`CMAKE_JOB_POOLS` variable was added specify a value to use for
+  the :prop_gbl:`JOB_POOLS` property. This enables control over build
+  parallelism with command line configuration parameters when using the Ninja
+  generator.
+
+* The :variable:`CMAKE_NETRC` and :variable:`CMAKE_NETRC_FILE` variables
+  were added to specify use of a ``.netrc`` file by the
+  :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands and
+  the :module:`ExternalProject` module.
+
+* A :variable:`CMAKE_CUDA_SEPARABLE_COMPILATION` variable was added to
+  initialize the :prop_tgt:`CUDA_SEPARABLE_COMPILATION` target property
+  on targets when they are created.
+
+Properties
+----------
+
+* The :prop_sf:`COMPILE_DEFINITIONS` source file property learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* A :prop_sf:`COMPILE_OPTIONS` source file property was added to manage list
+  of options to pass to the compiler.
+
+* An :prop_tgt:`IMPORTED_GLOBAL` target property was added to indicate
+  whether an :ref:`IMPORTED target <Imported Targets>` is globally visible.
+  It is automatically set to a true value for targets created with the
+  ``GLOBAL`` option to :command:`add_library` or :command:`add_executable`.
+  Additionally, project code may now *promote* a local imported target
+  to be globally visible by setting this property to ``TRUE``.
+
+* An :prop_sf:`INCLUDE_DIRECTORIES` source file property was added to specify
+  list of preprocessor include file search directories.
+
+* Source file properties :prop_sf:`VS_SHADER_DISABLE_OPTIMIZATIONS` and
+  :prop_sf:`VS_SHADER_ENABLE_DEBUG` have been added to specify more
+  details of ``.hlsl`` sources with :ref:`Visual Studio Generators`.
+
+Modules
+-------
+
+* The :module:`CheckIncludeFiles` module :command:`check_include_files`
+  command gained a ``LANGUAGE`` option to specify whether to check using the
+  ``C`` or ``CXX`` compiler.
+
+* The :module:`CMakePackageConfigHelpers` module
+  :command:`write_basic_package_version_file` command learned a new
+  ``SameMinorVersion`` mode for the ``COMPATIBILITY`` argument.
+
+* The :module:`ExternalProject` module learned to substitute ``<DOWNLOAD_DIR>``
+  in comments, commands, working directory and byproducts.
+
+* The :module:`ExternalProject` module gained ``NETRC`` and ``NETRC_FILE``
+  options to specify use of a ``.netrc`` file.
+
+* A new :module:`FetchContent` module was added which supports populating
+  content at configure time using any of the download/update methods
+  supported by :command:`ExternalProject_Add`.  This allows the content
+  to be used immediately during the configure stage, such as with
+  :command:`add_subdirectory`, etc.  Hierarchical project structures are
+  well supported, allowing parent projects to override the content details
+  of child projects and ensuring content is not populated multiple times
+  throughout the whole project tree.
+
+* The :module:`FindBLAS` and :module:`FindLAPACK` modules learned to support
+  `FLAME`_ ``blis`` and ``libflame``.
+
+* The :module:`FindDoxygen` module :command:`doxygen_add_docs` command
+  now supports a new ``DOXYGEN_VERBATIM_VARS`` list variable.  Any
+  ``DOXYGEN_...`` variable contained in that list will bypass the automatic
+  quoting logic, leaving its contents untouched when transferring them to the
+  output ``Doxyfile``.
+
+* A :module:`FindIconv` module was added to locate iconv support.
+
+* The :module:`GenerateExportHeader` module ``generate_export_header`` command
+  gained an ``INCLUDE_GUARD_NAME`` option to change the name of the include
+  guard symbol written to the generated export header.
+  Additionally, it now adds a comment after the closing ``#endif`` on the
+  generated export header's include guard.
+
+* The :module:`UseJava` module ``add_jar`` command gained a
+  ``GENERATE_NATIVE_HEADERS`` option to generate native header files
+  using ``javac -h`` for ``javac`` 1.8 or above.  This supersedes
+  ``create_javah``, which no longer works with JDK 1.10 and above due
+  to removal of the ``javah`` tool by `JEP 313`_.
+
+.. _`FLAME`: https://github.com/flame
+.. _`JEP 313`: https://openjdk.org/jeps/313
+
+Autogen
+-------
+
+* When using :prop_tgt:`AUTOMOC` or :prop_tgt:`AUTOUIC`, CMake now starts
+  multiple parallel ``moc`` or ``uic`` processes to reduce the build time.
+  A new :variable:`CMAKE_AUTOGEN_PARALLEL` variable and
+  :prop_tgt:`AUTOGEN_PARALLEL` target property may be set to specify the
+  number of parallel ``moc`` or ``uic`` processes to start.  The default
+  is derived from the number of CPUs on the host.
+
+CTest
+-----
+
+* The :command:`ctest_start` command no longer sets
+  :variable:`CTEST_RUN_CURRENT_SCRIPT` due to issues with scoping if it is
+  called from inside a function. Instead, it sets an internal variable in
+  CTest. However, setting :variable:`CTEST_RUN_CURRENT_SCRIPT` to 0 at the
+  global scope still prevents the script from being re-run at the end.
+
+CPack
+-----
+
+* :manual:`cpack(1)` gained ``--trace`` and ``--trace-expand`` options.
+
+* The :cpack_gen:`CPack IFW Generator` gained new
+  :variable:`CPACK_IFW_PACKAGE_REMOVE_TARGET_DIR` variable to control
+  if the target directory should not be deleted when uninstalling.
+
+* The :cpack_gen:`CPack RPM Generator` learned to enable enforcing of execute
+  privileges on programs and shared libraries.
+  See :variable:`CPACK_RPM_INSTALL_WITH_EXEC` variable.
+
+* A :variable:`CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS` variable was added
+  which serves the same purpose during packaging (e.g. ``make package``) as the
+  :variable:`CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS` variable serves during
+  installation (e.g. ``make install``).
+
+Other
+-----
+
+* :ref:`Alias Targets` may now alias :ref:`Imported Targets` that are
+  created with the ``GLOBAL`` option to :command:`add_library`.
+
+* :ref:`Interface Libraries` may now have custom properties set on them if
+  they start with either an underscore (``_``) or a lowercase ASCII character.
+  The original intention was to only allow properties which made sense for
+  ``INTERFACE`` libraries, but it also blocked usage of custom properties.
+
+* The :manual:`cmake(1)` ``--open <dir>`` command-line option was added
+  to open generated IDE projects like Visual Studio solutions or Xcode
+  projects.
+
+Deprecated and Removed Features
+===============================
+
+* An explicit deprecation diagnostic was added for policies ``CMP0037``
+  through ``CMP0054`` (``CMP0036`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+* The ``KDevelop3`` generator has been removed.
+
+Other Changes
+=============
+
+* Policy :policy:`CMP0037` no longer reserves target names associated
+  with optional features, such as ``test`` and ``package``, unless
+  the corresponding feature is enabled.
+
+* The :module:`FindOpenGL` module now prefers GLVND libraries if available.
+  See policy :policy:`CMP0072`.
+
+* The minimum deployment target set in the
+  :variable:`CMAKE_OSX_DEPLOYMENT_TARGET` variable used to be only
+  applied for macOS regardless of the selected SDK.  It is now properly
+  set for the target platform selected by :variable:`CMAKE_OSX_SYSROOT`.
+  For example, if the sysroot variable specifies an iOS SDK then the
+  value in ``CMAKE_OSX_DEPLOYMENT_TARGET`` is interpreted as minimum
+  iOS version.
+
+* The :generator:`Xcode` generator behavior of generating one project
+  file per :command:`project()` command may now be controlled with the
+  :variable:`CMAKE_XCODE_GENERATE_TOP_LEVEL_PROJECT_ONLY` variable.
+  This could be useful to speed up the CMake generation step for
+  large projects and to work-around a bug in the ``ZERO_CHECK`` logic.
+
+* Since the ``CMakeCache.txt`` format does not support newlines in values,
+  values containing newlines are now truncated before writing to the file.
+  In addition, a warning comment is written to the cache file, and a warning
+  message is displayed to the user on the console.
+
+Updates
+=======
+
+Changes made since CMake 3.11.0 include the following.
+
+3.11.1
+------
+
+* The :module:`CheckIncludeFile` module ``check_include_file()`` command,
+  :module:`CheckIncludeFileCXX` module ``check_include_file_cxx()`` command,
+  and :module:`CheckIncludeFiles` module ``check_include_files()`` command
+  were taught to honor the ``CMAKE_REQUIRED_LIBRARIES`` variable in
+  CMake 3.11.0.  This has been reverted due to changing behavior of
+  checks for existing projects.  It may be restored in the future
+  with a policy for compatibility.
+
+3.11.2
+------
+
+* Calling :command:`add_library` to create an alias of an imported
+  target that is not globally visible now causes an error again as
+  it did prior to 3.11.0.  This diagnostic was accidentally dropped
+  from CMake 3.11.0 and 3.11.1 by the change to allow globally visible
+  imported targets to be aliased.
+
+* The :module:`FindQt4` module ``qt4_wrap_cpp``, ``qt4_wrap_ui`` and
+  ``qt4_add_resources`` macros now set :prop_sf:`SKIP_AUTOMOC` and
+  :prop_sf:`SKIP_AUTOUIC` on their generated files.  These files never
+  need to be processed by moc or uic, and we must say so explicitly to
+  account for policy :policy:`CMP0071`.
+
+3.11.3
+------
+
+* CMake 3.11.0 introduced support for resolving symbolic links on
+  Windows in code paths that typically do so on UNIX.  This has been
+  reverted due to breakage on ``subst`` drives.

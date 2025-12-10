@@ -1,0 +1,25 @@
+CMP0144
+-------
+
+.. versionadded:: 3.27
+
+:command:`find_package` uses upper-case ``<PACKAGENAME>_ROOT`` variables.
+
+In CMake 3.27 and above the :command:`find_package(<PackageName>)` command now
+searches prefixes specified by the upper-case :variable:`<PACKAGENAME>_ROOT`
+CMake variable and the :envvar:`<PACKAGENAME>_ROOT` environment variable
+in addition to the case-preserved :variable:`<PackageName>_ROOT` and
+:envvar:`<PackageName>_ROOT` variables used since policy :policy:`CMP0074`.
+This policy provides compatibility with projects that have not been
+updated to avoid using ``<PACKAGENAME>_ROOT`` variables for other purposes.
+
+The ``OLD`` behavior for this policy is to ignore ``<PACKAGENAME>_ROOT``
+variables if the original ``<PackageName>`` has lower-case characters.
+The ``NEW`` behavior for this policy is to use ``<PACKAGENAME>_ROOT``
+variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

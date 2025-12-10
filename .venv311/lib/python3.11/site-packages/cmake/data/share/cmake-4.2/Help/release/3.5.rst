@@ -1,0 +1,187 @@
+CMake 3.5 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.4 include the following.
+
+New Features
+============
+
+GUI
+---
+
+* The :manual:`cmake-gui(1)` gained options to control warnings about
+  deprecated functionality.
+
+* The :manual:`cmake-gui(1)` learned an option to set the toolset
+  to be used with VS IDE and Xcode generators, much like the
+  existing ``-T`` option to :manual:`cmake(1)`.
+
+* The :manual:`cmake-gui(1)` gained a Regular Expression Explorer which
+  may be used to create and evaluate regular expressions in real-time.
+  The explorer window is available via the ``Tools`` menu.
+
+Command-Line
+------------
+
+* The ``-Wdev`` and ``-Wno-dev`` :manual:`cmake(1)` options now also enable
+  and suppress the deprecated warnings output by default.
+
+* The suppression of developer warnings as errors can now be controlled with
+  the new ``-Werror=dev`` and ``-Wno-error=dev`` :manual:`cmake(1)` options.
+
+* The :manual:`cmake(1)` ``-E`` command-line tools ``copy``,
+  ``copy_if_different``, ``copy_directory``, and ``make_directory``
+  learned to support multiple input files or directories.
+
+Commands
+--------
+
+* The :command:`cmake_parse_arguments` command is now implemented natively.
+  The :module:`CMakeParseArguments` module remains as an empty placeholder
+  for compatibility.
+
+* The :command:`install(DIRECTORY)` command learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  in the list of directories.
+
+Variables
+---------
+
+* The :variable:`CMAKE_ERROR_DEPRECATED` variable can now be set using the
+  ``-Werror=deprecated`` and ``-Wno-error=deprecated`` :manual:`cmake(1)`
+  options.
+
+* The :variable:`CMAKE_WARN_DEPRECATED` variable can now be set using the
+  ``-Wdeprecated`` and ``-Wno-deprecated`` :manual:`cmake(1)` options.
+
+Properties
+----------
+
+* The :prop_tgt:`VS_GLOBAL_<variable>` target property is now implemented
+  for VS 2010 and above.  Previously it worked only in VS 2008 and below.
+
+Modules
+-------
+
+* The :module:`ExternalProject` module learned a new ``GIT_REMOTE_NAME``
+  option to control the ``git clone --origin`` value.
+
+* The :module:`FindBoost` module now provides imported targets
+  such as ``Boost::boost`` and ``Boost::filesystem``.
+
+* The :module:`FindFLEX` module ``flex_target()`` command learned a
+  new ``DEFINES_FILE`` option to specify a custom output header
+  to be generated.
+
+* The :module:`FindGTest` module now provides imported targets.
+
+* The :module:`FindGTK2` module, when ``GTK2_USE_IMPORTED_TARGETS`` is
+  enabled, now sets ``GTK2_LIBRARIES`` to contain the list of imported
+  targets instead of the paths to the libraries.  Moreover it now sets
+  a new ``GTK2_TARGETS`` variable containing all the targets imported.
+
+* The :module:`FindOpenMP` module learned to support Clang.
+
+* The :module:`FindOpenSSL` module gained a new
+  ``OPENSSL_MSVC_STATIC_RT`` option to search for libraries using
+  the MSVC static runtime.
+
+* The :module:`FindPNG` module now provides imported targets.
+
+* The :module:`FindTIFF` module now provides imported targets.
+
+* A :module:`FindXalanC` module was introduced to find the
+  Apache Xalan-C++ XSL transform processing library.
+
+* The :module:`FindXercesC` module now provides imported targets.
+
+Platforms
+---------
+
+* Support was added for the ARM Compiler (arm.com) with compiler id ``ARMCC``.
+
+* A new platform file for cross-compiling in the Cray Linux Environment to
+  target compute nodes was added.  See
+  :ref:`Cross Compiling for the Cray Linux Environment <Cray Cross-Compile>`
+  for usage details.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of features supported by Clang compilers on Windows (MinGW).
+
+* When building for embedded Apple platforms like iOS CMake learned to build and
+  install combined targets which contain both a device and a simulator build.
+  This behavior can be enabled by setting the :prop_tgt:`IOS_INSTALL_COMBINED`
+  target property.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DragNDrop Generator` learned new variable to
+  specify AppleScript file run to customize appearance of ``DragNDrop``
+  installer folder, including background image setting using supplied
+  PNG or multi-resolution TIFF file.
+  See the :variable:`CPACK_DMG_DS_STORE_SETUP_SCRIPT` and
+  :variable:`CPACK_DMG_BACKGROUND_IMAGE` variables.
+
+* The :cpack_gen:`CPack DEB Generator` learned to set the optional config
+  file ``Source`` field using a monolithic or per-component variable.
+  See :variable:`CPACK_DEBIAN_PACKAGE_SOURCE`.
+
+* The :cpack_gen:`CPack DEB Generator` learned to set Package, Section
+  and Priority control fields per-component.
+  See variables :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_SECTION` and
+  :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_PRIORITY`.
+
+* The :cpack_gen:`CPack DragNDrop Generator` learned to add
+  multi-lingual SLAs to a DMG which is presented to the user when they try to
+  mount the DMG.  See the :variable:`CPACK_DMG_SLA_LANGUAGES` and
+  :variable:`CPACK_DMG_SLA_DIR` variables for details.
+
+* The :cpack_gen:`CPack NSIS Generator` learned new variables to
+  add bitmaps to the installer.
+  See the :variable:`CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP`
+  and :variable:`CPACK_NSIS_MUI_UNWELCOMEFINISHPAGE_BITMAP` variables.
+
+* The :cpack_gen:`CPack RPM Generator` learned to set Name and Group
+  control fields per-component.
+  See :variable:`CPACK_RPM_<component>_PACKAGE_NAME`
+  and :variable:`CPACK_RPM_<component>_PACKAGE_GROUP`.
+
+Other
+-----
+
+* Warnings about deprecated functionality are now enabled by default.
+  They may be suppressed with ``-Wno-deprecated`` or by setting the
+  :variable:`CMAKE_WARN_DEPRECATED` variable to false.
+
+Deprecated and Removed Features
+===============================
+
+* The :manual:`cmake(1)` ``-E time`` command now properly passes arguments
+  with spaces or special characters through to the child process.  This
+  may break scripts that worked around the bug with their own extra
+  quoting or escaping.
+
+* The :generator:`Xcode` generator was fixed to escape backslashes in
+  strings consistently with other generators.  Projects that previously
+  worked around the inconsistency with an extra level of backslashes
+  conditioned on the Xcode generator must be updated to remove the
+  workaround for CMake 3.5 and greater.
+
+Other Changes
+=============
+
+* The :generator:`Visual Studio 14 2015` generator learned to map the
+  ``/debug:fastlink`` linker flag to the ``.vcxproj`` file property.
+
+* The :module:`FindGTK2` module now configures the ``GTK2::sigc++`` imported
+  target to enable c++11 on its dependents when using sigc++ 2.5.1 or higher.
+
+* The precompiled Windows binary provided on ``cmake.org`` is now a
+  ``.msi`` package instead of an installer executable.  One may need
+  to manually uninstall CMake versions lower than 3.5 before installing
+  the new package.

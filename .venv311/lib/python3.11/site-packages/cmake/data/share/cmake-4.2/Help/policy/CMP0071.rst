@@ -1,0 +1,45 @@
+CMP0071
+-------
+
+.. versionadded:: 3.10
+
+Let :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` process
+:prop_sf:`GENERATED` files.
+
+Since version 3.10, CMake processes **regular** and :prop_sf:`GENERATED`
+source files in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+In earlier CMake versions, only **regular** source files were processed.
+:prop_sf:`GENERATED` source files were ignored silently.
+
+This policy affects how source files that are :prop_sf:`GENERATED`
+get treated in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+
+The ``OLD`` behavior for this policy is to ignore :prop_sf:`GENERATED`
+source files in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+
+The ``NEW`` behavior for this policy is to process :prop_sf:`GENERATED`
+source files in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` just like regular
+source files.
+
+.. note::
+
+  To silence the ``CMP0071`` warning source files can be excluded from
+  :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` processing by setting the
+  source file properties :prop_sf:`SKIP_AUTOMOC`, :prop_sf:`SKIP_AUTOUIC` or
+  :prop_sf:`SKIP_AUTOGEN`.
+
+Source skip example:
+
+.. code-block:: cmake
+
+  # ...
+  set_property(SOURCE /path/to/file1.h PROPERTY SKIP_AUTOMOC ON)
+  set_property(SOURCE /path/to/file2.h PROPERTY SKIP_AUTOUIC ON)
+  set_property(SOURCE /path/to/file3.h PROPERTY SKIP_AUTOGEN ON)
+  # ...
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.10
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

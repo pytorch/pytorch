@@ -1,0 +1,28 @@
+CMP0020
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Automatically link Qt executables to ``qtmain`` target on Windows.
+
+CMake 2.8.10 and lower required users of Qt to always specify a link
+dependency to the ``qtmain.lib`` static library manually on Windows.
+CMake 2.8.11 gained the ability to evaluate generator expressions
+while determining the link dependencies from ``IMPORTED`` targets.  This
+allows CMake itself to automatically link executables which link to Qt
+to the ``qtmain.lib`` library when using ``IMPORTED`` Qt targets.  For
+applications already linking to ``qtmain.lib``, this should have little
+impact.  For applications which supply their own alternative WinMain
+implementation and for applications which use the QAxServer library,
+this automatic linking will need to be disabled as per the
+documentation.
+
+The ``OLD`` behavior for this policy is not to link executables to
+``qtmain.lib`` automatically when they link to the QtCore ``IMPORTED`` target.
+The ``NEW`` behavior for this policy is to link executables to ``qtmain.lib``
+automatically when they link to QtCore ``IMPORTED`` target.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.11
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

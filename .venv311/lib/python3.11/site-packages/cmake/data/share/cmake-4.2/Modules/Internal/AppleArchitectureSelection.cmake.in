@@ -1,0 +1,23 @@
+# Save this now so we can restore it before returning
+if(NOT DEFINED PACKAGE_PREFIX_DIR)
+  list(APPEND _gasf_PACKAGE_PREFIX_DIR "<__CMAKE_UNDEFINED__>")
+elseif("${PACKAGE_PREFIX_DIR}" STREQUAL "")
+  list(APPEND _gasf_PACKAGE_PREFIX_DIR "<__CMAKE_EMPTY__>")
+else()
+  list(APPEND _gasf_PACKAGE_PREFIX_DIR "${PACKAGE_PREFIX_DIR}")
+endif()
+
+@PACKAGE_INIT@
+@_branch_code@
+
+# Restore PACKAGE_PREFIX_DIR
+list(LENGTH _gasf_PACKAGE_PREFIX_DIR _gasf_tmp)
+math(EXPR _gasf_tmp "${_gasf_tmp} - 1")
+list(GET _gasf_PACKAGE_PREFIX_DIR ${_gasf_tmp} PACKAGE_PREFIX_DIR)
+list(REMOVE_AT _gasf_PACKAGE_PREFIX_DIR ${_gasf_tmp})
+unset(_gasf_tmp)
+if("${PACKAGE_PREFIX_DIR}" STREQUAL "<__CMAKE_UNDEFINED__>")
+  unset(PACKAGE_PREFIX_DIR)
+elseif("${PACKAGE_PREFIX_DIR}" STREQUAL "<__CMAKE_EMPTY__>")
+  set(PACKAGE_PREFIX_DIR "")
+endif()

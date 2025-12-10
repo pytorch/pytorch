@@ -1,0 +1,28 @@
+CMP0027
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Conditionally linked imported targets with missing include directories.
+
+CMake 2.8.11 introduced introduced the concept of
+:prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES`, and a check at cmake time that the
+entries in the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of an ``IMPORTED``
+target actually exist.  CMake 2.8.11 also introduced generator expression
+support in the :command:`target_link_libraries` command.  However, if an
+imported target is linked as a result of a generator expression evaluation, the
+entries in the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of that target were not
+checked for existence as they should be.
+
+The ``OLD`` behavior of this policy is to report a warning if an entry in
+the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of a generator-expression
+conditionally linked ``IMPORTED`` target does not exist.
+
+The ``NEW`` behavior of this policy is to report an error if an entry in
+the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of a generator-expression
+conditionally linked ``IMPORTED`` target does not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

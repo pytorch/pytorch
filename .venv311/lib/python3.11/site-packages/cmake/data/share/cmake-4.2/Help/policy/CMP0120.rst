@@ -1,0 +1,47 @@
+CMP0120
+-------
+
+.. versionadded:: 3.20
+
+The :module:`WriteCompilerDetectionHeader` module is removed.
+
+CMake versions 3.1 through 3.19 provide this module to generate a
+C++ compatibility layer by reusing information from CMake's table of
+preprocessor checks for :manual:`cmake-compile-features(7)`.  However:
+
+* Those granular features have been superseded by meta-features for
+  :ref:`Requiring Language Standards` such as ``cxx_std_11``.  Therefore
+  no new granular feature checks will be added and projects will need to
+  use other means to conditionally use new C++ features.
+
+* The module exposes some of CMake's implementation details directly
+  to C++ translation units.
+
+* The module's approach effectively provides a header file with CMake,
+  thus tying the version of the header to the version of CMake.
+  Many projects found that the :module:`WriteCompilerDetectionHeader` was
+  best used by manually generating its header locally with a recent version
+  of CMake and then bundling it with the project source so that it could
+  be used with older CMake versions.
+
+For reasons including the above, CMake 3.20 and above prefer to not
+provide the :module:`WriteCompilerDetectionHeader` module.  This policy
+provides compatibility for projects that have not been ported away from
+it.  Projects using the module should be updated to stop using it.
+Alternatives include:
+
+* Bundle a copy of the generated header in the project's source.
+* Use a third-party alternative, such as the CC0-licensed `Hedley`_.
+* Drop support for compilers too old to provide the features natively.
+
+The ``OLD`` behavior of this policy is for inclusion of the deprecated
+:module:`WriteCompilerDetectionHeader` module to work.  The ``NEW``
+behavior is for inclusion of the module to fail as if it does not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.20
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst
+
+.. _`Hedley`: https://nemequ.github.io/hedley/

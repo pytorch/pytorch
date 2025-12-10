@@ -1,0 +1,323 @@
+CMake 3.23 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.22 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` files now support schema version ``4``.
+
+* :manual:`cmake-presets(7)` files now have an optional ``include`` field,
+  which allows the files to include other files.
+
+* :manual:`cmake-presets(7)` files now support a ``${fileDir}`` macro, which
+  contains the directory containing the preset file.
+
+* :manual:`cmake-presets(7)` gained support for specifying the
+  ``resolvePackageReferences`` command line option in a build preset to control
+  restoration behavior of package references from external package managers.
+  Currently this is only supported by the Visual Studio generator to support
+  restoring packages from NuGet. Other generators ignore this option.
+
+Generators
+----------
+
+* The :ref:`Visual Studio Generators` for VS 2019 and above learned to
+  support .NET SDK-style project files (``.csproj``) for C# projects.
+  See the :prop_tgt:`DOTNET_SDK` target property and corresponding
+  :variable:`CMAKE_DOTNET_SDK` variable.  :command:`add_custom_command`
+  is not yet supported in .NET SDK-style projects.
+
+* The :ref:`Visual Studio Generators` for VS 2017 and above learned to
+  use portable instances of Visual Studio not known to the VS installer.
+  See the :variable:`CMAKE_GENERATOR_INSTANCE` variable.
+
+Command-Line
+------------
+
+* The :manual:`cmake(1)` :option:`--build <cmake --build>` command, when used with
+  :ref:`Visual Studio Generators` on projects that set the
+  :prop_tgt:`VS_PACKAGE_REFERENCES` target property, now automatically
+  restores package references from NuGet.  The cache variable
+  :variable:`CMAKE_VS_NUGET_PACKAGE_RESTORE` may be set to toggle this behavior
+  in a build tree.  Use the
+  :option:`--resolve-package-references <cmake--build --resolve-package-references>`
+  command-line option to control the behavior on one invocation.
+
+* The :manual:`cmake(1)` command line tool gained a
+  :option:`--debug-find-pkg <cmake --debug-find-pkg>`
+  option to enable debug messages under specific :command:`find_package`
+  calls.
+
+* The :manual:`cmake(1)` command line tool gained a
+  :option:`--debug-find-var <cmake --debug-find-var>`
+  option to enable debug messages for ``find_*`` calls that use specific
+  result variables.
+
+Compilers
+---------
+
+* The IBM Open XL C/C++ compiler, based on LLVM, is now supported with
+  compiler id ``IBMClang``.
+
+* The MCST LCC compiler is now supported with compiler id ``LCC``.
+  See policy :policy:`CMP0129`.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field
+  has been updated to ``2.4``.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``directory``
+  object ``installers`` field gained a new ``fileSet`` installer type
+  and associated ``fileSetName``, ``fileSetType``, ``fileSetDirectories``,
+  and ``fileSetTarget`` fields.
+
+Commands
+--------
+
+* The :command:`define_property` command gained a new
+  ``INITIALIZE_FROM_VARIABLE`` option to cause a target property to be
+  initialized from a variable when a target is created.
+
+* The :command:`install(TARGETS)` command gained a new ``FILE_SET`` argument,
+  which can be used to install header file sets associated with a target.
+
+* The :command:`string(TIMESTAMP)` and :command:`file(TIMESTAMP)` commands now
+  support the ``%f`` specifier for microseconds.
+
+* The :command:`target_sources` command gained a new ``FILE_SET`` mode, which
+  can be used to add headers as header-only source files of a target.
+
+Variables
+---------
+
+* The :variable:`CMAKE_CUDA_ARCHITECTURES` variable and associated
+  :prop_tgt:`CUDA_ARCHITECTURES` target property now support the
+  ``all``, and ``all-major`` values for CUDA toolkit 7.0+.
+
+* The :variable:`CMAKE_IGNORE_PREFIX_PATH` and
+  :variable:`CMAKE_SYSTEM_IGNORE_PREFIX_PATH` variables were added
+  to tell the :command:`find_package`, :command:`find_program`,
+  :command:`find_library`, :command:`find_path`, and :command:`find_file`
+  commands to ignore specified prefixes.
+
+* The :variable:`CMAKE_LINK_LIBRARIES_ONLY_TARGETS` variable and
+  corresponding :prop_tgt:`LINK_LIBRARIES_ONLY_TARGETS` target
+  property were added to optionally require that all link items
+  that can be target names are actually names of existing targets.
+
+Properties
+----------
+
+* The :prop_tgt:`HEADER_SETS` and :prop_tgt:`INTERFACE_HEADER_SETS` read-only
+  target properties were added to list header sets associated with a target.
+
+* The :prop_tgt:`HEADER_SET` and :prop_tgt:`HEADER_SET_<NAME>` target
+  properties were added to list files in the default header set
+  and named header sets, respectively.
+
+* The :prop_tgt:`HEADER_DIRS` and :prop_tgt:`HEADER_DIRS_<NAME>` target
+  properties were added to specify the base directories of the default
+  header set and named header sets, respectively.
+
+* The :prop_tgt:`IMPORTED_NO_SYSTEM` target property was added to
+  specify that an :ref:`Imported Target <Imported Targets>` should
+  not be treated as a system library (i.e. its include directories
+  are not automatically ``SYSTEM``).
+
+* The :prop_tgt:`XCODE_EMBED_PLUGINS <XCODE_EMBED_<type>>` target property
+  was added to tell the :generator:`Xcode` generator what targets to put in
+  the ``Embed PlugIns`` build phase.
+
+* The :prop_tgt:`XCODE_SCHEME_ENABLE_GPU_FRAME_CAPTURE_MODE` target property
+  and supporting :variable:`CMAKE_XCODE_SCHEME_ENABLE_GPU_FRAME_CAPTURE_MODE`
+  variable were added to tell the :generator:`Xcode` generator to enable
+  specifying the Xcode scheme option property ``GPU Frame Capture``.
+
+Modules
+-------
+
+* The :module:`CheckPIESupported` module now supports the ``OBJC``,
+  ``OBJCXX``, ``CUDA``, and ``HIP`` languages.  It also now honors
+  :variable:`CMAKE_SYSROOT` and :variable:`CMAKE_OSX_SYSROOT`.
+
+* The :module:`ExternalProject` module's :command:`ExternalProject_Add`
+  command gained support for a ``USES_TERMINAL_PATCH`` option to give
+  the patch step exclusive terminal access.
+
+* The :module:`FindCUDAToolkit` module now provides a target for
+  ``libcufft_static_nocallback``, if found.
+
+* The :module:`FindGLUT` module now provides the ``GLUT_INCLUDE_DIRS``
+  result variable to conform with naming conventions documented in the
+  :manual:`cmake-developer(7)` manual.  This supersedes the legacy
+  ``GLUT_INCLUDE_DIR`` variable.
+
+* The :module:`FindGTest` module now provides a target for GMock, if found.
+
+* The :module:`FindVulkan` module now provides a ``Vulkan_VERSION`` result
+  variable reporting the version number.
+
+CTest
+-----
+
+* :manual:`ctest(1)` gained a new :variable:`CTEST_SUBMIT_INACTIVITY_TIMEOUT`
+  variable, which can be used to specify a timeout for submission inactivity.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack productbuild Generator` gained the new
+  :variable:`CPACK_PRODUCTBUILD_DOMAINS`,
+  :variable:`CPACK_PRODUCTBUILD_DOMAINS_ANYWHERE`,
+  :variable:`CPACK_PRODUCTBUILD_DOMAINS_USER`, and
+  :variable:`CPACK_PRODUCTBUILD_DOMAINS_ROOT` variables for
+  adding the domains element to the Distribution XML. With these variables,
+  it is now possible to install products to the user's home directory
+  without requiring administrative privileges.
+
+* The :cpack_gen:`CPack productbuild Generator` gained a new variable,
+  :variable:`CPACK_PRODUCTBUILD_IDENTIFIER`, used to customize the unique
+  product identifier associated with the product.
+
+* The ``CPack.distribution.dist.in`` template used by the
+  :cpack_gen:`CPack productbuild Generator` and
+  CPack ``PackageMaker`` generator was updated to use a new
+  ``CPACK_APPLE_PKG_INSTALLER_CONTENT`` variable for its main content.
+  This replaced the previously undocumented and now deprecated
+  ``CPACK_PACKAGEMAKER_CHOICES`` variable.
+
+* The :cpack_gen:`CPack IFW Generator` gained the new
+  :variable:`CPACK_IFW_ARCHIVE_FORMAT` and
+  :variable:`CPACK_IFW_ARCHIVE_COMPRESSION` variables for setting the
+  format used when packaging new component data archives, and choosing
+  the compression level used.
+  These features are available for QtIFW 4.2 and newer.
+
+* The :cpack_gen:`CPack IFW Generator` gained new
+  :variable:`CPACK_IFW_PACKAGE_DISABLE_COMMAND_LINE_INTERFACE` variable to
+  prevent the user from passing any consumer command to the installer, like
+  ``install``, ``update``, and ``remove``.
+  This feature is available for QtIFW 4.0 and newer.
+
+* The :cpack_gen:`CPack IFW Generator` gained the new
+  :variable:`CPACK_IFW_PACKAGE_PRODUCT_IMAGES` variable for adding a
+  list of images to be shown on the ``PerformInstallationPage``.
+  This feature is available for QtIFW 4.0 and newer.
+
+* The :cpack_gen:`CPack IFW Generator` gained the new
+  :variable:`CPACK_IFW_PACKAGE_RUN_PROGRAM`,
+  :variable:`CPACK_IFW_PACKAGE_RUN_PROGRAM_ARGUMENTS`, and
+  :variable:`CPACK_IFW_PACKAGE_RUN_PROGRAM_DESCRIPTION` variables for
+  executing a command after the installer is done if the user accepts
+  the action.  This feature is available for QtIFW 4.0 and newer.
+
+* The :cpack_gen:`CPack IFW Generator` gained the new
+  :variable:`CPACK_IFW_PACKAGE_SIGNING_IDENTITY` variable for specifying a
+  code signing identity to be used for signing the generated app bundle.
+  This feature is available on macOS only, and for QtIFW 3.0 and newer.
+
+* The :cpack_gen:`CPack WIX Generator` gained a new variable,
+  :variable:`CPACK_WIX_SKIP_WIX_UI_EXTENSION`, to skip the inclusion
+  of WixUIExtensions.
+
+Deprecated and Removed Features
+===============================
+
+* :manual:`cmake(1)` now warns when multiple source paths are specified,
+  as in ``cmake -S src1 src2``.  This has never been officially documented
+  or supported, but older versions accidentally accepted multiple source
+  paths and used the last path specified.  Update scripts to avoid
+  passing multiple source path arguments.
+
+* The :manual:`cpack(1)` undocumented ``OSXX11`` generator has been removed.
+
+* The previously undocumented ``CPACK_PACKAGEMAKER_CHOICES`` variable used in
+  the ``CPack.distribution.dist.in`` template has been replaced by a new
+  ``CPACK_APPLE_PKG_INSTALLER_CONTENT`` variable. This only affects projects
+  that were providing their own custom ``CPack.distribution.dist.in`` template
+  file, but still relied on ``CPACK_PACKAGEMAKER_CHOICES`` being set. Those
+  custom template files should be updated to use
+  ``CPACK_APPLE_PKG_INSTALLER_CONTENT`` instead, or to fully define all the
+  template file's contents without relying on substitution of either variable.
+
+Other Changes
+=============
+
+* The :cpack_gen:`CPack DragNDrop Generator` no longer attaches
+  :variable:`CPACK_RESOURCE_FILE_LICENSE` as the license agreement in
+  the generated ``.dmg`` unless explicitly activated by a
+  :variable:`CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE` option.
+  In CMake projects, the :module:`CPack` module enables the option
+  by default for compatibility.
+
+* ``CUDA`` targets may now enable both :prop_tgt:`CUDA_SEPARABLE_COMPILATION`
+  and :prop_tgt:`CUDA_PTX_COMPILATION`.
+
+* ``CUDA`` compiler detection now:
+
+  * issues an error in all cases when it's unable to compute the default
+    architecture(s) if required (see :policy:`CMP0104`),
+
+  * handles ``OFF`` for :variable:`CMAKE_CUDA_ARCHITECTURES` on Clang,
+
+  * supports the theoretical case of multiple default architectures, and
+
+  * tries to detect invalid architectures and issue an error.
+
+* ``CUDA`` with Clang now implements policy :policy:`CMP0105` and
+  the :genex:`$<DEVICE_LINK:...>` and :genex:`$<HOST_LINK:...>`
+  generator expressions.
+
+* The :command:`define_property` command's ``BRIEF_DOCS`` and ``FULL_DOCS``
+  arguments are now optional.
+
+* :manual:`ccmake(1)` may now be enabled on Windows when building
+  CMake from source.  This is experimental, and so is not included
+  in official distributions.
+
+Updates
+=======
+
+Changes made since CMake 3.23.0 include the following.
+
+3.23.1
+------
+
+* The :command:`target_sources` ``FILE_SET`` feature added in CMake 3.23.0
+  does not yet place header files properly in Apple :prop_tgt:`FRAMEWORK`
+  targets.  Pending further work in a future version of CMake, it is now
+  an error to add a ``FILE_SET`` of type ``HEADERS`` to such targets on
+  Apple platforms.
+
+* The :prop_tgt:`HEADER_SETS` and :prop_tgt:`INTERFACE_HEADER_SETS` target
+  properties added in CMake 3.23.0 are now read-only records of the header
+  sets created by the :command:`target_sources` command.
+
+3.23.2
+------
+
+* The ``CPACK_PACKAGEMAKER_CHOICES`` variable used in the
+  ``CPack.distribution.dist.in`` template file was replaced by a new
+  ``CPACK_APPLE_PKG_INSTALLER_CONTENT`` variable in CMake 3.23.0.
+  This broke projects that provided their own template file but still
+  expected the ``CPACK_PACKAGEMAKER_CHOICES`` variable to be defined.
+  The old ``CPACK_PACKAGEMAKER_CHOICES`` variable is now also set to the
+  same content as it was before, but it is formally deprecated.
+
+3.23.3, 3.23.4, 3.23.5
+----------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

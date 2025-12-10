@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<installer-gui-script minSpecVersion="1.0">
+	<title>@CPACK_PACKAGE_NAME@</title>
+	<welcome file="@CPACK_RESOURCE_FILE_WELCOME_NOPATH@"/>
+	<readme file="@CPACK_RESOURCE_FILE_README_NOPATH@"/>
+	<license file="@CPACK_RESOURCE_FILE_LICENSE_NOPATH@"/>
+@CPACK_APPLE_PKG_INSTALLER_CONTENT@
+</installer-gui-script>

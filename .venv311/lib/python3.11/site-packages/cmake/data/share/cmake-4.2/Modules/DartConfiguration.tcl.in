@@ -1,0 +1,109 @@
+# This file is configured by CMake automatically as DartConfiguration.tcl
+# If you choose not to use CMake, this file may be hand configured, by
+# filling in the required variables.
+
+
+# Configuration directories and files
+SourceDirectory: @PROJECT_SOURCE_DIR@
+BuildDirectory: @PROJECT_BINARY_DIR@
+
+# Where to place the cost data store
+CostDataFile: @CTEST_COST_DATA_FILE@
+
+# Site is something like machine.domain, i.e. pragmatic.crd
+Site: @SITE@
+
+# Build name is osname-revision-compiler, i.e. Linux-2.4.2-2smp-c++
+BuildName: @BUILDNAME@
+
+# Subprojects
+LabelsForSubprojects: @CTEST_LABELS_FOR_SUBPROJECTS@
+
+# Submission information
+SubmitURL: @SUBMIT_URL@
+SubmitInactivityTimeout: @CTEST_SUBMIT_INACTIVITY_TIMEOUT@
+
+# Dashboard start time
+NightlyStartTime: @NIGHTLY_START_TIME@
+
+# Commands for the build/test/submit cycle
+ConfigureCommand: "@CMAKE_COMMAND@" "@PROJECT_SOURCE_DIR@"
+MakeCommand: @MAKECOMMAND@
+DefaultCTestConfigurationType: @DEFAULT_CTEST_CONFIGURATION_TYPE@
+
+# version control
+UpdateVersionOnly: @CTEST_UPDATE_VERSION_ONLY@
+
+# CVS options
+# Default is "-d -P -A"
+CVSCommand: @CVSCOMMAND@
+CVSUpdateOptions: @CVS_UPDATE_OPTIONS@
+
+# Subversion options
+SVNCommand: @SVNCOMMAND@
+SVNOptions: @CTEST_SVN_OPTIONS@
+SVNUpdateOptions: @SVN_UPDATE_OPTIONS@
+
+# Git options
+GITCommand: @GITCOMMAND@
+GITInitSubmodules: @CTEST_GIT_INIT_SUBMODULES@
+GITUpdateOptions: @GIT_UPDATE_OPTIONS@
+GITUpdateCustom: @CTEST_GIT_UPDATE_CUSTOM@
+
+# Perforce options
+P4Command: @P4COMMAND@
+P4Client: @CTEST_P4_CLIENT@
+P4Options: @CTEST_P4_OPTIONS@
+P4UpdateOptions: @CTEST_P4_UPDATE_OPTIONS@
+P4UpdateCustom: @CTEST_P4_UPDATE_CUSTOM@
+
+# Generic update command
+UpdateCommand: @UPDATE_COMMAND@
+UpdateOptions: @UPDATE_OPTIONS@
+UpdateType: @UPDATE_TYPE@
+
+# Compiler info
+Compiler: @CMAKE_CXX_COMPILER@
+CompilerVersion: @CMAKE_CXX_COMPILER_VERSION@
+
+# Dynamic analysis (MemCheck)
+PurifyCommand: @PURIFYCOMMAND@
+ValgrindCommand: @VALGRIND_COMMAND@
+ValgrindCommandOptions: @VALGRIND_COMMAND_OPTIONS@
+DrMemoryCommand: @DRMEMORY_COMMAND@
+DrMemoryCommandOptions: @DRMEMORY_COMMAND_OPTIONS@
+CudaSanitizerCommand: @CUDA_SANITIZER_COMMAND@
+CudaSanitizerCommandOptions: @CUDA_SANITIZER_COMMAND_OPTIONS@
+MemoryCheckType: @MEMORYCHECK_TYPE@
+MemoryCheckSanitizerOptions: @MEMORYCHECK_SANITIZER_OPTIONS@
+MemoryCheckCommand: @MEMORYCHECK_COMMAND@
+MemoryCheckCommandOptions: @MEMORYCHECK_COMMAND_OPTIONS@
+MemoryCheckSuppressionFile: @MEMORYCHECK_SUPPRESSIONS_FILE@
+
+# Coverage
+CoverageCommand: @COVERAGE_COMMAND@
+CoverageExtraFlags: @COVERAGE_EXTRA_FLAGS@
+
+# Testing options
+# TimeOut is the amount of time in seconds to wait for processes
+# to complete during testing.  After TimeOut seconds, the
+# process will be summarily terminated.
+# Currently set to 25 minutes
+TimeOut: @DART_TESTING_TIMEOUT@
+
+# During parallel testing CTest will not start a new test if doing
+# so would cause the system load to exceed this value.
+TestLoad: @CTEST_TEST_LOAD@
+
+TLSVerify: @CTEST_TLS_VERIFY@
+TLSVersion: @CTEST_TLS_VERSION@
+
+UseLaunchers: @CTEST_USE_LAUNCHERS@
+CurlOptions: @CTEST_CURL_OPTIONS@
+# warning, if you add new options here that have to do with submit,
+# you have to update cmCTestSubmitCommand.cxx
+
+# For CTest submissions that timeout, these options
+# specify behavior for retrying the submission
+CTestSubmitRetryDelay: @CTEST_SUBMIT_RETRY_DELAY@
+CTestSubmitRetryCount: @CTEST_SUBMIT_RETRY_COUNT@

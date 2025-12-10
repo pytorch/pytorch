@@ -1,0 +1,140 @@
+[
+  {
+    "name": "16BitThumbInstructions",
+    "switch": "16",
+    "comment": "Assemble source as 16-bit Thumb instructions.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "32BitArmInstructions",
+    "switch": "32",
+    "comment": "Assemble source as 32-bit ARM instructions.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "CoffThumb2Only",
+    "switch": "coff_thumb2_only",
+    "comment": "Allow only Thumb-2 code.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:prompt",
+    "comment": "Prompt to send report immediately (/errorReport:prompt)",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:queue",
+    "comment": "Prompt to send report at the next logon (/errorReport:queue)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:send",
+    "comment": "Automatically send report (/errorReport:send)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:none",
+    "comment": "Do not send report (/errorReport:none)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "Errors",
+    "switch": "errors",
+    "comment": "Redirect error and warning messages.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "FunctionOverride",
+    "switch": "funcOverride",
+    "comment": "Emit function overriding support for the specified function.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "GenerateDebugInformation",
+    "switch": "g",
+    "comment": "Generate debugging information.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "Machine",
+    "switch": "machine",
+    "comment": "Specify the machine type to set in the PE header.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "NoEsc",
+    "switch": "noesc",
+    "comment": "Ignore C-style escaped special characters.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "NoLogo",
+    "switch": "nologo",
+    "comment": "Suppress the copyright banner.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "NoWarn",
+    "switch": "nowarn",
+    "comment": "Disable all warning messages.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ObjectFile",
+    "switch": "o",
+    "comment": "Specify the name of the object (output) file.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ItBlocks",
+    "switch": "oldit",
+    "comment": "Generate ARMv7-style IT blocks.",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SourceLink",
+    "switch": "sourcelink",
+    "comment": "Specify the configuration file that contains a simple mapping of local file paths to URLs for source files to display in the debugger.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "CommandLineArgumentsViaFile",
+    "switch": "via",
+    "comment": "Read extra command-line arguments from the specified file.",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

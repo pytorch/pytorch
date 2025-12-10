@@ -1,0 +1,357 @@
+CMake 3.17 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.16 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* :manual:`cmake(1)` gained a :generator:`Ninja Multi-Config` generator,
+  which is similar to the :generator:`Ninja` generator but can be used to build
+  multiple configurations at once.
+
+* :ref:`Visual Studio Generators` learned to support per-config sources.
+  Previously only :ref:`Command-Line Build Tool Generators` supported them.
+
+* :ref:`Visual Studio Generators` for VS 2010 and above now support
+  specifying the ``VCTargetsPath`` value for project files in
+  :variable:`CMAKE_GENERATOR_TOOLSET` setting.
+
+* :ref:`Visual Studio Generators` for VS 2010 and above learned to
+  support .NET Standard and .NET Core.  See the
+  :prop_tgt:`DOTNET_TARGET_FRAMEWORK` target property and
+  associated :variable:`CMAKE_DOTNET_TARGET_FRAMEWORK` variable.
+
+Languages
+---------
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  now offers meta-features for the CUDA language standard levels
+  (e.g. ``cuda_std_03``, ``cuda_std_14``).  See
+  :prop_gbl:`CMAKE_CUDA_KNOWN_FEATURES`.
+
+Compilers
+---------
+
+* The IBM XL Fortran compiler is now supported by the :generator:`Ninja`
+  generator.
+
+Command-Line
+------------
+
+* :manual:`cmake(1)` gained a ``--debug-find`` command-line option to
+  enable additional human-readable output on where ``find_*`` commands search.
+
+* :manual:`cmake(1)` gained a ``--trace-format`` command-line option that
+  can be used to set the ``--trace`` output format. Currently, the old
+  human readable and the new JSON format are supported. The new JSON format
+  is easier to parse automatically than the existing format.
+
+* :manual:`cmake(1)` gained a ``-E rm`` command-line tool that can be
+  used to remove directories and files.  This supersedes the existing
+  ``-E remove`` and ``-E remove_directory`` tools and has better semantics.
+
+Commands
+--------
+
+* The :command:`add_custom_command` command learned to interpret paths in
+  ``DEPENDS`` arguments that are specified relative to the current
+  binary directory.
+
+* The :command:`foreach` command learned a new ``ZIP_LISTS`` option to iterate
+  over multiple lists simultaneously.
+
+* The :command:`load_cache(READ_WITH_PREFIX)` command mode is now allowed
+  when using ``cmake -P`` to :ref:`Run a Script <Script Processing Mode>`.
+
+* The :command:`message` command learned to output context provided in
+  the :variable:`CMAKE_MESSAGE_CONTEXT` variable for log levels
+  ``NOTICE`` and below.  Enable this output with the new ``--log-context``
+  command-line option or :variable:`CMAKE_MESSAGE_CONTEXT_SHOW` variable.
+
+* The :command:`message` command gained new keywords ``CHECK_START``,
+  ``CHECK_PASS`` and ``CHECK_FAIL``.
+
+* The :command:`target_compile_options` command now honors the ``BEFORE``
+  keyword more consistently.  See policy :policy:`CMP0101`.
+
+Variables
+---------
+
+* A :variable:`CMAKE_CTEST_ARGUMENTS` variable was added to specify a list
+  of command-line arguments passed to CTest when running through the
+  ``test`` (or ``RUN_TESTS``) target of the generated build system.
+
+* The following variables are now defined inside a :command:`function`:
+
+  - :variable:`CMAKE_CURRENT_FUNCTION`
+  - :variable:`CMAKE_CURRENT_FUNCTION_LIST_DIR`
+  - :variable:`CMAKE_CURRENT_FUNCTION_LIST_FILE`
+  - :variable:`CMAKE_CURRENT_FUNCTION_LIST_LINE`
+
+* The :variable:`CMAKE_CUDA_RUNTIME_LIBRARY` variable and
+  :prop_tgt:`CUDA_RUNTIME_LIBRARY` target property were introduced to
+  select the CUDA runtime library used when linking targets that
+  use CUDA.
+
+* The :variable:`CMAKE_FIND_DEBUG_MODE` variable was introduced to
+  print extra ``find_*`` call information during the cmake run to standard
+  error. Output is designed for human consumption and not for parsing.
+
+* The :variable:`CMAKE_EXPORT_COMPILE_COMMANDS` variable now takes its
+  initial value from the :envvar:`CMAKE_EXPORT_COMPILE_COMMANDS` environment
+  variable if no explicit configuration is given.
+
+* The :variable:`CMAKE_<LANG>_COMPILER_LAUNCHER` variable, if not set
+  explicitly, now takes its initial value from the
+  :envvar:`CMAKE_<LANG>_COMPILER_LAUNCHER` environment variable.
+
+* The :variable:`CMAKE_MESSAGE_LOG_LEVEL` variable can now be used
+  to persist a log level between CMake runs, unlike the ``--log-level``
+  command line option which only applies to that particular run.
+
+* The :variable:`CMAKE_XCODE_SCHEME_ENVIRONMENT` variable was added
+  to initialize the :prop_tgt:`XCODE_SCHEME_ENVIRONMENT` target property.
+
+* The :variable:`CMAKE_XCODE_SCHEME_WORKING_DIRECTORY` variable and
+  associated :prop_tgt:`XCODE_SCHEME_WORKING_DIRECTORY` target property
+  were added to tell the :generator:`Xcode` generator to set the value of
+  the ``Custom Working Directory`` schema option.
+
+Properties
+----------
+
+* The :prop_tgt:`AIX_EXPORT_ALL_SYMBOLS` target property and associated
+  :variable:`CMAKE_AIX_EXPORT_ALL_SYMBOLS` variable were created to
+  optionally explicitly disable automatic export of symbols from shared
+  libraries on AIX.
+
+* The :prop_tgt:`DEPRECATION` target property was added to mark
+  a target as deprecated.  If a linked target is marked as
+  deprecated, a warning with the deprecation message is issued
+  at generate time.
+
+* The :prop_tgt:`INSTALL_NAME_DIR` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+  In particular, the :genex:`$<INSTALL_PREFIX>` generator expression can
+  be used to set the directory relative to the install-time prefix.
+
+* Target properties :prop_tgt:`MACHO_COMPATIBILITY_VERSION` and
+  :prop_tgt:`MACHO_CURRENT_VERSION` were added to set the
+  ``compatibility_version`` and ``current_version``, respectively,
+  for Mach-O binaries.  For backwards compatibility, if these properties
+  are not set, :prop_tgt:`SOVERSION` and :prop_tgt:`VERSION`
+  are used respectively as fallbacks.
+
+* The :prop_tgt:`VS_DOTNET_DOCUMENTATION_FILE` target property was added
+  to tell :ref:`Visual Studio Generators` to generate a ``DocumentationFile``
+  reference in ``.csproj`` files.
+
+Modules
+-------
+
+* The :module:`ExternalProject` module :command:`ExternalProject_Add`
+  command gained a ``GIT_SUBMODULES_RECURSE`` option to specify whether
+  Git submodules should be updated recursively.  The default is on to
+  preserve existing behavior.
+
+* The :module:`FindCUDAToolkit` module was added to find the
+  CUDA Toolkit without enabling CUDA as a language.
+
+* The :module:`FindCURL` module learned to find CURL using
+  the ``CURLConfig.cmake`` package configuration file generated by
+  CURL's cmake buildsystem.  It also gained a new ``CURL_NO_CURL_CMAKE``
+  option to disable this behavior.
+
+* The :module:`FindFLEX` module's ``flex_target()`` command now runs ``flex``
+  with :variable:`CMAKE_CURRENT_BINARY_DIR` as the working directory.
+  See policy :policy:`CMP0098`.
+
+* The :module:`FindLibArchive` module now provides an imported target
+  for libarchive.
+
+* The :module:`FindPython` module has learned to find Python components
+  in active virtual environments managed by ``conda``.
+
+* The :module:`FindPython3` and :module:`FindPython` modules gained,
+  respectively, variable ``Python3_SOABI`` and ``Python_SOABI`` giving
+  the standard extension suffix for modules. Moreover, commands
+  ``Python3_add_library()`` and ``Python_add_library()`` gained the option
+  ``WITH_SOABI`` to prefix the library suffix with the value of ``SOABI``.
+
+* The :module:`FindLibXml2` module now provides an imported target for the
+  ``xmllint`` executable.
+
+Autogen
+-------
+
+* :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` learned to process headers
+  with a ``.hh`` extension.  See policy :policy:`CMP0100`.
+
+CTest
+-----
+
+* The :variable:`CTEST_CONFIGURATION_TYPE` variable is now set from the
+  command line when :manual:`ctest(1)` is invoked with ``-C <cfg>``.
+
+* The :manual:`ctest(1)` tool gained support for Dr. Memory to run
+  memcheck runs.
+
+* The :manual:`ctest(1)` tool gained a ``--no-tests=<[error|ignore]>`` option
+  to explicitly set and unify the behavior between direct invocation and
+  script mode if no tests were found.
+
+* The :manual:`ctest(1)` tool gained a ``--repeat <mode>:<n>`` option
+  to specify conditions in which to repeat tests.  This generalizes
+  the existing ``--repeat-until-fail <n>`` option to add modes for
+  ``until-pass`` and ``after-timeout``.
+
+* The :command:`ctest_test` command gained a ``REPEAT <mode>:<n>`` option
+  to specify conditions in which to repeat tests.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DragNDrop Generator` learned to use
+  the :variable:`CPACK_DMG_<component>_FILE_NAME` variable
+  to set a custom filename when packaging components into
+  their own DMGs.
+
+* The :cpack_gen:`CPack DragNDrop Generator` learned to handle
+  RTF formatted license files.  When :variable:`CPACK_DMG_SLA_DIR`
+  variable is set, ``<language>.license.rtf`` is considered, but
+  only as a fallback when the plaintext (``.txt``) file is not found
+  in order to maintain backwards compatibility.
+
+* The :cpack_gen:`CPack NSIS Generator` gained a new variable
+  :variable:`CPACK_NSIS_MUI_HEADERIMAGE` to set the header image.
+  To not break existing setups, it still defaults to
+  :variable:`CPACK_PACKAGE_ICON` if the new variable is not set.
+
+* The :cpack_gen:`CPack NSIS Generator` now supports
+  :variable:`CPACK_NSIS_UNINSTALL_NAME`.
+  This can be used to specify the name of the Uninstall program.
+
+* The :cpack_gen:`CPack NSIS Generator` now supports
+  :variable:`CPACK_NSIS_WELCOME_TITLE` and
+  :variable:`CPACK_NSIS_WELCOME_TITLE_3LINES`.
+  These can be used to specify the welcome page title and display it in 3 lines.
+
+* The :cpack_gen:`CPack NSIS Generator` now supports
+  :variable:`CPACK_NSIS_FINISH_TITLE` and
+  :variable:`CPACK_NSIS_FINISH_TITLE_3LINES`.
+  These can be used to specify the finish page title and display it in 3 lines.
+
+* The :cpack_gen:`CPack productbuild Generator` gained support for a
+  :variable:`CPACK_PRODUCTBUILD_BACKGROUND` variable to specify a background
+  image for the macOS installer.
+
+Other
+-----
+
+* :manual:`ccmake(1)` now displays cache values using colors
+  based on the entry type if the terminal supports color.
+
+* :manual:`ccmake(1)` now displays messages and a progress bar during
+  configure and generate.  It will keep the output displayed if any
+  errors or warnings occurred.
+
+Deprecated and Removed Features
+===============================
+
+* An explicit deprecation diagnostic was added for policy ``CMP0068``
+  and policy ``CMP0069`` (``CMP0067`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+* The CPack ``PackageMaker`` generator has been
+  deprecated because Xcode no longer distributes the PackageMaker tools.
+  The undocumented ``OSXX11`` generator has also been deprecated.
+
+* The :manual:`cmake(1)` command-line ``-E remove`` and ``-E remove_directory``
+  tools are deprecated in favor of the new ``-E rm`` tool.  The older tools
+  always returned 0 if a named path did not exist even without the force
+  option and cannot be fixed without breaking compatibility, and so have
+  been superseded.
+
+* The :cpack_gen:`CPack NSIS Generator` now requires NSIS 3.0 or later.
+
+Other Changes
+=============
+
+* The :manual:`file API <cmake-file-api(7)>` index file now emits a
+  ``multiConfig`` flag specifying whether or not the generator supports
+  multiple output configurations.
+
+* Target link properties :prop_tgt:`INTERFACE_LINK_OPTIONS`,
+  :prop_tgt:`INTERFACE_LINK_DIRECTORIES` and
+  :prop_tgt:`INTERFACE_LINK_DEPENDS` are now transitive over private
+  dependencies on static libraries.
+  See policy :policy:`CMP0099`.
+
+* When using MinGW tools, the :command:`find_library` command no longer
+  finds ``.dll`` files by default.  Instead, it expects ``.dll.a`` import
+  libraries to be available.
+
+* The :generator:`MinGW Makefiles` generator no longer issues an error if
+  ``sh.exe`` is present in the environment's ``PATH``.
+
+* The :generator:`Ninja` generator now prefers the first ninja build
+  tool to appear in the ``PATH`` no matter whether it is called
+  ``ninja-build``, ``ninja``, or ``samu``.  Previously the first
+  of those names to appear anywhere in the ``PATH`` would be preferred.
+
+* With SDCC the ``sdar`` tool is now preferred over ``sdcclib`` as librarian.
+  The latter was deprecated by SDCC 3.2.0 and removed in SDCC 3.8.6.
+
+* With SDCC the default flags no longer include any target-specific flags.
+  Previously the default flags were hard-coded for 8051.
+
+* The :variable:`CMAKE_VS_GLOBALS` variable value now applies during
+  compiler identification and in targets created by the
+  :command:`add_custom_target` command.
+
+* The :generator:`Xcode` generator no longer hard-codes ``-Wmost``,
+  ``-Wno-four-char-constants``, and ``-Wno-unknown-pragmas`` warning flags.
+
+Updates
+=======
+
+Changes made since CMake 3.17.0 include the following.
+
+3.17.1
+------
+
+* CMake 3.17.0 updated the :cpack_gen:`CPack NSIS Generator` with changes
+  that require NSIS 3.0 or later.  CMake 3.17.1 now enforces the use
+  of a sufficiently new version.
+
+3.17.3
+------
+
+* Selection of the Objective C or C++ compiler now considers the
+  :envvar:`CC` or :envvar:`CXX` environment variable if the
+  :envvar:`OBJC` or :envvar:`OBJCXX` environment variable is not set.
+
+* The :module:`FindPkgConfig` module now extracts include directories
+  prefixed with ``-isystem`` into the ``*_INCLUDE_DIRS`` variables and
+  :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` target properties.
+  Previously they would be places in ``*_CFLAGS_OTHER`` variables and
+  :prop_tgt:`INTERFACE_COMPILE_OPTIONS` target properties.
+
+3.17.5
+------
+
+* The default value of :variable:`CMAKE_AUTOMOC_PATH_PREFIX` was changed to
+  ``OFF`` because this feature can break existing projects that have
+  identically named header files in different include directories.
+  This restores compatibility with behavior of CMake 3.15 and below.
+  The default was also changed to ``OFF`` in 3.16.9.

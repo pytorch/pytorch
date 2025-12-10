@@ -1,0 +1,31 @@
+CMP0193
+-------
+
+.. versionadded:: 4.1
+
+:module:`GNUInstallDirs` caches ``CMAKE_INSTALL_*`` with leading ``usr/`` for
+install prefix ``/``.
+
+When :variable:`CMAKE_INSTALL_PREFIX` is ``/``, the ``CMAKE_INSTALL_<dir>``
+variables, for ``<dir>`` equal to ``BINDIR``, ``SBINDIR``, ``LIBEXECDIR``,
+``SHAREDSTATEDIR``, ``INCLUDEDIR``, ``OLDINCLUDEDIR``, ``DATAROOTDIR``, and
+``LIBDIR``, are prepended with a leading ``usr/`` as documented among the
+:ref:`special cases <GNUInstallDirs special cases>`.
+In CMake 4.0 and below, these ``CMAKE_INSTALL_<dir>`` variables were cached
+without their leading ``usr/``, and it was prepended in normal variables that
+shadow their cache entries.
+CMake 4.1 and above prefer to cache ``CMAKE_INSTALL_<dir>`` with their leading
+``usr/``.  Consequently, the :command:`GNUInstallDirs_get_absolute_install_dir`
+command no longer alters the relative input variable argument ``<input-var>``.
+This policy provides compatibility for projects that have not been updated to
+expect the new behavior.
+
+The ``OLD`` behavior for this policy is to cache ``CMAKE_INSTALL_<dir>``
+variables without the leading ``usr/``.  The ``NEW`` behavior for this
+policy is to cache ``CMAKE_INSTALL_<dir>`` variables with the leading ``usr/``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,30 @@
+CMP0170
+-------
+
+.. versionadded:: 3.30
+
+When ``FETCHCONTENT_FULLY_DISCONNECTED`` is set to true,
+:command:`FetchContent_MakeAvailable` and :command:`FetchContent_Populate`
+enforce the constraint that their source directory must already be populated.
+The requirement has always been documented, but it was not checked or enforced
+with CMake 3.29 or older.  This sometimes led to hard-to-trace errors when a
+project expected a dependency to have been populated, but its population was
+silently skipped.
+
+CMake 3.30 and above prefers to check and enforce the constraint.
+This policy provides compatibility for situations where the user cannot easily
+prevent ``FETCHCONTENT_FULLY_DISCONNECTED`` from being inappropriately set
+to true.
+
+The ``OLD`` behavior of this policy allows ``FETCHCONTENT_FULLY_DISCONNECTED``
+to be set to true even if a dependency's source directory has not been
+populated.
+The ``NEW`` behavior halts with a fatal error if
+``FETCHCONTENT_FULLY_DISCONNECTED`` is set to true and a dependency population
+would be skipped, but that dependency's source directory doesn't exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

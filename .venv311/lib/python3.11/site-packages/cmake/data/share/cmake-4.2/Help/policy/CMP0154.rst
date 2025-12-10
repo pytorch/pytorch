@@ -1,0 +1,59 @@
+CMP0154
+-------
+
+.. versionadded:: 3.28
+
+Generated files are private by default in targets using :ref:`file sets`.
+
+CMake 3.27 and below assume that any file generated as an output or byproduct
+of :command:`add_custom_command` or :command:`add_custom_target` may be a
+public header file meant for inclusion by dependents' source files.  This
+requires :ref:`Ninja Generators` to add conservative order-only dependencies
+that prevent a target's source files from compiling before custom commands
+from the target's dependencies are finished, even if those custom commands
+only produce sources private to their own target.
+
+:ref:`File Sets`, introduced by CMake 3.23, provide a way to express the
+visibility of generated header files.  CMake 3.28 and above prefer to
+assume that, in targets using file sets, generated files are private to
+their own target by default.  Generated public headers must be specified
+as members of a ``PUBLIC`` (or ``INTERFACE``) ``FILE_SET``, typically of
+type ``HEADERS``.  With this information, :ref:`Ninja Generators` may omit
+the above-mentioned conservative dependencies and produce more efficient
+build graphs.  Dependents to such targets may also prune dependencies to such
+targets when using the :prop_tgt:`OPTIMIZE_DEPENDENCIES` target property.
+
+Additionally, if the custom command's output is a member of a file set of type
+``CXX_MODULES``, it will additionally not be required to exist before
+compiling other sources in the same target.  Since these files should not be
+included at compile time directly, they may not be implicitly required to
+exist for other compilation rules.
+
+This policy provides compatibility for projects using file sets in targets
+with generated header files that have not been updated.  Such projects
+should be updated to express generated public headers in a file set.
+For example:
+
+.. code-block:: cmake
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foo.h
+    ...
+  )
+  target_sources(foo
+    PUBLIC FILE_SET HEADERS
+      BASE_DIRS ${CMAKE_CURRENT_BINARY_DIR}
+      FILES     ${CMAKE_CURRENT_BINARY_DIR}/foo.h
+  )
+
+The ``OLD`` behavior for this policy is to assume generated files are
+public, even in targets using file sets, and for :ref:`Ninja Generators`
+to produce conservative build graphs.  The ``NEW`` behavior for this
+policy is to assume generated files are private in targets using file sets,
+and for :ref:`Ninja Generators` to produce more efficient build graphs.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.28
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

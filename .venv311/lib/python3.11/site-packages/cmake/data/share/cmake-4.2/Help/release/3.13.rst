@@ -1,0 +1,289 @@
+CMake 3.13 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.12 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* The :ref:`Visual Studio Generators` for VS 2010 and above learned to
+  support the :prop_tgt:`INTERPROCEDURAL_OPTIMIZATION` target property
+  and supporting :module:`CheckIPOSupported` module.
+
+* The :generator:`Xcode` generator learned to configure more Xcode Scheme
+  fields.  See the :variable:`CMAKE_XCODE_GENERATE_SCHEME` variable.
+
+* The :generator:`Green Hills MULTI` generator has been updated:
+
+  - Added support for architecture selection through
+    :variable:`CMAKE_GENERATOR_PLATFORM`:
+    e.g. ``arm``, ``ppc``, and ``86``.
+
+  - Added support for toolset selection through
+    :variable:`CMAKE_GENERATOR_TOOLSET`,
+    e.g. ``comp_201205``, ``comp_201510``, ``comp_201722_beta``.
+
+  - Added support for platform selection through ``GHS_TARGET_PLATFORM``,
+    e.g. ``integrity``, ``linux``, ``standalone``, etc.
+
+  - No longer checks that ``arm`` based compilers are installed but ensures
+    that the correct ``gbuild.exe`` exists.
+
+  - No longer hard-codes ARM files, BSP, toolset, or OS locations.
+
+Command-Line
+------------
+
+* The :manual:`cmake(1)` command gained the ``-S <source_dir>``
+  command line option to specify the location of the source directory.
+  This option can be used independently of ``-B``.
+
+* The :manual:`cmake(1)` command gained the ``-B <build_dir>``
+  command line option to specify the location of the build directory.
+  This option can be used independently of ``-S``.
+
+* The :manual:`cmake(1)` ``-E create_symlink`` command can now be used
+  on Windows.
+
+Commands
+--------
+
+* The :command:`add_custom_command` and :command:`add_custom_target` commands
+  learned to support generator expressions in ``WORKING_DIRECTORY`` options.
+
+* The :command:`add_link_options` command was created to add link
+  options in the current directory.
+
+* The :command:`install(TARGETS)` command learned to install targets
+  created outside the current directory.
+
+* The :command:`link_directories` command gained options to control
+  insertion position.
+
+* The :command:`list(SORT)` command gained options to control the
+  comparison operation used to order the entries.
+
+* The :command:`math` command gained options for hexadecimal.
+
+* The :command:`target_link_directories` command was created to
+  specify link directories for targets and their dependents.
+
+* The :command:`target_link_options` command was created to
+  specify link options for targets and their dependents.
+
+* The :command:`target_link_libraries` command may now be called
+  to modify targets created outside the current directory.
+  See policy :policy:`CMP0079`.
+
+Variables
+---------
+
+* A :variable:`CMAKE_AUTOGEN_VERBOSE` variable was added to optionally
+  increase the verbosity of :prop_tgt:`AUTOMOC`, :prop_tgt:`AUTOUIC`
+  and :prop_tgt:`AUTORCC` from within CMake project code.
+
+* A :variable:`CMAKE_VS_GLOBALS` variable was added to initialize
+  :prop_tgt:`VS_GLOBAL_<variable>` target properties on targets as
+  they are created.
+
+Properties
+----------
+
+* The :prop_tgt:`DEPLOYMENT_ADDITIONAL_FILES` target property was
+  added to tell the :generator:`Visual Studio 9 2008` generator
+  to specify additional files for deployment to WinCE devices
+  for remote debugging.
+
+* The :prop_tgt:`INTERFACE_LINK_DEPENDS` target property was created
+  to specify transitive link dependencies on files.
+
+* The :prop_tgt:`LINK_DEPENDS` target property learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* :prop_tgt:`LINK_DIRECTORIES` and :prop_tgt:`INTERFACE_LINK_DIRECTORIES`
+  target properties were added to collect link directories for a target
+  and its dependents.  Use the :command:`target_link_directories` command
+  to set them.
+
+* :prop_tgt:`LINK_OPTIONS` and :prop_tgt:`INTERFACE_LINK_OPTIONS` target
+  properties were added to collect link options for a target and its
+  dependents.  Use the :command:`target_link_options` command to set them.
+
+* A :prop_dir:`LINK_OPTIONS` directory property was added to collect
+  link options for targets created under the current directory.
+  Use the :command:`add_link_options` command to set it.
+
+* A :prop_tgt:`STATIC_LIBRARY_OPTIONS` target property was created
+  to specify archiver options to use when creating static libraries.
+
+* A :prop_tgt:`VS_DEBUGGER_COMMAND_ARGUMENTS` target property was created to
+  set the debugging command line arguments with
+  :ref:`Visual Studio Generators` for VS 2010 and above.
+
+* A :prop_tgt:`VS_DEBUGGER_ENVIRONMENT` target property was created to
+  set the debugging environment with
+  :ref:`Visual Studio Generators` for VS 2010 and above.
+
+* The :prop_tgt:`VS_DEBUGGER_COMMAND` and
+  :prop_tgt:`VS_DEBUGGER_WORKING_DIRECTORY` target properties
+  now support generator expressions.
+
+Modules
+-------
+
+* The :module:`FindBoost` module gained a ``Boost_ARCHITECTURE`` option
+  to specify a Boost architecture-specific library filename fragment.
+
+* The :module:`FindCURL` module learned to find debug and release variants
+  separately.
+
+* The :module:`FindMatlab` module gained new components ``ENGINE_LIBRARY`` and
+  ``DATAARRAY_LIBRARY`` to request finding the Matlab C++ Engine and DataArray
+  libraries respectively.
+
+* The :module:`FindMatlab` module now explicitly exports mexFunction in Visual
+  Studio.
+
+* The :module:`FindMatlab` module gained a new ``MCC_COMPILER``
+  component to request finding the Matlab Compiler add-on.
+
+* The :module:`FindPkgConfig` module gained an option to create imported
+  targets in global scope.
+
+* The :module:`FindPkgConfig` module gained support for ``<`` and ``>``
+  operators for version checks in addition to the already supported
+  operators ``>=``, ``<=``, and ``=``.
+
+* Modules :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  gain capability to control order of resource lookup on macOS (Framework) and
+  Windows (Registry).
+
+* The :module:`FindSubversion` module ``Subversion_WC_INFO`` command
+  gained an ``IGNORE_SVN_FAILURE`` option to suppress failures,
+  e.g. when the source tree is not under Subversion control.
+
+* The :module:`UseSWIG` module learned to manage target property
+  :prop_tgt:`INCLUDE_DIRECTORIES` for ``SWIG`` compilation.
+
+CTest
+-----
+
+* :manual:`ctest(1)` gained a ``--progress`` option to enable a live
+  test progress summary when output goes to a terminal.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DEB Generator` learned to split debug symbols into
+  a corresponding .ddeb package when ``CPACK_DEBIAN_DEBUGINFO_PACKAGE`` is
+  set.
+
+* The :cpack_gen:`CPack DEB Generator` learned to honor the ``SOURCE_DATE_EPOCH``
+  environment variable when packaging files.  This is useful for generating
+  reproducible packages.
+
+* CPack gained a new :cpack_gen:`CPack External Generator` which is used to
+  export the CPack metadata in a format that other software can understand. The
+  intention of this generator is to allow external packaging software to take
+  advantage of CPack's features when it may not be possible to use CPack for
+  the entire packaging process.
+
+Deprecated and Removed Features
+===============================
+
+* An explicit deprecation diagnostic was added for policies ``CMP0055``
+  through ``CMP0063`` (``CMP0054`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+Other Changes
+=============
+
+* The precompiled binaries provided on ``cmake.org`` now include
+  qthelp-format documentation.
+
+* The :command:`option` command now honors an existing normal variable
+  of the same name and does nothing instead of possibly creating a cache
+  entry (or setting its type) and removing the normal variable.
+  See policy :policy:`CMP0077`.
+
+* The :ref:`Makefile Generators` learned to remove custom command and
+  custom target byproducts during ``make clean``.
+
+* The :command:`target_sources` command now interprets relative source file
+  paths as relative to the current source directory.  This simplifies
+  incrementally building up a target's sources from subdirectories.  The
+  :policy:`CMP0076` policy was added to provide backward compatibility with
+  the old behavior where required.
+
+* The :module:`BundleUtilities` module may no longer be included at configure
+  time. This was always a bug anyway. See policy :policy:`CMP0080`.
+
+* The :module:`UseSWIG` module has changed strategy for target naming.
+  See policy :policy:`CMP0078`.
+
+* The :prop_tgt:`LINK_DIRECTORIES` target property now expects absolute paths.
+  See policy :policy:`CMP0081`.
+
+* The CPack generators have been moved into their own separate section
+  in the documentation, rather than having the documentation in their
+  internal implementation modules.
+  These internal implementation modules are also no longer available
+  to scripts that may have been incorrectly including them, because
+  they should never have been available in the first place.
+
+Updates
+=======
+
+Changes made since CMake 3.13.0 include the following.
+
+3.13.2
+------
+
+* CMake 3.13.0 included a change to pass compiler implicit include
+  directories to the ``moc`` tool for :prop_tgt:`AUTOMOC`.  This has
+  been reverted due to regressing existing builds and will need
+  further investigation before being re-introduced in a later release.
+
+3.13.3
+------
+
+* The :generator:`Visual Studio 15 2017` generator has been fixed to work
+  when VS 2019 is installed.
+
+* CMake now checks that at least one of the source or binary directory
+  is specified when running CMake and issues an error if both are missing.
+  This has always been a documented requirement, but the implementation
+  previously accidentally accepted cases in which neither are specified
+  so long as some other argument is given, and silently used the current
+  working directory as the source and build tree.
+
+3.13.4
+------
+
+* The error added by 3.13.3 in cases that neither a source or binary
+  directory is specified has been downgraded to a warning.  While this
+  was never intended, documented, nor supported behavior, some projects
+  relied on it.  The error has been downgraded to a warning for the
+  remainder of the 3.13.x release series to allow a transition period,
+  but it may become a fatal error again in a later release.  Scripts
+  relying on the old behavior can be trivially fixed by specifying
+  the path to the source tree (even if just ``.``) explicitly and
+  continue to work with all versions of CMake.
+
+3.13.5
+------
+
+* In CMake 3.13.0 through 3.13.4, calling :command:`target_link_libraries`
+  to add ``PRIVATE`` dependencies to a static library created in another
+  directory (under policy :policy:`CMP0079` ``NEW`` behavior) would
+  incorrectly propagate usage requirements of those dependencies to
+  dependents that link the static library.  This has been fixed.

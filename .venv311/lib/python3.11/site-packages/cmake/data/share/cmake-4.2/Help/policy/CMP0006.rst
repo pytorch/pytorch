@@ -1,0 +1,25 @@
+CMP0006
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Installing :prop_tgt:`MACOSX_BUNDLE` targets requires a ``BUNDLE DESTINATION``.
+
+This policy determines whether the :command:`install(TARGETS)` command must be
+given a ``BUNDLE DESTINATION`` when asked to install a target with the
+:prop_tgt:`MACOSX_BUNDLE` property set.  CMake 2.4 and below did not distinguish
+application bundles from normal executables when installing targets.
+CMake 2.6 provides a ``BUNDLE`` option to the :command:`install(TARGETS)`
+command that specifies rules specific to application bundles on the Mac.
+Projects should use this option when installing a target with the
+:prop_tgt:`MACOSX_BUNDLE` property set.
+
+The ``OLD`` behavior for this policy is to fall back to the
+``RUNTIME DESTINATION`` if a ``BUNDLE DESTINATION`` is not given.  The ``NEW``
+behavior for this policy is to produce an error if a bundle target is installed
+without a ``BUNDLE DESTINATION``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

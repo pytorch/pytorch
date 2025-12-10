@@ -1,0 +1,24 @@
+CMP0074
+-------
+
+.. versionadded:: 3.12
+
+:command:`find_package` uses ``<PackageName>_ROOT`` variables.
+
+In CMake 3.12 and above the :command:`find_package(<PackageName>)` command now
+searches prefixes specified by the :variable:`<PackageName>_ROOT` CMake
+variable and the :envvar:`<PackageName>_ROOT` environment variable.
+Package roots are maintained as a stack so nested calls to all ``find_*``
+commands inside find modules and config packages also search the roots as
+prefixes.  This policy provides compatibility with projects that have not been
+updated to avoid using ``<PackageName>_ROOT`` variables for other purposes.
+
+The ``OLD`` behavior for this policy is to ignore ``<PackageName>_ROOT``
+variables.  The ``NEW`` behavior for this policy is to use
+``<PackageName>_ROOT`` variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.12
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

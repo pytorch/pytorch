@@ -1,0 +1,102 @@
+Metadata-Version: 2.1
+Name: ninja
+Version: 1.13.0
+Summary: Ninja is a small build system with a focus on speed
+Keywords: build,c++,cross-compilation,cross-platform,fortran,ninja
+Author-Email: Jean-Christophe Fillion-Robin <scikit-build@googlegroups.com>, Henry Schreiner <henryfs@princeton.edu>
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: C
+Classifier: Programming Language :: C++
+Classifier: Programming Language :: Fortran
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Build Tools
+Classifier: Typing :: Typed
+Project-URL: Bug Tracker, https://github.com/scikit-build/ninja-python-distributions/issues
+Project-URL: Documentation, https://github.com/scikit-build/ninja-python-distributions#readme
+Project-URL: Download, https://github.com/ninja-build/ninja/releases
+Project-URL: Homepage, http://ninja-build.org/
+Project-URL: Mailing list, https://groups.google.com/forum/#!forum/scikit-build
+Project-URL: Source Code, https://github.com/scikit-build/ninja-python-distributions
+Requires-Python: >=3.8
+Description-Content-Type: text/x-rst
+
+==========================
+Ninja Python Distributions
+==========================
+
+`Ninja <http://www.ninja-build.org>`_ is a small build system with a focus on speed.
+
+The latest Ninja python wheels provide `ninja 1.13.0.gd74ef.kitware.jobserver-pipe-1 <https://ninja-build.org/manual.html>`_ executable
+and `ninja_syntax.py` for generating `.ninja` files.
+
+.. image:: https://raw.githubusercontent.com/scikit-build/ninja-python-distributions/master/ninja-python-distributions-logo.png
+
+Latest Release
+--------------
+
+.. table::
+
+  +----------------------------------------------------------------------+---------------------------------------------------------------------------+
+  | Versions                                                             | Downloads                                                                 |
+  +======================================================================+===========================================================================+
+  | .. image:: https://img.shields.io/pypi/v/ninja.svg                   | .. image:: https://img.shields.io/badge/downloads-2535k%20total-green.svg |
+  |     :target: https://pypi.python.org/pypi/ninja                      |     :target: https://pypi.python.org/pypi/ninja                           |
+  +----------------------------------------------------------------------+---------------------------------------------------------------------------+
+
+Build Status
+------------
+
+.. table::
+
+  +---------------+-------------------------------------------------------------------------------------------------------------+
+  |               | GitHub Actions (Windows, macOS, Linux)                                                                      |
+  +===============+=============================================================================================================+
+  | PyPI          | .. image:: https://github.com/scikit-build/ninja-python-distributions/actions/workflows/build.yml/badge.svg |
+  |               |     :target: https://github.com/scikit-build/ninja-python-distributions/actions/workflows/build.yml         |
+  +---------------+-------------------------------------------------------------------------------------------------------------+
+
+Maintainers
+-----------
+
+* `How to update ninja version ? <https://github.com/scikit-build/ninja-python-distributions/blob/master/docs/update_ninja_version.rst>`_
+
+* `How to make a release ? <https://github.com/scikit-build/ninja-python-distributions/blob/master/docs/make_a_release.rst>`_
+
+
+Miscellaneous
+-------------
+
+* Documentation: https://github.com/scikit-build/ninja-python-distributions#readme
+* Source code: https://github.com/scikit-build/ninja-python-distributions
+* Mailing list: https://groups.google.com/forum/#!forum/scikit-build
+
+Python Version Support
+----------------------
+
+Versions after 1.11.1.1 no longer support Python 2-3.6, and require manylinux2010+ on linux.
+Versions after 1.13 no longer support Python 3.7, and require manylinux2014+/musllinux_1_2+ on linux.
+
+License
+-------
+
+This project is maintained by Jean-Christophe Fillion-Robin from Kitware Inc.
+It is covered by the `Apache License, Version 2.0 <http://www.apache.org/licenses/LICENSE-2.0>`_.
+
+Ninja is also distributed under the `Apache License, Version 2.0 <http://www.apache.org/licenses/LICENSE-2.0>`_.
+For more information about Ninja, visit https://ninja-build.org
+
+Logo was originally created by Libby Rose from Kitware Inc.
+It is covered by `CC BY 4.0 <https://creativecommons.org/licenses/by/4.0/>`_.
+
+
+History
+-------
+
+ninja-python-distributions was initially developed in November 2016 by
+Jean-Christophe Fillion-Robin to facilitate the distribution of project using
+`scikit-build <http://scikit-build.readthedocs.io/>`_ and depending on CMake
+and Ninja.

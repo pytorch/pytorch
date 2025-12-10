@@ -1,0 +1,310 @@
+CMake 3.30 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.29 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` files now support schema version ``9``.
+  ``include`` fields now expand all macros except ``$env{}`` and
+  preset-specific macros, i.e., those derived from the fields
+  inside a preset's definition.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "cmakeFiles" version 1 object's ``version``
+  field has been updated to 1.1.  It gained a ``globsDependent`` field to
+  report :command:`file(GLOB)` calls using ``CONFIGURE_DEPENDS``.
+
+Generators
+----------
+
+* :ref:`Visual Studio Generators` now add ``UseDebugLibraries`` indicators to
+  ``.vcxproj`` files to denote which configurations are debug configurations.
+  See policy :policy:`CMP0162`.
+
+Languages
+---------
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  now implements support for the ``cxx_std_26`` and ``cuda_std_26``
+  meta-features to indicate that the compiler mode must be at least C++26.
+  These meta-features were first documented by CMake 3.25, but were not fully
+  implemented.
+
+Commands
+--------
+
+* The :command:`add_library` command, on platforms that do not support shared
+  libraries, now rejects creation of shared libraries instead of automatically
+  converting them to static libraries.  See policy :policy:`CMP0164`.
+
+* The :command:`enable_language` command now fails with an error
+  if it is called before the first :command:`project` call.
+  See policy :policy:`CMP0165`.
+
+* The :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands
+  gained a ``TLS_VERSION <min>`` option to specify the minimum TLS
+  version for connections to ``https://`` URLs.
+
+Variables
+---------
+
+* The :variable:`CMAKE_<LANG>_STANDARD_LATEST` variable was added to
+  describe the latest ``<LANG>`` language standard CMake supports for
+  the selected compiler.
+
+* The :envvar:`CMAKE_TLS_VERIFY` environment variable was added as a fallback
+  to the existing :variable:`CMAKE_TLS_VERIFY` variable.  It specifies
+  whether to verify the server certificate for ``https://`` URLs by default.
+
+* The :variable:`CMAKE_TLS_VERSION` variable and :envvar:`CMAKE_TLS_VERSION`
+  environment variable were added to specify a default minimum TLS version
+  for connections to ``https://`` URLs by the :command:`file(DOWNLOAD)`
+  and :command:`file(UPLOAD)` commands.
+
+* The :variable:`CMAKE_VS_USE_DEBUG_LIBRARIES` variable and corresponding
+  :prop_tgt:`VS_USE_DEBUG_LIBRARIES` target property were added to explicitly
+  control ``UseDebugLibraries`` indicators in ``.vcxproj`` files.
+
+Properties
+----------
+
+* The :prop_sf:`GENERATED` source file property is now visible in all
+  directories.  See policy :policy:`CMP0163`.  Policy :policy:`CMP0118`'s
+  documentation has been revised to describe its actual effects.
+
+* The :prop_gbl:`PROPAGATE_TOP_LEVEL_INCLUDES_TO_TRY_COMPILE` global property
+  can be used to propagate :variable:`CMAKE_PROJECT_TOP_LEVEL_INCLUDES` into
+  :command:`try_compile` calls that use the
+  :ref:`whole-project signature <Try Compiling Whole Projects>`.
+  This is primarily intended as a way for dependency providers to be enabled
+  in such :command:`try_compile` calls.
+
+* A :prop_tgt:`VS_FILTER_PROPS` target property was added to tell
+  :ref:`Visual Studio Generators` to use a custom MSBuild filter
+  ``.props`` file.
+
+Modules
+-------
+
+* The :module:`ExternalProject` module's :command:`ExternalProject_Add`
+  command gained a ``TLS_VERSION <min>`` option, and support for the
+  :variable:`CMAKE_TLS_VERSION` variable and :envvar:`CMAKE_TLS_VERSION`
+  environment variable, to specify the minimum TLS version for connections
+  to ``https://`` URLs.
+
+* The :module:`FindBacktrace` module now provides an imported target.
+
+* The :module:`FindBLAS` and :module:`FindLAPACK` modules gained
+  support for ``libblastrampoline``.
+
+* The :module:`FindCUDAToolkit` module now provides a target for
+  ``libnvfatbin`` and ``libnvfatbin_static``, if found.
+
+* The :module:`FindCUDAToolkit` module now searches the
+  :variable:`CMAKE_CUDA_COMPILER <CMAKE_<LANG>_COMPILER>`
+  variable and the :envvar:`CUDACXX` environment variable
+  even when the ``CUDA`` language isn't enabled.
+
+* The :module:`FindOpenMP` module gained an ``OpenMP_RUNTIME_MSVC``
+  option to control the OpenMP runtime used with MSVC.
+
+* The :module:`FindPython` and :module:`FindPython3` modules gained
+  support for the free threaded Python version.
+
+* The :module:`FindPython`, :module:`FindPython2`, and :module:`FindPython3`
+  modules, on Windows, now offer better support for the Python debug variant:
+
+  * new variables:
+
+    * ``Python_EXECUTABLE_DEBUG``
+    * ``Python_INTERPRETER``
+    * ``Python_DEBUG_POSTFIX``
+
+  * new targets:
+
+    * ``Python::InterpreterDebug``
+    * ``Python::InterpreterMultiConfig``
+
+  The ``python_add_library()`` command now manages the
+  :prop_tgt:`DEBUG_POSTFIX` target property based on the value
+  of the ``Python_DEBUG_POSTFIX`` variable.
+
+Generator Expressions
+---------------------
+
+* The :genex:`<LANG>_COMPILER_FRONTEND_VARIANT <C_COMPILER_FRONTEND_VARIANT>`
+  family of generator expressions were added to access the value of the
+  associated :variable:`CMAKE_<LANG>_COMPILER_FRONTEND_VARIANT` variables.
+
+* Link features, as used with the :genex:`LINK_LIBRARY` generator expression,
+  gained the ability to have attributes that describe their behavior by
+  specifying the :variable:`CMAKE_LINK_LIBRARY_<FEATURE>_ATTRIBUTES` or
+  :variable:`CMAKE_<LANG>_LINK_LIBRARY_<FEATURE>_ATTRIBUTES` variables.
+
+* The :genex:`QUOTE` generator expression was added to evaluate to ``"``.
+
+* The :genex:`TARGET_PROPERTY` generator expression learned to evaluate
+  :ref:`custom transitive properties <Custom Transitive Properties>`
+  defined by new :prop_tgt:`TRANSITIVE_COMPILE_PROPERTIES` and
+  :prop_tgt:`TRANSITIVE_LINK_PROPERTIES` target properties.
+
+* The :genex:`TARGET_PROPERTY` generator expression now evaluates target
+  properties :prop_tgt:`INTERFACE_LINK_OPTIONS`,
+  :prop_tgt:`INTERFACE_LINK_DIRECTORIES`, and
+  :prop_tgt:`INTERFACE_LINK_DEPENDS` correctly by following private
+  dependencies of static libraries.  See policy :policy:`CMP0166`.
+
+CTest
+-----
+
+* The :command:`ctest_submit` command and :option:`ctest -T Submit <ctest -T>`
+  step gained ``TLSVersion`` and ``TLSVerify`` options to control negotiation
+  with ``https://`` URLs.  See the :variable:`CTEST_TLS_VERSION` and
+  :variable:`CTEST_TLS_VERIFY` variables.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack Inno Setup Generator` is now available
+  on non-Windows hosts.
+
+* The :cpack_gen:`CPack NuGet Generator` gained the
+  :variable:`CPACK_NUGET_PACKAGE_README`,
+  :variable:`CPACK_NUGET_PACKAGE_REPOSITORY_URL`,
+  :variable:`CPACK_NUGET_PACKAGE_REPOSITORY_TYPE`,
+  :variable:`CPACK_NUGET_PACKAGE_REPOSITORY_BRANCH`, and
+  :variable:`CPACK_NUGET_PACKAGE_REPOSITORY_COMMIT` variables.
+
+* The :cpack_gen:`CPack NuGet Generator` can now generate dependency groups
+  for framework-specific dependencies. The :variable:`CPACK_NUGET_PACKAGE_TFMS`
+  variable was added to specify a list of target framework monikers (TFMs)
+  for which groups should be generated.
+
+* The :cpack_gen:`CPack WIX Generator` gained support for WiX Toolset v4.
+  See the :variable:`CPACK_WIX_VERSION` variable.
+
+Deprecated and Removed Features
+===============================
+
+* The :module:`FindBoost` module has been removed by policy :policy:`CMP0167`.
+  Port projects to upstream Boost's ``BoostConfig.cmake`` package
+  configuration file, for which ``find_package(Boost)`` now searches.
+
+* Calling :command:`FetchContent_Populate` with just the name of a
+  dependency is now deprecated. Projects should call
+  :command:`FetchContent_MakeAvailable` instead. See policy :policy:`CMP0169`.
+  Calling :command:`FetchContent_Populate` with full population details
+  rather than just a dependency name remains fully supported.
+
+* The :generator:`Visual Studio 9 2008` generator has been removed.
+
+Other Changes
+=============
+
+* :manual:`ctest(1)` now rejects unknown command-line arguments with an error.
+  Previously they were silently ignored.
+
+* The precompiled Windows ``.msi`` installers provided on
+  `cmake.org <https://cmake.org/download/>`_, when performing a fresh
+  installation, now modify the system-wide ``PATH`` by default.
+  When replacing an existing installation of 3.30 or later, the ``PATH``
+  modification preference is preserved by default.
+
+* The official ``.zip`` source archive provided on
+  `cmake.org <https://cmake.org/download/>`_ now uses LF newlines,
+  instead of CRLF newlines, for consistency with modern conventions.
+
+* The durations printed after "Configuring done" and "Generating done"
+  messages now reflect time spent in generator-specific steps, and
+  in a code model evaluation step at the beginning of generation that
+  was not previously captured.  Printed durations may appear longer
+  than in previous versions of CMake, but are more accurate.
+
+* :module:`FetchContent` now prefers to populate content directly rather
+  than using a separate sub-build. This may significantly improve configure
+  times on some systems (Windows especially, but also on macOS when using
+  the Xcode generator). :option:`cmake --fresh` also forces the download,
+  update, and patch steps of directly populated dependencies to be re-executed.
+  Policy :policy:`CMP0168` provides backward compatibility for those projects
+  that still rely on using a sub-build for content population.
+
+* When :variable:`FETCHCONTENT_FULLY_DISCONNECTED` is set to true,
+  :command:`FetchContent_MakeAvailable` and the single-argument form of
+  :command:`FetchContent_Populate` require that the dependency's source
+  directory has already been populated. CMake 3.29 and earlier did not
+  check this requirement, but it is now enforced, subject to policy
+  :policy:`CMP0170`.
+
+Updates
+=======
+
+Changes made since CMake 3.30.0 include the following.
+
+3.30.1, 3.30.2
+--------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.30.3
+------
+
+* The :command:`project(<PROJECT-NAME>)` command now sets
+  :variable:`<PROJECT-NAME>_SOURCE_DIR`, :variable:`<PROJECT-NAME>_BINARY_DIR`,
+  and :variable:`<PROJECT-NAME>_IS_TOP_LEVEL` as normal variables in addition
+  to setting them as cache entries.  This is needed to preserve support for
+  some :module:`FetchContent` use cases under policy :policy:`CMP0169`'s
+  NEW behavior.
+
+* The :module:`FindPython` and :module:`FindPython3` modules now define,
+  respectively, the ``Python_DEFINITIONS`` and  ``Python3_DEFINITIONS``
+  variables on Windows to support development with the free threaded
+  version of Python.  The :prop_tgt:`INTERFACE_COMPILE_DEFINITIONS` target
+  property is also defined for the various targets provided by these modules.
+
+3.30.4
+------
+
+* The :command:`project(<PROJECT-NAME>)` command now sets
+  :variable:`<PROJECT-NAME>_SOURCE_DIR`, :variable:`<PROJECT-NAME>_BINARY_DIR`,
+  and :variable:`<PROJECT-NAME>_IS_TOP_LEVEL` as normal variables only if they
+  are already set as cache or non-cache variables when :command:`project` is
+  invoked.  Cache entries by the same names are always set as before.
+  This refines 3.30.3's behavior change to restore behavior of nested
+  directories that call :command:`project` with the same project name,
+  but the implementation in this release is flawed (this release note has
+  been retroactively updated).  It can result in different behavior between
+  the first and subsequent runs.  Do not use CMake 3.30.4 if your project
+  contains nested calls to :command:`project` with the same project name
+  and you use these variables.
+
+3.30.5
+------
+
+* The :command:`project(<PROJECT-NAME>)` command now sets
+  :variable:`<PROJECT-NAME>_SOURCE_DIR`, :variable:`<PROJECT-NAME>_BINARY_DIR`,
+  and :variable:`<PROJECT-NAME>_IS_TOP_LEVEL` as non-cache variables only if
+  they are already set as non-cache variables when :command:`project` is
+  invoked.  Cache entries by the same names are always set as before.
+  This refines 3.30.3's behavior change to restore behavior of nested
+  directories that call :command:`project` with the same project name,
+  and it addresses the bug in the implementation introduced in 3.30.4.
+
+3.30.6, 3.30.7, 3.30.8, 3.30.9
+------------------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

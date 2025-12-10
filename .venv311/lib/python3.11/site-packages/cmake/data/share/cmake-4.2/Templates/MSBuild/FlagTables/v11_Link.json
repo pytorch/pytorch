@@ -1,0 +1,1263 @@
+[
+  {
+    "name": "ShowProgress",
+    "switch": "",
+    "comment": "Not Set",
+    "value": "NotSet",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE",
+    "comment": "Display all progress messages",
+    "value": "LinkVerbose",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE:Lib",
+    "comment": "For Libraries Searched",
+    "value": "LinkVerboseLib",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE:ICF",
+    "comment": "About COMDAT folding during optimized linking",
+    "value": "LinkVerboseICF",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE:REF",
+    "comment": "About data removed during optimized linking",
+    "value": "LinkVerboseREF",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE:SAFESEH",
+    "comment": "About Modules incompatible with SEH",
+    "value": "LinkVerboseSAFESEH",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "VERBOSE:CLR",
+    "comment": "About linker activity related to managed code",
+    "value": "LinkVerboseCLR",
+    "flags": []
+  },
+  {
+    "name": "ForceFileOutput",
+    "switch": "FORCE",
+    "comment": "Enabled",
+    "value": "Enabled",
+    "flags": []
+  },
+  {
+    "name": "ForceFileOutput",
+    "switch": "FORCE:MULTIPLE",
+    "comment": "Multiply Defined Symbol Only",
+    "value": "MultiplyDefinedSymbolOnly",
+    "flags": []
+  },
+  {
+    "name": "ForceFileOutput",
+    "switch": "FORCE:UNRESOLVED",
+    "comment": "Undefined Symbol Only",
+    "value": "UndefinedSymbolOnly",
+    "flags": []
+  },
+  {
+    "name": "CreateHotPatchableImage",
+    "switch": "FUNCTIONPADMIN",
+    "comment": "Enabled",
+    "value": "Enabled",
+    "flags": []
+  },
+  {
+    "name": "CreateHotPatchableImage",
+    "switch": "FUNCTIONPADMIN:5",
+    "comment": "X86 Image Only",
+    "value": "X86Image",
+    "flags": []
+  },
+  {
+    "name": "CreateHotPatchableImage",
+    "switch": "FUNCTIONPADMIN:6",
+    "comment": "X64 Image Only",
+    "value": "X64Image",
+    "flags": []
+  },
+  {
+    "name": "CreateHotPatchableImage",
+    "switch": "FUNCTIONPADMIN:16",
+    "comment": "Itanium Image Only",
+    "value": "ItaniumImage",
+    "flags": []
+  },
+  {
+    "name": "UACExecutionLevel",
+    "switch": "level='asInvoker'",
+    "comment": "asInvoker",
+    "value": "AsInvoker",
+    "flags": []
+  },
+  {
+    "name": "UACExecutionLevel",
+    "switch": "level='highestAvailable'",
+    "comment": "highestAvailable",
+    "value": "HighestAvailable",
+    "flags": []
+  },
+  {
+    "name": "UACExecutionLevel",
+    "switch": "level='requireAdministrator'",
+    "comment": "requireAdministrator",
+    "value": "RequireAdministrator",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "",
+    "comment": "Not Set",
+    "value": "NotSet",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:CONSOLE",
+    "comment": "Console",
+    "value": "Console",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:WINDOWS",
+    "comment": "Windows",
+    "value": "Windows",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:NATIVE",
+    "comment": "Native",
+    "value": "Native",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_APPLICATION",
+    "comment": "EFI Application",
+    "value": "EFI Application",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_BOOT_SERVICE_DRIVER",
+    "comment": "EFI Boot Service Driver",
+    "value": "EFI Boot Service Driver",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_ROM",
+    "comment": "EFI ROM",
+    "value": "EFI ROM",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_RUNTIME_DRIVER",
+    "comment": "EFI Runtime",
+    "value": "EFI Runtime",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:POSIX",
+    "comment": "POSIX",
+    "value": "POSIX",
+    "flags": []
+  },
+  {
+    "name": "Driver",
+    "switch": "",
+    "comment": "Not Set",
+    "value": "NotSet",
+    "flags": []
+  },
+  {
+    "name": "Driver",
+    "switch": "Driver",
+    "comment": "Driver",
+    "value": "Driver",
+    "flags": []
+  },
+  {
+    "name": "Driver",
+    "switch": "DRIVER:UPONLY",
+    "comment": "UP Only",
+    "value": "UpOnly",
+    "flags": []
+  },
+  {
+    "name": "Driver",
+    "switch": "DRIVER:WDM",
+    "comment": "WDM",
+    "value": "WDM",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "",
+    "comment": "Default",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "LTCG",
+    "comment": "Use Link Time Code Generation",
+    "value": "UseLinkTimeCodeGeneration",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "LTCG:PGInstrument",
+    "comment": "Profile Guided Optimization - Instrument",
+    "value": "PGInstrument",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "LTCG:PGOptimize",
+    "comment": "Profile Guided Optimization - Optimization",
+    "value": "PGOptimization",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "LTCG:PGUpdate",
+    "comment": "Profile Guided Optimization - Update",
+    "value": "PGUpdate",
+    "flags": []
+  },
+  {
+    "name": "GenerateWindowsMetadata",
+    "switch": "WINMD",
+    "comment": "Yes",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateWindowsMetadata",
+    "switch": "WINMD:NO",
+    "comment": "No",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataSignHash",
+    "switch": "WINMDSIGNHASH:SHA1",
+    "comment": "SHA1",
+    "value": "SHA1",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataSignHash",
+    "switch": "WINMDSIGNHASH:SHA256",
+    "comment": "SHA256",
+    "value": "SHA256",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataSignHash",
+    "switch": "WINMDSIGNHASH:SHA384",
+    "comment": "SHA384",
+    "value": "SHA384",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataSignHash",
+    "switch": "WINMDSIGNHASH:SHA512",
+    "comment": "SHA512",
+    "value": "SHA512",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "",
+    "comment": "Not Set",
+    "value": "NotSet",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:ARM",
+    "comment": "MachineARM",
+    "value": "MachineARM",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:EBC",
+    "comment": "MachineEBC",
+    "value": "MachineEBC",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:IA64",
+    "comment": "MachineIA64",
+    "value": "MachineIA64",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPS",
+    "comment": "MachineMIPS",
+    "value": "MachineMIPS",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPS16",
+    "comment": "MachineMIPS16",
+    "value": "MachineMIPS16",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPSFPU",
+    "comment": "MachineMIPSFPU",
+    "value": "MachineMIPSFPU",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPSFPU16",
+    "comment": "MachineMIPSFPU16",
+    "value": "MachineMIPSFPU16",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:SH4",
+    "comment": "MachineSH4",
+    "value": "MachineSH4",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:THUMB",
+    "comment": "MachineTHUMB",
+    "value": "MachineTHUMB",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:X64",
+    "comment": "MachineX64",
+    "value": "MachineX64",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:X86",
+    "comment": "MachineX86",
+    "value": "MachineX86",
+    "flags": []
+  },
+  {
+    "name": "CLRThreadAttribute",
+    "switch": "CLRTHREADATTRIBUTE:MTA",
+    "comment": "MTA threading attribute",
+    "value": "MTAThreadingAttribute",
+    "flags": []
+  },
+  {
+    "name": "CLRThreadAttribute",
+    "switch": "CLRTHREADATTRIBUTE:STA",
+    "comment": "STA threading attribute",
+    "value": "STAThreadingAttribute",
+    "flags": []
+  },
+  {
+    "name": "CLRThreadAttribute",
+    "switch": "CLRTHREADATTRIBUTE:NONE",
+    "comment": "Default threading attribute",
+    "value": "DefaultThreadingAttribute",
+    "flags": []
+  },
+  {
+    "name": "CLRImageType",
+    "switch": "CLRIMAGETYPE:IJW",
+    "comment": "Force IJW image",
+    "value": "ForceIJWImage",
+    "flags": []
+  },
+  {
+    "name": "CLRImageType",
+    "switch": "CLRIMAGETYPE:PURE",
+    "comment": "Force Pure IL Image",
+    "value": "ForcePureILImage",
+    "flags": []
+  },
+  {
+    "name": "CLRImageType",
+    "switch": "CLRIMAGETYPE:SAFE",
+    "comment": "Force Safe IL Image",
+    "value": "ForceSafeILImage",
+    "flags": []
+  },
+  {
+    "name": "CLRImageType",
+    "switch": "",
+    "comment": "Default image type",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "SignHash",
+    "switch": "CLRSIGNHASH:SHA1",
+    "comment": "SHA1",
+    "value": "SHA1",
+    "flags": []
+  },
+  {
+    "name": "SignHash",
+    "switch": "CLRSIGNHASH:SHA256",
+    "comment": "SHA256",
+    "value": "SHA256",
+    "flags": []
+  },
+  {
+    "name": "SignHash",
+    "switch": "CLRSIGNHASH:SHA384",
+    "comment": "SHA384",
+    "value": "SHA384",
+    "flags": []
+  },
+  {
+    "name": "SignHash",
+    "switch": "CLRSIGNHASH:SHA512",
+    "comment": "SHA512",
+    "value": "SHA512",
+    "flags": []
+  },
+  {
+    "name": "LinkErrorReporting",
+    "switch": "ERRORREPORT:PROMPT",
+    "comment": "PromptImmediately",
+    "value": "PromptImmediately",
+    "flags": []
+  },
+  {
+    "name": "LinkErrorReporting",
+    "switch": "ERRORREPORT:QUEUE",
+    "comment": "Queue For Next Login",
+    "value": "QueueForNextLogin",
+    "flags": []
+  },
+  {
+    "name": "LinkErrorReporting",
+    "switch": "ERRORREPORT:SEND",
+    "comment": "Send Error Report",
+    "value": "SendErrorReport",
+    "flags": []
+  },
+  {
+    "name": "LinkErrorReporting",
+    "switch": "ERRORREPORT:NONE",
+    "comment": "No Error Report",
+    "value": "NoErrorReport",
+    "flags": []
+  },
+  {
+    "name": "CLRSupportLastError",
+    "switch": "CLRSupportLastError",
+    "comment": "Enabled",
+    "value": "Enabled",
+    "flags": []
+  },
+  {
+    "name": "CLRSupportLastError",
+    "switch": "CLRSupportLastError:NO",
+    "comment": "Disabled",
+    "value": "Disabled",
+    "flags": []
+  },
+  {
+    "name": "CLRSupportLastError",
+    "switch": "CLRSupportLastError:SYSTEMDLL",
+    "comment": "System Dlls Only",
+    "value": "SystemDlls",
+    "flags": []
+  },
+  {
+    "name": "LinkIncremental",
+    "switch": "INCREMENTAL:NO",
+    "comment": "Enable Incremental Linking",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "LinkIncremental",
+    "switch": "INCREMENTAL",
+    "comment": "Enable Incremental Linking",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SuppressStartupBanner",
+    "switch": "NOLOGO",
+    "comment": "Suppress Startup Banner",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "LinkStatus",
+    "switch": "LTCG:NOSTATUS",
+    "comment": "Link Status",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "LinkStatus",
+    "switch": "LTCG:STATUS",
+    "comment": "Link Status",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreventDllBinding",
+    "switch": "ALLOWBIND:NO",
+    "comment": "Prevent Dll Binding",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "PreventDllBinding",
+    "switch": "ALLOWBIND",
+    "comment": "Prevent Dll Binding",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatLinkerWarningAsErrors",
+    "switch": "WX:NO",
+    "comment": "Treat Linker Warning As Errors",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "TreatLinkerWarningAsErrors",
+    "switch": "WX",
+    "comment": "Treat Linker Warning As Errors",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "IgnoreAllDefaultLibraries",
+    "switch": "NODEFAULTLIB",
+    "comment": "Ignore All Default Libraries",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateManifest",
+    "switch": "MANIFEST:NO",
+    "comment": "Generate Manifest",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "GenerateManifest",
+    "switch": "MANIFEST",
+    "comment": "Generate Manifest",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AllowIsolation",
+    "switch": "ALLOWISOLATION:NO",
+    "comment": "Allow Isolation",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "AllowIsolation",
+    "switch": "",
+    "comment": "Allow Isolation",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableUAC",
+    "switch": "MANIFESTUAC:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired",
+      "SpaceAppendable"
+    ]
+  },
+  {
+    "name": "UACUIAccess",
+    "switch": "uiAccess='false'",
+    "comment": "UAC Bypass UI Protection",
+    "value": "false",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "UACUIAccess",
+    "switch": "uiAccess='false'",
+    "comment": "UAC Bypass UI Protection",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "UACUIAccess",
+    "switch": "uiAccess='true'",
+    "comment": "UAC Bypass UI Protection",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ManifestEmbed",
+    "switch": "manifest:embed",
+    "comment": "Embed Manifest",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateDebugInformation",
+    "switch": "DEBUG",
+    "comment": "Generate Debug Info",
+    "value": "true",
+    "flags": [
+      "CaseInsensitive"
+    ]
+  },
+  {
+    "name": "GenerateMapFile",
+    "switch": "MAP",
+    "comment": "Generate Map File",
+    "value": "true",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "MapExports",
+    "switch": "MAPINFO:EXPORTS",
+    "comment": "Map Exports",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AssemblyDebug",
+    "switch": "ASSEMBLYDEBUG:DISABLE",
+    "comment": "Debuggable Assembly",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "AssemblyDebug",
+    "switch": "ASSEMBLYDEBUG",
+    "comment": "Debuggable Assembly",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "LargeAddressAware",
+    "switch": "LARGEADDRESSAWARE:NO",
+    "comment": "Enable Large Addresses",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "LargeAddressAware",
+    "switch": "LARGEADDRESSAWARE",
+    "comment": "Enable Large Addresses",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TerminalServerAware",
+    "switch": "TSAWARE:NO",
+    "comment": "Terminal Server",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "TerminalServerAware",
+    "switch": "TSAWARE",
+    "comment": "Terminal Server",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SwapRunFromCD",
+    "switch": "SWAPRUN:CD",
+    "comment": "Swap Run From CD",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SwapRunFromNET",
+    "switch": "SWAPRUN:NET",
+    "comment": "Swap Run From Network",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "OptimizeReferences",
+    "switch": "OPT:NOREF",
+    "comment": "References",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "OptimizeReferences",
+    "switch": "OPT:REF",
+    "comment": "References",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableCOMDATFolding",
+    "switch": "OPT:NOICF",
+    "comment": "Enable COMDAT Folding",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "EnableCOMDATFolding",
+    "switch": "OPT:ICF",
+    "comment": "Enable COMDAT Folding",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "IgnoreEmbeddedIDL",
+    "switch": "IGNOREIDL",
+    "comment": "Ignore Embedded IDL",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AppContainer",
+    "switch": "APPCONTAINER",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataLinkDelaySign",
+    "switch": "WINMDDELAYSIGN:NO",
+    "comment": "Windows Metadata Delay Sign",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "WindowsMetadataLinkDelaySign",
+    "switch": "WINMDDELAYSIGN",
+    "comment": "Windows Metadata Delay Sign",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "NoEntryPoint",
+    "switch": "NOENTRY",
+    "comment": "No Entry Point",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SetChecksum",
+    "switch": "RELEASE",
+    "comment": "Set Checksum",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "RandomizedBaseAddress",
+    "switch": "DYNAMICBASE:NO",
+    "comment": "Randomized Base Address",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "RandomizedBaseAddress",
+    "switch": "DYNAMICBASE",
+    "comment": "Randomized Base Address",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "FixedBaseAddress",
+    "switch": "FIXED:NO",
+    "comment": "Fixed Base Address",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "FixedBaseAddress",
+    "switch": "FIXED",
+    "comment": "Fixed Base Address",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "DataExecutionPrevention",
+    "switch": "NXCOMPAT:NO",
+    "comment": "Data Execution Prevention (DEP)",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "DataExecutionPrevention",
+    "switch": "NXCOMPAT",
+    "comment": "Data Execution Prevention (DEP)",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TurnOffAssemblyGeneration",
+    "switch": "NOASSEMBLY",
+    "comment": "Turn Off Assembly Generation",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SupportUnloadOfDelayLoadedDLL",
+    "switch": "DELAY:UNLOAD",
+    "comment": "Unload delay loaded DLL",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SupportNobindOfDelayLoadedDLL",
+    "switch": "DELAY:NOBIND",
+    "comment": "Nobind delay loaded DLL",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "Profile",
+    "switch": "PROFILE",
+    "comment": "Profile",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "LinkDelaySign",
+    "switch": "DELAYSIGN:NO",
+    "comment": "Delay Sign",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "LinkDelaySign",
+    "switch": "DELAYSIGN",
+    "comment": "Delay Sign",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "CLRUnmanagedCodeCheck",
+    "switch": "CLRUNMANAGEDCODECHECK:NO",
+    "comment": "CLR Unmanaged Code Check",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "CLRUnmanagedCodeCheck",
+    "switch": "CLRUNMANAGEDCODECHECK",
+    "comment": "CLR Unmanaged Code Check",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "DetectOneDefinitionRule",
+    "switch": "ODR",
+    "comment": "Detect One Definition Rule violations",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ImageHasSafeExceptionHandlers",
+    "switch": "SAFESEH:NO",
+    "comment": "Image Has Safe Exception Handlers",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "ImageHasSafeExceptionHandlers",
+    "switch": "SAFESEH",
+    "comment": "Image Has Safe Exception Handlers",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "LinkDLL",
+    "switch": "DLL",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AdditionalLibraryDirectories",
+    "switch": "LIBPATH:",
+    "comment": "Additional Library Directories",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "IgnoreSpecificDefaultLibraries",
+    "switch": "NODEFAULTLIB:",
+    "comment": "Ignore Specific Default Libraries",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "AddModuleNamesToAssembly",
+    "switch": "ASSEMBLYMODULE:",
+    "comment": "Add Module to Assembly",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "EmbedManagedResourceFile",
+    "switch": "ASSEMBLYRESOURCE:",
+    "comment": "Embed Managed Resource File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ForceSymbolReferences",
+    "switch": "INCLUDE:",
+    "comment": "Force Symbol References",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "DelayLoadDLLs",
+    "switch": "DELAYLOAD:",
+    "comment": "Delay Loaded Dlls",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "AssemblyLinkResource",
+    "switch": "ASSEMBLYLINKRESOURCE:",
+    "comment": "Assembly Link Resource",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "AdditionalManifestDependencies",
+    "switch": "MANIFESTDEPENDENCY:",
+    "comment": "Additional Manifest Dependencies",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ManifestInput",
+    "switch": "manifestinput:",
+    "comment": "Manifest Input",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "OutputFile",
+    "switch": "OUT:",
+    "comment": "Output File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "Version",
+    "switch": "VERSION:",
+    "comment": "Version",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "SpecifySectionAttributes",
+    "switch": "SECTION:",
+    "comment": "Specify Section Attributes",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "MSDOSStubFileName",
+    "switch": "STUB:",
+    "comment": "MS-DOS Stub File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ModuleDefinitionFile",
+    "switch": "DEF:",
+    "comment": "Module Definition File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ManifestFile",
+    "switch": "ManifestFile:",
+    "comment": "Manifest File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ProgramDatabaseFile",
+    "switch": "PDB:",
+    "comment": "Generate Program Database File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "StripPrivateSymbols",
+    "switch": "PDBSTRIPPED:",
+    "comment": "Strip Private Symbols",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "MapFileName",
+    "switch": "MAP:",
+    "comment": "Map File Name",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "HeapReserveSize",
+    "switch": "HEAP:",
+    "comment": "Heap Reserve Size",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "HeapCommitSize",
+    "switch": "HEAP",
+    "comment": "Heap Commit Size",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "StackReserveSize",
+    "switch": "STACK:",
+    "comment": "Stack Reserve Size",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "StackCommitSize",
+    "switch": "STACK",
+    "comment": "Stack Commit Size",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "FunctionOrder",
+    "switch": "ORDER:@",
+    "comment": "Function Order",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ProfileGuidedDatabase",
+    "switch": "PGD:",
+    "comment": "Profile Guided Database",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "MidlCommandFile",
+    "switch": "MIDL:@",
+    "comment": "MIDL Commands",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "MergedIDLBaseFileName",
+    "switch": "IDLOUT:",
+    "comment": "Merged IDL Base File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "TypeLibraryFile",
+    "switch": "TLBOUT:",
+    "comment": "Type Library",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "WindowsMetadataFile",
+    "switch": "WINMDFILE:",
+    "comment": "Windows Metadata File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "WindowsMetadataLinkKeyFile",
+    "switch": "WINMDKEYFILE:",
+    "comment": "Windows Metadata Key File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "WindowsMetadataKeyContainer",
+    "switch": "WINMDKEYCONTAINER:",
+    "comment": "Windows Metadata Key Container",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "EntryPointSymbol",
+    "switch": "ENTRY:",
+    "comment": "Entry Point",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "BaseAddress",
+    "switch": "BASE:",
+    "comment": "Base Address",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ImportLibrary",
+    "switch": "IMPLIB:",
+    "comment": "Import Library",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "LinkKeyFile",
+    "switch": "KEYFILE:",
+    "comment": "Key File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "KeyContainer",
+    "switch": "KEYCONTAINER:",
+    "comment": "Key Container",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "TypeLibraryResourceID",
+    "switch": "TLBID:",
+    "comment": "TypeLib Resource ID",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "SectionAlignment",
+    "switch": "ALIGN:",
+    "comment": "SectionAlignment",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

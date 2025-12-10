@@ -1,0 +1,25 @@
+CMP0024
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Disallow include export result.
+
+CMake 2.8.12 and lower allowed use of the :command:`include` command with the
+result of the :command:`export` command.  This relies on the assumption that
+the :command:`export` command has an immediate effect at configure-time during
+a cmake run.  Certain properties of targets are not fully determined
+until later at generate-time, such as the link language and complete
+list of link libraries.  Future refactoring will change the effect of
+the :command:`export` command to be executed at generate-time.  Use ``ALIAS``
+targets instead in cases where the goal is to refer to targets by
+another name.
+
+The ``OLD`` behavior for this policy is to allow including the result of
+an :command:`export` command.  The ``NEW`` behavior for this policy is not to
+allow including the result of an :command:`export` command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

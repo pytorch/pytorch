@@ -1,0 +1,38 @@
+CMP0177
+-------
+
+.. versionadded:: 3.31
+
+:command:`install` ``DESTINATION`` paths are normalized.
+
+The :command:`install` command has a number of different forms, and most of
+them take a ``DESTINATION`` keyword, some in more than one place.
+CMake 3.30 and earlier used the value given after the ``DESTINATION`` keyword
+as provided with no transformations.  The :command:`install(EXPORT)` form
+assumes the path contains no ``..`` or ``.`` path components when computing
+a path relative to the ``DESTINATION``, and if the project provided a path
+that violated that assumption, the computed path would be incorrect.
+
+CMake 3.31 normalizes all ``DESTINATION`` values given in any form of the
+:command:`install` command, except for the ``INCLUDES DESTINATION`` of the
+:command:`install(TARGETS)` form.  The normalization performed is the same
+as for the :command:`cmake_path` command (see :ref:`Normalization`).
+
+The ``OLD`` behavior of this policy performs no translation on the
+``DESTINATION`` values of any :command:`install` command.  They are used
+exactly as provided.  If a destination path contains ``..`` or ``.`` path
+components, :command:`install(EXPORT)` will use the same wrong paths as
+CMake 3.30 and earlier.
+
+The ``NEW`` behavior will normalize all ``DESTINATION`` values except for
+``INCLUDES DESTINATION``.  If a destination path contains a generator
+expression, it will be wrapped in a ``$<PATH:CMAKE_PATH,NORMALIZE,...>``
+generator expression.
+
+This policy was introduced in CMake version 3.31.
+It may be set by :command:`cmake_policy` or :command:`cmake_minimum_required`.
+If it is not set, CMake will warn if it detects a path that would be different
+if normalized, and uses ``OLD`` behavior.  If a destination path contains a
+generator expression, no such warning will be issued regardless of the value.
+
+.. include:: include/DEPRECATED.rst

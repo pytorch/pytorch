@@ -1,0 +1,149 @@
+[
+  {
+    "name":  "Optimization",
+    "switch": "Od",
+    "comment": "Disabled",
+    "value": "Od",
+    "flags": []
+  },
+  {
+    "name":  "Optimization",
+    "switch": "O1",
+    "comment": "Minimize Size",
+    "value": "O1",
+    "flags": []
+  },
+  {
+    "name":  "Optimization",
+    "switch": "O2",
+    "comment": "Maximize Speed",
+    "value": "O2",
+    "flags": []
+  },
+  {
+    "name":  "Optimization",
+    "switch": "Ox",
+    "comment": "Full Optimization",
+    "value": "O3",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "MT",
+    "comment": "Multi-Threaded",
+    "value": "MT",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "MTd",
+    "comment": "Multi-Threaded Debug",
+    "value": "MTd",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "MD",
+    "comment": "Multi-Threaded DLL",
+    "value": "MD",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "MDd",
+    "comment": "Multi-threaded Debug DLL",
+    "value": "MDd",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "ML",
+    "comment": "Single-Threaded",
+    "value": "ML",
+    "flags": []
+  },
+  {
+    "name":  "Runtime",
+    "switch": "MLd",
+    "comment": "Single-Threaded Debug",
+    "value": "MLd",
+    "flags": []
+  },
+  {
+    "name":  "RuntimeChecks",
+    "switch": "RTCs",
+    "comment": "Stack Frames",
+    "value": "RTCs",
+    "flags": []
+  },
+  {
+    "name":  "RuntimeChecks",
+    "switch": "RTCu",
+    "comment": "Uninitialized Variables",
+    "value": "RTCu",
+    "flags": []
+  },
+  {
+    "name":  "RuntimeChecks",
+    "switch": "RTC1",
+    "comment": "Both",
+    "value": "RTC1",
+    "flags": []
+  },
+  {
+    "name":  "TypeInfo",
+    "switch": "GR",
+    "comment": "Yes",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "TypeInfo",
+    "switch": "GR-",
+    "comment": "No",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "W0",
+    "comment": "Off: Turn Off All Warnings",
+    "value": "W0",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "W1",
+    "comment": "Level 1",
+    "value": "W1",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "W2",
+    "comment": "Level 2",
+    "value": "W2",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "W3",
+    "comment": "Level 3",
+    "value": "W3",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "W4",
+    "comment": "Level 4",
+    "value": "W4",
+    "flags": []
+  },
+  {
+    "name":  "Warning",
+    "switch": "Wall",
+    "comment": "Enable All Warnings",
+    "value": "Wall",
+    "flags": []
+  }
+]

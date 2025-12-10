@@ -1,0 +1,27 @@
+CMP0151
+-------
+
+.. versionadded:: 3.27
+
+AUTOMOC include directory is a system include directory by default.
+
+Headers generated for :ref:`Qt AUTOMOC` are placed in target-specific include
+directories.  CMake 3.26 and older added these as normal include directories.
+CMake 3.27 and newer prefer to add them as system include directories.
+This policy provides compatibility for projects that have not been updated
+to expect this.
+
+If the :prop_tgt:`AUTOGEN_USE_SYSTEM_INCLUDE` target property is set,
+perhaps via the :variable:`CMAKE_AUTOGEN_USE_SYSTEM_INCLUDE` variable,
+then its value is used regardless of the setting of this policy.
+
+The ``OLD`` behavior for this policy is to add autogen include directory to
+the target's include directories.
+The ``NEW`` behavior for this policy is to add autogen include directory to
+the target's system include directories.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

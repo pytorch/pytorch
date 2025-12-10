@@ -1,0 +1,29 @@
+@CHECK_PROTOTYPE_DEFINITION_HEADER@
+
+static void cmakeRequireSymbol(int dummy, ...) {
+  (void) dummy;
+}
+
+static void checkSymbol(void) {
+#ifndef @CHECK_PROTOTYPE_DEFINITION_SYMBOL@
+  cmakeRequireSymbol(0, &@CHECK_PROTOTYPE_DEFINITION_SYMBOL@);
+#endif
+}
+
+@CHECK_PROTOTYPE_DEFINITION_PROTO@ {
+  return @CHECK_PROTOTYPE_DEFINITION_RETURN@;
+}
+
+#ifdef __CLASSIC_C__
+int main() {
+  int ac;
+  char*av[];
+#else
+int main(int ac, char *av[]) {
+#endif
+  checkSymbol();
+  if (ac > 1000) {
+    return *av[0];
+  }
+  return 0;
+}

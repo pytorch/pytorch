@@ -1,0 +1,6 @@
+set(ExternalData_OBJECT_STORES "@ExternalData_OBJECT_STORES@")
+set(ExternalData_URL_TEMPLATES "@ExternalData_URL_TEMPLATES@")
+set(ExternalData_TIMEOUT_INACTIVITY "@ExternalData_TIMEOUT_INACTIVITY@")
+set(ExternalData_TIMEOUT_ABSOLUTE "@ExternalData_TIMEOUT_ABSOLUTE@")
+set(ExternalData_NO_SYMLINKS "@ExternalData_NO_SYMLINKS@")
+@_ExternalData_CONFIG_CODE@

@@ -1,0 +1,243 @@
+CMake 3.29 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.28 include the following.
+
+New Features
+============
+
+Command-Line
+------------
+
+* :manual:`cmake(1)` :option:`-E cat <cmake-E cat>` can now print the standard
+  input by passing the ``-`` argument.
+
+Generators
+----------
+
+* :ref:`Visual Studio Generators` now support selecting between the
+  Intel oneAPI Fortran compiler (``ifx``) and the Intel classic Fortran
+  compiler (``ifort``) using a ``fortran=`` field in
+  :variable:`CMAKE_GENERATOR_TOOLSET`.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field has
+  been updated to 2.7.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object gained
+  a new "launchers" field.
+
+Compilers
+---------
+
+* The LLVM/Clang GNU-like frontend on Windows (``clang++``) may now be used
+  to compile ``CUDA`` language sources.
+
+* Compilers targeting the GNU ABI on Windows (MinGW) may now be used to
+  compile Objective C (``OBJC``) and Objective C++ (``OBJCXX``).  These
+  include GNU compilers (``gcc`` and ``g++``) and the LLVM/Clang GNU-like
+  frontends (``clang`` and ``clang++``).
+
+* TI Clang-based compilers are now supported with
+  :variable:`compiler id <CMAKE_<LANG>_COMPILER_ID>` ``TIClang``.
+
+Commands
+--------
+
+* The :ref:`add_custom_command(TARGET) <add_custom_command(TARGET)>`
+  signature now supports adding build events through :ref:`Alias Targets`.
+
+* The :command:`cmake_language(EXIT)` sub-command was added to terminate
+  :option:`cmake -P` scripts with a specified exit code.
+
+* The :command:`export(SETUP)` sub-command was added to configure export sets.
+  Its ``TARGET`` option's ``XCFRAMEWORK_LOCATION`` setting specifies the
+  location of a ``.xcframework`` that can be substituted for an installed
+  target.
+
+* The :command:`if` command gained new tests ``IS_READABLE``, ``IS_WRITABLE``
+  and ``IS_EXECUTABLE`` to check file or directory permissions.
+
+* The :command:`try_compile` and :command:`try_run` commands gained a
+  ``LINKER_LANGUAGE`` option to specify the :prop_tgt:`LINKER_LANGUAGE`
+  target property in the generated test project.
+
+Variables
+---------
+
+* The :envvar:`CMAKE_INSTALL_PREFIX` environment variable was added to
+  provide a default value for the :variable:`CMAKE_INSTALL_PREFIX` variable.
+
+* The :variable:`CMAKE_LINKER_TYPE` variable and corresponding
+  :prop_tgt:`LINKER_TYPE` target property were added to specify
+  what linker to use with some toolchains.
+
+* The :variable:`CMAKE_<LANG>_COMPILER_LINKER`,
+  :variable:`CMAKE_<LANG>_COMPILER_LINKER_ID`,
+  :variable:`CMAKE_<LANG>_COMPILER_LINKER_VERSION` and
+  :variable:`CMAKE_<LANG>_COMPILER_LINKER_FRONTEND_VARIANT` variables
+  were added to describe the linker used by the language's link step.
+
+* The :variable:`CMAKE_PROJECT_INCLUDE`,
+  :variable:`CMAKE_PROJECT_INCLUDE_BEFORE`,
+  :variable:`CMAKE_PROJECT_<PROJECT-NAME>_INCLUDE`, and
+  :variable:`CMAKE_PROJECT_<PROJECT-NAME>_INCLUDE_BEFORE` variables learned
+  to support a :ref:`semicolon-separated list <CMake Language Lists>` of
+  CMake language files to be included sequentially. These variables can also
+  reference module names to be found in :variable:`CMAKE_MODULE_PATH` or
+  builtin to CMake.
+
+* The :variable:`CMAKE_SKIP_TEST_ALL_DEPENDENCY` variable was added
+  to control whether the ``test`` (or ``RUN_TESTS``) buildsystem
+  target depends on the ``all`` (or ``ALL_BUILD``) target.
+
+* A :variable:`CMAKE_TEST_LAUNCHER` variable and corresponding
+  :prop_tgt:`TEST_LAUNCHER` target property were added to specify
+  a launcher to be used by executable targets when invoked by
+  tests added by the :command:`add_test` command.
+
+Properties
+----------
+
+* The :prop_tgt:`CROSSCOMPILING_EMULATOR` target property now
+  supports :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`UNITY_BUILD` target property now supports the
+  Objective C (``OBJC``) and Objective C++ (``OBJCXX``) languages.
+
+* The :prop_tgt:`XCODE_EMBED_XPC_SERVICES <XCODE_EMBED_<type>>` target property
+  was added to tell the :generator:`Xcode` generator what targets to put in
+  the ``Embed XPC Resources`` build phase.
+
+Modules
+-------
+
+* The :module:`CMakePackageConfigHelpers` module gained new
+  :command:`generate_apple_platform_selection_file` and
+  :command:`generate_apple_architecture_selection_file` functions, which can
+  be used to generate a file that includes another Apple-platform-specific
+  file or the includes an architecture-specific implementation of a package
+  for an Apple platform, respectively.
+
+* The :module:`FindOpenGL` module learned to find a GLU include
+  directory different than the GL include directory.  A new
+  ``OPENGL_INCLUDE_DIRS`` result variable provides all include
+  directories.
+
+CTest
+-----
+
+* :manual:`ctest(1)` gained a :option:`--http-header <ctest --http-header>`
+  option to add custom headers on submission to CDash.
+
+* :manual:`ctest(1)` gained the :option:`--tests-from-file <ctest
+  --tests-from-file>` and :option:`--exclude-from-file <ctest
+  --exclude-from-file>` options to run or exclude tests named in a file.
+
+* :manual:`ctest(1)` now supports :ref:`job server integration
+  <ctest-job-server-integration>` on POSIX systems.
+
+* The :option:`ctest -j` option may now be given without a value to let
+  ctest choose a default level of parallelism, or with ``0`` to let ctest
+  use unbounded parallelism.  The corresponding :envvar:`CTEST_PARALLEL_LEVEL`
+  environment variable, if set to the empty string, is now equivalent to
+  passing ``-j`` with no value.
+
+* The :command:`ctest_test` command gained options
+  ``INCLUDE_FROM_FILE`` and ``EXCLUDE_FROM_FILE`` to run or exclude
+  tests named in a file.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DEB Generator` :variable:`CPACK_DEBIAN_FILE_NAME`
+  variable may now be set without any suffix, and the ``.deb`` suffix
+  will be added automatically.
+
+* The :cpack_gen:`CPack RPM Generator` :variable:`CPACK_RPM_FILE_NAME`
+  variable may now be set without any suffix, and the ``.rpm`` suffix
+  will be added automatically.
+
+* The :cpack_gen:`CPack WIX Generator` gained a new variable,
+  :variable:`CPACK_WIX_INSTALL_SCOPE`, to control the
+  ``InstallScope`` property of WiX MSI installers.
+
+Other Changes
+=============
+
+* CMake learned to de-duplicate libraries on link lines based on linker
+  capabilities.  See policy :policy:`CMP0156`.
+
+* The :command:`add_test` command now honors
+  :variable:`CMAKE_CROSSCOMPILING_EMULATOR` only when cross-compiling.
+  See policy :policy:`CMP0158`.
+
+* On Windows, when targeting the MSVC ABI, the :command:`find_library` command
+  now accepts ``.a`` file names after first considering ``.lib``.  This is
+  symmetric with existing behavior when targeting the GNU ABI, in which the
+  command accepts ``.lib`` file names after first considering ``.a``.
+
+* On Windows, when targeting the MSVC ABI, the :command:`find_library` command
+  now considers ``.dll.lib`` file names before ``.lib``.  This is the default
+  suffix for DLL import libraries created by Rust toolchains for the MSVC ABI.
+
+* The :generator:`Ninja` and :generator:`NMake Makefiles` generators now use
+  the ``-external:I`` flag for system includes when using IntelLLVM as of
+  version 2021.4. The ``-external:W0`` flag is also used as of version 2022.2.
+
+* The :command:`create_test_sourcelist` command now provides a full path to
+  the generated driver source file.
+
+* The :variable:`CPACK_PRODUCTBUILD_DOMAINS` variable now defaults to true.
+  See policy :policy:`CMP0161`.
+
+Updates
+=======
+
+Changes made since CMake 3.29.0 include the following.
+
+3.29.1
+------
+
+* The :variable:`CMAKE_LINKER_TYPE` variable and corresponding
+  :prop_tgt:`LINKER_TYPE` target property now work with compilers
+  for the ``Swift`` language.
+
+3.29.2, 3.29.3, 3.29.4
+----------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.29.5
+------
+
+* The :cpack_gen:`CPack WIX Generator`'s :variable:`CPACK_WIX_INSTALL_SCOPE`
+  variable, new in 3.29, now defaults to ``NONE``.  This restores
+  compatibility with behavior of 3.28 and below: without a custom WiX
+  template, it produces installers that only create start menu and
+  uninstall entries for the current user, even though they install
+  for all users.
+
+  In 3.29.0 through 3.29.4, ``CPACK_WIX_INSTALL_SCOPE`` defaulted to
+  ``perMachine``.  This created MSI installers that create start menu
+  and uninstall entries for all users by default.  While this behavior
+  is better on its own, these installers do not cleanly replace existing
+  installations created with MSI installers produced by 3.28 and below.
+  3.29.5 reverts the default for compatibility.  Projects may transition
+  to ``perMachine`` on their own schedule by setting
+  ``CPACK_WIX_INSTALL_SCOPE``.
+
+3.29.6, 3.29.7, 3.29.8, 3.29.9
+------------------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

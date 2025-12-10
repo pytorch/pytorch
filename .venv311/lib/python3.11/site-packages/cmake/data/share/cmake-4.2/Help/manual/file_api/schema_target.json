@@ -1,0 +1,1579 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake codemodel target object",
+  "type": "object",
+  "oneOf": [
+    {
+      "$comment": "The top level codemodelVersion field was only added in version 2.9, so we can't differentiate between earlier versions",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/codemodelV2_0"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_1"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_2"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_5"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_6"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_7"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_8"
+        }
+      ]
+    },
+    {
+      "$ref": "#/definitions/codemodelV2_9"
+    }
+  ],
+  "definitions": {
+    "codemodelVersionV2_9": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 9
+        }
+      },
+      "additionalProperties": false
+    },
+    "name": {
+      "type": "string",
+      "description": "Logical name of the target"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the target. The format is unspecified and should not be interpreted by clients."
+    },
+    "typeV2_0": {
+      "type": "string",
+      "enum": [
+        "EXECUTABLE",
+        "STATIC_LIBRARY",
+        "SHARED_LIBRARY",
+        "MODULE_LIBRARY",
+        "OBJECT_LIBRARY",
+        "INTERFACE_LIBRARY",
+        "UTILITY"
+      ]
+    },
+    "typeV2_9": {
+      "type": "string",
+      "enum": [
+        "EXECUTABLE",
+        "STATIC_LIBRARY",
+        "SHARED_LIBRARY",
+        "MODULE_LIBRARY",
+        "OBJECT_LIBRARY",
+        "INTERFACE_LIBRARY",
+        "UNKNOWN_LIBRARY",
+        "UTILITY"
+      ]
+    },
+    "importedV2_9": {
+      "type": "boolean",
+      "description": "True if the target is imported"
+    },
+    "localV2_9": {
+      "type": "boolean",
+      "description": "True if the target is defined in a local scope rather than being a global target"
+    },
+    "symbolicV2_9": {
+      "type": "boolean",
+      "description": "True if an interface target has the SYMBOLIC property set"
+    },
+    "abstractV2_9": {
+      "type": "boolean",
+      "description": "True if the target is not part of the build system"
+    },
+    "backtrace": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index into backtraceGraph nodes array"
+    },
+    "folder": {
+      "type": "object",
+      "description": "This will only be present if the FOLDER target property is set",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the folder to place the target under in IDEs and other GUI tools"
+        }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "source",
+        "build"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Path to the source directory. If it is inside the top level source directory, the path will be relative to that directory. For the top level source directory, this will simply be '.'. Paths outside the top level source directory will be absolute."
+        },
+        "build": {
+          "type": "string",
+          "description": "Path to the build directory. If it is inside the top level build directory, the path will be relative to that directory. For the top level build directory, this will simply be '.'. Paths outside the top level build directory will be absolute."
+        }
+      },
+      "additionalProperties": false
+    },
+    "nameOnDisk": {
+      "type": "string",
+      "description": "File name of the primary artifact on disk, only present for executable and library targets that are linked or archived into a single primary artifact"
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Only present for executable and library targets that produce artifacts on disk meant for consumption by dependents",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to artifact file on disk. If the file is inside the top-level build directory, the path is specified relative to that directory. Otherwise, the path is absolute."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "isGeneratorProvided": {
+      "type": "boolean",
+      "description": "Only present and will have the value true if the target is provided by CMake's build system generator rather than by a command in the project's source code"
+    },
+    "install": {
+      "type": "object",
+      "description": "Only present if the target has an install() rule",
+      "required": [
+        "prefix",
+        "destinations"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The value of CMAKE_INSTALL_PREFIX"
+            }
+          },
+          "additionalProperties": false
+        },
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Install destination path. It may be absolute or relative to the install prefix."
+              },
+              "backtrace": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Index into the backtraceGraph nodes array, if a backtrace is available"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "launchersV2_7": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "command",
+          "type"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Path to the launcher on disk. If the file is inside the top-level source directory, the path is specified relative to that directory."
+          },
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments preceding the executable"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "emulator",
+              "test"
+            ],
+            "description": "Type of launcher"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "link": {
+      "type": "object",
+      "description": "This is only present for executables and shared library targets that link into a runtime binary",
+      "required": [
+        "language"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "Language of the toolchain used to invoke the linker"
+        },
+        "commandFragments": {
+          "type": "array",
+          "description": "Ordered fragments of the link command line, if available",
+          "items": {
+            "type": "object",
+            "required": [
+              "fragment",
+              "role"
+            ],
+            "properties": {
+              "fragment": {
+                "type": "string",
+                "description": "Fragment of link command line"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "flags",
+                  "libraries",
+                  "libraryPath",
+                  "frameworkPath"
+                ],
+                "description": "Role of the fragment content"
+              },
+              "backtrace": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Index into backtraceGraph nodes array for the command that added the link fragment, if available"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "lto": {
+          "type": "boolean",
+          "description": "True if link-time optimization is enabled"
+        },
+        "sysroot": {
+          "type": "object",
+          "description": "Only present when the CMAKE_SYSROOT_LINK or CMAKE_SYSROOT variable is defined",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute path to the sysroot"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "archive": {
+      "type": "object",
+      "description": "Only present for static library targets",
+      "properties": {
+        "commandFragments": {
+          "type": "array",
+          "description": "Ordered fragments of the archiver command line, if available",
+          "items": {
+            "type": "object",
+            "required": [
+              "fragment",
+              "role"
+            ],
+            "properties": {
+              "fragment": {
+                "type": "string",
+                "description": "Fragment of the archiver command line"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "flags"
+                ],
+                "description": "Role of the fragment content"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "lto": {
+          "type": "boolean",
+          "description": "True if link-time optimization is enabled"
+        }
+      },
+      "additionalProperties": false
+    },
+    "debuggerV2_8": {
+      "type": "object",
+      "properties": {
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory for a debugger"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of another target on which this one depends"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "linkLibrariesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the target for the dependency"
+          },
+          "fragment": {
+            "type": "string",
+            "description": "Raw linker command line arguments that capture the dependency"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          },
+          "fromDependency": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier of another target whose INTERFACE_LINK_LIBRARIES_DIRECT property created this dependency"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "interfaceLinkLibrariesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the target for the dependency"
+          },
+          "fragment": {
+            "type": "string",
+            "description": "Raw linker command line arguments that capture the dependency"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileDependenciesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the target for the dependency"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          },
+          "fromDependency": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier of another target whose INTERFACE_LINK_LIBRARIES_DIRECT property created this dependency"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "interfaceCompileDependenciesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the target for the dependency"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "onlyTargetDependenciesArrayV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier of the target for the dependency"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into backtraceGraph nodes array of the command that created the dependency, if available"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "fileSetsV2_5": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "visibility",
+          "baseDirectories"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "HEADERS",
+              "CXX_MODULES"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "PRIVATE",
+              "INTERFACE"
+            ]
+          },
+          "baseDirectories": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Base directories containing the file set's files. If a directory is inside the top level source directory, its path is specified relative to that directory. Otherwise, its path is absolute."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sourcesPath": {
+      "type": "string",
+      "description": "Path to the source file. If the file is inside the top level source directory, the path is specified relative to that directory. Otherwise, the path is absolute."
+    },
+    "sourcesCompileGroupIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index into the compileGroups array. Only present if the file is compiled."
+    },
+    "sourcesSourceGroupIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index into the sourceGroups array. Only present if the file is part of a source group."
+    },
+    "sourcesIsGenerated": {
+      "type": "boolean",
+      "description": "True if the file has its GENERATED property set to true"
+    },
+    "sourcesFileSetIndexV2_5": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index into the fileSets array. Only present if the file is part of a file set."
+    },
+    "sourcesV2_0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/definitions/sourcesPath"
+          },
+          "compileGroupIndex": {
+            "$ref": "#/definitions/sourcesCompileGroupIndex"
+          },
+          "sourceGroupIndex": {
+            "$ref": "#/definitions/sourcesSourceGroupIndex"
+          },
+          "isGenerated": {
+            "$ref": "#/definitions/sourcesIsGenerated"
+          },
+          "backtrace": {
+            "$ref": "#/definitions/backtrace"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sourcesV2_5": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/definitions/sourcesPath"
+          },
+          "compileGroupIndex": {
+            "$ref": "#/definitions/sourcesCompileGroupIndex"
+          },
+          "sourceGroupIndex": {
+            "$ref": "#/definitions/sourcesSourceGroupIndex"
+          },
+          "isGenerated": {
+            "$ref": "#/definitions/sourcesIsGenerated"
+          },
+          "backtrace": {
+            "$ref": "#/definitions/backtrace"
+          },
+          "fileSetIndex": {
+            "$ref": "#/definitions/sourcesFileSetIndexV2_5"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sourceGroups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "sourceIndexes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of source group"
+          },
+          "sourceIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into sources array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsSourceIndexes": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Indices into the sources array for sources belonging to the group"
+    },
+    "compileGroupsLanguage": {
+      "type": "string",
+      "description": "Language used to compile sources in the group"
+    },
+    "compileGroupsLanguageStandardV2_2": {
+      "type": "object",
+      "required": [
+        "backtraces",
+        "standard"
+      ],
+      "properties": {
+        "backtraces": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Indices into the backtraceGraph nodes array"
+        },
+        "standard": {
+          "type": "string",
+          "description": "Language standard"
+        }
+      },
+      "additionalProperties": false
+    },
+    "compileGroupsCompileCommandFragments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "fragment"
+        ],
+        "properties": {
+          "fragment": {
+            "type": "string",
+            "description": "Fragment of the compile command line"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the backtraceGraph nodes array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsIncludes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Include directory path"
+          },
+          "isSystem": {
+            "type": "boolean",
+            "description": "True if the path is a system include directory"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the backtraceGraph nodes array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsFrameworksV2_6": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Framework directory path"
+          },
+          "isSystem": {
+            "type": "boolean",
+            "description": "True if the path is to a system framework directory"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the backtraceGraph nodes array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsPrecompileHeadersV2_1": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "header"
+        ],
+        "properties": {
+          "header": {
+            "type": "string",
+            "description": "Path to the precompile header file"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the backtraceGraph nodes array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsDefines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "define"
+        ],
+        "properties": {
+          "define": {
+            "type": "string",
+            "description": "Preprocessor definition in name or name=value format"
+          },
+          "backtrace": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into the backtraceGraph nodes array"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsSysroot": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the sysroot"
+        }
+      },
+      "additionalProperties": false
+    },
+    "compileGroupsV2_0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sourceIndexes",
+          "language"
+        ],
+        "properties": {
+          "sourceIndexes": {
+            "$ref": "#/definitions/compileGroupsSourceIndexes"
+          },
+          "language": {
+            "$ref": "#/definitions/compileGroupsLanguage"
+          },
+          "compileCommandFragments": {
+            "$ref": "#/definitions/compileGroupsCompileCommandFragments"
+          },
+          "includes": {
+            "$ref": "#/definitions/compileGroupsIncludes"
+          },
+          "defines": {
+            "$ref": "#/definitions/compileGroupsDefines"
+          },
+          "sysroot": {
+            "$ref": "#/definitions/compileGroupsSysroot"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsV2_1": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sourceIndexes",
+          "language"
+        ],
+        "properties": {
+          "sourceIndexes": {
+            "$ref": "#/definitions/compileGroupsSourceIndexes"
+          },
+          "language": {
+            "$ref": "#/definitions/compileGroupsLanguage"
+          },
+          "compileCommandFragments": {
+            "$ref": "#/definitions/compileGroupsCompileCommandFragments"
+          },
+          "includes": {
+            "$ref": "#/definitions/compileGroupsIncludes"
+          },
+          "precompileHeaders": {
+            "$ref": "#/definitions/compileGroupsPrecompileHeadersV2_1"
+          },
+          "defines": {
+            "$ref": "#/definitions/compileGroupsDefines"
+          },
+          "sysroot": {
+            "$ref": "#/definitions/compileGroupsSysroot"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsV2_2": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sourceIndexes",
+          "language"
+        ],
+        "properties": {
+          "sourceIndexes": {
+            "$ref": "#/definitions/compileGroupsSourceIndexes"
+          },
+          "language": {
+            "$ref": "#/definitions/compileGroupsLanguage"
+          },
+          "languageStandard": {
+            "$ref": "#/definitions/compileGroupsLanguageStandardV2_2"
+          },
+          "compileCommandFragments": {
+            "$ref": "#/definitions/compileGroupsCompileCommandFragments"
+          },
+          "includes": {
+            "$ref": "#/definitions/compileGroupsIncludes"
+          },
+          "precompileHeaders": {
+            "$ref": "#/definitions/compileGroupsPrecompileHeadersV2_1"
+          },
+          "defines": {
+            "$ref": "#/definitions/compileGroupsDefines"
+          },
+          "sysroot": {
+            "$ref": "#/definitions/compileGroupsSysroot"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "compileGroupsV2_6": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sourceIndexes",
+          "language"
+        ],
+        "properties": {
+          "sourceIndexes": {
+            "$ref": "#/definitions/compileGroupsSourceIndexes"
+          },
+          "language": {
+            "$ref": "#/definitions/compileGroupsLanguage"
+          },
+          "languageStandard": {
+            "$ref": "#/definitions/compileGroupsLanguageStandardV2_2"
+          },
+          "compileCommandFragments": {
+            "$ref": "#/definitions/compileGroupsCompileCommandFragments"
+          },
+          "includes": {
+            "$ref": "#/definitions/compileGroupsIncludes"
+          },
+          "frameworks": {
+            "$ref": "#/definitions/compileGroupsFrameworksV2_6"
+          },
+          "precompileHeaders": {
+            "$ref": "#/definitions/compileGroupsPrecompileHeadersV2_1"
+          },
+          "defines": {
+            "$ref": "#/definitions/compileGroupsDefines"
+          },
+          "sysroot": {
+            "$ref": "#/definitions/compileGroupsSysroot"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "backtraceGraph": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "commands",
+        "files"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "file"
+            ],
+            "properties": {
+              "file": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "0-based index into the backtrace files array"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This is present when the node represents a line within the file. The line number is a 1-based value."
+              },
+              "command": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "This is present when the node represents a command invocation. It is a 0-based index into the backtrace commands array."
+              },
+              "parent": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "This is present when the node is not the bottom of the call stack. It is a 0-based index of another node in the backtrace nodes array."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "commands": {
+          "type": "array",
+          "description": "Each list item is a string specifying a command name",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "Each list item is a string specifying the path to a file, represented with forward slashes. If the file is inside the top level source directory, the path is specified relative to that directory. Otherwise, the path is absolute.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_0": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_0"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_0"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_1": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_0"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_1"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_2": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_0"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_2"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_5": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "fileSets": {
+          "$ref": "#/definitions/fileSetsV2_5"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_5"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_2"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_6": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "fileSets": {
+          "$ref": "#/definitions/fileSetsV2_5"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_5"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_6"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_7": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "launchers": {
+          "$ref": "#/definitions/launchersV2_7"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "fileSets": {
+          "$ref": "#/definitions/fileSetsV2_5"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_5"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_6"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_8": {
+      "required": [
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_0"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "launchers": {
+          "$ref": "#/definitions/launchersV2_7"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "debugger": {
+          "$ref": "#/definitions/debuggerV2_8"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "fileSets": {
+          "$ref": "#/definitions/fileSetsV2_5"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_5"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_6"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_9": {
+      "required": [
+        "codemodelVersion",
+        "name",
+        "id",
+        "type",
+        "paths",
+        "sources",
+        "backtraceGraph"
+      ],
+      "properties": {
+        "codemodelVersion": {
+          "$ref": "#/definitions/codemodelVersionV2_9"
+        },
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "$ref": "#/definitions/typeV2_9"
+        },
+        "imported": {
+          "$ref": "#/definitions/importedV2_9"
+        },
+        "local": {
+          "$ref": "#/definitions/localV2_9"
+        },
+        "abstract": {
+          "$ref": "#/definitions/abstractV2_9"
+        },
+        "backtrace": {
+          "$ref": "#/definitions/backtrace"
+        },
+        "folder": {
+          "$ref": "#/definitions/folder"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "nameOnDisk": {
+          "$ref": "#/definitions/nameOnDisk"
+        },
+        "artifacts": {
+          "$ref": "#/definitions/artifacts"
+        },
+        "isGeneratorProvided": {
+          "$ref": "#/definitions/isGeneratorProvided"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        },
+        "launchers": {
+          "$ref": "#/definitions/launchersV2_7"
+        },
+        "link": {
+          "$ref": "#/definitions/link"
+        },
+        "archive": {
+          "$ref": "#/definitions/archive"
+        },
+        "debugger": {
+          "$ref": "#/definitions/debuggerV2_8"
+        },
+        "dependencies": {
+          "$ref": "#/definitions/dependencies"
+        },
+        "linkLibraries": {
+          "$ref": "#/definitions/linkLibrariesV2_9"
+        },
+        "interfaceLinkLibraries": {
+          "$ref": "#/definitions/interfaceLinkLibrariesV2_9"
+        },
+        "compileDependencies": {
+          "$ref": "#/definitions/compileDependenciesV2_9"
+        },
+        "interfaceCompileDependencies": {
+          "$ref": "#/definitions/interfaceCompileDependenciesV2_9"
+        },
+        "objectDependencies": {
+          "$ref": "#/definitions/onlyTargetDependenciesArrayV2_9"
+        },
+        "orderDependencies": {
+          "$ref": "#/definitions/onlyTargetDependenciesArrayV2_9"
+        },
+        "fileSets": {
+          "$ref": "#/definitions/fileSetsV2_5"
+        },
+        "sources": {
+          "$ref": "#/definitions/sourcesV2_5"
+        },
+        "symbolic": {
+          "$ref": "#/definitions/symbolicV2_9"
+        },
+        "sourceGroups": {
+          "$ref": "#/definitions/sourceGroups"
+        },
+        "compileGroups": {
+          "$ref": "#/definitions/compileGroupsV2_6"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

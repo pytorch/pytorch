@@ -1,0 +1,51 @@
+CMP0156
+-------
+
+.. versionadded:: 3.29
+
+De-duplicate libraries on link lines based on linker capabilities.
+
+Traditional linkers maintain a set of undefined symbols during linking. The
+linker processes each file in the order in which it appears on the command
+line, until the set of undefined symbols becomes empty. An object file is
+linked into the output object when it is encountered, with its undefined
+symbols added to the set. Upon encountering an archive file a traditional
+linker searches the objects contained therein, and processes those that satisfy
+symbols in the unresolved set.
+
+Handling mutually dependent archives may be awkward when using a traditional
+linker. Archive files may have to be specified multiple times.
+
+Some linkers (for instance Apple or Windows linkers, as well as ``LLVM LLD``)
+record all symbols found in objects and archives as they iterate over command
+line arguments. When one of these linkers encounters an undefined symbol that
+can be resolved by an object file contained in a previously processed archive
+file, it immediately extracts and links it into the output object.
+
+CMake 3.28 and below may generate link lines that repeat static libraries as
+a traditional linker would need, even when using a linker that does not need it.
+They may also de-duplicate shared libraries by keeping their last occurrence,
+which on Windows platforms can change DLL load order.
+
+CMake 3.29 and above prefer to apply different strategies based on linker
+capabilities.  So, when targeting Apple and Windows platforms, all
+libraries are de-duplicated.  Moreover, on Windows platforms, libraries
+are de-duplicated by keeping their first occurrence, thus respecting the
+project-specified order.  This policy provides compatibility with projects
+that have not been updated to expect the latter behavior.
+
+.. note::
+
+  When this policy is set to ``NEW``, the policy :policy:`CMP0179` controls
+  which occurrence of the static libraries is kept when they are de-duplicated.
+
+The ``OLD`` behavior for this policy is to always repeat static libraries
+as if using a traditional linker, and always de-duplicate shared libraries
+by keeping the last occurrence of each.  The ``NEW`` behavior for this policy
+is to apply different strategies based on linker capabilities.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.29
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,116 @@
+CMP0058
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+Ninja requires custom command byproducts to be explicit.
+
+When an intermediate file generated during the build is consumed
+by an expensive operation or a large tree of dependents, one may
+reduce the work needed for an incremental rebuild by updating the
+file timestamp only when its content changes.  With this approach
+the generation rule must have a separate output file that is always
+updated with a new timestamp that is newer than any dependencies of
+the rule so that the build tool re-runs the rule only when the input
+changes.  We refer to the separate output file as a rule's *witness*
+and the generated file as a rule's *byproduct*.
+
+Byproducts may not be listed as outputs because their timestamps are
+allowed to be older than the inputs.  No build tools (like ``make``)
+that existed when CMake was designed have a way to express byproducts.
+Therefore CMake versions prior to 3.2 had no way to specify them.
+Projects typically left byproducts undeclared in the rules that
+generate them.  For example:
+
+.. code-block:: cmake
+
+  add_custom_command(
+    OUTPUT witness.txt
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/input.txt
+            byproduct.txt # timestamp may not change
+    COMMAND ${CMAKE_COMMAND} -E touch witness.txt
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/input.txt
+    )
+  add_custom_target(Provider DEPENDS witness.txt)
+  add_custom_command(
+    OUTPUT generated.c
+    COMMAND expensive-task -i byproduct.txt -o generated.c
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/byproduct.txt
+    )
+  add_library(Consumer generated.c)
+  add_dependencies(Consumer Provider)
+
+This works well for all generators except :generator:`Ninja`.
+The Ninja build tool sees a rule listing ``byproduct.txt``
+as a dependency and no rule listing it as an output.  Ninja then
+complains that there is no way to satisfy the dependency and
+stops building even though there are order-only dependencies
+that ensure ``byproduct.txt`` will exist before its consumers
+need it.  See discussion of this problem in `Ninja Issue 760`_
+for further details on why Ninja works this way.
+
+.. _Ninja Issue 760: https://github.com/ninja-build/ninja/issues/760
+
+Instead of leaving byproducts undeclared in the rules that generate
+them, Ninja expects byproducts to be listed along with other outputs.
+Such rules may be marked with a ``restat`` option that tells Ninja
+to check the timestamps of outputs after the rules run.  This
+prevents byproducts whose timestamps do not change from causing
+their dependents to re-build unnecessarily.
+
+Since the above approach does not tell CMake what custom command
+generates ``byproduct.txt``, the Ninja generator does not have
+enough information to add the byproduct as an output of any rule.
+CMake 2.8.12 and above work around this problem and allow projects
+using the above approach to build by generating ``phony`` build
+rules to tell Ninja to tolerate such missing files.  However, this
+workaround prevents Ninja from diagnosing a dependency that is
+really missing.  It also works poorly in in-source builds where
+every custom command dependency, even on source files, needs to
+be treated this way because CMake does not have enough information
+to know which files are generated as byproducts of custom commands.
+
+Introducing Byproducts
+^^^^^^^^^^^^^^^^^^^^^^
+
+CMake 3.2 introduced the ``BYPRODUCTS`` option to the
+:command:`add_custom_command` and :command:`add_custom_target`
+commands.  This option allows byproducts to be specified explicitly:
+
+.. code-block:: cmake
+
+  add_custom_command(
+    OUTPUT witness.txt
+    BYPRODUCTS byproduct.txt # explicit byproduct specification
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/input.txt
+            byproduct.txt # timestamp may not change
+  ...
+
+The ``BYPRODUCTS`` option is used by the :generator:`Ninja` generator
+to list byproducts among the outputs of the custom commands that
+generate them, and is ignored by other generators.
+
+CMake 3.3 and above prefer to require projects to specify custom
+command byproducts explicitly so that it can avoid using the
+``phony`` rule workaround altogether.  Policy ``CMP0058`` was
+introduced to provide compatibility with existing projects that
+still need the workaround.
+
+This policy has no effect on generators other than :generator:`Ninja`.
+The ``OLD`` behavior for this policy is to generate Ninja ``phony``
+rules for unknown dependencies in the build tree.  The ``NEW``
+behavior for this policy is to not generate these and instead
+require projects to specify custom command ``BYPRODUCTS`` explicitly.
+
+The policy setting must be in scope at the end of the top-level
+``CMakeLists.txt`` file of the project and has global effect.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace::
+   warned when it saw unknown dependencies in out-of-source build trees
+.. include:: include/REMOVED_EPILOGUE.rst

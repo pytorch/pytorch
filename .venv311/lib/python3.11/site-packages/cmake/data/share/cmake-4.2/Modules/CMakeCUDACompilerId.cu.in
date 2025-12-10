@@ -1,0 +1,110 @@
+#ifndef __CUDACC__
+# error "A C or C++ compiler has been selected for CUDA"
+#endif
+
+@CMAKE_CUDA_COMPILER_ID_CONTENT@
+
+/* Construct the string literal in pieces to prevent the source from
+   getting matched.  Store it in a pointer rather than an array
+   because some compilers will just produce instructions to fill the
+   array rather than assigning a pointer to a static array.  */
+char const* info_compiler = "INFO" ":" "compiler[" COMPILER_ID "]";
+#ifdef SIMULATE_ID
+char const* info_simulate = "INFO" ":" "simulate[" SIMULATE_ID "]";
+#endif
+
+@CMAKE_CUDA_COMPILER_ID_PLATFORM_CONTENT@
+@CMAKE_CUDA_COMPILER_ID_ERROR_FOR_TEST@
+
+#ifdef HOST_COMPILER_ID
+char const* info_host_compiler = "INFO" ":" "host_compiler[" HOST_COMPILER_ID "]";
+#endif
+#ifdef HOST_COMPILER_VERSION
+char const* info_host_compiler_version = "INFO" ":" "host_compiler_version[" HOST_COMPILER_VERSION "]";
+#elif defined(HOST_COMPILER_VERSION_MAJOR)
+char const info_host_compiler_version[] = {
+  'I', 'N', 'F', 'O', ':','h','o','s','t','_',
+  'c','o','m','p','i','l','e','r','_','v','e','r','s','i','o','n','[',
+  HOST_COMPILER_VERSION_MAJOR,
+# ifdef HOST_COMPILER_VERSION_MINOR
+  '.', HOST_COMPILER_VERSION_MINOR,
+#  ifdef HOST_COMPILER_VERSION_PATCH
+   '.', HOST_COMPILER_VERSION_PATCH,
+#   ifdef HOST_COMPILER_VERSION_TWEAK
+    '.', HOST_COMPILER_VERSION_TWEAK,
+#   endif
+#  endif
+# endif
+  ']','\0'};
+#endif
+
+#define CXX_STD_11 201103L
+#define CXX_STD_14 201402L
+#define CXX_STD_17 201703L
+#define CXX_STD_20 202002L
+#define CXX_STD_23 202302L
+
+#if defined(_MSC_VER) && defined(_MSVC_LANG)
+#  if _MSVC_LANG > __cplusplus
+#    define CXX_STD _MSVC_LANG
+#  else
+#    define CXX_STD __cplusplus
+#  endif
+#else
+#  define CXX_STD __cplusplus
+#endif
+
+const char* info_language_standard_default = "INFO" ":" "standard_default["
+#if CXX_STD > CXX_STD_23
+  "26"
+#elif CXX_STD > CXX_STD_20
+  "23"
+#elif CXX_STD > CXX_STD_17
+  "20"
+#elif CXX_STD > CXX_STD_14
+  "17"
+#elif CXX_STD > CXX_STD_11
+  "14"
+#elif CXX_STD >= CXX_STD_11
+  "11"
+#else
+  "03"
+#endif
+"]";
+
+const char* info_language_extensions_default = "INFO" ":" "extensions_default["
+#if (defined(__clang__) || defined(__GNUC__)) &&                              \
+  !defined(__STRICT_ANSI__)
+  "ON"
+#else
+  "OFF"
+#endif
+"]";
+
+/*--------------------------------------------------------------------------*/
+
+int main(int argc, char* argv[])
+{
+  int require = 0;
+  require += info_compiler[argc];
+  require += info_platform[argc];
+#ifdef COMPILER_VERSION_MAJOR
+  require += info_version[argc];
+#endif
+#ifdef SIMULATE_ID
+  require += info_simulate[argc];
+#endif
+#ifdef SIMULATE_VERSION_MAJOR
+  require += info_simulate_version[argc];
+#endif
+#ifdef HOST_COMPILER_ID
+  require += info_host_compiler[argc];
+#endif
+#ifdef HOST_COMPILER_VERSION_MAJOR
+  require += info_host_compiler_version[argc];
+#endif
+  require += info_language_standard_default[argc];
+  require += info_language_extensions_default[argc];
+  (void)argv;
+  return require;
+}

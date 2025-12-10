@@ -1,0 +1,36 @@
+CMP0180
+-------
+
+.. versionadded:: 3.31
+
+:command:`project` always sets ``<PROJECT-NAME>_*`` as normal variables.
+
+In CMake 3.29 and below, the :command:`project` command set
+:variable:`<PROJECT-NAME>_SOURCE_DIR`, :variable:`<PROJECT-NAME>_BINARY_DIR`,
+and :variable:`<PROJECT-NAME>_IS_TOP_LEVEL` as cache entries, but not as
+normal variables.  CMake 3.30 started setting them as normal variables,
+but only if they are already set as normal variables.  This was needed to
+preserve support for some :module:`FetchContent` use cases under policy
+:policy:`CMP0169`'s NEW behavior, while also preserving behavior of nested
+directories that call :command:`project` with the same project name.
+See release notes for 3.30.3, 3.30.4, and 3.30.5 for details.
+
+CMake 3.31 and later prefer to always set ``<PROJECT-NAME>_SOURCE_DIR``,
+``<PROJECT-NAME>_BINARY_DIR``, and ``<PROJECT-NAME>_IS_TOP_LEVEL``, as both
+cache entries and normal variables, regardless of what cache or normal
+variables already exist.  This policy provides compatibility for projects
+that have not been updated to expect this behavior.
+
+The ``OLD`` behavior for this policy will only set normal variables for
+``<PROJECT-NAME>_SOURCE_DIR``, ``<PROJECT-NAME>_BINARY_DIR``, and
+``<PROJECT-NAME>_IS_TOP_LEVEL`` if there is already a normal variable by that
+name when :command:`project` is called.
+The ``NEW`` behavior for this policy will always set normal variables for
+``<PROJECT-NAME>_SOURCE_DIR``, ``<PROJECT-NAME>_BINARY_DIR``, and
+``<PROJECT-NAME>_IS_TOP_LEVEL`` when :command:`project` is called.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

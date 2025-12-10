@@ -1,0 +1,25 @@
+CMP0078
+-------
+
+.. versionadded:: 3.13
+
+:module:`UseSWIG` generates standard target names.
+
+Starting with CMake 3.13, :module:`UseSWIG` generates now standard target
+names. This policy provides compatibility with projects that expect the legacy
+behavior.
+
+The ``OLD`` behavior for this policy relies on
+``UseSWIG_TARGET_NAME_PREFERENCE`` variable that can be used to specify an
+explicit preference.  The value may be one of:
+
+* ``LEGACY``: legacy strategy is applied. Variable
+  ``SWIG_MODULE_<name>_REAL_NAME`` must be used to get real target name.
+  This is the default if not specified.
+* ``STANDARD``: target name matches specified name.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.13
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

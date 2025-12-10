@@ -1,0 +1,37 @@
+# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
+# file LICENSE.rst or https://cmake.org/licensing for details.
+
+cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
+
+if("@LOCAL@" STREQUAL "")
+  message(FATAL_ERROR "LOCAL can't be empty")
+endif()
+
+if(NOT EXISTS "@LOCAL@")
+  message(FATAL_ERROR "File not found: @LOCAL@")
+endif()
+
+if("@ALGO@" STREQUAL "")
+  message(WARNING "File cannot be verified since no URL_HASH specified")
+  return()
+endif()
+
+if("@EXPECT_VALUE@" STREQUAL "")
+  message(FATAL_ERROR "EXPECT_VALUE can't be empty")
+endif()
+
+message(VERBOSE "verifying file...
+     file='@LOCAL@'")
+
+file("@ALGO@" "@LOCAL@" actual_value)
+
+if(NOT "${actual_value}" STREQUAL "@EXPECT_VALUE@")
+  message(FATAL_ERROR "error: @ALGO@ hash of
+  @LOCAL@
+does not match expected value
+  expected: '@EXPECT_VALUE@'
+    actual: '${actual_value}'
+")
+endif()
+
+message(VERBOSE "verifying file... done")

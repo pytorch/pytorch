@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|@id_platform@">
+      <Configuration>Debug</Configuration>
+      <Platform>@id_platform@</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{CAE07175-D007-4FC3-BFE8-47B392814159}</ProjectGuid>
+    <RootNamespace>CompilerId@id_lang@</RootNamespace>
+    <Keyword>@id_keyword@</Keyword>
+    @id_system@
+    @id_system_version@
+    @id_WindowsTargetPlatformVersion@
+    @id_WindowsSDKDesktopARMSupport@
+    @id_CudaToolkitCustomDir@
+    @id_ToolsetVCTargetsDir@
+    @id_CustomGlobals@
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  @id_toolset_version_props@
+  <PropertyGroup>
+    @id_PreferredToolArchitecture@
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|@id_platform@'" Label="Configuration">
+    <ConfigurationType>@id_config_type@</ConfigurationType>
+    @id_toolset@
+    @id_api_level@
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    @id_Import_props@
+  </ImportGroup>
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|@id_platform@'">.\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|@id_platform@'">$(Configuration)\</IntDir>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|@id_platform@'">false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|@id_platform@'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MinimalRebuild>false</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary Condition="'$(ApplicationType)'!='Android'">MultiThreadedDebugDLL</RuntimeLibrary>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    @id_ItemDefinitionGroup_entry@
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      @id_Link_AdditionalDependencies@
+    </Link>
+    <PostBuildEvent>
+      <Command>@id_PostBuildEvent_Command@</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <@id_compile@ Include="@id_src@" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    @id_Import_targets@
+  </ImportGroup>
+</Project>

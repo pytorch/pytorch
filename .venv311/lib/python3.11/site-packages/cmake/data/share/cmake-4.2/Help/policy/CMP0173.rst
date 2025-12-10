@@ -1,0 +1,22 @@
+CMP0173
+-------
+
+.. versionadded:: 3.31
+
+The :module:`CMakeFindFrameworks` module is removed.
+
+CMake's framework handling has evolved well beyond what the
+``CMakeFindFrameworks`` module supports. The module lacks any handling of
+XCFrameworks, it never documented the one command it provides, and
+:command:`find_library` provides superior capabilities in all respects.
+
+The ``OLD`` behavior of this policy is for :module:`CMakeFindFrameworks` to
+continue to provide the undocumented ``cmake_find_frameworks()`` command.
+The ``NEW`` behavior halts with a fatal error if anything tries to include
+the module.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

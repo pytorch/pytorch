@@ -1,0 +1,21 @@
+CMP0121
+-------
+
+.. versionadded:: 3.21
+
+The :command:`list` command now detects invalid indices.
+
+Prior to CMake version 3.21, the :command:`list` command's ``GET``,
+``INSERT``, ``SUBLIST``, and ``REMOVE_AT`` subcommands did not detect invalid
+index arguments.
+
+The ``OLD`` behavior of this policy is for invalid indices to be treated as
+their integer value (if any) at the start of the string. For example,
+``2good4you`` is a ``2`` and ``not_an_integer`` is a ``0``. The ``NEW``
+behavior is for invalid indices to trigger an error.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

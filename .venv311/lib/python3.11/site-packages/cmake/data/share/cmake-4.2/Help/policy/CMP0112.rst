@@ -1,0 +1,45 @@
+CMP0112
+-------
+
+.. versionadded:: 3.19
+
+Target file component generator expressions do not add target dependencies.
+
+The following target-based generator expressions that query for directory or
+file name components no longer add a dependency on the evaluated target.
+
+- ``TARGET_FILE_NAME``
+- ``TARGET_FILE_DIR``
+- ``TARGET_LINKER_FILE_BASE_NAME``
+- ``TARGET_LINKER_FILE_NAME``
+- ``TARGET_LINKER_FILE_DIR``
+- ``TARGET_SONAME_FILE_NAME``
+- ``TARGET_SONAME_FILE_DIR``
+- ``TARGET_PDB_FILE_NAME``
+- ``TARGET_PDB_FILE_DIR``
+- ``TARGET_BUNDLE_DIR``
+- ``TARGET_BUNDLE_DIR_NAME``
+- ``TARGET_BUNDLE_CONTENT_DIR``
+
+
+In CMake 3.18 and lower a dependency on the evaluated target of the above
+generator expressions would always be added.  CMake 3.19 and above prefer
+to not add this dependency.  This policy provides compatibility for projects
+that have not been updated to expect the new behavior.  The policy setting
+is recorded on each target when it is created, and decides whether generator
+expressions referencing that target imply a dependency on it.
+
+The ``OLD`` behavior for this policy is to add a dependency on the evaluated
+target for the above generator expressions.  The ``NEW`` behavior of
+this policy is to not add a dependency on the evaluated target for the
+above generator expressions.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.19
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0112 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

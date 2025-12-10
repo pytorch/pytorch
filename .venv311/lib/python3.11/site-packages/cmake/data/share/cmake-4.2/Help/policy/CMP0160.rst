@@ -1,0 +1,39 @@
+CMP0160
+-------
+
+.. versionadded:: 3.29
+
+More read-only target properties now error when trying to set them.
+
+The :command:`set_target_properties` and :command:`set_property` commands
+are intended to error out on all read-only properties. However, CMake 3.28 and
+below only did this for the following properties:
+
+* :prop_tgt:`HEADER_SETS`
+* :prop_tgt:`INTERFACE_HEADER_SETS`
+* :prop_tgt:`IMPORTED_GLOBAL`
+* :prop_tgt:`MANUALLY_ADDED_DEPENDENCIES`
+* :prop_tgt:`NAME`
+* :prop_tgt:`TYPE`
+
+This policy enforces the read-only nature of the following target properties:
+
+* :prop_tgt:`ALIAS_GLOBAL`
+* :prop_tgt:`BINARY_DIR`
+* :prop_tgt:`CXX_MODULE_SETS`
+* :prop_tgt:`IMPORTED`
+* :prop_tgt:`INTERFACE_CXX_MODULE_SETS`
+* :prop_tgt:`LOCATION`
+* :prop_tgt:`LOCATION_<CONFIG>`
+* :prop_tgt:`SOURCE_DIR`
+
+The ``OLD`` behavior for this policy is to only error out for the properties
+:prop_tgt:`MANUALLY_ADDED_DEPENDENCIES`, :prop_tgt:`NAME`, and :prop_tgt:`TYPE`.
+The ``NEW`` behavior for this policy is to error out on all target properties
+that are documented as read-only.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.29
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

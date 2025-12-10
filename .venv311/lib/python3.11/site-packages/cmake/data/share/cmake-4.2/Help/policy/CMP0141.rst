@@ -1,0 +1,54 @@
+CMP0141
+-------
+
+.. versionadded:: 3.25
+
+MSVC debug information format flags are selected by an abstraction.
+
+Compilers targeting the MSVC ABI have flags to select the debug information
+format. Debug information format selection typically varies with build
+configuration.
+
+In CMake 3.24 and below, debug information format flags are added to
+the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache entries by CMake
+automatically.  This allows users to edit their cache entries to adjust the
+flags.  However, the presence of such default flags is problematic for
+projects that want to choose a different debug information format
+programmatically.  In particular, it requires string editing of the
+:variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` variables with knowledge of the
+CMake builtin defaults so they can be replaced.
+
+CMake 3.25 and above prefer to leave the debug information format flags
+out of the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` values and instead
+offer a first-class abstraction.  The
+:variable:`CMAKE_MSVC_DEBUG_INFORMATION_FORMAT` variable and
+:prop_tgt:`MSVC_DEBUG_INFORMATION_FORMAT` target property may be set to
+select the MSVC debug information format.  If they are not set, CMake
+enables debug information in debug configurations using the default value
+``$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>``, if supported by the
+compiler, and otherwise ``$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>``.
+
+This policy provides compatibility with projects that have not been updated
+to be aware of the abstraction.  The policy setting takes effect as of the
+first :command:`project` or :command:`enable_language` command that enables
+a language whose compiler targets the MSVC ABI.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project, that choice
+  will be used throughout the tree.  In projects that have nested projects
+  in subdirectories, be sure to confirm if everything is working with the
+  selected policy behavior.
+
+The ``OLD`` behavior for this policy is to place MSVC debug information
+format flags in the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache
+entries and ignore the :variable:`CMAKE_MSVC_DEBUG_INFORMATION_FORMAT`
+abstraction.  The ``NEW`` behavior for this policy is to *not* place MSVC
+debug information format flags in the default cache entries and use
+the abstraction instead.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.25
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,86 @@
+CMP0114
+-------
+
+.. versionadded:: 3.19
+
+:module:`ExternalProject` step targets fully adopt their steps.
+
+The :command:`ExternalProject_Add` ``STEP_TARGETS`` option, and the
+:command:`ExternalProject_Add_StepTargets` function, can be used to
+create build targets for individual steps of an external project.
+
+In CMake 3.18 and below, step targets have some limitations:
+
+* Step targets always depend on targets named by the
+  :command:`ExternalProject_Add` ``DEPENDS`` option even though
+  not all steps need them.  In order to allow step targets to be created
+  without those dependencies, the :command:`ExternalProject_Add`
+  ``INDEPENDENT_STEP_TARGETS`` option or the
+  :command:`ExternalProject_Add_StepTargets` ``NO_DEPENDS`` option may
+  be used.  However, adding such "independent" step targets makes sense
+  only for specific steps such as ``download``, ``update``, and ``patch``
+  because they do not need any of the external project's build dependencies.
+  Furthermore, it does not make sense to create independent step targets
+  for steps that depend on non-independent steps.  Such rules are not
+  enforced, and projects that do not follow them can generate build systems
+  with confusing and generator-specific behavior.
+
+* Step targets hold copies of the custom commands implementing their
+  steps that are separate from the copies in the primary target created
+  by :command:`ExternalProject_Add`, and the primary target does not
+  depend on the step targets.  In parallel builds that drive the primary
+  target and step targets concurrently, multiple copies of the steps'
+  commands may run concurrently and race each other.
+
+  Also, prior to policy :policy:`CMP0113`, the step targets generated
+  by :ref:`Makefile Generators` also contain all the custom commands
+  on which their step depends.  This can lead to repeated execution of
+  those steps even in serial builds.
+
+In CMake 3.19 and above, the :module:`ExternalProject` module prefers
+a revised design to address these problems:
+
+* Each step is classified as "independent" if it does not depend
+  on other targets named by the :command:`ExternalProject_Add` ``DEPENDS``.
+  The predefined steps are automatically classified by default:
+
+  * The ``download``, ``update``, and ``patch`` steps are independent.
+  * The ``configure``, ``build``, ``test``, and ``install`` steps are not.
+
+  For custom steps, the :command:`ExternalProject_Add_Step` command provides
+  an ``INDEPENDENT`` option to mark them as independent.  It is an error to
+  mark a step as independent if it depends on other steps that are not.  Note
+  that this use of the term "independent" refers only to independence from
+  external targets and is orthogonal to a step's dependencies on other steps.
+
+* Step targets created by the :command:`ExternalProject_Add` ``STEP_TARGETS``
+  option or the :command:`ExternalProject_Add_Step` function are now
+  independent if and only if their steps are marked as independent.
+  The :command:`ExternalProject_Add` ``INDEPENDENT_STEP_TARGETS`` option
+  and :command:`ExternalProject_Add_StepTargets` ``NO_DEPENDS`` option
+  are no longer allowed.
+
+* Step targets, when created, are fully responsible for holding the
+  custom commands implementing their steps.  The primary target created
+  by :command:`ExternalProject_Add` depends on the step targets, and the
+  step targets depend on each other.  The target-level dependencies match
+  the file-level dependencies used by the custom commands for each step.
+
+  When the :command:`ExternalProject_Add` ``UPDATE_DISCONNECTED`` or
+  ``TEST_EXCLUDE_FROM_MAIN`` option is used, or the
+  :command:`ExternalProject_Add_Step` ``EXCLUDE_FROM_MAIN`` option is used
+  for a custom step, some step targets may be created automatically.
+  These are needed to hold the steps commonly depended upon by the primary
+  target and the disconnected step targets.
+
+Policy ``CMP0114`` provides compatibility for projects that have not been
+updated to expect the new behavior.  The ``OLD`` behavior for this policy
+is to use the above-documented behavior from 3.18 and below.  The ``NEW``
+behavior for this policy is to use the above-documented behavior preferred
+by 3.19 and above.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.19
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,26 @@
+CMP0142
+-------
+
+.. versionadded:: 3.25
+
+The :generator:`Xcode` generator does not append per-config suffixes to
+library search paths.
+
+In CMake 3.24 and below, the :generator:`Xcode` generator preceded each
+entry of a library search path with a copy of itself appended with
+``$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)``.  This was left from
+very early versions of CMake in which per-config directories were not well
+modeled.  Such paths often do not exist, resulting in warnings from the
+toolchain.  CMake 3.25 and above prefer to not add such library search
+paths.  This policy provides compatibility for projects that may have been
+accidentally relying on the old behavior.
+
+The ``OLD`` behavior for this policy is to append
+``$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)`` to all library search paths.
+The ``NEW`` behavior is to not modify library search paths.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.25
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

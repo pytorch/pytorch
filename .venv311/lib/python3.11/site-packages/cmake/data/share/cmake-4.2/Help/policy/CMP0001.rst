@@ -1,0 +1,22 @@
+CMP0001
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+``CMAKE_BACKWARDS_COMPATIBILITY`` should no longer be used.
+
+The behavior is to check ``CMAKE_BACKWARDS_COMPATIBILITY`` and present
+it to the user.  The ``NEW`` behavior is to ignore
+``CMAKE_BACKWARDS_COMPATIBILITY`` completely.
+
+In CMake 2.4 and below the variable ``CMAKE_BACKWARDS_COMPATIBILITY`` was
+used to request compatibility with earlier versions of CMake.  In
+CMake 2.6 and above all compatibility issues are handled by policies
+and the :command:`cmake_policy` command.  However, CMake must still check
+``CMAKE_BACKWARDS_COMPATIBILITY`` for projects written for CMake 2.4 and
+below.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

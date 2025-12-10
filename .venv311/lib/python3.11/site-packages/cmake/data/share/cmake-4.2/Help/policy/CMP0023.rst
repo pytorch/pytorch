@@ -1,0 +1,36 @@
+CMP0023
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Plain and keyword :command:`target_link_libraries` signatures cannot be mixed.
+
+CMake 2.8.12 introduced the :command:`target_link_libraries` signature using
+the ``PUBLIC``, ``PRIVATE``, and ``INTERFACE`` keywords to generalize the
+``LINK_PUBLIC`` and ``LINK_PRIVATE`` keywords introduced in CMake 2.8.7.
+Use of signatures with any of these keywords sets the link interface of a
+target explicitly, even if empty.  This produces confusing behavior
+when used in combination with the historical behavior of the plain
+:command:`target_link_libraries` signature.  For example, consider the code:
+
+.. code-block:: cmake
+
+ target_link_libraries(mylib A)
+ target_link_libraries(mylib PRIVATE B)
+
+After the first line the link interface has not been set explicitly so
+CMake would use the link implementation, A, as the link interface.
+However, the second line sets the link interface to empty.  In order
+to avoid this subtle behavior CMake now prefers to disallow mixing the
+plain and keyword signatures of :command:`target_link_libraries` for a single
+target.
+
+The ``OLD`` behavior for this policy is to allow keyword and plain
+:command:`target_link_libraries` signatures to be mixed.  The ``NEW`` behavior for
+this policy is to not to allow mixing of the keyword and plain
+signatures.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.12
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

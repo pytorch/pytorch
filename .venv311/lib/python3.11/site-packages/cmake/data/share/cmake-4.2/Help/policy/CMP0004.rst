@@ -1,0 +1,27 @@
+CMP0004
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Libraries linked may not have leading or trailing whitespace.
+
+CMake versions 2.4 and below silently removed leading and trailing
+whitespace from libraries linked with code like
+
+.. code-block:: cmake
+
+  target_link_libraries(myexe " A ")
+
+This could lead to subtle errors in user projects.
+
+The ``OLD`` behavior for this policy is to silently remove leading and
+trailing whitespace.  The ``NEW`` behavior for this policy is to diagnose
+the existence of such whitespace as an error.  The setting for this
+policy used when checking the library names is that in effect when the
+target is created by an :command:`add_executable` or :command:`add_library`
+command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

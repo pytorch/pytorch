@@ -1,0 +1,29 @@
+CMP0012
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+:command:`if` recognizes numbers and boolean constants.
+
+In CMake versions 2.6.4 and lower the :command:`if` command implicitly
+dereferenced arguments corresponding to variables, even those named
+like numbers or boolean constants, except for ``0`` and ``1``.  Numbers and
+boolean constants such as ``true``, ``false``, ``yes``, ``no``, ``on``,
+``off``, ``y``, ``n``, ``notfound``, ``ignore`` (all case insensitive)
+were recognized in some cases but not all.  For example, the code ``if(TRUE)``
+might have evaluated as ``false``.
+Numbers such as 2 were recognized only in boolean expressions
+like ``if(NOT 2)`` (leading to ``false``) but not as a single-argument like
+``if(2)`` (also leading to ``false``).  Later versions of CMake prefer to
+treat numbers and boolean constants literally, so they should not be
+used as variable names.
+
+The ``OLD`` behavior for this policy is to implicitly dereference
+variables named like numbers and boolean constants.  The ``NEW`` behavior
+for this policy is to recognize numbers and boolean constants without
+dereferencing variables with such names.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

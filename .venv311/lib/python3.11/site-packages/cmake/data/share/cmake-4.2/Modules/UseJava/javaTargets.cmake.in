@@ -1,0 +1,38 @@
+cmake_policy(PUSH)
+cmake_policy(VERSION 2.8.12...4.0)
+
+#----------------------------------------------------------------
+# Generated CMake Java target import file.
+#----------------------------------------------------------------
+
+# Protect against multiple inclusion, which would fail when already imported targets are added once more.
+set(_targetsDefined)
+set(_targetsNotDefined)
+set(_expectedTargets)
+foreach(_expectedTarget @__targets__@)
+  list(APPEND _expectedTargets ${_expectedTarget})
+  if(TARGET ${_expectedTarget})
+    list(APPEND _targetsDefined ${_expectedTarget})
+  else()
+    list(APPEND _targetsNotDefined ${_expectedTarget})
+  endif()
+endforeach()
+if("%${_targetsDefined}" STREQUAL "%${_expectedTargets}")
+  unset(_targetsDefined)
+  unset(_targetsNotDefined)
+  unset(_expectedTargets)
+  cmake_policy(POP)
+  return()
+endif()
+if(NOT "${_targetsDefined}" STREQUAL "")
+  message(FATAL_ERROR
+    "Some (but not all) targets in this export set were already defined.\n"
+    "Targets Defined: ${_targetsDefined}\n"
+    "Targets not yet defined: ${_targetsNotDefined}\n")
+endif()
+unset(_targetsDefined)
+unset(_targetsNotDefined)
+unset(_expectedTargets)
+
+@__targetdefs__@
+cmake_policy(POP)

@@ -1,0 +1,21 @@
+CMP0010
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Bad variable reference syntax is an error.
+
+In CMake 2.6.2 and below, incorrect variable reference syntax such as
+a missing close-brace (``${FOO``) was reported but did not stop
+processing of CMake code.  This policy determines whether a bad
+variable reference is an error.  The ``OLD`` behavior for this policy is
+to warn about the error, leave the string untouched, and continue.
+The ``NEW`` behavior for this policy is to report an error.
+
+If :policy:`CMP0053` is set to ``NEW``, this policy has no effect
+and is treated as always being ``NEW``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

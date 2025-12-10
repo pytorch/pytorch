@@ -1,0 +1,70 @@
+CMP0083
+-------
+
+.. versionadded:: 3.14
+
+To control generation of Position Independent Executable (``PIE``) or not, some
+flags are required at link time.
+
+CMake 3.13 and lower did not add these link flags when
+:prop_tgt:`POSITION_INDEPENDENT_CODE` is set.
+
+The ``OLD`` behavior for this policy is to not manage ``PIE`` link flags. The
+``NEW`` behavior is to add link flags if :prop_tgt:`POSITION_INDEPENDENT_CODE`
+is set:
+
+* Set to ``TRUE``: flags to produce a position independent executable are
+  passed to the linker step. For example ``-pie`` for ``GCC``.
+* Set to ``FALSE``: flags not to produce a position independent executable are
+  passed to the linker step. For example ``-no-pie`` for ``GCC``.
+* Not set: no flags are passed to the linker step.
+
+Since a given linker may not support ``PIE`` flags in all environments in
+which it is used, it is the project's responsibility to use the
+:module:`CheckPIESupported` module to check for support to ensure that the
+:prop_tgt:`POSITION_INDEPENDENT_CODE` target property for executables will be
+honored at link time.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.14
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. Note::
+
+   Android platform has a special handling of ``PIE`` so it is not required
+   to use the :module:`CheckPIESupported` module to ensure flags are passed to
+   the linker.
+
+.. include:: include/DEPRECATED.rst
+
+Examples
+^^^^^^^^
+
+Behave like CMake 3.13 and do not apply any ``PIE`` flags at link stage.
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.13)
+  project(foo)
+
+  # ...
+
+  add_executable(foo ...)
+  set_property(TARGET foo PROPERTY POSITION_INDEPENDENT_CODE TRUE)
+
+Use the :module:`CheckPIESupported` module to detect whether ``PIE`` is
+supported by the current linker and environment.  Apply ``PIE`` flags only
+if the linker supports them.
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.14) # CMP0083 NEW
+  project(foo)
+
+  include(CheckPIESupported)
+  check_pie_supported()
+
+  # ...
+
+  add_executable(foo ...)
+  set_property(TARGET foo PROPERTY POSITION_INDEPENDENT_CODE TRUE)

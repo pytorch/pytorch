@@ -1,0 +1,311 @@
+[
+  {
+    "name": "ErrorReporting",
+    "switch": "ERRORREPORT:PROMPT",
+    "comment": "PromptImmediately",
+    "value": "PromptImmediately",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "ERRORREPORT:QUEUE",
+    "comment": "Queue For Next Login",
+    "value": "QueueForNextLogin",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "ERRORREPORT:SEND",
+    "comment": "Send Error Report",
+    "value": "SendErrorReport",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "ERRORREPORT:NONE",
+    "comment": "No Error Report",
+    "value": "NoErrorReport",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:ARM",
+    "comment": "MachineARM",
+    "value": "MachineARM",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:ARM64",
+    "comment": "MachineARM64",
+    "value": "MachineARM64",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:ARM64X",
+    "comment": "MachineARM64X",
+    "value": "MachineARM64X",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:EBC",
+    "comment": "MachineEBC",
+    "value": "MachineEBC",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:IA64",
+    "comment": "MachineIA64",
+    "value": "MachineIA64",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPS",
+    "comment": "MachineMIPS",
+    "value": "MachineMIPS",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPS16",
+    "comment": "MachineMIPS16",
+    "value": "MachineMIPS16",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPSFPU",
+    "comment": "MachineMIPSFPU",
+    "value": "MachineMIPSFPU",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:MIPSFPU16",
+    "comment": "MachineMIPSFPU16",
+    "value": "MachineMIPSFPU16",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:SH4",
+    "comment": "MachineSH4",
+    "value": "MachineSH4",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:THUMB",
+    "comment": "MachineTHUMB",
+    "value": "MachineTHUMB",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:X64",
+    "comment": "MachineX64",
+    "value": "MachineX64",
+    "flags": []
+  },
+  {
+    "name": "TargetMachine",
+    "switch": "MACHINE:X86",
+    "comment": "MachineX86",
+    "value": "MachineX86",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:CONSOLE",
+    "comment": "Console",
+    "value": "Console",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:WINDOWS",
+    "comment": "Windows",
+    "value": "Windows",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:NATIVE",
+    "comment": "Native",
+    "value": "Native",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_APPLICATION",
+    "comment": "EFI Application",
+    "value": "EFI Application",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_BOOT_SERVICE_DRIVER",
+    "comment": "EFI Boot Service Driver",
+    "value": "EFI Boot Service Driver",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_ROM",
+    "comment": "EFI ROM",
+    "value": "EFI ROM",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:EFI_RUNTIME_DRIVER",
+    "comment": "EFI Runtime",
+    "value": "EFI Runtime",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:WINDOWSCE",
+    "comment": "WindowsCE",
+    "value": "WindowsCE",
+    "flags": []
+  },
+  {
+    "name": "SubSystem",
+    "switch": "SUBSYSTEM:POSIX",
+    "comment": "POSIX",
+    "value": "POSIX",
+    "flags": []
+  },
+  {
+    "name": "SuppressStartupBanner",
+    "switch": "NOLOGO",
+    "comment": "Suppress Startup Banner",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "IgnoreAllDefaultLibraries",
+    "switch": "NODEFAULTLIB",
+    "comment": "Ignore All Default Libraries",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatLibWarningAsErrors",
+    "switch": "WX:NO",
+    "comment": "Treat Lib Warning As Errors",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "TreatLibWarningAsErrors",
+    "switch": "WX",
+    "comment": "Treat Lib Warning As Errors",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "Verbose",
+    "switch": "VERBOSE",
+    "comment": "Verbose",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "LinkTimeCodeGeneration",
+    "switch": "LTCG",
+    "comment": "Link Time Code Generation",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AdditionalLibraryDirectories",
+    "switch": "LIBPATH:",
+    "comment": "Additional Library Directories",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "IgnoreSpecificDefaultLibraries",
+    "switch": "NODEFAULTLIB:",
+    "comment": "Ignore Specific Default Libraries",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ExportNamedFunctions",
+    "switch": "EXPORT:",
+    "comment": "Export Named Functions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "RemoveObjects",
+    "switch": "REMOVE:",
+    "comment": "Remove Objects",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "OutputFile",
+    "switch": "OUT:",
+    "comment": "Output File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ModuleDefinitionFile",
+    "switch": "DEF:",
+    "comment": "Module Definition File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ForceSymbolReferences",
+    "switch": "INCLUDE:",
+    "comment": "Force Symbol References",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "DisplayLibrary",
+    "switch": "LIST:",
+    "comment": "Display Library to standard output",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "Name",
+    "switch": "NAME:",
+    "comment": "Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

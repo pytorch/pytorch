@@ -1,0 +1,542 @@
+[
+  {
+    "name":  "ProjectName",
+    "switch": "out:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "OutputType",
+    "switch": "target:exe",
+    "comment": "",
+    "value": "Exe",
+    "flags": []
+  },
+  {
+    "name":  "OutputType",
+    "switch": "target:winexe",
+    "comment": "",
+    "value": "Winexe",
+    "flags": []
+  },
+  {
+    "name":  "OutputType",
+    "switch": "target:library",
+    "comment": "",
+    "value": "Library",
+    "flags": []
+  },
+  {
+    "name":  "OutputType",
+    "switch": "target:module",
+    "comment": "",
+    "value": "Module",
+    "flags": []
+  },
+  {
+    "name":  "DocumentationFile",
+    "switch": "doc",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:x86",
+    "comment": "",
+    "value": "x86",
+    "flags": []
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:Itanium",
+    "comment": "",
+    "value": "Itanium",
+    "flags": []
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:x64",
+    "comment": "",
+    "value": "x64",
+    "flags": []
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:arm",
+    "comment": "",
+    "value": "arm",
+    "flags": []
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:anycpu32bitpreferred",
+    "comment": "",
+    "value": "anycpu32bitpreferred",
+    "flags": []
+  },
+  {
+    "name":  "Platform",
+    "switch": "platform:anycpu",
+    "comment": "",
+    "value": "anycpu",
+    "flags": []
+  },
+  {
+    "name":  "References",
+    "switch": "reference:",
+    "comment": "mit alias",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "References",
+    "switch": "reference:",
+    "comment": "dateiliste",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "AddModules",
+    "switch": "addmodule:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name":  "Win32Resource",
+    "switch": "win32res:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "ApplicationIcon",
+    "switch": "win32icon:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "ApplicationManifest",
+    "switch": "win32manifest:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "NoWin32Manifest",
+    "switch": "nowin32manifest",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "DefineDebug",
+    "switch": "debug",
+    "comment": "",
+    "value": "true",
+    "flags": [
+      "Continue"
+    ]
+  },
+  {
+    "name":  "DebugSymbols",
+    "switch": "debug",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "DebugSymbols",
+    "switch": "debug-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "DebugSymbols",
+    "switch": "debug+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "DebugType",
+    "switch": "debug:none",
+    "comment": "",
+    "value": "none",
+    "flags": []
+  },
+  {
+    "name":  "DebugType",
+    "switch": "debug:full",
+    "comment": "",
+    "value": "full",
+    "flags": []
+  },
+  {
+    "name":  "DebugType",
+    "switch": "debug:pdbonly",
+    "comment": "",
+    "value": "pdbonly",
+    "flags": []
+  },
+  {
+    "name":  "DebugType",
+    "switch": "debug:embedded",
+    "comment": "",
+    "value": "embedded",
+    "flags": []
+  },
+  {
+    "name":  "Optimize",
+    "switch": "optimize",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "Optimize",
+    "switch": "optimize-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "Optimize",
+    "switch": "optimize+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "TreatWarningsAsErrors",
+    "switch": "warnaserror",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "TreatWarningsAsErrors",
+    "switch": "warnaserror-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "TreatWarningsAsErrors",
+    "switch": "warnaserror+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "WarningsAsErrors",
+    "switch": "warnaserror",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "WarningsAsErrors",
+    "switch": "warnaserror-",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "WarningsAsErrors",
+    "switch": "warnaserror+",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "WarningLevel",
+    "switch": "warn:0",
+    "comment": "",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name":  "WarningLevel",
+    "switch": "warn:1",
+    "comment": "",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name":  "WarningLevel",
+    "switch": "warn:2",
+    "comment": "",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name":  "WarningLevel",
+    "switch": "warn:3",
+    "comment": "",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name":  "WarningLevel",
+    "switch": "warn:4",
+    "comment": "",
+    "value": "4",
+    "flags": []
+  },
+  {
+    "name":  "NoWarn",
+    "switch": "nowarn:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired",
+      "CommaAppendable"
+    ]
+  },
+  {
+    "name":  "CheckForOverflowUnderflow",
+    "switch": "checked",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "CheckForOverflowUnderflow",
+    "switch": "checked-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "CheckForOverflowUnderflow",
+    "switch": "checked+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "AllowUnsafeBlocks",
+    "switch": "unsafe",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "AllowUnsafeBlocks",
+    "switch": "unsafe-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "AllowUnsafeBlocks",
+    "switch": "unsafe+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "DefineConstants",
+    "switch": "define:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "SemicolonAppendable",
+      "UserValue"
+    ]
+  },
+  {
+    "name":  "LangVersion",
+    "switch": "langversion:",
+    "comment": "",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name":  "DelaySign",
+    "switch": "delaysign",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "DelaySign",
+    "switch": "delaysign-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "DelaySign",
+    "switch": "delaysign+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "AssemblyOriginatorKeyFile",
+    "switch": "keyfile",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "KeyContainerName",
+    "switch": "keycontainer",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "NoLogo",
+    "switch": "nologo",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "NoConfig",
+    "switch": "noconfig",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "BaseAddress",
+    "switch": "baseaddress:",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "CodePage",
+    "switch": "codepage",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "Utf8Output",
+    "switch": "utf8output",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "MainEntryPoint",
+    "switch": "main:",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "GenerateFullPaths",
+    "switch": "fullpaths",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "FileAlignment",
+    "switch": "filealign",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "PdbFile",
+    "switch": "pdb:",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "NoStdLib",
+    "switch": "nostdlib",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "NoStdLib",
+    "switch": "nostdlib-",
+    "comment": "",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name":  "NoStdLib",
+    "switch": "nostdlib+",
+    "comment": "",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name":  "SubsystemVersion",
+    "switch": "subsystemversion",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "AdditionalLibPaths",
+    "switch": "lib:",
+    "comment": "",
+    "value": "",
+    "flags": []
+  },
+  {
+    "name":  "ErrorReport",
+    "switch": "errorreport:none",
+    "comment": "Do Not Send Report",
+    "value": "none",
+    "flags": []
+  },
+  {
+    "name":  "ErrorReport",
+    "switch": "errorreport:prompt",
+    "comment": "Prompt Immediately",
+    "value": "prompt",
+    "flags": []
+  },
+  {
+    "name":  "ErrorReport",
+    "switch": "errorreport:queue",
+    "comment": "Queue For Next Login",
+    "value": "queue",
+    "flags": []
+  },
+  {
+    "name":  "ErrorReport",
+    "switch": "errorreport:send",
+    "comment": "Send Automatically",
+    "value": "send",
+    "flags": []
+  }
+]

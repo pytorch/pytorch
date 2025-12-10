@@ -1,0 +1,26 @@
+CMP0165
+-------
+
+.. versionadded:: 3.30
+
+:command:`enable_language` must not be called before :command:`project`.
+
+In CMake 3.29 and below, if a project called :command:`enable_language`
+before the first call to :command:`project`, the language would be enabled
+but possibly using unset details that were expected to be set.
+In CMake 3.30 and above, :command:`enable_language` prefers to reject this
+case and stop with a fatal error instead if it detects that :command:`project`
+has not yet been called.  This policy provides compatibility for projects that
+happened to work when :command:`enable_language` was called before
+:command:`project` and have not been updated to call these commands in the
+required order.
+
+The ``OLD`` behavior for this policy is to allow :command:`enable_language`
+to be called before :command:`project`.  The ``NEW`` behavior for this policy
+is to fail with a fatal error in such cases.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,27 @@
+CMP0195
+-------
+
+.. versionadded:: 4.1
+
+Swift modules in build trees use the Swift module directory structure.
+
+The Swift compiler emits several supplementary files that make up the
+interface to a Swift library.  It accepts finding these files separately
+or in a single swiftmodule directory.  The single file keeps things better
+organized and makes it easier to install the resulting products.
+
+CMake versions 4.1 and above prefer to generate the modules in the
+directory structure when working with a new enough Swift compiler.
+This policy provides compatibility for projects that have not been
+updated to expect the new behavior.
+
+The ``OLD`` behavior for this policy is to emit the interface files directly
+into the current binary directory.
+The ``NEW`` behavior for this policy is to gather the binary swiftmodule and
+other supplemental compiler outputs in a single Swift module directory.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

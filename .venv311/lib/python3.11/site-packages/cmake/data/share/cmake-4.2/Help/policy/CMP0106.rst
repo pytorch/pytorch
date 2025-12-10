@@ -1,0 +1,21 @@
+CMP0106
+-------
+
+.. versionadded:: 3.18
+
+The :module:`Documentation` module is removed.
+
+The :module:`Documentation` was added as a support mechanism for the VTK
+project and was tuned for that project. Instead of CMake providing this module
+with (now old) VTK patterns for cache variables and required packages, the
+module is now deprecated by CMake itself.
+
+The ``OLD`` behavior of this policy is for :module:`Documentation` to add
+cache variables and find VTK documentation dependent packages. The ``NEW``
+behavior is to act as an empty module.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.18
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

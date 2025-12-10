@@ -1,0 +1,4 @@
+Wheel-Version: 1.0
+Generator: maturin (1.9.6)
+Root-Is-Purelib: false
+Tag: py3-none-macosx_11_0_arm64

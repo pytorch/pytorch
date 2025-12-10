@@ -1,0 +1,435 @@
+CMake 3.1 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.0 include the following.
+
+Documentation Changes
+=====================
+
+* A new :manual:`cmake-compile-features(7)` manual was added.
+
+New Features
+============
+
+Generators
+----------
+
+* The :generator:`Visual Studio 14 2015` generator was added.
+
+Windows Phone and Windows Store
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Generators for Visual Studio 11 (2012) and above learned to generate
+  projects for Windows Phone and Windows Store.  One may set the
+  :variable:`CMAKE_SYSTEM_NAME` variable to ``WindowsPhone``
+  or ``WindowsStore`` on the :manual:`cmake(1)` command-line
+  or in a :variable:`CMAKE_TOOLCHAIN_FILE` to activate these platforms.
+  Also set :variable:`CMAKE_SYSTEM_VERSION` to ``8.0`` or ``8.1`` to
+  specify the version of Windows to be targeted.
+
+NVIDIA Nsight Tegra
+^^^^^^^^^^^^^^^^^^^
+
+* Generators for Visual Studio 10 (2010) and above learned to generate
+  projects for NVIDIA Nsight Tegra Visual Studio Edition.  One may set
+  the :variable:`CMAKE_SYSTEM_NAME` variable to ``Android`` on the
+  :manual:`cmake(1)` command-line or in a :variable:`CMAKE_TOOLCHAIN_FILE`
+  to activate this platform.
+
+Syntax
+------
+
+* The :manual:`cmake-language(7)` syntax for :ref:`Variable References` and
+  :ref:`Escape Sequences` was simplified in order to allow a much faster
+  implementation.  See policy :policy:`CMP0053`.
+
+* The :command:`if` command no longer automatically dereferences
+  variables named in quoted or bracket arguments.  See policy
+  :policy:`CMP0054`.
+
+Commands
+--------
+
+* The :command:`add_custom_command` command learned to interpret
+  :manual:`cmake-generator-expressions(7)` in arguments to ``DEPENDS``.
+
+* The :command:`export(PACKAGE)` command learned to check the
+  :variable:`CMAKE_EXPORT_NO_PACKAGE_REGISTRY` variable to skip
+  exporting the package.
+
+* The :command:`file(STRINGS)` command gained a new ``ENCODING``
+  option to enable extraction of ``UTF-8`` strings.
+
+* The :command:`find_package` command learned to check the
+  :variable:`CMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY` and
+  :variable:`CMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY`
+  variables to skip searching the package registries.
+
+* The :command:`get_property` command learned a new ``INSTALL`` scope
+  for properties.
+
+* The :command:`install` command learned a ``MESSAGE_NEVER`` option
+  to avoid output during installation.
+
+* The :command:`set_property` command learned a new ``INSTALL`` scope
+  for properties.
+
+* The :command:`string` command learned a new ``GENEX_STRIP`` subcommand
+  which removes
+  :manual:`generator expression <cmake-generator-expressions(7)>`.
+
+* The :command:`string` command learned a new ``UUID`` subcommand
+  to generate a universally unique identifier.
+
+* New :command:`target_compile_features` command allows populating the
+  :prop_tgt:`COMPILE_FEATURES` target property, just like any other
+  build variable.
+
+* The :command:`target_sources` command was added to add to the
+  :prop_tgt:`SOURCES` target property.
+
+Variables
+---------
+
+* The Visual Studio generators for versions 8 (2005) and above
+  learned to read the target platform name from a new
+  :variable:`CMAKE_GENERATOR_PLATFORM` variable when it is
+  not specified as part of the generator name.  The platform
+  name may be specified on the :manual:`cmake(1)` command line
+  with the ``-A`` option, e.g. ``-G "Visual Studio 12 2013" -A x64``.
+
+* The :variable:`CMAKE_GENERATOR_TOOLSET` variable may now be
+  initialized in a toolchain file specified by the
+  :variable:`CMAKE_TOOLCHAIN_FILE` variable.  This is useful
+  when cross-compiling with the Xcode or Visual Studio
+  generators.
+
+* The :variable:`CMAKE_INSTALL_MESSAGE` variable was introduced to
+  optionally reduce output installation.
+
+Properties
+----------
+
+* New :prop_tgt:`CXX_STANDARD` and :prop_tgt:`CXX_EXTENSIONS` target
+  properties may specify values which CMake uses to compute required
+  compile options such as ``-std=c++11`` or ``-std=gnu++11``. The
+  :variable:`CMAKE_CXX_STANDARD` and :variable:`CMAKE_CXX_EXTENSIONS`
+  variables may be set to initialize the target properties.
+
+* New :prop_tgt:`C_STANDARD` and :prop_tgt:`C_EXTENSIONS` target
+  properties may specify values which CMake uses to compute required
+  compile options such as ``-std=c11`` or ``-std=gnu11``. The
+  :variable:`CMAKE_C_STANDARD` and :variable:`CMAKE_C_EXTENSIONS`
+  variables may be set to initialize the target properties.
+
+* New :prop_tgt:`COMPILE_FEATURES` target property may contain a list
+  of features required to compile a target.  CMake uses this
+  information to ensure that the compiler in use is capable of building
+  the target, and to add any necessary compile flags to support language
+  features.
+
+* New :prop_tgt:`COMPILE_PDB_NAME` and
+  :prop_tgt:`COMPILE_PDB_OUTPUT_DIRECTORY` target properties
+  were introduced to specify the MSVC compiler program database
+  file location (``cl /Fd``).  This complements the existing
+  :prop_tgt:`PDB_NAME` and :prop_tgt:`PDB_OUTPUT_DIRECTORY`
+  target properties that specify the linker program database
+  file location (``link /pdb``).
+
+* The :prop_tgt:`INTERFACE_LINK_LIBRARIES` target property now supports
+  a ``$<LINK_ONLY:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`.
+
+* A new :prop_tgt:`INTERFACE_SOURCES` target property was introduced. This is
+  consumed by dependent targets, which compile and link the listed sources.
+
+* The :prop_tgt:`SOURCES` target property now contains
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  such as ``TARGET_OBJECTS`` when read at configure time, if
+  policy :policy:`CMP0051` is ``NEW``.
+
+* The :prop_tgt:`SOURCES` target property now generally supports
+  :manual:`generator expression <cmake-generator-expressions(7)>`.  The
+  generator expressions may be used in the :command:`add_library` and
+  :command:`add_executable` commands.
+
+* It is now possible to write and append to the :prop_tgt:`SOURCES` target
+  property.  The :variable:`CMAKE_DEBUG_TARGET_PROPERTIES` variable may be
+  used to trace the origin of sources.
+
+* A :prop_sf:`VS_DEPLOYMENT_CONTENT` source file property was added
+  to tell the Visual Studio generators to mark content for deployment
+  in Windows Phone and Windows Store projects.
+
+* A :prop_sf:`VS_DEPLOYMENT_LOCATION` source file property was added
+  to tell the Visual Studio generators the relative location of content
+  marked for deployment in Windows Phone and Windows Store projects.
+
+* The :prop_tgt:`VS_WINRT_COMPONENT` target property was created to
+  tell Visual Studio generators to compile a shared library as a
+  Windows Runtime (WinRT) component.
+
+* The :generator:`Xcode` generator learned to check source
+  file properties  :prop_sf:`XCODE_EXPLICIT_FILE_TYPE` and
+  :prop_sf:`XCODE_LAST_KNOWN_FILE_TYPE` for a custom Xcode
+  file reference type.
+
+Modules
+-------
+
+* The :module:`BundleUtilities` module learned to resolve and replace
+  ``@rpath`` placeholders on OS X to correctly bundle applications
+  using them.
+
+* The :module:`CMakePackageConfigHelpers` module
+  :command:`configure_package_config_file` command learned a new
+  ``INSTALL_PREFIX`` option to generate package configuration files
+  meant for a prefix other than :variable:`CMAKE_INSTALL_PREFIX`.
+
+* The :module:`CheckFortranSourceCompiles` module was added to
+  provide a ``check_fortran_source_compiles()`` command.
+
+* The :module:`ExternalData` module learned to tolerate a ``DATA{}``
+  reference to a missing source file with a warning instead of
+  rejecting it with an error.  This helps developers write new
+  ``DATA{}`` references to test reference outputs that have not
+  yet been created.
+
+* The :module:`ExternalProject` module learned to support lzma-compressed
+  source tarballs with ``.7z``, ``.tar.xz``, and ``.txz`` extensions.
+
+* The :module:`ExternalProject` module ``ExternalProject_Add`` command
+  learned a new ``BUILD_ALWAYS`` option to cause the external project
+  build step to run every time the host project is built.
+
+* The :module:`ExternalProject` module ``ExternalProject_Add`` command
+  learned a new ``EXCLUDE_FROM_ALL`` option to cause the external
+  project target to have the :prop_tgt:`EXCLUDE_FROM_ALL` target
+  property set.
+
+* The :module:`ExternalProject` module ``ExternalProject_Add_Step`` command
+  learned a new ``EXCLUDE_FROM_MAIN`` option to cause the step to not be
+  a direct dependency of the main external project target.
+
+* The :module:`ExternalProject` module ``ExternalProject_Add`` command
+  learned a new ``DOWNLOAD_NO_PROGRESS`` option to disable progress
+  output while downloading the source tarball.
+
+* The :module:`FeatureSummary` module ``feature_summary`` API
+  learned to accept multiple values for the ``WHAT`` option and
+  combine them appropriately.
+
+* The :module:`FindCUDA` module learned to support ``fatbin`` and ``cubin``
+  modules.
+
+* The :module:`FindGTest` module ``gtest_add_tests`` macro learned
+  a new ``AUTO`` option to automatically read the :prop_tgt:`SOURCES`
+  target property of the test executable and scan the source files
+  for tests to be added.
+
+* The :module:`FindGLEW` module now provides imported targets.
+
+* The :module:`FindGLUT` module now provides imported targets.
+
+* The :module:`FindHg` module gained a new ``Hg_WC_INFO`` command to
+  help run ``hg`` to extract information about a Mercurial work copy.
+
+* The :module:`FindOpenCL` module was introduced.
+
+* The :module:`FindOpenMP` module learned to support Fortran.
+
+* The :module:`FindPkgConfig` module learned to use the ``PKG_CONFIG``
+  environment variable value as the ``pkg-config`` executable, if set.
+
+* The :module:`FindXercesC` module was introduced.
+
+* The :module:`FindZLIB` module now provides imported targets.
+
+* The :module:`GenerateExportHeader` module ``generate_export_header``
+  command learned to allow use with :ref:`Object Libraries`.
+
+* The :module:`InstallRequiredSystemLibraries` module gained a new
+  ``CMAKE_INSTALL_OPENMP_LIBRARIES`` option to install MSVC OpenMP
+  runtime libraries.
+
+* The :module:`UseSWIG` module learned to detect the module name
+  from ``.i`` source files if possible to avoid the need to set
+  the ``SWIG_MODULE_NAME`` source file property explicitly.
+
+* The :module:`WriteCompilerDetectionHeader` module was added to allow
+  creation of a portable header file for compiler optional feature detection.
+
+Generator Expressions
+---------------------
+
+* New ``COMPILE_FEATURES``
+  :manual:`generator expression <cmake-generator-expressions(7)>` allows
+  setting build properties based on available compiler features.
+
+CTest
+-----
+
+* The :command:`ctest_coverage` command learned to read variable
+  ``CTEST_COVERAGE_EXTRA_FLAGS`` to set ``CoverageExtraFlags``.
+
+* The :command:`ctest_coverage` command learned to support
+  Intel coverage files with the ``codecov`` tool.
+
+* The :command:`ctest_memcheck` command learned to support sanitizer
+  modes, including ``AddressSanitizer``, ``MemorySanitizer``,
+  ``ThreadSanitizer``, and ``UndefinedBehaviorSanitizer``.
+  Options may be set using the new
+  :variable:`CTEST_MEMORYCHECK_SANITIZER_OPTIONS` variable.
+
+CPack
+-----
+
+* :manual:`cpack(1)` gained an ``IFW`` generator to package using
+  Qt Framework Installer tools.  See the :cpack_gen:`CPack IFW Generator`.
+
+* :manual:`cpack(1)` gained ``7Z`` and ``TXZ`` generators supporting
+  lzma-compressed archives.
+
+* The :cpack_gen:`CPack DEB Generator` learned a new
+  :variable:`CPACK_DEBIAN_COMPRESSION_TYPE` variable to set the
+  tarball compression type.
+
+* The :cpack_gen:`CPack WIX Generator` learned to support
+  a :prop_inst:`CPACK_WIX_ACL` installed file property to
+  specify an Access Control List.
+
+Other
+-----
+
+* The :manual:`cmake(1)` ``-E`` option learned a new ``env`` command.
+
+* The :manual:`cmake(1)` ``-E tar`` command learned to support
+  lzma-compressed files.
+
+* :ref:`Object Libraries` may now have extra sources that do not
+  compile to object files so long as they would not affect linking
+  of a normal library (e.g. ``.dat`` is okay but not ``.def``).
+
+* Visual Studio generators for VS 8 and later learned to support
+  the ``ASM_MASM`` language.
+
+* The Visual Studio generators learned to treat ``.hlsl`` source
+  files as High Level Shading Language sources (using ``FXCompile``
+  in ``.vcxproj`` files).  Source file properties
+  :prop_sf:`VS_SHADER_TYPE`, :prop_sf:`VS_SHADER_MODEL`, and
+  :prop_sf:`VS_SHADER_ENTRYPOINT` were added added to specify the
+  shader type, model, and entry point name.
+
+New Diagnostics
+===============
+
+* Policy :policy:`CMP0052` introduced to control directories in the
+  :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of exported targets.
+
+Deprecated and Removed Features
+===============================
+
+* In CMake 3.0 the :command:`target_link_libraries` command
+  accidentally began allowing unquoted arguments to use
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  containing a (``;`` separated) list within them.  For example:
+
+  .. code-block:: cmake
+
+    set(libs B C)
+    target_link_libraries(A PUBLIC $<BUILD_INTERFACE:${libs}>)
+
+  This is equivalent to writing:
+
+  .. code-block:: cmake
+
+    target_link_libraries(A PUBLIC $<BUILD_INTERFACE:B C>)
+
+  and was never intended to work.  It did not work in CMake 2.8.12.
+  Such generator expressions should be in quoted arguments:
+
+  .. code-block:: cmake
+
+    set(libs B C)
+    target_link_libraries(A PUBLIC "$<BUILD_INTERFACE:${libs}>")
+
+  CMake 3.1 again requires the quotes for this to work correctly.
+
+* Prior to CMake 3.1 the Makefile generators did not escape ``#``
+  correctly inside make variable assignments used in generated
+  makefiles, causing them to be treated as comments.  This made
+  code like:
+
+  .. code-block:: cmake
+
+    add_compile_options(-Wno-#pragma-messages)
+
+  not work in Makefile generators, but work in other generators.
+  Now it is escaped correctly, making the behavior consistent
+  across generators.  However, some projects may have tried to
+  workaround the original bug with code like:
+
+  .. code-block:: cmake
+
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-\\#pragma-messages")
+
+  This added the needed escape for Makefile generators but also
+  caused other generators to pass ``-Wno-\#pragma-messages`` to
+  the shell, which would work only in POSIX shells.
+  Unfortunately the escaping fix could not be made in a compatible
+  way so this platform- and generator-specific workaround no
+  longer works.  Project code may test the :variable:`CMAKE_VERSION`
+  variable value to make the workaround version-specific too.
+
+* Callbacks established by the :command:`variable_watch` command will no
+  longer receive the ``ALLOWED_UNKNOWN_READ_ACCESS`` access type when
+  the undocumented ``CMAKE_ALLOW_UNKNOWN_VARIABLE_READ_ACCESS`` variable is
+  set.  Uninitialized variable accesses will always be reported as
+  ``UNKNOWN_READ_ACCESS``.
+
+* The :module:`CMakeDetermineVSServicePack` module now warns that
+  it is deprecated and should not longer be used.  Use the
+  :variable:`CMAKE_<LANG>_COMPILER_VERSION` variable instead.
+
+* The :module:`FindITK` module has been removed altogether.
+  It was a thin-wrapper around ``find_package(ITK ... NO_MODULE)``.
+  This produces much clearer error messages when ITK is not found.
+
+* The :module:`FindVTK` module has been removed altogether.
+  It was a thin-wrapper around ``find_package(VTK ... NO_MODULE)``.
+  This produces much clearer error messages when VTK is not found.
+
+  The module also provided compatibility support for finding VTK 4.0.
+  This capability has been dropped.
+
+Other Changes
+=============
+
+* The :manual:`cmake-gui(1)` learned to capture output from child
+  processes started by the :command:`execute_process` command
+  and display it in the output window.
+
+* The :manual:`cmake-language(7)` internal implementation of generator
+  expression and list expansion parsers have been optimized and shows
+  non-trivial speedup on large projects.
+
+* The Makefile generators learned to use response files with GNU tools
+  on Windows to pass library directories and names to the linker.
+
+* When generating linker command-lines, CMake now avoids repeating
+  items corresponding to SHARED library targets.
+
+* Support for the Open Watcom compiler has been overhauled.
+  The :variable:`CMAKE_<LANG>_COMPILER_ID` is now ``OpenWatcom``,
+  and the :variable:`CMAKE_<LANG>_COMPILER_VERSION` now uses
+  the Open Watcom external version numbering.  The external
+  version numbers are lower than the internal version number
+  by 11.
+
+* The ``cmake-mode.el`` major Emacs editing mode no longer
+  treats ``_`` as part of words, making it more consistent
+  with other major modes.

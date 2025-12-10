@@ -1,0 +1,16 @@
+CMP0139
+-------
+
+.. versionadded:: 3.24
+
+The :command:`if` command supports path comparisons using ``PATH_EQUAL``
+operator.
+
+The ``OLD`` behavior for this policy is to ignore the ``PATH_EQUAL`` operator.
+The ``NEW`` behavior is to interpret the ``PATH_EQUAL`` operator.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

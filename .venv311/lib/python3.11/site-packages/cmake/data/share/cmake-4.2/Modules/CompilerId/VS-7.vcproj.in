@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioProject
+	ProjectType="Visual C++"
+	Version="@id_version@"
+	Name="CompilerId@id_lang@"
+	ProjectGUID="{CAE07175-D007-4FC3-BFE8-47B392814159}"
+	RootNamespace="CompilerId@id_lang@"
+	Keyword="Win32Proj"
+	TargetFrameworkVersion="196613"
+	>
+	<Platforms>
+		<Platform
+			Name="@id_platform@"
+		/>
+	</Platforms>
+	<Configurations>
+		<Configuration
+			Name="Debug|@id_platform@"
+			OutputDirectory="."
+			IntermediateDirectory="$(ConfigurationName)"
+			ConfigurationType="1"
+			CharacterSet="1"
+			>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="0"
+				MinimalRebuild="false"
+				BasicRuntimeChecks="3"
+				RuntimeLibrary="3"
+				UsePrecompiledHeader="0"
+				WarningLevel="0"
+				DebugInformationFormat="0"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				LinkIncremental="1"
+				IgnoreDefaultLibraryNames="libc"
+				GenerateDebugInformation="false"
+				SubSystem="@id_subsystem@"
+				EntryPointSymbol="@id_entrypoint@"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				CommandLine="for %%i in (@id_cl@) do @echo CMAKE_@id_lang@_COMPILER=%%~$PATH:i"
+			/>
+		</Configuration>
+	</Configurations>
+	<Files>
+		<Filter
+			Name="Source Files"
+			Filter="cpp;c"
+			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
+			>
+			<File
+				RelativePath="@id_src@"
+				>
+			</File>
+		</Filter>
+	</Files>
+</VisualStudioProject>

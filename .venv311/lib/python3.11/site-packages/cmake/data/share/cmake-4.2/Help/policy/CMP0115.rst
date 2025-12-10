@@ -1,0 +1,34 @@
+CMP0115
+-------
+
+.. versionadded:: 3.20
+
+Source file extensions must be explicit.
+
+In CMake 3.19 and below, if a source file could not be found by the name
+specified, it would append a list of known extensions to the name to see if
+the file with the extension could be found. For example, this would allow the
+user to run:
+
+.. code-block:: cmake
+
+  add_executable(exe main)
+
+and put ``main.c`` in the executable without specifying the extension.
+
+Starting in CMake 3.20, CMake prefers all source files to have their extensions
+explicitly listed:
+
+.. code-block:: cmake
+
+  add_executable(exe main.c)
+
+The ``OLD`` behavior for this policy is to implicitly append known extensions
+to source files if they can't be found. The ``NEW`` behavior of this policy is
+to not append known extensions and require them to be explicit.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.20
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

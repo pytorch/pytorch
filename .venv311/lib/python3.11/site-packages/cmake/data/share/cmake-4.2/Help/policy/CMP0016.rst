@@ -1,0 +1,17 @@
+CMP0016
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+:command:`target_link_libraries` reports error if its only argument
+is not a target.
+
+In CMake 2.8.2 and lower the :command:`target_link_libraries` command silently
+ignored if it was called with only one argument, and this argument
+wasn't a valid target.  In CMake 2.8.3 and above it reports an error
+in this case.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

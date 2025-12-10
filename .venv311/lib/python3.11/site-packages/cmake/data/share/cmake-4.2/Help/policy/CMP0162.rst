@@ -1,0 +1,47 @@
+CMP0162
+-------
+
+.. versionadded:: 3.30
+
+:ref:`Visual Studio Generators` add ``UseDebugLibraries`` indicators by default.
+
+The "Use Debug Libraries" setting in Visual Studio projects indicates what
+configurations are considered debug configurations.  In standalone projects,
+this may affect MSBuild's default selection of MSVC runtime library,
+optimization flags, runtime checks, and similar settings.  CMake typically
+generates all those settings explicitly based on the project's specification,
+so CMake 3.29 and below do not write any ``UseDebugLibraries`` indicators to
+``.vcxproj`` files.
+
+CMake 3.30 and above prefer to write ``UseDebugLibraries`` indicators because
+they are useful for reference by both humans and tools, and may also affect
+the behavior of platform-specific SDKs.  The indicator for each configuration
+of a target is determined as follows:
+
+* If the target compiles sources for a known MSVC runtime library
+  (such as that specified by :prop_tgt:`MSVC_RUNTIME_LIBRARY`),
+  then ``UseDebugLibraries`` is ``true`` for configurations that
+  compile for a "Debug" runtime library, and ``false`` for others.
+
+* Otherwise, such as in targets created by :command:`add_custom_target`,
+  ``UseDebugLibraries`` is ``true`` for the ``Debug`` configuration,
+  and ``false`` for others.
+
+This policy provides compatibility for projects that have not been updated to
+expect the indicators.  The policy setting is recorded by each target as it is
+created and used to determine the default behavior for that target's
+``.vcxproj`` file.
+
+The ``OLD`` behavior for this policy is to not generate ``UseDebugLibraries``
+indicators by default.  The ``NEW`` behavior for this policy is to generate
+``UseDebugLibraries`` indicators by default.
+
+If the :variable:`CMAKE_VS_USE_DEBUG_LIBRARIES` variable and/or
+:prop_tgt:`VS_USE_DEBUG_LIBRARIES` target property is set, it explicitly
+controls ``UseDebugLibraries`` generation regardless of this policy.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

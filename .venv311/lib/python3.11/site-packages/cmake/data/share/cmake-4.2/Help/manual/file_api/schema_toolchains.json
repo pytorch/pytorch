@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake toolchains object kind",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "toolchains"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "toolchains",
+      "description": "Specifies the object kind"
+    },
+    "version": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 1
+        },
+        "minor": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolchains": {
+      "type": "array",
+      "description": "Array of toolchain configurations per language",
+      "items": {
+        "type": "object",
+        "required": [
+          "language",
+          "compiler"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "Toolchain language identifier (e.g. C, CXX)"
+          },
+          "compiler": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Path to the compiler executable. This is present when the CMAKE_<LANG>_COMPILER variable is defined."
+              },
+              "id": {
+                "type": "string",
+                "description": "Compiler identifier (e.g. GNU, MSVC). This is present when the CMAKE_<LANG>_COMPILER_ID variable is defined."
+              },
+              "version": {
+                "type": "string",
+                "description": "Version of the compiler. This is present when the CMAKE_<LANG>_COMPILER_VERSION variable is defined."
+              },
+              "target": {
+                "type": "string",
+                "description": "Cross-compiling target of the compiler. This is present when the CMAKE_<LANG>_COMPILER_TARGET variable is defined."
+              },
+              "implicit": {
+                "type": "object",
+                "properties": {
+                  "includeDirectories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of implicit include directories for the compiler. This is present when the CMAKE_<LANG>_IMPLICIT_INCLUDE_DIRECTORIES variable is defined."
+                  },
+                  "linkDirectories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of implicit link directories for the compiler front end. This is present when the CMAKE_<LANG>_IMPLICIT_LINK_DIRECTORIES variable is defined."
+                  },
+                  "linkFrameworkDirectories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of implicit link framework directories for the compiler front end. This is present when the CMAKE_<LANG>_IMPLICIT_FRAMEWORK_DIRECTORIES variable is defined."
+                  },
+                  "linkLibraries": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of implicit link libraries for the compiler front end. This is present when the CMAKE_<LANG>_IMPLICIT_LINK_LIBRARIES variable is defined."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "sourceFileExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of source file extensions (without leading dot) supported by this toolchain"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,69 @@
+[
+  {
+    "name": "IgnoreStandardIncludePath",
+    "switch": "X",
+    "comment": "Ignore Standard Include Paths",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ShowProgress",
+    "switch": "v",
+    "comment": "Show Progress",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SuppressStartupBanner",
+    "switch": "nologo",
+    "comment": "Suppress Startup Banner",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "NullTerminateStrings",
+    "switch": "n",
+    "comment": "Null Terminate Strings",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreprocessorDefinitions",
+    "switch": "D",
+    "comment": "Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "UndefinePreprocessorDefinitions",
+    "switch": "u",
+    "comment": "Undefine Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "AdditionalIncludeDirectories",
+    "switch": "I",
+    "comment": "Additional Include Directories",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ResourceOutputFileName",
+    "switch": "fo",
+    "comment": "Resource File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

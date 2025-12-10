@@ -1,0 +1,372 @@
+CMake 3.20 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.19 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` gained support for build and test presets.
+
+Generators
+----------
+
+* :ref:`Makefile Generators`, for some toolchains, now use the compiler
+  to extract implicit dependencies while compiling source files.
+
+Languages
+---------
+
+* C++23 compiler modes may now be specified via the :prop_tgt:`CXX_STANDARD`,
+  :prop_tgt:`CUDA_STANDARD`, or :prop_tgt:`OBJCXX_STANDARD` target properties,
+  or via the :manual:`Compile Features <cmake-compile-features(7)>`
+  functionality's ``cxx_std_23`` meta-feature.
+
+* ``CUDA`` language support now works when ``nvcc`` is a symbolic link,
+  for example due to a ``ccache`` or ``colornvcc`` wrapper script.
+
+* The :envvar:`CUDAARCHS` environment variable was added for initializing
+  :variable:`CMAKE_CUDA_ARCHITECTURES`. Useful in cases where the compiler
+  default is unsuitable for the machine's GPU.
+
+Compilers
+---------
+
+* The NVIDIA HPC SDK compilers are now supported with compiler id ``NVHPC``.
+
+* The Intel oneAPI NextGen LLVM compilers are now supported with
+  compiler id ``IntelLLVM``:
+
+  * The ``icx``/``icpx`` C/C++ compilers on Linux, and the ``icx``
+    C/C++ compiler on Windows, are fully supported as of oneAPI 2021.1.
+
+  * The ``ifx`` Fortran compiler on Linux is supported as of oneAPI 2021.1.
+
+  * The ``ifx`` Fortran compiler on Windows is not yet supported.
+
+  The Intel oneAPI Classic compilers (``icc``, ``icpc``, and ``ifort``)
+  continue to be supported with compiler id ``Intel``.
+
+* Support was added for the IAR STM8 compiler.
+
+Platforms
+---------
+
+* CMake's support for :ref:`Cross Compiling for Android`
+  is now merged with the Android NDK's toolchain file.
+  They now have similar behavior, though some variable names differ.
+  User-facing changes include:
+
+  - ``find_*`` functions will search NDK ABI / API specific paths by default.
+
+  - The default :variable:`CMAKE_BUILD_TYPE` for Android is
+    now ``RelWithDebInfo``.
+
+  - The :variable:`CMAKE_ANDROID_NDK_VERSION` variable was added to
+    report the version of the NDK.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` gained a new "toolchains" object
+  kind that describes the compiler used for each enabled language.
+
+Commands
+--------
+
+* :command:`add_custom_command` and :command:`add_custom_target` now
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`
+  in their ``OUTPUT`` and ``BYPRODUCTS`` options.
+
+  Their ``COMMAND``, ``WORKING_DIRECTORY``, and ``DEPENDS`` options gained
+  support for new generator expressions :genex:`$<COMMAND_CONFIG:...>` and
+  :genex:`$<OUTPUT_CONFIG:...>` that control cross-config handling when using
+  the :generator:`Ninja Multi-Config` generator.
+
+* The :command:`add_custom_command` command gained ``DEPFILE`` support on
+  :ref:`Makefile Generators`.
+
+* The :command:`add_library` command previously prohibited imported object
+  libraries when using potentially multi-architecture configurations.
+  This mostly affected the :generator:`Xcode` generator, e.g. when targeting
+  iOS or one of the other device platforms.  This restriction has now been
+  removed.
+
+* The :command:`cmake_path` command was added for operations on
+  filesystem paths.
+
+* The :command:`configure_file` command gained ``USE_SOURCE_PERMISSIONS``
+  and ``FILE_PERMISSIONS`` options to support copying of permissions of the
+  source file and using specified permissions respectively.
+
+* The :command:`file(GENERATE)` command gained a ``NEWLINE_STYLE`` option to
+  specify how newlines are handled for the generated file.
+
+* The :command:`file(GENERATE)` command gained ``NO_SOURCE_PERMISSIONS``,
+  ``USE_SOURCE_PERMISSIONS``, and ``FILE_PERMISSIONS`` options for controlling
+  the permissions of the generated file.
+
+* The :command:`install(FILES)` command ``RENAME`` option learned to
+  support :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :command:`target_include_directories` command gained a new option
+  ``AFTER``.
+
+* The :command:`target_sources` command now supports targets created
+  by the :command:`add_custom_target` command.
+
+* The :command:`try_run` command gained a ``WORKING_DIRECTORY`` option to
+  set the working directory in which to run the compiled check executable.
+
+Variables
+---------
+
+* The :variable:`CMAKE_<LANG>_BYTE_ORDER` variable was added to provide the
+  target architecture byte order detected from the toolchain.
+
+* The :variable:`CMAKE_RUNTIME_OUTPUT_DIRECTORY`,
+  :variable:`CMAKE_LIBRARY_OUTPUT_DIRECTORY`, and
+  :variable:`CMAKE_ARCHIVE_OUTPUT_DIRECTORY` variables now support
+  target-dependent generator expressions.
+
+Properties
+----------
+
+* The :prop_tgt:`<LANG>_CLANG_TIDY` target property and the associated
+  :variable:`CMAKE_<LANG>_CLANG_TIDY` variable learned to support
+  the ``OBJC`` and ``OBJCXX`` languages.
+
+* The :prop_tgt:`EXPORT_COMPILE_COMMANDS` target property was added
+  for the associated :variable:`CMAKE_EXPORT_COMPILE_COMMANDS` variable
+  to allow for configuration of exporting compile commands per target.
+
+* Generated sources may be used across directories without manual marking.
+  Additionally, the :prop_sf:`GENERATED` source file property can no longer be
+  turned off once turned on, nor can it be set to other than boolean values.
+  See policy :policy:`CMP0118`.
+
+* The :prop_tgt:`UNITY_BUILD_UNIQUE_ID` target property
+  was added to support generation of an identifier that is
+  unique per source file in unity builds.  It can help to
+  resolve duplicate symbol problems with anonymous namespaces.
+
+* The :prop_tgt:`WIN32_EXECUTABLE` target property now works with Clang
+  on Windows.
+
+* The :prop_tgt:`XCODE_EMBED_FRAMEWORKS <XCODE_EMBED_<type>>` target property
+  was added to tell the :generator:`Xcode` generator to embed frameworks.
+  Aspects of the embedding can be customized with the
+  :prop_tgt:`XCODE_EMBED_FRAMEWORKS_PATH <XCODE_EMBED_<type>>`,
+  :prop_tgt:`XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY`, and
+  :prop_tgt:`XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY` target properties.
+
+Modules
+-------
+
+* The :module:`ExternalData` module :command:`ExternalData_Add_Target`
+  function gained a ``SHOW_PROGRESS <bool>`` option for controlling whether
+  or not to show progress output during the build.
+
+* The :module:`ExternalProject` module :command:`ExternalProject_Add` function
+  gained a ``CONFIGURE_HANDLED_BY_BUILD`` option.  This can be used to make
+  subsequent runs of the configure step be triggered by the build step when
+  an external project dependency rebuilds instead of always re-running the
+  configure step in such cases.
+
+* The :module:`FindBoost` module gained a ``Boost_NO_WARN_NEW_VERSIONS``
+  option to silence the warning about unknown dependencies for new
+  Boost versions.
+
+* The :module:`FindCUDAToolkit` module gained support for finding CUDA
+  toolkits when ``nvcc`` is a symbolic link,
+  for example due to a ``ccache`` or ``colornvcc`` wrapper script.
+
+* The :module:`FindGDAL` module has been improved to document and mark as
+  advanced its cache variables. There is a new ``FindGDAL_SKIP_GDAL_CONFIG``
+  variable which may be used to skip over the ``gdal-config``-based search.
+  Users may also set ``GDAL_ADDITIONAL_LIBRARY_VERSIONS`` to add additional
+  versions to the library name search strategy.
+
+* The :module:`FindIntl` module now provides an imported target.
+
+* The :module:`FindOpenSSL` module learned to support a version range.
+
+* The :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  modules gained options controlling how unversioned interpreter names are
+  searched.
+
+* The :module:`UseJava` module ``add_jar()`` command's
+  ``GENERATE_NATIVE_HEADERS`` feature gained options to export the
+  generated target.
+
+* The :module:`UseSWIG` module gained the capability, for
+  :ref:`Makefile <Makefile Generators>` and :ref:`Ninja <Ninja Generators>`
+  generators, to use the ``swig`` tool to generate implicit dependencies.
+
+Autogen
+-------
+
+* The :ref:`Qt AUTOMOC` feature now works with per-config sources.
+
+CTest
+-----
+
+* :manual:`ctest(1)` gained a :option:`--test-dir <ctest --test-dir>`
+  option to specify the directory in which to look for tests.
+
+CPack
+-----
+
+* :module:`CPack` gained the :variable:`CPACK_THREADS` variable to
+  control the number of threads used for parallelized operations,
+  such as compressing the installer package.
+
+* The :cpack_gen:`CPack DEB Generator` learned a new
+  :variable:`CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS`
+  variable to specify additional search directories for
+  resolving private library dependencies when using
+  ``dpkg-shlibdeps``.
+
+* The :cpack_gen:`CPack IFW Generator` gained a new
+  :variable:`CPACK_IFW_PACKAGE_WIZARD_SHOW_PAGE_LIST` variable to
+  control visibility of the widget listing installer pages on the left side
+  of the wizard. This feature available only since QtIFW 4.0.
+
+* The :cpack_gen:`CPack NSIS Generator` gained new
+  :variable:`CPACK_NSIS_BRANDING_TEXT` and
+  :variable:`CPACK_NSIS_BRANDING_TEXT_TRIM_POSITION` variables to change
+  the text at the bottom of the install window and change its trim position
+
+* The :cpack_gen:`CPack NSIS Generator` now correctly handles Unicode
+  characters.  If you want to have a :variable:`CPACK_RESOURCE_FILE_LICENSE`
+  with UTF-8 characters, it needs to be encoded in UTF-8 BOM.
+
+* The :cpack_gen:`CPack NuGet Generator` gained options:
+
+  - :variable:`CPACK_NUGET_PACKAGE_ICON` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_ICON`
+    allow package icons to be specified by local files.
+  - :variable:`CPACK_NUGET_PACKAGE_LICENSE_EXPRESSION` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_LICENSE_EXPRESSION` add
+    support for specifying licenses recognized by the
+    `Software Package Data Exchange`_ (SPDX).
+  - :variable:`CPACK_NUGET_PACKAGE_LICENSE_FILE_NAME` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_LICENSE_FILE_NAME` allow
+    licenses to be specified by local files.
+  - :variable:`CPACK_NUGET_PACKAGE_LANGUAGE` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_LANGUAGE` allow the locale
+    for a package to be specified, for example ``en_CA``.
+
+.. _Software Package Data Exchange: https://spdx.dev/
+
+Deprecated and Removed Features
+===============================
+
+* The :manual:`cmake-server(7)` mode has been removed.
+  Clients should use the :manual:`cmake-file-api(7)` instead.
+
+* The :module:`WriteCompilerDetectionHeader` module has been deprecated
+  via policy :policy:`CMP0120`.  Projects should be ported away from it.
+
+* The :module:`TestBigEndian` module has been deprecated in favor
+  of the :variable:`CMAKE_<LANG>_BYTE_ORDER` variable.
+
+* The :module:`AddFileDependencies` module is deprecated.
+  Port projects to use :command:`set_property` directly.
+
+* The :cpack_gen:`CPack NuGet Generator` deprecated some variables to reflect
+  changes in the NuGet specification:
+
+  - :variable:`CPACK_NUGET_PACKAGE_ICONURL` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_ICONURL` have been deprecated;
+    replace with a reference to a local icon file.
+  - :variable:`CPACK_NUGET_PACKAGE_LICENSEURL` and
+    :variable:`CPACK_NUGET_<compName>_PACKAGE_LICENSEURL` have been deprecated;
+    replace with a reference to the project's license file or SPDX
+    license expression.
+
+Other Changes
+=============
+
+* When running :manual:`cmake(1)` to :ref:`Generate a Project Buildsystem`,
+  unknown command-line arguments starting with a hyphen (``-``) are now
+  rejected with an error.  Previously they were silently ignored.
+
+* Source file extensions must now be explicit.
+  See policy :policy:`CMP0115` for details.
+
+* The :prop_sf:`LANGUAGE` source file property now forces compilation
+  as the specified language.  See policy :policy:`CMP0119`.
+
+* On AIX, installation of XCOFF executables and shared libraries
+  no longer requires relinking to change the runtime search path
+  from the build-tree RPATH to the install-tree RPATH.  CMake now
+  edits the XCOFF binaries directly during installation, as has
+  long been done on ELF platforms.
+
+* With MSVC-like compilers the value of
+  :variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` no longer contains
+  the ``/GR`` flag for runtime type information by default.
+  See policy :policy:`CMP0117`.
+
+* Ninja generators now transform the ``DEPFILE`` generated by an
+  :command:`add_custom_command`. See policy :policy:`CMP0116` for details.
+
+* The precompiled Linux binaries provided on
+  `cmake.org <https://cmake.org/download/>`_ have changed their naming pattern
+  to ``cmake-$ver-linux-$arch``, where ``$arch`` is either ``x86_64`` or
+  ``aarch64``.
+
+* The precompiled Windows binaries provided on
+  `cmake.org <https://cmake.org/download/>`_ have changed their naming pattern
+  to ``cmake-$ver-windows-$arch``, where ``$arch`` is either ``x86_64`` or
+  ``i386``.
+
+Updates
+=======
+
+Changes made since CMake 3.20.0 include the following.
+
+3.20.1
+------
+
+* The :module:`FindIntl` module in CMake 3.20.0 added checks
+  ``Intl_HAVE_GETTEXT_BUILTIN``, ``Intl_HAVE_DCGETTEXT_BUILTIN``,
+  and ``Intl_IS_BUILTIN``, but they were not implemented correctly.
+  These have been removed and replaced with a single ``Intl_IS_BUILT_IN``
+  check, whose name is consistent with the :module:`FindIconv` module.
+
+* The ``-rpath`` linker flag is now specified as supported on all Apple
+  platforms, not just macOS.  The ``install_name_dir`` used for
+  iOS, tvOS and watchOS should now default to ``@rpath`` instead of using
+  a full absolute path and failing at runtime when the library or framework
+  is embedded in an application bundle (see :prop_tgt:`XCODE_EMBED_<type>`).
+
+3.20.2
+------
+
+* The Intel Classic 2021 compiler version numbers are now detected correctly
+  as having major version 2021.  CMake 3.20.1 and below were not aware of a
+  change to the identification macro version scheme made by Intel starting
+  in version 2021, and detected the version as 20.2.
+
+* The Intel oneAPI Fortran compiler is now identified as ``IntelLLVM``.
+  The oneAPI 2021.1 Fortran compiler is missing an identification macro,
+  so CMake 3.20.1 and below identified it as ``Intel``.  CMake now has
+  a special case to recognize oneAPI 2021.1 Fortran as ``IntelLLVM``.
+  The oneAPI 2021.2 Fortran compiler defines the proper identification
+  macro and so is identified as ``IntelLLVM`` by all CMake 3.20 versions.
+
+3.20.3, 3.20.4, 3.20.5, 3.20.6
+------------------------------
+
+These versions made no changes to documented features or interfaces.
+Some implementation updates were made to support ecosystem changes
+and/or fix regressions.

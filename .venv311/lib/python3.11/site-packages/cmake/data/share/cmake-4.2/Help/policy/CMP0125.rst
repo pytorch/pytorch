@@ -1,0 +1,41 @@
+CMP0125
+-------
+
+.. versionadded:: 3.21
+
+The :command:`find_file`, :command:`find_path`, :command:`find_library` and
+:command:`find_program` commands cache their result in the variable specified
+by their first argument.  Prior to CMake 3.21, if a cache variable of that
+name already existed before the call but the cache variable had no type, any
+non-cache variable of the same name would be discarded and the cache variable
+was always used (see also :policy:`CMP0126` for a different but similar
+behavior).  This contradicts the convention that a non-cache variable should
+take precedence over a cache variable of the same name.  Such a situation can
+arise if a user sets a cache variable on the command line without specifying
+a type, such as ``cmake -DMYVAR=blah ...`` instead of
+``cmake -DMYVAR:FILEPATH=blah``.
+
+Related to the above, if a cache variable of the specified name already exists
+and it *does* have a type, the various ``find_...()`` commands would return
+that value unchanged.  In particular, if it contained a relative path, it
+would not be converted to an absolute path in this situation.
+
+When policy ``CMP0125`` is set to ``OLD`` or is unset, the behavior is as
+described above.  When it is set to ``NEW``, the behavior is as follows:
+
+* If a non-cache variable of the specified name exists when the ``find_...()``
+  command is called, its value will be used regardless of whether a cache
+  variable of the same name already exists or not.  A cache variable will not
+  be created in this case if no such cache variable existed before.
+  If a cache variable of the specified name did already exist, the cache will
+  be updated to match the non-cache variable.
+
+* The various ``find...()`` commands will always provide an absolute path in
+  the result variable, except where a relative path provided by a cache or
+  non-cache variable cannot be resolved to an existing path.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

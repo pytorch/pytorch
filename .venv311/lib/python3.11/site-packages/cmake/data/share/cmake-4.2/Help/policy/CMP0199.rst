@@ -1,0 +1,93 @@
+CMP0199
+-------
+
+.. versionadded:: 4.2
+
+:genex:`$<CONFIG:cfgs>` only matches the configuration of the consumed target.
+
+Historically, when a :genex:`$<CONFIG:cfgs>` generator expression appeared in
+the properties of an imported target, it would match (that is, evaluate to
+``1``) if any of the ``cfgs`` matched *any* of the following:
+
+1. The selected configuration of the imported target being consumed.
+
+2. The configuration of the consuming target.
+
+3. *Any* of the configurations in the :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>`
+   of the imported target being consumed
+   (where ``<CONFIG>`` is the configuration of the consuming target),
+   *whether or not such configurations are valid for the imported target*.
+
+This could result in expressions which are intended to be mutually exclusive
+being concurrently evaluated.  This would be especially problematic if the
+value of a compile definition is intended to be determined by the
+configuration, as this lack of exclusivity could result in redefinition.
+
+CMake 4.2 and above prefer to consider *only* the configuration of the imported
+target being consumed; that is, (1) in the above list.
+
+This policy provides compatibility with projects that rely on the historical
+behavior.  The ``OLD`` behavior for this policy is to retain the historic
+behavior as described above.  The ``NEW`` behavior is to consider only the
+configuration of the imported target being consumed.
+
+.. note::
+
+  This policy only applies to generator expressions being evaluated as part of
+  the usage requirements of imported targets which are not imported from |CPS|
+  packages.
+
+  For non-imported targets, both the historic and ongoing behavior is to
+  consider only the configuration of the consuming target.  (The selected
+  configuration of a non-imported target is always the active build
+  configuration, which is necessarily the same as the consuming target's
+  configuration.)
+
+  For targets imported from |CPS| packages, the ``NEW`` behavior is used,
+  regardless of the policy setting.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst
+
+Examples
+^^^^^^^^
+
+Consider the following imported libraries:
+
+.. code-block:: cmake
+
+  add_library(test1 INTERFACE IMPORTED)
+  set_target_properties(test1 PROPERTIES
+    IMPORTED_CONFIGURATIONS "DEBUG"
+    INTERFACE_COMPILE_DEFINITIONS
+      "$<$<CONFIG:debug>:DEBUG>;$<$<CONFIG:release>:RELEASE>"
+  )
+
+  add_library(test2 INTERFACE IMPORTED)
+  set_target_properties(test2 PROPERTIES
+    IMPORTED_CONFIGURATIONS "TEST"
+    INTERFACE_COMPILE_DEFINITIONS
+      "$<$<CONFIG:debug>:DEBUG>;$<$<CONFIG:example>:EXAMPLE>;$<$<CONFIG:test>:TEST>"
+    MAP_IMPORTED_CONFIG_RELEASE "DEBUG;EXAMPLE;TEST"
+  )
+
+Assume that the consuming project is built in the ``Release`` configuration.
+Under the ``OLD`` policy, a consumer of ``test1`` would see both ``DEBUG``
+and ``RELEASE`` defined; ``$<CONFIG:debug>`` evaluates to ``1`` because the
+selected configuration of ``test1`` is ``DEBUG``, and ``$<CONFIG:release>``
+evaluates to ``1`` because the consumer's configuration is ``Release``
+(keeping in mind that configuration matching is case-insensitive). Likewise,
+a consumer of ``test2`` would see all of ``DEBUG``, ``RELEASE`` and ``TEST``
+defined; ``$<CONFIG:debug>``, ``$<CONFIG:example>`` and ``$<CONFIG:test>`` all
+evaluate to ``1`` because all of these configurations appear in
+``MAP_IMPORTED_CONFIG_RELEASE``.
+
+Under the ``NEW`` policy, when ``test1`` is consumed, only ``$<CONFIG:debug>``
+will evaluate to ``1``. Similarly, when ``test2`` is consumed, only
+``$<CONFIG:test>`` will evaluate to ``1``. Both of these correspond to the
+configuration of the consumed library that is actually selected by CMake.
+
+.. |CPS| replace:: Common Package Specification

@@ -1,0 +1,54 @@
+CMP0184
+-------
+
+.. versionadded:: 4.0
+
+MSVC runtime checks flags are selected by an abstraction.
+
+Compilers targeting the MSVC ABI have flags to select the runtime checks.
+Runtime checks selection typically varies with build
+configuration.
+
+In CMake 3.31 and below, runtime checks flags are added to
+the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache entries by CMake
+automatically.  This allows users to edit their cache entries to adjust the
+flags.  However, the presence of such default flags is problematic for
+projects that want to choose different runtime checks programmatically.
+In particular, it requires string editing of the
+:variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` variables with knowledge of the
+CMake builtin defaults so they can be replaced.
+
+CMake 4.0 and above prefer to leave the runtime checks flags
+out of the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` values and instead
+offer a first-class abstraction.  The
+:variable:`CMAKE_MSVC_RUNTIME_CHECKS` variable and
+:prop_tgt:`MSVC_RUNTIME_CHECKS` target property may be set to
+select the MSVC runtime checks.  If they are not set, CMake
+enables runtime checks for the ``Debug`` configuration only using the default
+value ``$<$<CONFIG:Debug>:StackFrameErrorCheck;UninitializedVariable>``, if
+supported by the compiler, or an empty value otherwise.
+
+This policy provides compatibility with projects that have not been updated
+to be aware of the abstraction.  The policy setting takes effect as of the
+first :command:`project` or :command:`enable_language` command that enables
+a language whose compiler targets the MSVC ABI.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project, that choice
+  will be used throughout the tree.  In projects that have nested projects
+  in subdirectories, be sure to confirm if everything is working with the
+  selected policy behavior.
+
+The ``OLD`` behavior for this policy is to place MSVC runtimes checks
+flags in the default :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>` cache
+entries and ignore the :variable:`CMAKE_MSVC_RUNTIME_CHECKS`
+abstraction.  The ``NEW`` behavior for this policy is to *not* place MSVC
+runtime checks flags in the default cache entries and use
+the abstraction instead.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.0
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

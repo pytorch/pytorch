@@ -1,0 +1,35 @@
+CMP0119
+-------
+
+.. versionadded:: 3.20
+
+:prop_sf:`LANGUAGE` source file property explicitly compiles as specified
+language.
+
+The :prop_sf:`LANGUAGE` source file property is documented to mean that the
+source file is written in the specified language.  In CMake 3.19 and below,
+setting this property causes CMake to compile the source file using the
+compiler for the specified language.  However, it only passes an explicit
+flag to tell the compiler to treat the source as the specified language
+for MSVC-like, XL, and Embarcadero compilers for the ``CXX`` language.
+CMake 3.20 and above prefer to also explicitly tell the compiler to use
+the specified language using a flag such as ``-x c`` on all compilers
+for which such flags are known.
+
+This policy provides compatibility for projects that have not been updated
+to expect this behavior.  For example, some projects were setting the
+``LANGUAGE`` property to ``C`` on assembly-language ``.S`` source files
+in order to compile them using the C compiler.  Such projects should be
+updated to use ``enable_language(ASM)``, for which CMake will often choose
+the C compiler as the assembler on relevant platforms anyway.
+
+The ``OLD`` behavior for this policy is to interpret the ``LANGUAGE <LANG>``
+property using its undocumented meaning to "use the ``<LANG>`` compiler".
+The ``NEW`` behavior for this policy is to interpret the ``LANGUAGE <LANG>``
+property using its documented meaning to "compile as a ``<LANG>`` source".
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.20
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

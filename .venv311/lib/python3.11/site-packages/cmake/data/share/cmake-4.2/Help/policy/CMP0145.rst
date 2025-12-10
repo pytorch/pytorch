@@ -1,0 +1,29 @@
+CMP0145
+-------
+
+.. versionadded:: 3.27
+
+The :module:`Dart` and :module:`FindDart` modules are removed.
+
+These modules were added very early in CMake's development to support
+driving tests with a "DART" tool, but DART has not been distributed or
+maintained for many years.  Projects would ``include(Dart)`` to use it,
+and the ``Dart`` module would run ``find_package(Dart)`` internally.
+Since :manual:`ctest(1)` was created, the ``Dart`` module has just been
+a compatibility shim that finds ``Dart`` to support some legacy
+functionality and then forwards to the :module:`CTest` module.
+
+CMake 3.27 and above prefer to not provide the :module:`Dart` or
+:module:`FindDart` modules.  This policy provides compatibility for
+projects that have not been ported away from them.  Projects using the
+``Dart`` module should be updated to use the :module:`CTest` module directly.
+
+The ``OLD`` behavior of this policy is for ``include(Dart)`` and
+``find_package(Dart)`` to load the deprecated modules.  The ``NEW``
+behavior is for uses of the modules to fail as if they do not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.27
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

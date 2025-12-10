@@ -1,0 +1,21 @@
+CMP0191
+-------
+
+.. versionadded:: 4.1
+
+The :module:`FindCABLE` module is removed.
+
+CMake 4.0 and below provide the :module:`FindCABLE` module, but the CABLE
+tool is no longer maintained.  CMake 4.1 and above prefer to not provide
+the :module:`FindCABLE` module.  This policy provides compatibility for
+projects that have not been ported away from it.
+
+The ``OLD`` behavior of this policy is for ``find_package(CABLE)`` to load
+the deprecated module.  The ``NEW`` behavior is for ``find_package(CABLE)``
+to fail as if the module does not exist.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

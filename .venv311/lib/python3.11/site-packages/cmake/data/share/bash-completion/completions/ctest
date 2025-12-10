@@ -1,0 +1,131 @@
+# bash completion for ctest(1)                             -*- shell-script -*-
+
+_ctest()
+{
+    local cur prev words cword
+    if type -t _comp_initialize >/dev/null; then
+        _comp_initialize -n = || return
+    elif type -t _init_completion >/dev/null; then
+        _init_completion -n = || return
+    else
+        # manual initialization for older bash completion versions
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    fi
+
+    case "$prev" in
+        -C|--build-config)
+            COMPREPLY=( $( compgen -W 'Debug Release RelWithDebInfo
+                MinSizeRel' -- "$cur" ) )
+            return
+            ;;
+        -j|--parallel)
+            COMPREPLY=( $( compgen -W "{1..$(( $(_ncpus)*2 ))}" -- "$cur" ) )
+            return
+            ;;
+        -O|--output-log|-A|--add-notes|--extra-submit)
+            _filedir
+            return
+            ;;
+        -L|--label-regex|-LE|--label-exclude)
+            COMPREPLY=( $( compgen -W '$( ctest --print-labels 2>/dev/null |
+                grep "^  " 2>/dev/null | cut -d" " -f 3 )' -- "$cur" ) )
+            return
+            ;;
+        --track|-I|--tests-information|--max-width|--timeout|--stop-time)
+            # argument required but no completions available
+            return
+            ;;
+        -R|--tests-regex|-E|--exclude-regex)
+            COMPREPLY=( $( compgen -W '$( ctest -N 2>/dev/null |
+                grep "^  Test" 2>/dev/null | cut -d: -f 2 )' -- "$cur" ) )
+            return
+            ;;
+        -D|--dashboard)
+            if [[ $cur == @(Experimental|Nightly|Continuous)* ]]; then
+                local model action
+                action=${cur#@(Experimental|Nightly|Continuous)}
+                model=${cur%"$action"}
+                COMPREPLY=( $( compgen -W 'Start Update Configure Build Test
+                    Coverage Submit MemCheck' -P "$model" -- "$action" ) )
+            else
+                COMPREPLY=( $( compgen -W 'Experimental Nightly Continuous' \
+                -- "$cur" ) )
+                compopt -o nospace
+            fi
+            return
+            ;;
+        -M|--test-model)
+            COMPREPLY=( $( compgen -W 'Experimental Nightly Continuous' -- \
+                "$cur" ) )
+            return
+            ;;
+        -T|--test-action)
+            COMPREPLY=( $( compgen -W 'Start Update Configure Build Test
+                Coverage Submit MemCheck' -- "$cur" ) )
+            return
+            ;;
+        -S|--script|-SP|--script-new-process)
+            _filedir '@(cmake|ctest)'
+            return
+            ;;
+        --interactive-debug-mode)
+            COMPREPLY=( $( compgen -W '0 1' -- "$cur" ) )
+            return
+            ;;
+
+        --help-command)
+            COMPREPLY=( $( compgen -W '$( ctest --help-command-list 2>/dev/null|
+                grep -v "^ctest version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-manual)
+            COMPREPLY=( $( compgen -W '$( ctest --help-manual-list 2>/dev/null|
+                grep -v "^ctest version " | sed -e "s/([0-9])$//" )' -- "$cur" ) )
+            return
+            ;;
+        --help-module)
+            COMPREPLY=( $( compgen -W '$( ctest --help-module-list 2>/dev/null|
+                grep -v "^ctest version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-policy)
+            COMPREPLY=( $( compgen -W '$( ctest --help-policy-list 2>/dev/null |
+                grep -v "^ctest version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-property)
+            COMPREPLY=( $( compgen -W '$( ctest --help-property-list \
+                2>/dev/null | grep -v "^ctest version " )' -- "$cur" ) )
+            return
+            ;;
+        --help-variable)
+            COMPREPLY=( $( compgen -W '$( ctest --help-variable-list \
+                2>/dev/null | grep -v "^ctest version " )' -- "$cur" ) )
+            return
+            ;;
+         --preset)
+            local IFS=$'\n'
+            local quoted
+            printf -v quoted %q "$cur"
+            COMPREPLY=( $( compgen -W '$( ctest --list-presets 2>/dev/null |
+                grep -o "^  \".*\"" | sed \
+                -e "s/^  //g" \
+                -e "s/\"//g" \
+                -e "s/ /\\\\ /g" )' -- "$quoted" ) )
+            return
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W '$( _parse_help "$1" --help )' -- ${cur}) )
+        [[ $COMPREPLY == *= ]] && compopt -o nospace
+        [[ $COMPREPLY ]] && return
+    fi
+
+    _filedir
+} &&
+complete -F _ctest ctest
+
+# ex: ts=4 sw=4 et filetype=sh

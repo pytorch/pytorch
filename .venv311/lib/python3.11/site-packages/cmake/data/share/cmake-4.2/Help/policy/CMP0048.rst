@@ -1,0 +1,24 @@
+CMP0048
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`project` command manages ``VERSION`` variables.
+
+CMake version 3.0 introduced the ``VERSION`` option of the :command:`project`
+command to specify a project version as well as the name.  In order to keep
+:variable:`PROJECT_VERSION` and related variables consistent with variable
+:variable:`PROJECT_NAME` it is necessary to set the ``VERSION`` variables
+to the empty string when no ``VERSION`` is given to :command:`project`.
+However, this can change behavior for existing projects that set ``VERSION``
+variables themselves since :command:`project` may now clear them.
+This policy controls the behavior for compatibility with such projects.
+
+The ``OLD`` behavior for this policy is to leave ``VERSION`` variables untouched.
+The ``NEW`` behavior for this policy is to set ``VERSION`` as documented by the
+:command:`project` command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

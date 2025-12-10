@@ -1,0 +1,45 @@
+CMP0197
+-------
+
+.. versionadded:: 4.1
+
+MSVC link ``-machine:`` flag is not in ``CMAKE_*_LINKER_FLAGS``.
+
+When using MSVC-like compilers in CMake 4.0 and below, the linker's
+``-machine:`` flag is added via language-agnostic linker flag variables:
+
+* :variable:`CMAKE_EXE_LINKER_FLAGS`
+* :variable:`CMAKE_SHARED_LINKER_FLAGS`
+* :variable:`CMAKE_MODULE_LINKER_FLAGS`
+* :variable:`CMAKE_STATIC_LINKER_FLAGS`
+
+This is problematic when multiple languages' toolchains disagree about
+if/how to pass the flag through a compiler driver to the linker.
+Furthermore, carrying the flag in public-facing variables allows projects
+or users to change it even though it is required.
+
+CMake 4.1 and above prefer to leave the ``-machine:`` flag out of
+``CMAKE_*_LINKER_FLAGS`` variables, and instead generate the link
+flag automatically where needed.
+
+This policy provides compatibility with projects that have not been updated
+to expect the lack of the ``-machine:`` flags.  The policy setting takes
+effect as of the first :command:`project` or :command:`enable_language`
+command that initializes the above-listed ``CMAKE_*_LINKER_FLAGS`` variables.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project for a given
+  language, that choice must be used throughout the tree for that language.
+  In projects that have nested projects in subdirectories, be sure to
+  convert everything together.
+
+The ``OLD`` behavior for this policy is to place the MSVC ``-machine:``
+flag in ``CMAKE_*_LINKER_FLAGS``.  The ``NEW`` behavior for this policy
+is to *not* place the MSVC ``-machine:`` flag in ``CMAKE_*_LINKER_FLAGS``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

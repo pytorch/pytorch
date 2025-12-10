@@ -1,0 +1,363 @@
+CMake 3.18 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.17 include the following.
+
+New Features
+============
+
+Languages
+---------
+
+* The ``CUDA`` language can now be compiled using Clang on non-Windows
+  platforms. Separable compilation is not yet supported on any platform.
+
+Command-Line
+------------
+
+* :manual:`cmake(1)` gained support for profiling of CMake scripts through
+  the parameters ``--profiling-output`` and ``--profiling-format``.
+
+* :manual:`cmake(1)` gained a ``cat`` command line
+  option that can be used to concatenate files and print them
+  on standard output.
+
+Commands
+--------
+
+* The :command:`add_library` and :command:`add_executable` commands
+  learned to create :ref:`Alias Targets` referencing non-``GLOBAL``
+  :ref:`Imported Targets`.
+
+* The :command:`cmake_language()` command was added for meta-operations on
+  scripted or built-in commands, starting with a mode to ``CALL`` other
+  commands, and ``EVAL CODE`` to inplace evaluate a CMake script.
+
+* The :command:`execute_process` command gained the ``ECHO_OUTPUT_VARIABLE``
+  and ``ECHO_ERROR_VARIABLE`` options.
+
+* The :command:`export` command now raise an error if used multiple times with
+  same ``FILE`` without ``APPEND``. See policy :policy:`CMP0103`.
+
+* The :command:`file` command gained the ``ARCHIVE_CREATE`` and
+  ``ARCHIVE_EXTRACT`` subcommands to expose the :manual:`cmake(1)` ``-E tar``
+  functionality to CMake scripting code.
+
+* The :command:`file(CONFIGURE)` subcommand was created in order to replicate
+  the :command:`configure_file` functionality without resorting to a
+  pre-existing file on disk as input. The content is instead passed as a
+  string.
+
+* The :command:`file(UPLOAD)` command gained ``TLS_VERIFY`` and ``TLS_CAINFO``
+  options to control server certificate verification.
+
+* The :command:`find_program`, :command:`find_library`, :command:`find_path`
+  and :command:`find_file` commands gained a new ``REQUIRED`` option that will
+  stop processing with an error message if nothing is found.
+
+* The :command:`get_property` command with ``SOURCE`` scope gained the
+  ``DIRECTORY`` and ``TARGET_DIRECTORY`` options to get a property
+  from the provided directory scope.
+
+* The :command:`get_source_file_property` command gained the ``DIRECTORY``
+  and ``TARGET_DIRECTORY`` options to get a property from the
+  provided directory scope.
+
+* The :command:`list` operation ``SORT`` gained the ``NATURAL`` sort
+  option to sort using natural order (see ``strverscmp(3)`` manual).
+
+* The :command:`set_property` command with the ``SOURCE`` scope gained the
+  ``DIRECTORY`` and ``TARGET_DIRECTORY`` options to set properties
+  in the provided directory scopes.
+
+* The :command:`set_source_files_properties` command gained the ``DIRECTORY``
+  and ``TARGET_DIRECTORY`` options to set properties in the provided
+  directory scopes.
+
+* The :command:`string` command learned a new ``HEX`` sub-command, which
+  converts strings into their hexadecimal representation.
+
+Variables
+---------
+
+* A :variable:`CMAKE_CUDA_ARCHITECTURES` variable was added to specify
+  CUDA output architectures.  Users are encouraged to use this instead of
+  specifying options manually, as this approach is compiler-agnostic.
+  The variable is initialized automatically when
+  :variable:`CMAKE_CUDA_COMPILER_ID <CMAKE_<LANG>_COMPILER_ID>` is ``NVIDIA``.
+  The variable is used to initialize the new :prop_tgt:`CUDA_ARCHITECTURES`
+  target property.  See policy :policy:`CMP0104`.
+
+* The :variable:`CMAKE_PCH_WARN_INVALID` variable was added to initialize the
+  :prop_tgt:`PCH_WARN_INVALID` target property to allow the removal of the
+  precompiled header invalid warning.
+
+Properties
+----------
+
+* The :prop_tgt:`CUDA_ARCHITECTURES` target property was added to specify
+  CUDA output architectures. Users are encouraged to use this instead of
+  specifying options manually, as this approach is compiler-agnostic.
+  The property is initialized by the new :variable:`CMAKE_CUDA_ARCHITECTURES`
+  variable.  See policy :policy:`CMP0104`.
+
+* The :prop_tgt:`Fortran_PREPROCESS` target property and
+  :prop_sf:`Fortran_PREPROCESS` source-file property were added to
+  control preprocessing of Fortran source files.
+
+* The :prop_tgt:`FRAMEWORK_MULTI_CONFIG_POSTFIX_<CONFIG>` target property
+  and associated :variable:`CMAKE_FRAMEWORK_MULTI_CONFIG_POSTFIX_<CONFIG>`
+  variable were created to allow adding a postfix to the name of a
+  framework file name when using a multi-config generator.
+
+* The :prop_sf:`OBJECT_OUTPUTS` source file property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`PCH_WARN_INVALID` target property was added to allow the
+  removal of the precompiled header invalid warning.
+
+* The :prop_tgt:`UNITY_BUILD_MODE` target property was added to tell
+  generators which algorithm to use for grouping included source
+  files.
+
+* The :prop_tgt:`VS_SOURCE_SETTINGS_<tool>` target property was added
+  to tell :ref:`Visual Studio Generators` for VS 2010 and above to add
+  metadata to non-built source files using ``<tool>``.
+
+* The :prop_sf:`VS_SETTINGS` source file property was added to tell
+  :ref:`Visual Studio Generators` for VS 2010 and above to add
+  metadata to a non-built source file.
+
+* The :prop_tgt:`VS_PLATFORM_TOOLSET` target property was added to tell
+  :ref:`Visual Studio Generators` for VS 2010 and above to override
+  the platform toolset.
+
+* The :prop_tgt:`VS_SOLUTION_DEPLOY` target property was added to tell
+  :ref:`Visual Studio Generators` for VS 2010 and above to mark a
+  target for deployment even when not building for Windows Phone/Store/CE.
+
+Modules
+-------
+
+* The :module:`CheckLinkerFlag` module has been added to provide a
+  facility to check validity of link flags.
+
+* The :module:`ExternalProject` module :command:`ExternalProject_Add` command
+  gained a new ``GIT_REMOTE_UPDATE_STRATEGY`` keyword.  This can be used to
+  specify how failed rebase operations during a git update should be handled.
+  The ``CMAKE_EP_GIT_REMOTE_UPDATE_STRATEGY`` variable was also added as a
+  global default and is honored by both the :module:`ExternalProject` and
+  :module:`FetchContent` modules.
+
+* The :module:`FetchContent` module :command:`FetchContent_Declare` command
+  now supports a ``SOURCE_SUBDIR`` option.  It can be used to direct
+  :command:`FetchContent_MakeAvailable` to look in a different location
+  for the ``CMakeLists.txt`` file.
+
+* The :module:`FindBLAS` module now provides an imported target.
+
+* The :module:`FindCUDAToolkit` module:
+
+  * gained the variable
+    ``CUDAToolkit_LIBRARY_ROOT``, which is the directory containing the
+    ``nvvm`` directory and ``version.txt``.
+
+  * uses toolkit and library root found during ``CUDA`` compiler detection.
+
+* The :module:`FindLAPACK` module now provides an imported target.
+
+* The :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  modules:
+
+  * gained the possibility to create per-artifact cache variables for
+    interactive editing in :manual:`cmake-gui(1)` and :manual:`ccmake(1)`.
+
+  * gained sub-components ``Development.Module`` and
+    ``Development.Embed`` under the ``Development`` component.
+
+  * gained the capability to specify which Python implementations to find,
+    including ``IronPython`` and ``PyPy``.
+
+* The :module:`FindRuby` module input and output variables were all renamed
+  from ``RUBY_`` to ``Ruby_`` for consistency with other find modules.
+  Input variables of the old case will be honored if provided, and output
+  variables of the old case are always provided.
+
+* The :module:`FindSWIG` module now accepts target languages as  ``COMPONENTS``
+  and ``OPTIONAL_COMPONENTS`` arguments to ``find_package``.
+
+* The :module:`GoogleTest` module :command:`gtest_discover_tests` command:
+
+  * gained a new ``DISCOVERY_MODE`` option to control when the test
+    discovery step is run.  It offers a new ``PRE_TEST`` setting to
+    run the discovery at test time instead of build time.  A new
+    ``CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE`` variable can be used
+    to change the default globally.
+
+  * gained a new optional parameter ``XML_OUTPUT_DIR``. When set the
+    JUnit XML test results are stored in that directory.
+
+* The :module:`FindLibXslt` module now provides imported targets.
+
+* The :module:`UseSWIG` module now supports Fortran as a target language if
+  the ``SWIG_EXECUTABLE`` is SWIG-Fortran_.
+
+.. _`SWIG-Fortran`: https://github.com/swig-fortran/swig
+
+Generator Expressions
+---------------------
+
+* The :genex:`$<DEVICE_LINK:...>` and :genex:`$<HOST_LINK:...>`
+  generator expressions were added to manage device and host link steps.
+
+* The :genex:`$<LINK_LANGUAGE:...>` and :genex:`$<LINK_LANG_AND_ID:...>`
+  generator expressions were added.
+
+CTest
+-----
+
+* :manual:`ctest(1)` gained a new :variable:`CTEST_RESOURCE_SPEC_FILE`
+  variable, which can be used to specify a
+  :ref:`resource specification file <ctest-resource-specification-file>`.
+
+* :manual:`ctest(1)` gained a ``--stop-on-failure`` option,
+  which can be used to stop running the tests once one has failed.
+
+* The :command:`ctest_test` command gained a ``STOP_ON_FAILURE`` option
+  which can be used to stop running the tests once one has failed.
+
+* The :module:`CTestCoverageCollectGCOV` module
+  :command:`ctest_coverage_collect_gcov` command gained a
+  ``TARBALL_COMPRESSION`` option to control compression of the
+  tarball of collected results.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack Archive Generator`'s ``TXZ`` format learned the
+  :variable:`CPACK_ARCHIVE_THREADS` variable to enable parallel compression.
+  Requires support in the ``liblzma`` used by CMake.
+
+* The :cpack_gen:`CPack NSIS Generator` gained a new variable
+  :variable:`CPACK_NSIS_MANIFEST_DPI_AWARE` to declare that the
+  installer is DPI-aware.
+
+* The :cpack_gen:`CPack RPM Generator` gained
+  :variable:`CPACK_RPM_PRE_TRANS_SCRIPT_FILE` and
+  :variable:`CPACK_RPM_POST_TRANS_SCRIPT_FILE`
+  variables to specify pre- and post-transaction scripts.
+
+Other
+-----
+
+* :manual:`cmake-gui(1)` now populates its generator selection
+  widget default value from the :envvar:`CMAKE_GENERATOR` environment
+  variable.  Additionally, environment variables
+  :envvar:`CMAKE_GENERATOR_PLATFORM` and :envvar:`CMAKE_GENERATOR_TOOLSET`
+  are used to populate their respective widget defaults.
+
+* :manual:`ccmake(1)` learned to read a :envvar:`CCMAKE_COLORS`
+  environment variable to customize colors.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of the availability of C11 features in MSVC 19.27 and 19.28,
+  including support for the ``c_restrict``, ``c_static_assert`` features and
+  the ``-std:c11`` flag.
+
+Deprecated and Removed Features
+===============================
+
+* The :module:`Documentation` module has been deprecated via
+  :policy:`CMP0106`. This module was essentially VTK code that CMake should
+  not be shipping anymore.
+
+* An explicit deprecation diagnostic was added for policy ``CMP0070``
+  and policy ``CMP0071`` (``CMP0069`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+Other Changes
+=============
+
+* On Windows, the :generator:`Ninja` and :generator:`Ninja Multi-Config`
+  generators, when a compiler is not explicitly specified, now select
+  the first compiler (of any name) found in directories listed by the
+  ``PATH`` environment variable.
+
+* The :prop_tgt:`LINK_OPTIONS` and :prop_tgt:`INTERFACE_LINK_OPTIONS` target
+  properties are now used for the device link step.
+  See policy :policy:`CMP0105`.
+
+* Creation of an ``ALIAS`` target overwriting an existing target now raises an
+  error. See policy :policy:`CMP0107`.
+
+* Linking a target to itself through an alias now raises an error.
+  See policy :policy:`CMP0108`.
+
+* The :module:`FindPackageHandleStandardArgs` module option ``REQUIRED_VARS``
+  is now optional if ``HANDLE_COMPONENTS`` is specified.
+
+* The :command:`source_group` command now also recognizes forward slashes
+  as subgroup delimiters, not just backslashes.
+
+* :manual:`ctest(1)` now logs environment variables that it sets for each test,
+  either due to the :prop_test:`ENVIRONMENT` property or the
+  :ref:`resource allocation <ctest-resource-allocation>` feature, and submits
+  this log to CDash. It does not log environment variables that were set
+  outside of CTest.
+
+* When building CMake itself from source and not using a system-provided
+  libcurl, HTTP/2 support is now enabled for commands supporting
+  network communication via ``http(s)``, such as :command:`file(DOWNLOAD)`,
+  :command:`file(UPLOAD)`, and :command:`ctest_submit`.
+  The precompiled binaries provided on ``cmake.org`` now support HTTP/2.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field has
+  been updated to 2.1.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object gained
+  a new ``precompileHeaders`` field in the ``compileGroups`` objects.
+
+Updates
+=======
+
+Changes made since CMake 3.18.0 include the following.
+
+3.18.1
+------
+
+* The :generator:`Xcode` generator, when :variable:`CMAKE_OSX_ARCHITECTURES`
+  is not defined, now selects ``$(NATIVE_ARCH_ACTUAL)`` as the default
+  architecture (the Xcode ``ARCHS`` setting).  This is needed for Xcode 12
+  to select the host's architecture, which older versions of Xcode did
+  by default.
+
+* In CMake 3.18.0 the :command:`add_test` command learned to support
+  special characters in test names.  This was accidentally left out of
+  its release notes.  Unfortunately the fix breaks existing projects
+  that were using manual quoting or escaping to work around the prior
+  limitation.  This fix has been reverted in 3.18.1, but may be
+  re-introduced in future versions of CMake with a policy for compatibility.
+
+3.18.2
+------
+
+* The default value of :variable:`CMAKE_AUTOMOC_PATH_PREFIX` was changed to
+  ``OFF`` because this feature can break existing projects that have
+  identically named header files in different include directories.
+  This restores compatibility with behavior of CMake 3.15 and below.
+  The default was also changed to ``OFF`` in 3.16.9 and 3.17.5.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  was updated for MSVC 19.27 as mentioned above (``c_restrict``).
+
+3.18.3
+------
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  was updated for MSVC 19.28 as mentioned above (``c_static_assert``).

@@ -1,0 +1,25 @@
+CMP0049
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Do not expand variables in target source entries.
+
+CMake 2.8.12 and lower performed an extra layer of variable expansion
+when evaluating source file names::
+
+  set(a_source foo.c)
+  add_executable(foo \${a_source})
+
+.. note: no cmake highlighting since this syntax is deprecated
+
+This was undocumented behavior.
+
+The ``OLD`` behavior for this policy is to expand such variables when processing
+the target sources.  The ``NEW`` behavior for this policy is to issue an error
+if such variables need to be expanded.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

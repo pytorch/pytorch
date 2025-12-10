@@ -1,0 +1,30 @@
+CMP0131
+-------
+
+.. versionadded:: 3.24
+
+:prop_tgt:`LINK_LIBRARIES` supports the :genex:`$<LINK_ONLY:...>`
+generator expression.
+
+CMake 3.23 and below documented the :genex:`$<LINK_ONLY:...>` generator
+expression only for use in :prop_tgt:`INTERFACE_LINK_LIBRARIES`.
+When used in :prop_tgt:`LINK_LIBRARIES`, the content guarded inside
+:genex:`$<LINK_ONLY:...>` was always used, even when collecting non-linking
+usage requirements such as :prop_tgt:`INTERFACE_COMPILE_DEFINITIONS`.
+
+CMake 3.24 and above prefer to support :genex:`$<LINK_ONLY:...>`, when
+used in :prop_tgt:`LINK_LIBRARIES`, by using the guarded content only
+for link dependencies and not other usage requirements.  This policy
+provides compatibility for projects that have not been updated to
+account for this change.
+
+The ``OLD`` behavior for this policy is to use :prop_tgt:`LINK_LIBRARIES`
+content guarded by :genex:`$<LINK_ONLY:...>` even for non-linking
+usage requirements.  The ``NEW`` behavior for this policy is to use
+the guarded content only for link dependencies.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,21 @@
+CMP0086
+-------
+
+.. versionadded:: 3.14
+
+:module:`UseSWIG` honors ``SWIG_MODULE_NAME`` via ``-module`` flag.
+
+Starting with CMake 3.14, :module:`UseSWIG` passes option
+``-module <module_name>`` to ``SWIG`` compiler if the file property
+``SWIG_MODULE_NAME`` is specified. This policy provides compatibility with
+projects that expect the legacy behavior.
+
+The ``OLD`` behavior for this policy is to never pass ``-module`` option.
+The ``NEW`` behavior is to pass ``-module`` option to ``SWIG`` compiler if
+``SWIG_MODULE_NAME`` is specified.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.14
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

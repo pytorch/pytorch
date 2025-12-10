@@ -1,0 +1,29 @@
+CMP0061
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+CTest does not by default tell ``make`` to ignore errors (``-i``).
+
+The :command:`ctest_build` and :command:`build_command` commands no
+longer generate build commands for :ref:`Makefile Generators` with
+the ``-i`` option.  Previously this was done to help build as much
+of tested projects as possible.  However, this behavior is not
+consistent with other generators and also causes the return code
+of the ``make`` tool to be meaningless.
+
+Of course users may still add this option manually by setting
+:variable:`CTEST_BUILD_COMMAND` or the ``MAKECOMMAND`` cache entry.
+See the :ref:`CTest Build Step` ``MakeCommand`` setting documentation
+for their effects.
+
+The ``OLD`` behavior for this policy is to add ``-i`` to ``make``
+calls in CTest.  The ``NEW`` behavior for this policy is to not
+add ``-i``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: did *not* warn
+.. include:: include/REMOVED_EPILOGUE.rst

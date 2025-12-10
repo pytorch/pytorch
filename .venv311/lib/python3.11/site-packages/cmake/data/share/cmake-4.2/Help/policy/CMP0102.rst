@@ -1,0 +1,29 @@
+CMP0102
+-------
+
+.. versionadded:: 3.17
+
+The :command:`mark_as_advanced` command no longer creates a cache entry if one
+does not already exist.
+
+In CMake 3.16 and below, if a variable was not defined at all or just defined
+locally, the :command:`mark_as_advanced` command would create a new cache
+entry with an ``UNINITIALIZED`` type and no value. When a :command:`find_path`
+(or other similar ``find_`` command) would next run, it would find this
+undefined cache entry and set it up with an empty string value. This process
+would end up deleting the local variable in the process (due to the way the
+cache works), effectively clearing any stored ``find_`` results that were only
+available in the local scope.
+
+The ``OLD`` behavior for this policy is to create the empty cache definition.
+The ``NEW`` behavior of this policy is to ignore variables which do not
+already exist in the cache.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the :variable:`CMAKE_POLICY_WARNING_CMP0102
+<CMAKE_POLICY_WARNING_CMP<NNNN>>` variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

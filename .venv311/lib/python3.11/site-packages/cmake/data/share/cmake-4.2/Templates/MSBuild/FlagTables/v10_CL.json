@@ -1,0 +1,992 @@
+[
+  {
+    "name": "DebugInformationFormat",
+    "switch": "Z7",
+    "comment": "C7 compatible",
+    "value": "OldStyle",
+    "flags": []
+  },
+  {
+    "name": "DebugInformationFormat",
+    "switch": "Zi",
+    "comment": "Program Database",
+    "value": "ProgramDatabase",
+    "flags": []
+  },
+  {
+    "name": "DebugInformationFormat",
+    "switch": "ZI",
+    "comment": "Program Database for Edit And Continue",
+    "value": "EditAndContinue",
+    "flags": []
+  },
+  {
+    "name": "CompileAsManaged",
+    "switch": "",
+    "comment": "No Common Language RunTime Support",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "CompileAsManaged",
+    "switch": "clr",
+    "comment": "Common Language RunTime Support",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "CompileAsManaged",
+    "switch": "clr:pure",
+    "comment": "Pure MSIL Common Language RunTime Support",
+    "value": "Pure",
+    "flags": []
+  },
+  {
+    "name": "CompileAsManaged",
+    "switch": "clr:safe",
+    "comment": "Safe MSIL Common Language RunTime Support",
+    "value": "Safe",
+    "flags": []
+  },
+  {
+    "name": "CompileAsManaged",
+    "switch": "clr:oldSyntax",
+    "comment": "Common Language RunTime Support, Old Syntax",
+    "value": "OldSyntax",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W0",
+    "comment": "Turn Off All Warnings",
+    "value": "TurnOffAllWarnings",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W1",
+    "comment": "Level1",
+    "value": "Level1",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W2",
+    "comment": "Level2",
+    "value": "Level2",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W3",
+    "comment": "Level3",
+    "value": "Level3",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W4",
+    "comment": "Level4",
+    "value": "Level4",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "Wall",
+    "comment": "EnableAllWarnings",
+    "value": "EnableAllWarnings",
+    "flags": []
+  },
+  {
+    "name": "Optimization",
+    "switch": "Od",
+    "comment": "Disabled",
+    "value": "Disabled",
+    "flags": []
+  },
+  {
+    "name": "Optimization",
+    "switch": "O1",
+    "comment": "Minimize Size",
+    "value": "MinSpace",
+    "flags": []
+  },
+  {
+    "name": "Optimization",
+    "switch": "O2",
+    "comment": "Maximize Speed",
+    "value": "MaxSpeed",
+    "flags": []
+  },
+  {
+    "name": "Optimization",
+    "switch": "Ox",
+    "comment": "Full Optimization",
+    "value": "Full",
+    "flags": []
+  },
+  {
+    "name": "InlineFunctionExpansion",
+    "switch": "",
+    "comment": "Default",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "InlineFunctionExpansion",
+    "switch": "Ob0",
+    "comment": "Disabled",
+    "value": "Disabled",
+    "flags": []
+  },
+  {
+    "name": "InlineFunctionExpansion",
+    "switch": "Ob1",
+    "comment": "Only __inline",
+    "value": "OnlyExplicitInline",
+    "flags": []
+  },
+  {
+    "name": "InlineFunctionExpansion",
+    "switch": "Ob2",
+    "comment": "Any Suitable",
+    "value": "AnySuitable",
+    "flags": []
+  },
+  {
+    "name": "FavorSizeOrSpeed",
+    "switch": "Os",
+    "comment": "Favor small code",
+    "value": "Size",
+    "flags": []
+  },
+  {
+    "name": "FavorSizeOrSpeed",
+    "switch": "Ot",
+    "comment": "Favor fast code",
+    "value": "Speed",
+    "flags": []
+  },
+  {
+    "name": "FavorSizeOrSpeed",
+    "switch": "",
+    "comment": "Neither",
+    "value": "Neither",
+    "flags": []
+  },
+  {
+    "name": "ExceptionHandling",
+    "switch": "EHa",
+    "comment": "Yes with SEH Exceptions",
+    "value": "Async",
+    "flags": []
+  },
+  {
+    "name": "ExceptionHandling",
+    "switch": "EHsc",
+    "comment": "Yes",
+    "value": "Sync",
+    "flags": []
+  },
+  {
+    "name": "ExceptionHandling",
+    "switch": "EHs",
+    "comment": "Yes with Extern C functions",
+    "value": "SyncCThrow",
+    "flags": []
+  },
+  {
+    "name": "ExceptionHandling",
+    "switch": "",
+    "comment": "No",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "BasicRuntimeChecks",
+    "switch": "RTCs",
+    "comment": "Stack Frames",
+    "value": "StackFrameRuntimeCheck",
+    "flags": []
+  },
+  {
+    "name": "BasicRuntimeChecks",
+    "switch": "RTCu",
+    "comment": "Uninitialized variables",
+    "value": "UninitializedLocalUsageCheck",
+    "flags": []
+  },
+  {
+    "name": "BasicRuntimeChecks",
+    "switch": "RTC1",
+    "comment": "Both (/RTC1, equiv. to /RTCsu)",
+    "value": "EnableFastChecks",
+    "flags": []
+  },
+  {
+    "name": "BasicRuntimeChecks",
+    "switch": "",
+    "comment": "Default",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "RuntimeLibrary",
+    "switch": "MT",
+    "comment": "Multi-threaded",
+    "value": "MultiThreaded",
+    "flags": []
+  },
+  {
+    "name": "RuntimeLibrary",
+    "switch": "MTd",
+    "comment": "Multi-threaded Debug",
+    "value": "MultiThreadedDebug",
+    "flags": []
+  },
+  {
+    "name": "RuntimeLibrary",
+    "switch": "MD",
+    "comment": "Multi-threaded DLL",
+    "value": "MultiThreadedDLL",
+    "flags": []
+  },
+  {
+    "name": "RuntimeLibrary",
+    "switch": "MDd",
+    "comment": "Multi-threaded Debug DLL",
+    "value": "MultiThreadedDebugDLL",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "Zp1",
+    "comment": "1 Byte",
+    "value": "1Byte",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "Zp2",
+    "comment": "2 Bytes",
+    "value": "2Bytes",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "Zp4",
+    "comment": "4 Byte",
+    "value": "4Bytes",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "Zp8",
+    "comment": "8 Bytes",
+    "value": "8Bytes",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "Zp16",
+    "comment": "16 Bytes",
+    "value": "16Bytes",
+    "flags": []
+  },
+  {
+    "name": "StructMemberAlignment",
+    "switch": "",
+    "comment": "Default",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "EnableEnhancedInstructionSet",
+    "switch": "arch:SSE",
+    "comment": "Streaming SIMD Extensions (/arch:SSE)",
+    "value": "StreamingSIMDExtensions",
+    "flags": []
+  },
+  {
+    "name": "EnableEnhancedInstructionSet",
+    "switch": "arch:SSE2",
+    "comment": "Streaming SIMD Extensions 2 (/arch:SSE2)",
+    "value": "StreamingSIMDExtensions2",
+    "flags": []
+  },
+  {
+    "name": "EnableEnhancedInstructionSet",
+    "switch": "",
+    "comment": "Not Set",
+    "value": "NotSet",
+    "flags": []
+  },
+  {
+    "name": "FloatingPointModel",
+    "switch": "fp:precise",
+    "comment": "Precise",
+    "value": "Precise",
+    "flags": []
+  },
+  {
+    "name": "FloatingPointModel",
+    "switch": "fp:strict",
+    "comment": "Strict",
+    "value": "Strict",
+    "flags": []
+  },
+  {
+    "name": "FloatingPointModel",
+    "switch": "fp:fast",
+    "comment": "Fast",
+    "value": "Fast",
+    "flags": []
+  },
+  {
+    "name": "PrecompiledHeader",
+    "switch": "Yc",
+    "comment": "Create",
+    "value": "Create",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "PrecompiledHeader",
+    "switch": "Yu",
+    "comment": "Use",
+    "value": "Use",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "PrecompiledHeader",
+    "switch": "Y-",
+    "comment": "Not Using Precompiled Headers",
+    "value": "NotUsing",
+    "flags": []
+  },
+  {
+    "name": "AssemblerOutput",
+    "switch": "",
+    "comment": "No Listing",
+    "value": "NoListing",
+    "flags": []
+  },
+  {
+    "name": "AssemblerOutput",
+    "switch": "FA",
+    "comment": "Assembly-Only Listing",
+    "value": "AssemblyCode",
+    "flags": []
+  },
+  {
+    "name": "AssemblerOutput",
+    "switch": "FAc",
+    "comment": "Assembly With Machine Code",
+    "value": "AssemblyAndMachineCode",
+    "flags": []
+  },
+  {
+    "name": "AssemblerOutput",
+    "switch": "FAs",
+    "comment": "Assembly With Source Code",
+    "value": "AssemblyAndSourceCode",
+    "flags": []
+  },
+  {
+    "name": "AssemblerOutput",
+    "switch": "FAcs",
+    "comment": "Assembly, Machine Code and Source",
+    "value": "All",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gd",
+    "comment": "__cdecl",
+    "value": "Cdecl",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gr",
+    "comment": "__fastcall",
+    "value": "FastCall",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gz",
+    "comment": "__stdcall",
+    "value": "StdCall",
+    "flags": []
+  },
+  {
+    "name": "CompileAs",
+    "switch": "",
+    "comment": "Default",
+    "value": "Default",
+    "flags": []
+  },
+  {
+    "name": "CompileAs",
+    "switch": "TC",
+    "comment": "Compile as C Code",
+    "value": "CompileAsC",
+    "flags": []
+  },
+  {
+    "name": "CompileAs",
+    "switch": "TP",
+    "comment": "Compile as C++ Code",
+    "value": "CompileAsCpp",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:none",
+    "comment": "Do Not Send Report",
+    "value": "None",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:prompt",
+    "comment": "Prompt Immediately",
+    "value": "Prompt",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:queue",
+    "comment": "Queue For Next Login",
+    "value": "Queue",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:send",
+    "comment": "Send Automatically",
+    "value": "Send",
+    "flags": []
+  },
+  {
+    "name": "SuppressStartupBanner",
+    "switch": "nologo-",
+    "comment": "Suppress Startup Banner",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "SuppressStartupBanner",
+    "switch": "nologo",
+    "comment": "Suppress Startup Banner",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatWarningAsError",
+    "switch": "WX-",
+    "comment": "Treat Warnings As Errors",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "TreatWarningAsError",
+    "switch": "WX",
+    "comment": "Treat Warnings As Errors",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "MultiProcessorCompilation",
+    "switch": "MP",
+    "comment": "Multi-processor Compilation",
+    "value": "true",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "IntrinsicFunctions",
+    "switch": "Oi",
+    "comment": "Enable Intrinsic Functions",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "OmitFramePointers",
+    "switch": "Oy-",
+    "comment": "Omit Frame Pointers",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "OmitFramePointers",
+    "switch": "Oy",
+    "comment": "Omit Frame Pointers",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableFiberSafeOptimizations",
+    "switch": "GT",
+    "comment": "Enable Fiber-Safe Optimizations",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "WholeProgramOptimization",
+    "switch": "GL",
+    "comment": "Whole Program Optimization",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "UndefineAllPreprocessorDefinitions",
+    "switch": "u",
+    "comment": "Undefine All Preprocessor Definitions",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "IgnoreStandardIncludePath",
+    "switch": "X",
+    "comment": "Ignore Standard Include Paths",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreprocessToFile",
+    "switch": "P",
+    "comment": "Preprocess to a File",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreprocessSuppressLineNumbers",
+    "switch": "EP",
+    "comment": "Preprocess Suppress Line Numbers",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreprocessKeepComments",
+    "switch": "C",
+    "comment": "Keep Comments",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "StringPooling",
+    "switch": "GF-",
+    "comment": "Enable String Pooling",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "StringPooling",
+    "switch": "GF",
+    "comment": "Enable String Pooling",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "MinimalRebuild",
+    "switch": "Gm-",
+    "comment": "Enable Minimal Rebuild",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "MinimalRebuild",
+    "switch": "Gm",
+    "comment": "Enable Minimal Rebuild",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "SmallerTypeCheck",
+    "switch": "RTCc",
+    "comment": "Smaller Type Check",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "BufferSecurityCheck",
+    "switch": "GS-",
+    "comment": "Buffer Security Check",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "BufferSecurityCheck",
+    "switch": "GS",
+    "comment": "Buffer Security Check",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "FunctionLevelLinking",
+    "switch": "Gy-",
+    "comment": "Enable Function-Level Linking",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "FunctionLevelLinking",
+    "switch": "Gy",
+    "comment": "Enable Function-Level Linking",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "FloatingPointExceptions",
+    "switch": "fp:except-",
+    "comment": "Enable Floating Point Exceptions",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "FloatingPointExceptions",
+    "switch": "fp:except",
+    "comment": "Enable Floating Point Exceptions",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "CreateHotpatchableImage",
+    "switch": "hotpatch",
+    "comment": "Create Hotpatchable Image",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "DisableLanguageExtensions",
+    "switch": "Za",
+    "comment": "Disable Language Extensions",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatWChar_tAsBuiltInType",
+    "switch": "Zc:wchar_t-",
+    "comment": "Treat WChar_t As Built in Type",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "TreatWChar_tAsBuiltInType",
+    "switch": "Zc:wchar_t",
+    "comment": "Treat WChar_t As Built in Type",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ForceConformanceInForLoopScope",
+    "switch": "Zc:forScope-",
+    "comment": "Force Conformance in For Loop Scope",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "ForceConformanceInForLoopScope",
+    "switch": "Zc:forScope",
+    "comment": "Force Conformance in For Loop Scope",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "RuntimeTypeInfo",
+    "switch": "GR-",
+    "comment": "Enable Run-Time Type Information",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "RuntimeTypeInfo",
+    "switch": "GR",
+    "comment": "Enable Run-Time Type Information",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "OpenMPSupport",
+    "switch": "openmp-",
+    "comment": "Open MP Support",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "OpenMPSupport",
+    "switch": "openmp",
+    "comment": "Open MP Support",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ExpandAttributedSource",
+    "switch": "Fx",
+    "comment": "Expand Attributed Source",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateXMLDocumentationFiles",
+    "switch": "doc",
+    "comment": "Generate XML Documentation Files",
+    "value": "true",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "BrowseInformation",
+    "switch": "FR",
+    "comment": "Enable Browse Information",
+    "value": "true",
+    "flags": [
+      "UserValue",
+      "UserIgnored",
+      "Continue"
+    ]
+  },
+  {
+    "name": "ShowIncludes",
+    "switch": "showIncludes",
+    "comment": "Show Includes",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnablePREfast",
+    "switch": "analyze-",
+    "comment": "Enable Code Analysis",
+    "value": "false",
+    "flags": []
+  },
+  {
+    "name": "EnablePREfast",
+    "switch": "analyze",
+    "comment": "Enable Code Analysis",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "UseFullPaths",
+    "switch": "FC",
+    "comment": "Use Full Paths",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "OmitDefaultLibName",
+    "switch": "Zl",
+    "comment": "Omit Default Library Name",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "UseUnicodeForAssemblerListing",
+    "switch": "FAu",
+    "comment": "Use Unicode For Assembler Listing",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AdditionalIncludeDirectories",
+    "switch": "I",
+    "comment": "Additional Include Directories",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "AdditionalUsingDirectories",
+    "switch": "AI",
+    "comment": "Resolve #using References",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "PreprocessorDefinitions",
+    "switch": "D",
+    "comment": "Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "UndefinePreprocessorDefinitions",
+    "switch": "U",
+    "comment": "Undefine Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "DisableSpecificWarnings",
+    "switch": "wd",
+    "comment": "Disable Specific Warnings",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ForcedIncludeFiles",
+    "switch": "FI",
+    "comment": "Forced Include File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ForcedIncludeFiles",
+    "switch": "FI",
+    "comment": "Forced Include File",
+    "value": "",
+    "flags": [
+      "UserFollowing",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ForcedUsingFiles",
+    "switch": "FU",
+    "comment": "Forced #using File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "TreatSpecificWarningsAsErrors",
+    "switch": "we",
+    "comment": "Treat Specific Warnings As Errors",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "PreprocessOutputPath",
+    "switch": "Fi",
+    "comment": "Preprocess Output Path",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "PrecompiledHeaderFile",
+    "switch": "Yu",
+    "comment": "Precompiled Header File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "PrecompiledHeaderFile",
+    "switch": "Yc",
+    "comment": "Precompiled Header File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "PrecompiledHeaderOutputFile",
+    "switch": "Fp",
+    "comment": "Precompiled Header Output File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "AssemblerListingLocation",
+    "switch": "Fa",
+    "comment": "ASM List Location",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ObjectFileName",
+    "switch": "Fo",
+    "comment": "Object File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "ProgramDataBaseFileName",
+    "switch": "Fd",
+    "comment": "Program Database File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "XMLDocumentationFileName",
+    "switch": "doc",
+    "comment": "XML Documentation File Name",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "BrowseInformationFile",
+    "switch": "FR",
+    "comment": "Browse Information File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  },
+  {
+    "name": "ProcessorNumber",
+    "switch": "MP",
+    "comment": "Number of processors",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "UserRequired"
+    ]
+  }
+]

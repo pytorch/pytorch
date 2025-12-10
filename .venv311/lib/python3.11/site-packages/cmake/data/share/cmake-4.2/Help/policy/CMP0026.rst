@@ -1,0 +1,30 @@
+CMP0026
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Disallow use of the LOCATION property for build targets.
+
+CMake 2.8.12 and lower allowed reading the :prop_tgt:`LOCATION` target
+property (and configuration-specific variants) to
+determine the eventual location of build targets.  This relies on the
+assumption that all necessary information is available at
+configure-time to determine the final location and filename of the
+target.  However, this property is not fully determined until later at
+generate-time.  At generate time, the :genex:`$<TARGET_FILE>` generator
+expression can be used to determine the eventual :prop_tgt:`LOCATION` of a target
+output.
+
+Code which reads the :prop_tgt:`LOCATION` target property can be ported to
+use the :genex:`$<TARGET_FILE>` generator expression together with the
+:command:`file(GENERATE)` subcommand to generate a file containing
+the target location.
+
+The ``OLD`` behavior for this policy is to allow reading the :prop_tgt:`LOCATION`
+properties from build-targets.  The ``NEW`` behavior for this policy is to
+not to allow reading the :prop_tgt:`LOCATION` properties from build-targets.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

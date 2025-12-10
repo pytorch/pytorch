@@ -1,0 +1,201 @@
+[
+  {
+    "name": "Outputswitch",
+    "switch": "fwin",
+    "comment": "Object File win32",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "Outputswitch",
+    "switch": "fwin32",
+    "comment": "Object File win32",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "Outputswitch",
+    "switch": "fwin64",
+    "comment": "Object File win64",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "Outputswitch",
+    "switch": "felf",
+    "comment": "ELF32 (i386) object files (e.g. Linux)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "Outputswitch",
+    "switch": "felf32",
+    "comment": "ELF32 (i386) object files (e.g. Linux)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "Outputswitch",
+    "switch": "felf64",
+    "comment": "ELF64 (x86_64) object files (e.g. Linux)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "ErrorReportingFormat",
+    "switch": "Xgnu",
+    "comment": "-Xgnu GNU format: Default format",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "ErrorReportingFormat",
+    "switch": "Xvc",
+    "comment": "-Xvc Style used by Microsoft Visual C++",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "tasmmode",
+    "switch": "t",
+    "comment": "SciTech TASM compatible mode",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateDebugInformation",
+    "switch": "g",
+    "comment": "Generate Debug Information",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatWarningsAsErrors",
+    "switch": "Werror",
+    "comment": "Treat Warnings As Errors",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "floatunderflow",
+    "switch": "w+float-underflow",
+    "comment": "float-underflow",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "macrodefaults",
+    "switch": "w-macro-defaults",
+    "comment": "Disable macro-defaults",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "user",
+    "switch": "w-user",
+    "comment": "Disable user",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "floatoverflow",
+    "switch": "w-float-overflow",
+    "comment": "Disable float-overflow",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "floatdenorm",
+    "switch": "w+float-denorm",
+    "comment": "float-denorm",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "numberoverflow",
+    "switch": "w-number-overflow",
+    "comment": "Disable number-overflow",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "macroselfref",
+    "switch": "w+macro-selfref",
+    "comment": "macro-selfref",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "floattoolong",
+    "switch": "w-float-toolong",
+    "comment": "Disable float-toolong",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "orphanlabels",
+    "switch": "w-orphan-labels",
+    "comment": "Disable orphan-labels",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AssembledCodeListingFile",
+    "switch": "l",
+    "comment": "Assembled Code Listing File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "Z",
+    "comment": "Redirect Error Messages to File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "IncludePaths",
+    "switch": "I",
+    "comment": "Include Paths",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "PreprocessorDefinitions",
+    "switch": "D",
+    "comment": "Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "UndefinePreprocessorDefinitions",
+    "switch": "U",
+    "comment": "Undefine Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "OutputFormat",
+    "switch": "o",
+    "comment": "Output File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

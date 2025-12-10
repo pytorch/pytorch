@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# Source file.
+src="$(printf %q "$1")"
+shift
+
+# Output file the compiler expects.
+out="$(printf %q "$1")"
+shift
+
+# Create the file the compiler expects.  It will check syntax.
+>"$out"
+
+cpp='cpp'
+opts=''
+while test "$#" != 0; do
+    case "$1" in
+    # Extract the option for the path to cpp.
+    --cpp) shift; cpp="$(printf %q "$1")" ;;
+    # Extract the option for our own output file.
+    --out) shift; out="$(printf %q "$1")" ;;
+    # Collect the rest of the command line.
+    *) opts="$opts $(printf %q "$1")" ;;
+    esac
+    shift
+done
+
+# Execute the real preprocessor tool.
+eval "exec $cpp $src $out $opts"

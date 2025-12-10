@@ -1,0 +1,287 @@
+CMake 3.3 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.2 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* The :ref:`Makefile Generators` now add ``.DELETE_ON_ERROR`` to the
+  makefiles that contain the actual build rules for files on disk.
+  This tells GNU make to remove rule outputs when their recipe
+  modifies an output but fails.
+
+* The :ref:`Visual Studio Generators` learned to support ``.xaml``
+  source files and automatically associate them with corresponding
+  ``.h`` and ``.cpp`` sources.
+
+* A new experimental :generator:`Green Hills MULTI` generator was
+  added on Windows.  `Green Hills MULTI`_ is an IDE for embedded
+  real-time systems.
+
+.. _`Green Hills MULTI`: https://www.ghs.com/products/MULTI_IDE.html
+
+Commands
+--------
+
+* The :command:`add_dependencies` command learned to allow dependencies
+  to be added to :ref:`interface libraries <Interface Libraries>`.
+  Dependencies added to an interface library are followed transitively
+  in its place since the target itself does not build.
+
+* The :command:`execute_process` command learned to support specifying
+  the same file for ``OUTPUT_FILE`` and ``ERROR_FILE``.
+
+* The :command:`file(GLOB)` and :command:`file(GLOB_RECURSE)` commands
+  learned a new ``LIST_DIRECTORIES <bool>`` option to specify whether
+  the glob result should include directories.
+
+* The :command:`find_library`, :command:`find_path`, and :command:`find_file`
+  commands now search in installation prefixes derived from the ``PATH``
+  environment variable.
+
+* The :command:`if` command learned a new ``IN_LIST`` operator that
+  evaluates to true if a given element is contained in a named list.
+
+* The :command:`install(EXPORT)` and :command:`export()` commands
+  learned to export targets that populate the :prop_tgt:`INTERFACE_SOURCES`
+  target property.
+
+* The :command:`install(TARGETS)` command learned to support
+  generator expressions in the ``DESTINATION`` value.
+
+Variables
+---------
+
+* The version of some Fortran compilers is now detected and stored in the
+  :variable:`CMAKE_Fortran_COMPILER_VERSION <CMAKE_<LANG>_COMPILER_VERSION>`
+  variable.
+
+* The :ref:`Visual Studio Generators` learned a new
+  :variable:`CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD` option
+  to put the ``INSTALL`` target in the default build of a
+  solution (``.sln``) file.
+
+Properties
+----------
+
+* A :prop_tgt:`CROSSCOMPILING_EMULATOR` target property and supporting
+  :variable:`CMAKE_CROSSCOMPILING_EMULATOR` variable were introduced
+  to allow target platform binaries to run on the host during cross
+  compiling.
+
+* A :prop_tgt:`<LANG>_INCLUDE_WHAT_YOU_USE` target property and supporting
+  :variable:`CMAKE_<LANG>_INCLUDE_WHAT_YOU_USE` variable were introduced
+  to tell the :ref:`Makefile Generators` and the :generator:`Ninja` generator
+  to run ``include-what-you-use`` along with the compiler for ``C`` and
+  ``CXX`` languages.
+
+* The :prop_tgt:`<LANG>_VISIBILITY_PRESET` and
+  :prop_tgt:`VISIBILITY_INLINES_HIDDEN` target properties now
+  affect compilation in sources of all target types.  See
+  policy :policy:`CMP0063`.
+
+* The :prop_tgt:`XCODE_ATTRIBUTE_<an-attribute>` target property learned
+  to support generator expressions.
+
+Modules
+-------
+
+* The :module:`CheckFortranCompilerFlag` module was introduced
+  to check ``Fortran`` compiler flags, much like the
+  :module:`CheckCCompilerFlag` module already does for ``C``.
+
+* The :module:`ExternalData` module learned a new
+  :variable:`ExternalData_NO_SYMLINKS` option to disable use of
+  symbolic links to populate the real data files and use copies
+  instead.
+
+* The :module:`ExternalData` module learned a new ``RECURSE:``
+  option in ``DATA{}`` references specifying directories.
+  This allows an entire directory tree of associated files
+  to be matched.
+
+* The :module:`ExternalData` module learned a new URL template
+  placeholder ``%(algo:<key>)`` to allow custom mapping from
+  algorithm name to URL component through configuration of new
+  :variable:`ExternalData_URL_ALGO_<algo>_<key>` variables.
+  This allows more flexibility in remote URLs.
+
+* The :module:`ExternalProject` module learned to replace tokens
+  like ``<BINARY_DIR>`` in the ``BYPRODUCTS`` of each step.
+
+* The :module:`ExternalProject` module APIs learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  when using ``LOG_*`` options and in CMake initial cache options.
+
+* The :module:`FindBoost` module now tracks the directories containing
+  libraries separately for RELEASE and DEBUG configurations.
+
+* The :module:`FindCUDA` module now defaults to using the static
+  CUDA runtime library if it is available.  A new
+  ``CUDA_USE_STATIC_CUDA_RUNTIME`` option is offered to control
+  this behavior.
+
+* The :module:`FindMatlab` module was completely rewritten.  It learned
+  about versions and components and to find Matlab in a more precise and
+  multiplatform way.  The module now offers APIs to create mex extensions,
+  documentation, and unit tests.
+
+* The :module:`FindPackageHandleStandardArgs` module
+  :command:`find_package_handle_standard_args` command now
+  always populates both the ``<PackageName>_FOUND``
+  and ``<UPPERCASE_NAME>_FOUND`` variables (the latter
+  for backwards compatibility).  The ``FOUND_VAR``
+  option is now ignored except to enforce its allowed
+  values.
+
+* The :module:`InstallRequiredSystemLibraries` module learned a new
+  ``CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT`` option to specify the
+  installation component.
+
+Generator Expressions
+---------------------
+
+* A new ``COMPILE_LANGUAGE`` generator expression was introduced to
+  allow specification of compile options for target files based on the
+  :prop_sf:`LANGUAGE` of each source file.  Due to limitations of the
+  underlying native build tools, this feature has varying support across
+  generators.  See the :manual:`cmake-generator-expressions(7)` manual
+  for details.
+
+CTest
+-----
+
+* The :manual:`ctest(1)` tool learned a new ``--repeat-until-fail <n>``
+  option to help find sporadic test failures.
+
+* The :module:`CTestCoverageCollectGCOV` module learned to support
+  the same ``CTEST_CUSTOM_COVERAGE_EXCLUDE`` option as the
+  :command:`ctest_coverage` command.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack IFW Generator` learned to support
+  Qt Framework Installer 2.0 tools.
+
+* The :cpack_gen:`CPack DEB Generator` learned a new
+  :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_SHLIBDEPS`
+  variable to specify per-component use of ``dpkg-shlibdeps``.
+
+* The :cpack_gen:`CPack DEB Generator` learned a new
+  :variable:`CPACK_DEBIAN_<COMPONENT>_PACKAGE_DEPENDS`
+  option to specify per-component dependencies.
+
+* The :cpack_gen:`CPack RPM Generator` learned to package symbolic links
+  more cleanly and now supports directory symlinks with recent
+  ``rpmbuild`` versions.
+
+* The :cpack_gen:`CPack RPM Generator` learned a new
+  :variable:`CPACK_RPM_ADDITIONAL_MAN_DIRS` variable to specify
+  directories containing man pages for the brp-compress RPM macro.
+
+* The :cpack_gen:`CPack RPM Generator` learned a new
+  :variable:`CPACK_RPM_<component>_PACKAGE_ARCHITECTURE` variable
+  to specify a component-specific package architecture.
+
+* The CPack WIX generator learned the new
+  :prop_inst:`CPACK_START_MENU_SHORTCUTS`,
+  :prop_inst:`CPACK_DESKTOP_SHORTCUTS` and
+  :prop_inst:`CPACK_STARTUP_SHORTCUTS` installed file properties which can
+  be used to install shortcuts in the Start Menu, on the Desktop and
+  in the Startup Folder respectively.
+
+Other
+-----
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of features supported by GNU compilers on Windows, versions
+  4.4 through 5.0.
+
+* The :manual:`cmake(1)` ``-E tar`` command learned a new
+  ``--format<format>`` option to specify the archive format to
+  be written.
+
+* On OS X, CMake learned to create XCTest bundles to test Frameworks
+  and App Bundles within Xcode.  The :module:`FindXCTest` module
+  provides convenience functions to handle :prop_tgt:`XCTEST` bundles.
+
+Deprecated and Removed Features
+===============================
+
+* On OS X the :manual:`cmake-gui(1)` no longer has the
+  ``Install For Command Line Use`` menu item.  Instead there
+  is a ``How to Install For Command Line Use`` menu item
+  that shows an informational dialog box explaining how to
+  make the command line tools available.  For example::
+
+    /Applications/CMake.app/Contents/bin/cmake-gui --install
+
+* The :command:`ctest_build` and :command:`build_command` commands
+  no longer tell ``make`` tools to ignore errors with the ``-i`` option.
+  Previously this was done for :ref:`Makefile Generators` but not others.
+  See policy :policy:`CMP0061`.
+
+* The :generator:`Visual Studio 10 2010` generator no longer checks
+  for running VS IDEs with the project open or asks them to reload.
+  This was originally done for VS 10 because it had been done for
+  VS 7 through 9 to avoid prompting for every project in a solution.
+  Since VS >= 10 allow the whole solution to reload at once they
+  do not need CMake to help them.
+
+* The :generator:`Visual Studio 7` generator (.NET 2002) is now
+  deprecated and will be removed in a future version of CMake.
+
+* The :generator:`Visual Studio 6` generator is now deprecated
+  and will be removed in a future version of CMake.
+
+* The :command:`find_package` command no longer considers project
+  build trees recently configured in a :manual:`cmake-gui(1)`.
+  This was previously done only on Windows and is now never done.
+  The ``NO_CMAKE_BUILDS_PATH`` option is now ignored if given
+  and effectively always on.
+  Projects may populate the :ref:`User Package Registry` to aid
+  users building multiple dependent projects one after another.
+
+* The :command:`add_definitions()` command no longer causes a
+  :prop_dir:`DEFINITIONS` directory property to be populated. See policy
+  :policy:`CMP0059`.
+
+* With Visual Studio 7, 8, and 9 generators the value of the ``$(OutDir)``
+  placeholder no longer evaluates to the configuration name.  Projects
+  should use ``$(ConfigurationName)`` for that instead.
+
+* Using the output of :command:`export()` with the :command:`install(FILES)`
+  command is no longer allowed.  See policy :policy:`CMP0062` for details.
+
+Other Changes
+=============
+
+* The :generator:`Ninja` generator now requires that calls to the
+  :command:`add_custom_command` and :command:`add_custom_target`
+  commands use the ``BYPRODUCTS`` option to explicitly specify any
+  files generated by the custom commands that are not listed as
+  outputs (perhaps because their timestamps are allowed to be older
+  than the inputs).  See policy :policy:`CMP0058`.
+
+* Build-time progress output of :ref:`Makefile Generators` has been improved.
+  It no longer mixes progress and build rule messages during parallel builds.
+  The link rule messages now have progress and are displayed as bold green
+  instead of bold red (since red is often associated with an error message).
+
+* The :variable:`CMAKE_CFG_INTDIR` variable value for Visual Studio
+  7, 8, and 9 is now ``$(ConfigurationName)`` instead of ``$(OutDir)``.
+  This should have no effect on the intended use cases of the variable.
+
+* Linking to library files by a full path in an implicit linker search
+  directory (e.g. ``/usr/lib/libfoo.a``) no longer asks the linker to
+  search for the library (e.g. ``-lfoo``) and now links by full path.
+  See policy :policy:`CMP0060`.

@@ -1,0 +1,40 @@
+CMP0175
+-------
+
+.. versionadded:: 3.31
+
+:command:`add_custom_command` rejects invalid arguments.
+
+CMake 3.30 and earlier silently ignored unsupported keywords and missing or
+invalid arguments for the different forms of the :command:`add_custom_command`
+command. CMake 3.31 implements more rigorous argument checking and will flag
+invalid or missing arguments as errors.
+
+The ``OLD`` behavior of this policy will accept the same invalid keywords or
+arguments as CMake 3.30 and earlier. The ``NEW`` behavior will flag the
+following as errors that previously went unreported:
+
+* The ``OUTPUT`` form does not accept ``PRE_BUILD``, ``PRE_LINK``, or
+  ``POST_BUILD`` keywords.
+* When the ``APPEND`` keyword is given, the ``OUTPUT`` form also does not
+  accept ``BYPRODUCTS``, ``COMMAND_EXPAND_LISTS``, ``DEPENDS_EXPLICIT_ONLY``,
+  ``DEPFILE``, ``JOB_POOL``, ``JOB_SERVER_AWARE``, ``USES_TERMINAL``, or
+  ``VERBATIM`` keywords.
+* The ``TARGET`` form requires exactly one of ``PRE_BUILD``, ``PRE_LINK``, or
+  ``POST_BUILD`` to be given.  Previously, if none were given, ``POST_BUILD``
+  was assumed, or if multiple keywords were given, the last one was used.
+* The ``TARGET`` form does not accept ``DEPENDS``, ``DEPENDS_EXPLICIT_ONLY``,
+  ``DEPFILE``, ``IMPLICIT_DEPENDS``, ``MAIN_DEPENDENCY``, ``JOB_POOL``, or
+  ``JOB_SERVER_AWARE`` keywords.
+* The ``TARGET`` form now requires at least one ``COMMAND`` to be given.
+* If a keyword expects a value to be given after it, but no value is provided,
+  that was previously treated as though the keyword was not given at all.
+* The ``COMMENT`` keyword expects exactly one value after it.  If multiple
+  values are given, or if the ``COMMENT`` keyword is given more than once,
+  this is an error.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

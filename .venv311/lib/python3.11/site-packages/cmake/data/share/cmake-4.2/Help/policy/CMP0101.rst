@@ -1,0 +1,29 @@
+CMP0101
+-------
+
+.. versionadded:: 3.17
+
+:command:`target_compile_options` now always honors the ``BEFORE`` keyword.
+
+In CMake 3.16 and below, the :command:`target_compile_options` command
+ignores the ``BEFORE`` keyword when inserting items into the
+:prop_tgt:`COMPILE_OPTIONS` target property (``PRIVATE`` and ``PUBLIC``
+items).  CMake 3.17 and later honors the ``BEFORE`` keyword in all cases.
+This policy provides compatibility for projects that have not been updated
+to expect the new behavior.
+
+The behavior of inserting items into the :prop_tgt:`INTERFACE_COMPILE_OPTIONS`
+target property (``PUBLIC`` and ``INTERFACE`` items) is not affected by this
+policy.  The ``BEFORE`` keyword has always been honored when adding items to
+:prop_tgt:`INTERFACE_COMPILE_OPTIONS`.
+
+The ``OLD`` behavior for this policy is to not honor the ``BEFORE`` keyword
+when inserting into the :prop_tgt:`COMPILE_OPTIONS` property.
+The ``NEW`` behavior for this policy is to honor the ``BEFORE`` keyword in
+all cases.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

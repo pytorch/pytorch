@@ -1,0 +1,36 @@
+CMP0068
+-------
+
+.. versionadded:: 3.9
+
+``RPATH`` settings on macOS do not affect ``install_name``.
+
+CMake 3.9 and newer remove any effect the following settings may have on the
+``install_name`` of a target on macOS:
+
+* :prop_tgt:`BUILD_WITH_INSTALL_RPATH` target property
+* :prop_tgt:`SKIP_BUILD_RPATH` target property
+* :variable:`CMAKE_SKIP_RPATH` variable
+* :variable:`CMAKE_SKIP_INSTALL_RPATH` variable
+
+Previously, setting :prop_tgt:`BUILD_WITH_INSTALL_RPATH` had the effect of
+setting both the ``install_name`` of a target to :prop_tgt:`INSTALL_NAME_DIR`
+and the ``RPATH`` to :prop_tgt:`INSTALL_RPATH`.  In CMake 3.9, it only affects
+setting of ``RPATH``.  However, if one wants :prop_tgt:`INSTALL_NAME_DIR` to
+apply to the target in the build tree, one may set
+:prop_tgt:`BUILD_WITH_INSTALL_NAME_DIR`.
+
+If :prop_tgt:`SKIP_BUILD_RPATH`, :variable:`CMAKE_SKIP_RPATH` or
+:variable:`CMAKE_SKIP_INSTALL_RPATH` were used to strip the directory portion
+of the ``install_name`` of a target, one may set ``INSTALL_NAME_DIR=""``
+instead.
+
+The ``OLD`` behavior of this policy is to use the ``RPATH`` settings for
+``install_name`` on macOS.  The ``NEW`` behavior of this policy is to ignore
+the ``RPATH`` settings for ``install_name`` on macOS.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.9
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

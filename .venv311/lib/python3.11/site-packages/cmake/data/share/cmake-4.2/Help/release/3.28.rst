@@ -1,0 +1,228 @@
+CMake 3.28 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.27 include the following.
+
+New Features
+============
+
+Languages
+---------
+
+* C++ 20 named modules are now supported by :ref:`Ninja Generators`
+  and :ref:`Visual Studio Generators` for VS 2022 and newer, in combination
+  with the MSVC 14.34 toolset (provided with VS 17.4) and newer, LLVM/Clang
+  16.0 and newer, and GCC 14 (after the 2023-09-20 daily bump) and newer.
+  See :manual:`cmake-cxxmodules(7)` for details.
+
+* ``HIP`` language code may now be compiled for NVIDIA GPUs
+  using the NVIDIA CUDA Compiler (NVCC).
+  See the :variable:`CMAKE_HIP_PLATFORM` variable.
+
+Platforms
+---------
+
+* On Apple platforms, ``.xcframework`` folders are now supported:
+
+  * The :command:`find_library` command now finds ``.xcframework`` folders.
+
+  * The :command:`target_link_libraries` command now supports
+    linking against a ``.xcframework`` folder.
+
+  * The :prop_tgt:`IMPORTED_LOCATION` target property of an imported
+    library target may now be the path to a ``.xcframework`` folder.
+
+* Apple visionOS and its ``xros`` and ``xrsimulator`` SDKs are now supported.
+  Compiling for Apple visionOS can be requested by setting
+  :variable:`CMAKE_SYSTEM_NAME` to ``visionOS``.
+  See :ref:`Cross Compiling for iOS, tvOS, visionOS, or watchOS`
+  for more information.
+
+Presets
+-------
+
+* :manual:`cmake-presets(7)` files now support schema version ``8``.
+  It adds support for a ``$schema`` field.
+
+Compilers
+---------
+
+* Cray Clang-based compilers are now supported with
+  :variable:`compiler id <CMAKE_<LANG>_COMPILER_ID>` ``CrayClang``.
+
+* The OrangeC compiler is now supported with
+  :variable:`compiler id <CMAKE_<LANG>_COMPILER_ID>` ``OrangeC``.
+
+Commands
+--------
+
+* The :command:`add_custom_command` and :command:`add_custom_target`
+  commands gained a ``JOB_SERVER_AWARE`` option.
+
+* The :command:`cmake_host_system_information` command gained a
+  ``MSYSTEM_PREFIX`` query for the installation prefix of a MSYS
+  or MinGW development environment on Windows hosts.
+
+* The :command:`set_property` command ``TEST`` mode gained a ``DIRECTORY``
+  option to set properties on tests in other directories.
+
+* The :command:`set_tests_properties` command gained a ``DIRECTORY``
+  option to set properties on tests in other directories.
+
+* The :command:`get_property` command ``TEST`` mode gained a ``DIRECTORY``
+  option to get properties on tests in other directories.
+
+* The :command:`get_test_property` command gained a ``DIRECTORY``
+  option to get properties on tests in other directories.
+
+Variables
+---------
+
+* The :envvar:`CMAKE_CROSSCOMPILING_EMULATOR` environment variable
+  was added to initialize the :variable:`CMAKE_CROSSCOMPILING_EMULATOR`
+  cache variable.
+
+* The :variable:`CMAKE_HIP_PLATFORM` variable was added to specify
+  the GPU platform for which HIP language sources are to be compiled
+  (``amd`` or ``nvidia``).
+
+Properties
+----------
+
+* On imported shared libraries, the :prop_tgt:`IMPORTED_IMPLIB` target
+  property may now be used without :prop_tgt:`IMPORTED_LOCATION`.
+  This can be used to represent a stub library whose location should not
+  be added as a runtime search path to dependents that link it.
+
+* The :prop_tgt:`IMPORTED_LOCATION` property of a macOS framework
+  may now be a path to the ``.framework`` folder itself.
+
+* The :prop_tgt:`XCODE_EMBED_RESOURCES <XCODE_EMBED_<type>>` target property
+  was added to tell the :generator:`Xcode` generator what targets to put in
+  the ``Embed Resources`` build phase.
+
+Modules
+-------
+
+* The :module:`ExternalProject` module now includes the
+  ``BUILD_JOB_SERVER_AWARE`` option for the
+  :command:`ExternalProject_Add` command. This option enables
+  the integration of the GNU Make job server when using an
+  explicit ``BUILD_COMMAND`` with certain :ref:`Makefile Generators`.
+  Additionally, the :command:`ExternalProject_Add_Step` command
+  has been updated to support the new ``JOB_SERVER_AWARE`` option.
+
+* The :module:`FetchContent` module's :command:`FetchContent_Declare` command
+  gained an ``EXCLUDE_FROM_ALL`` option, which propagates through to the
+  :command:`add_subdirectory` call made by
+  :command:`FetchContent_MakeAvailable` for the dependency.
+
+* The :module:`FindCURL` module gained a ``CURL_USE_STATIC_LIBS`` hint
+  to select static libraries.
+
+* The :module:`FindEXPAT` module gained an ``EXPAT_USE_STATIC_LIBS`` hint
+  to select static libraries.
+
+* The :module:`FindPkgConfig` module :command:`pkg_get_variable` command
+  gained a ``DEFINE_VARIABLES`` option to pass variables to ``pkg-config``.
+
+Generator Expressions
+---------------------
+
+* The :manual:`generator expressions <cmake-generator-expressions(7)>`
+  :genex:`$<IF:...>`, :genex:`$<AND:...>`, and :genex:`$<OR:...>`
+  short-circuit to avoid unnecessary evaluation of parameters.
+
+CTest
+-----
+
+* CTest may now take a :ref:`dynamically-generated resource spec file
+  <ctest-resource-dynamically-generated-spec-file>`, which can be specified by the
+  :prop_test:`GENERATED_RESOURCE_SPEC_FILE` test property.
+
+Deprecated and Removed Features
+===============================
+
+* The :command:`exec_program` command, which has been deprecated
+  since CMake 3.0, has been removed by policy :policy:`CMP0153`.
+  Use the :command:`execute_process` command instead.
+
+* The :generator:`Visual Studio 11 2012` generator has been removed.
+
+* The :generator:`Visual Studio 12 2013` generator is now deprecated
+  and will be removed in a future version of CMake.
+
+* The :prop_tgt:`IOS_INSTALL_COMBINED` target property and corresponding
+  :variable:`CMAKE_IOS_INSTALL_COMBINED` variable have been deprecated.
+  Their functionality does not make sense on Apple Silicon hosts.
+
+* The :generator:`Xcode` generator will now issue a fatal error if
+  the Legacy Build System has been selected for Xcode 14 and
+  newer. Those Xcode versions dropped support for the Legacy Build
+  System and expect the project to be set-up for their current
+  Build System.
+
+Other Changes
+=============
+
+* Generated files, in targets using :ref:`file sets`, are now considered
+  private by default.  Generated public headers must be specified using
+  file sets.  This allows :ref:`Ninja Generators` to produce more
+  efficient build graphs.  See policy :policy:`CMP0154`.
+
+* The :command:`find_library`, :command:`find_path`, and :command:`find_file`
+  commands no longer search in installation prefixes derived from the ``PATH``
+  environment variable.  This behavior was added in CMake 3.3 to support
+  MSYS and MinGW (``MSYSTEM``) development environments on Windows, but
+  it can search undesired prefixes that happen to be in the ``PATH`` for
+  unrelated reasons.  Users who keep some ``<prefix>/bin`` directories in
+  the ``PATH`` just for their tools do not necessarily want any corresponding
+  ``<prefix>/lib`` or ``<prefix>/include`` directories searched.
+  The behavior was reverted for non-Windows platforms by CMake 3.6.
+  Now it has been reverted on Windows platforms too.
+
+  One may set the ``CMAKE_PREFIX_PATH`` environment variable with a
+  :ref:`semicolon-separated list <CMake Language Lists>` of prefixes
+  that are to be searched.
+
+* When using MinGW tools in a ``MSYSTEM`` environment on Windows,
+  the ``$MSYSTEM_PREFIX/local`` and ``$MSYSTEM_PREFIX`` prefixes are
+  now added to :variable:`CMAKE_SYSTEM_PREFIX_PATH`.
+
+* The precompiled Linux ``x86_64`` binaries provided on
+  `cmake.org <https://cmake.org/download/>`_ now require GLIBC 2.17 or higher.
+
+Updates
+=======
+
+Changes made since CMake 3.28.0 include the following.
+
+3.28.1, 3.28.2, 3.28.3
+----------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.28.4
+------
+
+* Apple visionOS support has been updated for the official Xcode 15.2
+  release of the  ``xros`` and ``xrsimulator`` SDKs.
+
+3.28.5
+------
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to C++ modules support.
+
+3.28.6
+------
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

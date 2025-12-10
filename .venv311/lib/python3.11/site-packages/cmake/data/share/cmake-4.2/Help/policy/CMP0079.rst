@@ -1,0 +1,41 @@
+CMP0079
+-------
+
+.. versionadded:: 3.13
+
+:command:`target_link_libraries` allows use with targets in other directories.
+
+Prior to CMake 3.13 the :command:`target_link_libraries` command did not
+accept targets not created in the calling directory as its first argument
+for calls that update the :prop_tgt:`LINK_LIBRARIES` of the target itself.
+It did accidentally accept targets from other directories on calls that
+only update the :prop_tgt:`INTERFACE_LINK_LIBRARIES`, but would simply
+add entries to the property as if the call were made in the original
+directory.  Thus link interface libraries specified this way were always
+looked up by generators in the scope of the original target rather than
+in the scope that called :command:`target_link_libraries`.
+
+CMake 3.13 now allows the :command:`target_link_libraries` command to
+be called from any directory to add link dependencies and link interface
+libraries to targets created in other directories.  The entries are added
+to :prop_tgt:`LINK_LIBRARIES` and :prop_tgt:`INTERFACE_LINK_LIBRARIES`
+using a special (internal) suffix to tell the generators to look up the
+names in the calling scope rather than the scope that created the target.
+
+This policy provides compatibility with projects that already use
+:command:`target_link_libraries` with the ``INTERFACE`` keyword
+on a target in another directory to add :prop_tgt:`INTERFACE_LINK_LIBRARIES`
+entries to be looked up in the target's directory.  Such projects should
+be updated to be aware of the new scoping rules in that case.
+
+The ``OLD`` behavior of this policy is to disallow
+:command:`target_link_libraries` calls naming targets from another directory
+except in the previously accidentally allowed case of using the ``INTERFACE``
+keyword only.  The ``NEW`` behavior of this policy is to allow all such
+calls but use the new scoping rules.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.13
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

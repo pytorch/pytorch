@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["kind", "version", "backtraceGraph", "tests"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "ctestInfo"
+    },
+    "version": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": {
+          "const": 1,
+          "description": "A positive integer specifying the major version component of the JSON object model."
+        },
+        "minor": {
+          "const": 0,
+          "description": "A non-negative integer specifying the minor version component of the JSON object model."
+        }
+      }
+    },
+    "backtraceGraph": {
+      "type": "object",
+      "required": ["commands", "files", "nodes"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "description": "List of CMake command names.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "List of file paths, which may be relative or absolute. Relative paths are relative to the top-level source directory.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file"],
+            "properties": {
+              "command": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "An optional member present when the node represents a command invocation within the file. The value is an unsigned integer 0-based index into the commands member of the backtraceGraph."
+              },
+              "file": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "An unsigned integer 0-based index into the files member of the backtraceGraph."
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "An optional member present when the node represents a line within the file. The value is an unsigned integer 1-based line number in the file where the backtrace was added."
+              },
+              "parent": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "An optional member present when the node is not the bottom of the call stack. The value is an unsigned integer 0-based index into the nodes member of the backtraceGraph representing the parent in the graph."
+              }
+            }
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "backtrace"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Test name",
+            "minLength": 1
+          },
+          "config": {
+            "type": "string",
+            "description": "Optional field specifying the configuration for which the test will run. This will always match the -C option specified on the ctest command line. If no such option was given, this field will not be present."
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Optional array where the first element is the test command and the remaining elements are the command arguments. Normally, this field should be present and non-empty, but in certain corner cases involving generator expressions, it is possible for a test to have no command and therefore this field can be missing."
+          },
+          "backtrace": {
+            "type": "integer",
+            "description": "Index into the nodes member of the backtraceGraph."
+          },
+          "properties": {
+            "type": "array",
+            "description": "Optional list of test properties associated with the test.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Test property name.",
+                  "minLength": 1
+                },
+                "value": {
+                  "description": "Value of the test property. Any valid JSON type might be present."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

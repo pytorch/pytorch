@@ -1,0 +1,31 @@
+CMP0098
+-------
+
+.. versionadded:: 3.17
+
+:module:`FindFLEX` runs ``flex`` in directory
+:variable:`CMAKE_CURRENT_BINARY_DIR` when executing.
+
+The module provides a ``flex_target()`` command which generates FLEX output.
+In CMake 3.16 and below the command would generate a custom build rule that runs
+``flex`` in the current source directory.  CMake 3.17 and later prefer to
+run it in the build directory and use :variable:`CMAKE_CURRENT_BINARY_DIR`
+as the ``WORKING_DIRECTORY`` of its :command:`add_custom_command` invocation.
+This ensures that any implicitly generated file is written relative to the
+build tree rather than the source tree, unless the generated file is
+provided as absolute path.
+
+This policy provides compatibility for projects that have not been updated
+to expect the new behavior.
+
+The ``OLD`` behavior for this policy is for ``flex_target()`` to use
+the current source directory for the ``WORKING_DIRECTORY`` and where
+to generate implicit files. The ``NEW`` behavior of this policy is to
+use the current binary directory for the ``WORKING_DIRECTORY`` relative to
+which implicit files are generated unless provided as absolute path.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

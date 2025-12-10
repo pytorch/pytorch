@@ -1,0 +1,29 @@
+CMP0052
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.1
+
+Reject source and build dirs in installed
+:prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES`.
+
+CMake 3.0 and lower allowed subdirectories of the source directory or build
+directory to be in the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of
+installed and exported targets, if the directory was also a subdirectory of
+the installation prefix.  This makes the installation depend on the
+existence of the source dir or binary dir, and the installation will be
+broken if either are removed after installation.
+
+See :ref:`Include Directories and Usage Requirements` for more on
+specifying include directories for targets.
+
+The ``OLD`` behavior for this policy is to export the content of the
+:prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` with the source or binary
+directory.  The ``NEW`` behavior for this
+policy is to issue an error if such a directory is used.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.1
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

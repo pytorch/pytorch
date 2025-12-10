@@ -1,0 +1,42 @@
+CMP0117
+-------
+
+.. versionadded:: 3.20
+
+MSVC RTTI flag ``/GR`` is not added to
+:variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` by default.
+
+When using MSVC-like compilers in CMake 3.19 and below, the RTTI flag
+``/GR`` is added to :variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` by
+default.  This behavior is left from support for MSVC versions from Visual
+Studio 2003 and below that did not enable RTTI by default.  It is no longer
+necessary.  Furthermore, it is problematic for projects that want to change
+to ``/GR-`` programmatically.  In particular, it requires string editing of
+the :variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` variable with knowledge
+of the CMake builtin default so it can be replaced.
+
+CMake 3.20 and above prefer to leave out ``/GR`` from the value of
+:variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` by default.
+
+This policy provides compatibility with projects that have not been updated
+to expect the lack of the ``/GR`` flag.  The policy setting takes effect as
+of the first :command:`project` or :command:`enable_language` command that
+initializes :variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>`.
+
+.. note::
+
+  Once the policy has taken effect at the top of a project for a given
+  language, that choice must be used throughout the tree for that language.
+  In projects that have nested projects in subdirectories, be sure to
+  convert everything together.
+
+The ``OLD`` behavior for this policy is to place the MSVC ``/GR`` flag in the
+default :variable:`CMAKE_CXX_FLAGS <CMAKE_<LANG>_FLAGS>` cache entry.  The
+``NEW`` behavior for this policy is to *not* place the MSVC ``/GR`` flag in
+the default cache entry.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.20
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

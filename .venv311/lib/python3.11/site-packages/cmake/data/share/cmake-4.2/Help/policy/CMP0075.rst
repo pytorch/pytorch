@@ -1,0 +1,27 @@
+CMP0075
+-------
+
+.. versionadded:: 3.12
+
+Include file check macros honor ``CMAKE_REQUIRED_LIBRARIES``.
+
+In CMake 3.12 and above, the
+
+* ``check_include_file()`` command in the :module:`CheckIncludeFile` module, the
+* ``check_include_file_cxx()`` command in the
+  :module:`CheckIncludeFileCXX` module, and the
+* ``check_include_files()`` command in the :module:`CheckIncludeFiles` module
+
+now prefer to link the check executable to the libraries listed in the
+``CMAKE_REQUIRED_LIBRARIES`` variable.  This policy provides compatibility
+with projects that have not been updated to expect this behavior.
+
+The ``OLD`` behavior for this policy is to ignore ``CMAKE_REQUIRED_LIBRARIES``
+in the include file check commands.  The ``NEW`` behavior of this policy is to
+honor ``CMAKE_REQUIRED_LIBRARIES`` in the include file check commands.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.12
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,42 @@
+Metadata-Version: 2.4
+Name: filelock
+Version: 3.20.0
+Summary: A platform independent file lock.
+Project-URL: Documentation, https://py-filelock.readthedocs.io
+Project-URL: Homepage, https://github.com/tox-dev/py-filelock
+Project-URL: Source, https://github.com/tox-dev/py-filelock
+Project-URL: Tracker, https://github.com/tox-dev/py-filelock/issues
+Maintainer-email: Bernát Gábor <gaborjbernat@gmail.com>
+License-Expression: Unlicense
+License-File: LICENSE
+Keywords: application,cache,directory,log,user
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: The Unlicense (Unlicense)
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Topic :: Internet
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: System
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# filelock
+
+[![PyPI](https://img.shields.io/pypi/v/filelock)](https://pypi.org/project/filelock/)
+[![Supported Python
+versions](https://img.shields.io/pypi/pyversions/filelock.svg)](https://pypi.org/project/filelock/)
+[![Documentation
+status](https://readthedocs.org/projects/py-filelock/badge/?version=latest)](https://py-filelock.readthedocs.io/en/latest/?badge=latest)
+[![Code style:
+black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Downloads](https://static.pepy.tech/badge/filelock/month)](https://pepy.tech/project/filelock)
+[![check](https://github.com/tox-dev/py-filelock/actions/workflows/check.yaml/badge.svg)](https://github.com/tox-dev/py-filelock/actions/workflows/check.yaml)
+
+For more information checkout the [official documentation](https://py-filelock.readthedocs.io/en/latest/index.html).

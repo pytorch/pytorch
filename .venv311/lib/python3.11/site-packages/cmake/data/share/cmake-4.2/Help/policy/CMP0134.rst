@@ -1,0 +1,35 @@
+CMP0134
+-------
+
+.. versionadded:: 3.24
+
+The default registry view is ``TARGET`` for the :command:`find_file`,
+:command:`find_path`, :command:`find_library`, and :command:`find_package`
+commands and ``BOTH`` for the :command:`find_program` command.
+
+The default registry views in CMake 3.23 and below are selected using the
+following rules:
+
+* if :variable:`CMAKE_SIZEOF_VOID_P` has value ``8``:
+
+  * Use view ``64`` for all ``find_*`` commands except :command:`find_program`
+    command.
+  * Use view ``64_32`` for :command:`find_program` command.
+
+* if :variable:`CMAKE_SIZEOF_VOID_P` has value ``4`` or is undefined:
+
+  * Use view ``32`` for all ``find_*`` commands except :command:`find_program`
+    command.
+  * Use view ``32_64`` for :command:`find_program` command.
+
+The ``OLD`` behavior for this policy is to use registry views ``64`` and
+``64_32`` or ``32_64`` and ``32`` as default, depending of
+:variable:`CMAKE_SIZEOF_VOID_P` variable value.
+The ``NEW`` behavior for this policy is to use registry views ``TARGET`` and
+``BOTH`` as default.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

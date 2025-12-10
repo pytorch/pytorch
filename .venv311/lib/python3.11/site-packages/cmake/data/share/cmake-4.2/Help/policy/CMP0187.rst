@@ -1,0 +1,33 @@
+CMP0187
+-------
+
+.. versionadded:: 4.1
+
+Include source file without an extension after the same name with an extension.
+
+In CMake 4.0 and below, if two source files have the same filename and only one
+file has a file extension and the file with the extension is listed first, the
+file without the extension is omitted from the target.
+
+For example, the following library target only include ``hello.c`` in the
+target, but omits the file ``hello``.
+
+.. code-block:: cmake
+
+   add_library(library hello.c hello)
+
+If the file without the extension is listed before the file with the extension,
+both files are included in the target.
+
+Starting in CMake 4.1, CMake includes both files in the library target.
+
+This policy has no effect if :policy:`CMP0115` uses the ``OLD`` behavior.
+
+The ``OLD`` behavior for this policy is to omit the file without the extension.
+The ``NEW`` behavior for this policy is to include it.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

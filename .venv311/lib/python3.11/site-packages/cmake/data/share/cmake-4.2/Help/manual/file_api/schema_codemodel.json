@@ -1,0 +1,565 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake codemodel object kind",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "paths",
+    "configurations"
+  ],
+  "oneOf": [
+    {
+      "$ref": "#/definitions/codemodelV2_0"
+    },
+    {
+      "$ref": "#/definitions/codemodelV2_3"
+    },
+    {
+      "$ref": "#/definitions/codemodelV2_9"
+    }
+  ],
+  "definitions": {
+    "kind": {
+      "type": "string",
+      "const": "codemodel",
+      "description": "Specifies the object kind"
+    },
+    "versionV2_0": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "versionV2_3": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 8
+        }
+      },
+      "additionalProperties": false
+    },
+    "versionV2_9": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 9
+        }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "source",
+        "build"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Absolute path to the top-level source directory"
+        },
+        "build": {
+          "type": "string",
+          "description": "Absolute path to the top-level build directory"
+        }
+      },
+      "additionalProperties": false
+    },
+    "configurationDirectoryItemSource": {
+      "type": "string",
+      "description": "Path to the source directory. If it is inside the top level source directory, the path will be relative to that directory. For the top level source directory, this will simply be '.'. Paths outside the top level source directory will be absolute."
+    },
+    "configurationDirectoryItemBuild": {
+      "type": "string",
+      "description": "Path to the build directory. If it is inside the top level build directory, the path will be relative to that directory. For the top level build directory, this will simply be '.'. Paths outside the top level build directory will be absolute."
+    },
+    "configurationDirectoryItemParentIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index of the parent directory in the directories array"
+    },
+    "configurationDirectoryItemChildIndexes": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Indices of child directories"
+    },
+    "configurationDirectoryItemProjectIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Index into the projects array"
+    },
+    "configurationDirectoryItemBuildSystemTargetIndexes": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Indices into the targets array"
+    },
+    "configurationDirectoryItemAbstractTargetIndexesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Indices into the abstractTargets array"
+    },
+    "configurationDirectoryItemMinimumCMakeVersion": {
+      "type": "object",
+      "required": [
+        "string"
+      ],
+      "properties": {
+        "string": {
+          "type": "string",
+          "description": "Minimum required CMake version, if known"
+        }
+      },
+      "additionalProperties": false
+    },
+    "configurationDirectoryItemHasInstallRule": {
+      "type": "boolean",
+      "description": "Whether the directory has install rules"
+    },
+    "configurationDirectoryItemJsonFileV2_3": {
+      "jsonFile": {
+        "type": "string",
+        "description": "Path to directory-specific JSON file"
+      }
+    },
+    "configurationDirectoriesV2_0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "build",
+          "projectIndex"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/definitions/configurationDirectoryItemSource"
+          },
+          "build": {
+            "$ref": "#/definitions/configurationDirectoryItemBuild"
+          },
+          "parentIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemParentIndex"
+          },
+          "childIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemChildIndexes"
+          },
+          "projectIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemProjectIndex"
+          },
+          "targetIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemBuildSystemTargetIndexes"
+          },
+          "minimumCMakeVersion": {
+            "$ref": "#/definitions/configurationDirectoryItemMinimumCMakeVersion"
+          },
+          "hasInstallRule": {
+            "$ref": "#/definitions/configurationDirectoryItemHasInstallRule"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configurationDirectoriesV2_3": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "build",
+          "projectIndex"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/definitions/configurationDirectoryItemSource"
+          },
+          "build": {
+            "$ref": "#/definitions/configurationDirectoryItemBuild"
+          },
+          "parentIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemParentIndex"
+          },
+          "childIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemChildIndexes"
+          },
+          "projectIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemProjectIndex"
+          },
+          "targetIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemBuildSystemTargetIndexes"
+          },
+          "minimumCMakeVersion": {
+            "$ref": "#/definitions/configurationDirectoryItemMinimumCMakeVersion"
+          },
+          "hasInstallRule": {
+            "$ref": "#/definitions/configurationDirectoryItemHasInstallRule"
+          },
+          "jsonFile": {
+            "$ref": "#/definitions/configurationDirectoryItemJsonFileV2_3"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configurationDirectoriesV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "build",
+          "projectIndex"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/definitions/configurationDirectoryItemSource"
+          },
+          "build": {
+            "$ref": "#/definitions/configurationDirectoryItemBuild"
+          },
+          "parentIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemParentIndex"
+          },
+          "childIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemChildIndexes"
+          },
+          "projectIndex": {
+            "$ref": "#/definitions/configurationDirectoryItemProjectIndex"
+          },
+          "targetIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemBuildSystemTargetIndexes"
+          },
+          "abstractTargetIndexes": {
+            "$ref": "#/definitions/configurationDirectoryItemAbstractTargetIndexesV2_9"
+          },
+          "minimumCMakeVersion": {
+            "$ref": "#/definitions/configurationDirectoryItemMinimumCMakeVersion"
+          },
+          "hasInstallRule": {
+            "$ref": "#/definitions/configurationDirectoryItemHasInstallRule"
+          },
+          "jsonFile": {
+            "$ref": "#/definitions/configurationDirectoryItemJsonFileV2_3"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configurationName": {
+      "type": "string",
+      "description": "Configuration name (e.g., 'Debug')"
+    },
+    "configurationProjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directoryIndexes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Project name"
+          },
+          "parentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of parent project"
+          },
+          "childIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices of child projects"
+          },
+          "directoryIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into directories array"
+          },
+          "targetIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into targets array"
+          }
+        }
+      }
+    },
+    "configurationProjectsV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directoryIndexes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Project name"
+          },
+          "parentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of parent project"
+          },
+          "childIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices of child projects"
+          },
+          "directoryIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into directories array"
+          },
+          "targetIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into targets array"
+          },
+          "abstractTargetIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Indices into abstractTargets array"
+          }
+        }
+      }
+    },
+    "configurationTargets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directoryIndex",
+          "projectIndex",
+          "jsonFile"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Target name"
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique target identifier"
+          },
+          "directoryIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into directories array"
+          },
+          "projectIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index into projects array"
+          },
+          "jsonFile": {
+            "type": "string",
+            "description": "Path to target-specific JSON file"
+          }
+        }
+      }
+    },
+    "configurationsV2_0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directories",
+          "projects",
+          "targets"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/configurationName"
+          },
+          "projects": {
+            "$ref": "#/definitions/configurationProjects"
+          },
+          "targets": {
+            "$ref": "#/definitions/configurationTargets"
+          },
+          "directories": {
+            "$ref": "#/definitions/configurationDirectoriesV2_0"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configurationsV2_3": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directories",
+          "projects",
+          "targets"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/configurationName"
+          },
+          "projects": {
+            "$ref": "#/definitions/configurationProjects"
+          },
+          "targets": {
+            "$ref": "#/definitions/configurationTargets"
+          },
+          "directories": {
+            "$ref": "#/definitions/configurationDirectoriesV2_3"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configurationsV2_9": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "directories",
+          "projects",
+          "targets",
+          "abstractTargets"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/definitions/configurationName"
+          },
+          "projects": {
+            "$ref": "#/definitions/configurationProjectsV2_9"
+          },
+          "targets": {
+            "$ref": "#/definitions/configurationTargets"
+          },
+          "abstractTargets": {
+            "$ref": "#/definitions/configurationTargets"
+          },
+          "directories": {
+            "$ref": "#/definitions/configurationDirectoriesV2_9"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "codemodelV2_0": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/kind"
+        },
+        "version": {
+          "$ref": "#/definitions/versionV2_0"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "configurations": {
+          "$ref": "#/definitions/configurationsV2_0"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_3": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/kind"
+        },
+        "version": {
+          "$ref": "#/definitions/versionV2_3"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "configurations": {
+          "$ref": "#/definitions/configurationsV2_3"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_9": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/kind"
+        },
+        "version": {
+          "$ref": "#/definitions/versionV2_9"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "configurations": {
+          "$ref": "#/definitions/configurationsV2_9"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake cmakeFiles object kind",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "paths",
+    "inputs"
+  ],
+  "oneOf": [
+    {
+      "$ref": "#/definitions/cmakeFilesV1_0"
+    },
+    {
+      "$ref": "#/definitions/cmakeFilesV1_1"
+    }
+  ],
+  "definitions": {
+    "kind": {
+      "type": "string",
+      "const": "cmakeFiles",
+      "description": "Specifies the object kind"
+    },
+    "versionV1_0": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 1
+        },
+        "minor": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "versionV1_1": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 1
+        },
+        "minor": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "build",
+        "source"
+      ],
+      "properties": {
+        "build": {
+          "type": "string",
+          "description": "Absolute path to the top-level build directory"
+        },
+        "source": {
+          "type": "string",
+          "description": "Absolute path to the top-level source directory"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to an input file to CMake"
+          },
+          "isGenerated": {
+            "type": "boolean",
+            "description": "Indicates if the file is under the build directory in out-of-source builds"
+          },
+          "isExternal": {
+            "type": "boolean",
+            "description": "Indicates if the file is not under source or build directories"
+          },
+          "isCMake": {
+            "type": "boolean",
+            "description": "Indicates if the file is in the CMake installation"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "globsDependentV1_1": {
+      "type": "array",
+      "description": "Optional member present only when the project calls file(GLOB) or file(GLOB_RECURSE) with the CONFIGURE_DEPENDS option",
+      "items": {
+        "type": "object",
+        "required": [
+          "expression",
+          "paths"
+        ],
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "The globbing expression. If the result of the expression no longer matches the same list of paths, the build system is considered out of date and the build tool will re-run cmake."
+          },
+          "recurse": {
+            "type": "boolean",
+            "description": "This will be true if the glob expression was from a file(GLOB_RECURSE) call"
+          },
+          "listDirectories": {
+            "type": "boolean",
+            "description": "This will be true if the expression is from a file(GLOB) that does not specify LIST_DIRECTORIES false, or from a file(GLOB_RECURSE) with LIST_DIRECTORIES set to true"
+          },
+          "followSymlinks": {
+            "type": "boolean",
+            "description": "This will be true if the FOLLOW_SYMLINKS option was given"
+          },
+          "relative": {
+            "type": "string",
+            "description": "This will be present if the RELATIVE option was given. The value is the path given after the RELATIVE keyword."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Paths matched by the globbing expression"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cmakeFilesV1_0": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/kind"
+        },
+        "version": {
+          "$ref": "#/definitions/versionV1_0"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "inputs": {
+          "$ref": "#/definitions/inputs"
+        }
+      },
+      "additionalProperties": false
+    },
+    "cmakeFilesV1_1": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/kind"
+        },
+        "version": {
+          "$ref": "#/definitions/versionV1_1"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "inputs": {
+          "$ref": "#/definitions/inputs"
+        },
+        "globsDependent": {
+          "$ref": "#/definitions/globsDependentV1_1"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

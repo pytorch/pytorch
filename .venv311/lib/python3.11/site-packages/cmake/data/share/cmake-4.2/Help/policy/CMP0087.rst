@@ -1,0 +1,30 @@
+CMP0087
+-------
+
+.. versionadded:: 3.14
+
+:command:`install(CODE)` and :command:`install(SCRIPT)` support generator
+expressions.
+
+In CMake 3.13 and earlier, :command:`install(CODE)` and
+:command:`install(SCRIPT)` did not evaluate generator expressions.  CMake 3.14
+and later will evaluate generator expressions for :command:`install(CODE)` and
+:command:`install(SCRIPT)`.
+
+The ``OLD`` behavior of this policy is for :command:`install(CODE)` and
+:command:`install(SCRIPT)` to not evaluate generator expressions.  The ``NEW``
+behavior is to evaluate generator expressions for :command:`install(CODE)` and
+:command:`install(SCRIPT)`.
+
+Note that it is the value of this policy setting at the end of the directory
+scope that is important, not its setting at the time of the call to
+:command:`install(CODE)` or :command:`install(SCRIPT)`.  This has implications
+for calling these commands from places that have their own policy scope but not
+their own directory scope (e.g. from files brought in via :command:`include()`
+rather than :command:`add_subdirectory()`).
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.14
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

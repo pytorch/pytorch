@@ -1,0 +1,16 @@
+CMP0032
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`output_required_files` command should not be called.
+
+This command was added in June 2001 to expose the then-current CMake
+implicit dependency scanner.  CMake's real implicit dependency scanner
+has evolved since then but is not exposed through this command.  The
+scanning capabilities of this command are very limited and this
+functionality is better achieved through dedicated outside tools.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst

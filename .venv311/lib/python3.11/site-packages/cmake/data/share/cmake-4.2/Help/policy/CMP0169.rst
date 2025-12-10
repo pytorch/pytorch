@@ -1,0 +1,49 @@
+CMP0169
+-------
+
+.. versionadded:: 3.30
+
+Calling :command:`FetchContent_Populate` with a single argument (the name of
+a declared dependency) is deprecated.
+
+Prior to the introduction of :command:`FetchContent_MakeAvailable`, projects
+populated previously declared content (with :command:`FetchContent_Declare`)
+using the following pattern:
+
+.. code-block:: cmake
+
+  FetchContent_GetProperties(depname)
+  if(NOT depname_POPULATED)
+    FetchContent_Populate(depname)
+    add_subdirectory(${depname_SOURCE_DIR} ${depname_BINARY_DIR})
+  endif()
+
+The above pattern does not support a number of features that have been added
+to :module:`FetchContent` over time. It ignores options like ``SYSTEM`` and
+``EXCLUDE_FROM_ALL`` which may be given to :command:`FetchContent_Declare`,
+but can't be made known to the above project code. It also does not support
+:ref:`dependency providers <dependency_providers_overview>`.
+Projects should call :command:`FetchContent_MakeAvailable` instead of using
+the above pattern.
+
+CMake 3.30 and above prefers to reject calls to
+:command:`FetchContent_Populate` with the name of a declared dependency.
+This policy provides compatibility for projects that have not been updated
+to call :command:`FetchContent_MakeAvailable` instead.
+
+The ``OLD`` behavior of this policy allows :command:`FetchContent_Populate`
+to be called with the name of a declared dependency.
+The ``NEW`` behavior halts with a fatal error in such cases.
+
+.. note::
+  Calling :command:`FetchContent_Populate` with the full population details
+  as command arguments rather than just a dependency name remains fully
+  supported. Only the form calling :command:`FetchContent_Populate` with a
+  single argument (the name of a previously declared dependency) is deprecated
+  with this policy.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

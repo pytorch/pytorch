@@ -1,0 +1,31 @@
+CMP0190
+-------
+
+.. versionadded:: 4.1
+
+Modules :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+enforce consistency of artifacts in cross-compiling mode.
+
+Starting with CMake 4.1, Modules :module:`FindPython3`, :module:`FindPython2`
+and :module:`FindPython` apply, in cross-compiling mode (i.e. the
+:variable:`CMAKE_CROSSCOMPILING` variable is set to true), the following
+constraints to the requested components:
+
+* ``Interpreter`` or ``Compiler`` alone: the host artifacts will be searched.
+* ``Interpreter`` or ``Compiler`` with ``Development`` or any sub-component:
+  The target artifacts will be searched. In this case, the
+  :variable:`CMAKE_CROSSCOMPILING_EMULATOR` variable must be defined and will
+  be used to execute the interpreter or the compiler.
+
+This policy provides compatibility with projects that expect the legacy
+behavior.
+
+The ``OLD`` behavior for this policy does not enforce consistency in
+cross-compiling mode and will, potentially, returns a mix of artifacts
+(i.e. host and target artifacts).
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

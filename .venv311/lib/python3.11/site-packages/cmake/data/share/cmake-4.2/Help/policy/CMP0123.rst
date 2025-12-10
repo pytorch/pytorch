@@ -1,0 +1,32 @@
+CMP0123
+-------
+
+.. versionadded:: 3.21
+
+``ARMClang`` cpu/arch compile and link flags must be set explicitly.
+
+CMake 3.20 and lower automatically maps the :variable:`CMAKE_SYSTEM_PROCESSOR`
+variable and an undocumented ``CMAKE_SYSTEM_ARCH`` to compile and link options
+for ``ARMClang``.  For example, the ``-mcpu=cortex-m33`` flag is added when
+:variable:`CMAKE_SYSTEM_PROCESSOR` equals ``cortex-m33``.  CMake requires
+projects to set either variable or it raises a fatal error.  However, the
+project may need to additionally specify CPU features using e.g.
+``-mcpu=cortex-m33+nodsp``, conflicting with the ``-mcpu=cortex-m33`` added
+by CMake.  This results in either link errors or unusable binaries.
+
+CMake 3.21 and above prefer instead to not add any cpu/arch compile and link
+flags automatically.  Instead, projects must specify them explicitly.
+This policy provides compatibility for projects that have not been updated.
+
+The ``OLD`` behavior of this policy requires projects that use ``ARMClang``
+to set either :variable:`CMAKE_SYSTEM_PROCESSOR` or ``CMAKE_SYSTEM_ARCH``
+and it automatically adds a compile option ``-mcpu=`` or ``-march=`` and
+a link option ``--cpu=`` based on those variables.  The ``NEW`` behavior
+does not add compile or link options, and projects are responsible for
+setting correct options.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

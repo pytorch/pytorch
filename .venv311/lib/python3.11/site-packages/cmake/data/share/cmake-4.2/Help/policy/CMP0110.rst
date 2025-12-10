@@ -1,0 +1,28 @@
+CMP0110
+-------
+
+.. versionadded:: 3.19
+
+:command:`add_test` supports arbitrary characters in test names.
+
+:command:`add_test` can now (officially) create tests with whitespace and
+other special characters in its name.  Before CMake version 3.19 that was not
+allowed, however, it was possible to work around this limitation by explicitly
+putting escaped quotes around the test's name in the ``add_test`` command.
+
+Although never officially supported several projects in the wild found and
+implemented this workaround.  However, the new change which officially allows
+the ``add_test`` command to support whitespace and other special characters in
+test names now breaks that workaround.  In order for these projects to work
+smoothly with newer CMake versions, this policy was introduced.
+
+The ``OLD`` behavior of this policy is to still prevent ``add_test`` from
+handling whitespace and special characters properly (if not using the
+mentioned workaround).  The ``NEW`` behavior on the other hand allows names
+with whitespace and special characters for tests created by ``add_test``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.19
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

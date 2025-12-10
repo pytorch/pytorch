@@ -1,0 +1,21 @@
+CMP0040
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The target in the ``TARGET`` signature of :command:`add_custom_command`
+must exist and must be defined in the current directory.
+
+CMake 2.8.12 and lower silently ignored a custom command created with
+the ``TARGET`` signature of :command:`add_custom_command`
+if the target is unknown or was defined outside the current directory.
+
+The ``OLD`` behavior for this policy is to ignore custom commands
+for unknown targets.  The ``NEW`` behavior for this policy is to report
+an error if the target referenced in :command:`add_custom_command` is
+unknown or was defined outside the current directory.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

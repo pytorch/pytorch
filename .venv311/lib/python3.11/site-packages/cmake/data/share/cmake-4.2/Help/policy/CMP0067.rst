@@ -1,0 +1,41 @@
+CMP0067
+-------
+
+.. versionadded:: 3.8
+
+Honor language standard in :command:`try_compile` source-file signature.
+
+The :command:`try_compile` source file signature is intended to allow
+callers to check whether they will be able to compile a given source file
+with the current toolchain.  In order to match compiler behavior, any
+language standard mode should match.  However, CMake 3.7 and below did not
+do this.  CMake 3.8 and above prefer to honor the language standard settings
+for ``C``, ``CXX`` (C++), and ``CUDA`` using the values of the variables:
+
+* :variable:`CMAKE_C_STANDARD`
+* :variable:`CMAKE_C_STANDARD_REQUIRED`
+* :variable:`CMAKE_C_EXTENSIONS`
+* :variable:`CMAKE_CXX_STANDARD`
+* :variable:`CMAKE_CXX_STANDARD_REQUIRED`
+* :variable:`CMAKE_CXX_EXTENSIONS`
+* :variable:`CMAKE_CUDA_STANDARD`
+* :variable:`CMAKE_CUDA_STANDARD_REQUIRED`
+* :variable:`CMAKE_CUDA_EXTENSIONS`
+
+This policy provides compatibility for projects that do not expect
+the language standard settings to be used automatically.
+
+The ``OLD`` behavior of this policy is to ignore language standard
+setting variables when generating the ``try_compile`` test project.
+The ``NEW`` behavior of this policy is to honor language standard
+setting variables.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.8
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0067 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

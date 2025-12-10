@@ -1,0 +1,16 @@
+..
+  This file should be included by the adjacent "index.rst"
+  in development versions but not in release versions.
+
+Changes Since Release
+=====================
+
+The following noteworthy changes have been made in this development
+version since the preceding release but have not yet been consolidated
+into notes for a specific release version:
+
+.. toctree::
+   :maxdepth: 1
+   :glob:
+
+   dev/*

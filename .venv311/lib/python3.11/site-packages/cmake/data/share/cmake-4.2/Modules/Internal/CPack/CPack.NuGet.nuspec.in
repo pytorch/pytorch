@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+    <metadata>
+        <!-- Required elements-->
+        <id>@CPACK_NUGET_PACKAGE_NAME@</id>
+        <version>@CPACK_NUGET_PACKAGE_VERSION@</version>
+        <description>@CPACK_NUGET_PACKAGE_DESCRIPTION@</description>
+        <authors>@CPACK_NUGET_PACKAGE_AUTHORS@</authors>
+
+        <!-- Optional elements -->
+        @_CPACK_NUGET_TITLE_TAG@
+        @_CPACK_NUGET_OWNERS_TAG@
+        @_CPACK_NUGET_PROJECTURL_TAG@
+        @_CPACK_NUGET_LICENSEURL_TAG@
+        @_CPACK_NUGET_LICENSE_TAG@
+        @_CPACK_NUGET_ICONURL_TAG@
+        @_CPACK_NUGET_ICON_TAG@
+        @_CPACK_NUGET_README_TAG@
+        @_CPACK_NUGET_REQUIRELICENSEACCEPTANCE_TAG@
+        @_CPACK_NUGET_SUMMARY_TAG@
+        @_CPACK_NUGET_RELEASENOTES_TAG@
+        @_CPACK_NUGET_COPYRIGHT_TAG@
+        @_CPACK_NUGET_LANGUAGE_TAG@
+        @_CPACK_NUGET_TAGS_TAG@
+        @_CPACK_NUGET_REPOSITORY_TAG@
+        @_CPACK_NUGET_DEPENDENCIES_TAG@
+    </metadata>
+    @_CPACK_NUGET_FILES_TAG@
+</package>

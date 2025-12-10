@@ -1,0 +1,1 @@
+include(Platform/CYGWIN-windres)

@@ -1,0 +1,49 @@
+CMP0124
+-------
+
+.. versionadded:: 3.21
+
+:command:`foreach` loop variables are only available in the loop scope.
+
+CMake 3.20 and below always leave the loop variable set at the end of the
+loop, either to the value it had before the loop, if any, or to the empty
+string.  CMake 3.21 and above prefer to leave the loop variable in the
+state it had before the loop started, either set or unset.  This policy
+provides compatibility for projects that expect the loop variable to always
+be left set.
+
+The ``OLD`` behavior for this policy is to set the loop variable at the
+end of the loop, either to its original value, or to an empty value.
+The ``NEW`` behavior for this policy is to restore the loop variable to
+the state it had before the loop started, either set or unset.
+
+For example:
+
+.. code-block:: cmake
+
+  set(items a b c)
+
+  set(var1 "value")
+  unset(var2)
+
+  foreach(var1 IN LISTS items)
+  endforeach()
+
+  foreach(var2 IN LISTS items)
+  endforeach()
+
+  if(DEFINED var1)
+    message("var1: ${var1}")
+  endif()
+  if(DEFINED var2)
+    message("var2: ${var2}")
+  endif()
+
+Under the ``OLD`` behavior, this code prints ``var1: value`` and ``var2:``.
+Under the ``NEW`` behavior, this code prints only ``var1: value``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

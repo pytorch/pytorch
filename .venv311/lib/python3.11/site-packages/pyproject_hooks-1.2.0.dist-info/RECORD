@@ -1,0 +1,14 @@
+pyproject_hooks-1.2.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+pyproject_hooks-1.2.0.dist-info/LICENSE,sha256=GyKwSbUmfW38I6Z79KhNjsBLn9-xpR02DkK0NCyLQVQ,1081
+pyproject_hooks-1.2.0.dist-info/METADATA,sha256=O_2BjlqJjiwB2EniNCkgE22CK1lFS1ma1VwNKTQoZUw,1288
+pyproject_hooks-1.2.0.dist-info/RECORD,,
+pyproject_hooks-1.2.0.dist-info/WHEEL,sha256=EZbGkh7Ie4PoZfRQ8I0ZuP9VklN_TvcZ6DSE5Uar4z4,81
+pyproject_hooks/__init__.py,sha256=cPB_a9LXz5xvsRbX1o2qyAdjLatZJdQ_Lc5McNX-X7Y,691
+pyproject_hooks/__pycache__/__init__.cpython-311.pyc,,
+pyproject_hooks/__pycache__/_impl.cpython-311.pyc,,
+pyproject_hooks/_impl.py,sha256=jY-raxnmyRyB57ruAitrJRUzEexuAhGTpgMygqx67Z4,14936
+pyproject_hooks/_in_process/__init__.py,sha256=MJNPpfIxcO-FghxpBbxkG1rFiQf6HOUbV4U5mq0HFns,557
+pyproject_hooks/_in_process/__pycache__/__init__.cpython-311.pyc,,
+pyproject_hooks/_in_process/__pycache__/_in_process.cpython-311.pyc,,
+pyproject_hooks/_in_process/_in_process.py,sha256=qcXMhmx__MIJq10gGHW3mA4Tl8dy8YzHMccwnNoKlw0,12216
+pyproject_hooks/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VisualStudioProject
+	ProjectCreator="Intel Fortran"
+	Keyword="Console Application"
+	Version="@CMAKE_VS_INTEL_Fortran_PROJECT_VERSION@"
+	ProjectIdGuid="{AB67BAB7-D7AE-4E97-B492-FE5420447509}"
+	>
+	<Platforms>
+		<Platform Name="@id_platform@"/>
+	</Platforms>
+	<Configurations>
+		<Configuration
+			Name="Debug|@id_platform@"
+			OutputDirectory="."
+			IntermediateDirectory="$(ConfigurationName)"
+			@id_UseCompiler@>
+			<Tool
+				Name="VFFortranCompilerTool"
+				DebugInformationFormat="debugEnabled"
+				Optimization="optimizeDisabled"
+				Preprocess="preprocessYes"
+				RuntimeLibrary="rtMultiThreadedDebugDLL"
+			/>
+			<Tool
+				Name="VFLinkerTool"
+				LinkIncremental="linkIncrementalNo"
+				GenerateDebugInformation="true"
+				SubSystem="subSystemConsole"
+			/>
+			<Tool
+				Name="VFPostBuildEventTool"
+				CommandLine="for %%i in (@id_cl@) do @echo CMAKE_@id_lang@_COMPILER=%%~$PATH:i"
+			/>
+		</Configuration>
+	</Configurations>
+	<Files>
+		<Filter Name="Source Files" Filter="F">
+			<File RelativePath="@id_src@"/>
+		</Filter>
+	</Files>
+	<Globals/>
+</VisualStudioProject>

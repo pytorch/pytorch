@@ -1,0 +1,27 @@
+CMP0155
+-------
+
+.. versionadded:: 3.28
+
+C++ sources in targets with at least C++20 are scanned for imports
+when supported.
+
+CMake 3.27 and below assume that C++ sources do not ``import`` modules.
+CMake 3.28 and above prefer to assume that C++ sources in targets using C++20
+or higher might ``import`` modules, and must be scanned before compiling,
+unless explicitly disabled.  This policy provides compatibility for projects
+that use C++20 or higher, without modules, that have not been updated to turn
+off scanning, e.g., via the :variable:`CMAKE_CXX_SCAN_FOR_MODULES` variable.
+See the :manual:`cmake-cxxmodules(7)` manual for more details on C++ module
+support.
+
+The ``OLD`` behavior for this policy is to assume that C++ 20 and newer
+sources do not import modules.  The ``NEW`` behavior for this policy is to
+assume that C++ 20 and newer files may import modules if the compiler
+understands how to scan for their dependencies, and need to be scanned.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.28
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

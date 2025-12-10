@@ -1,0 +1,83 @@
+#!/bin/sh
+# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
+# file LICENSE.rst or https://cmake.org/licensing for details.
+
+# This script is internal to CMake and meant only to be
+# invoked by CMake-generated build systems on AIX.
+
+usage='usage: ExportImportList -o <out-file> -c <compiler> [-l <lib>] [-n] [--] <objects>...'
+
+die() {
+    echo "$@" 1>&2; exit 1
+}
+
+# Process command-line arguments.
+out=''
+lib=''
+no_objects=''
+compiler=''
+while test "$#" != 0; do
+    case "$1" in
+    -l) shift; lib="$1" ;;
+    -o) shift; out="$1" ;;
+    -n) no_objects='1' ;;
+    -c) shift; compiler="$1" ;;
+    --) shift; break ;;
+    --target=*) ;;
+    -*) die "$usage" ;;
+    *)  break ;;
+    esac
+    shift
+done
+test -n "$out" || die "$usage"
+# We need the compiler executable to resolve where the ibm-llvm-nm executable is
+test -n "$compiler" || die "$usage"
+
+# Build a temporary file that atomically replaces the output later.
+out_tmp="$out.tmp$$"
+trap 'rm -f "$out_tmp"' EXIT INT TERM
+> "$out_tmp"
+
+# If IPA was enabled and a compiler from the IBMClang family is used, then
+# the object files contain LLVM bitcode[0] rather than XCOFF objects and so
+# need to be handled differently.
+#
+# [0]: https://www.ibm.com/docs/en/openxl-c-and-cpp-aix/17.1.0?topic=compatibility-link-time-optimization-lto
+NM="$(dirname "$compiler")/../libexec/ibm-llvm-nm"
+
+function IsBitcode {
+    # N4 = first 4 bytes, -tx = output in hexadecimal, -An = don't display offset
+    # cut: trim off the preceding whitespace where the offset would be
+    # 4243code is the hexadecimal magic number for LLVM bitcode
+    [ "$(od -N4 -tx -An $1 | cut -d ' ' -f 2)" == "4243c0de" ];
+}
+
+# Collect symbols exported from all object files.
+if test -z "$no_objects"; then
+    for f in "$@"; do
+        if IsBitcode "$f"; then
+            "$NM" "$f" --defined-only --extern-only --just-symbol-name 2>/dev/null
+        else
+            dump -tov -X 32_64 "$f" |
+            awk '
+                BEGIN {
+                    V["EXPORTED"]=" export"
+                    V["PROTECTED"]=" protected"
+                }
+                /^\[[0-9]+\]\tm +[^ ]+ +\.(text|data|tdata|bss|tbss) +[^ ]+ +(extern|weak) +(EXPORTED|PROTECTED| ) / {
+                    if (!match($NF,/^(\.|__sinit|__sterm|__[0-9]+__)/)) {
+                        print $NF V[$(NF-1)]
+                    }
+                }
+            '
+        fi
+    done >> "$out_tmp"
+fi
+
+# Generate the export/import file.
+{
+    if test -n "$lib"; then
+        echo "#! $lib"
+    fi
+    sort -u "$out_tmp"
+} > "$out"

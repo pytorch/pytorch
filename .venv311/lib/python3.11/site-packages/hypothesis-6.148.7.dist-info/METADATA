@@ -1,0 +1,137 @@
+Metadata-Version: 2.4
+Name: hypothesis
+Version: 6.148.7
+Summary: The property-based testing library for Python
+Author-email: "David R. MacIver and Zac Hatfield-Dodds" <david@drmaciver.com>
+License-Expression: MPL-2.0
+Project-URL: homepage, https://hypothesis.works
+Project-URL: source, https://github.com/HypothesisWorks/hypothesis
+Project-URL: changelog, https://hypothesis.readthedocs.io/en/latest/changelog.html
+Project-URL: documentation, https://hypothesis.readthedocs.io
+Project-URL: issues, https://github.com/HypothesisWorks/hypothesis/issues
+Keywords: python,testing,fuzzing,property-based-testing
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Framework :: Hypothesis
+Classifier: Framework :: Pytest
+Classifier: Intended Audience :: Developers
+Classifier: Operating System :: Unix
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Classifier: Topic :: Education :: Testing
+Classifier: Topic :: Software Development :: Testing
+Classifier: Typing :: Typed
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE.txt
+Requires-Dist: exceptiongroup>=1.0.0; python_version < "3.11"
+Requires-Dist: sortedcontainers<3.0.0,>=2.1.0
+Provides-Extra: cli
+Requires-Dist: click>=7.0; extra == "cli"
+Requires-Dist: black>=20.8b0; extra == "cli"
+Requires-Dist: rich>=9.0.0; extra == "cli"
+Provides-Extra: codemods
+Requires-Dist: libcst>=0.3.16; extra == "codemods"
+Provides-Extra: ghostwriter
+Requires-Dist: black>=20.8b0; extra == "ghostwriter"
+Provides-Extra: pytz
+Requires-Dist: pytz>=2014.1; extra == "pytz"
+Provides-Extra: dateutil
+Requires-Dist: python-dateutil>=1.4; extra == "dateutil"
+Provides-Extra: lark
+Requires-Dist: lark>=0.10.1; extra == "lark"
+Provides-Extra: numpy
+Requires-Dist: numpy>=1.21.6; extra == "numpy"
+Provides-Extra: pandas
+Requires-Dist: pandas>=1.1; extra == "pandas"
+Provides-Extra: pytest
+Requires-Dist: pytest>=4.6; extra == "pytest"
+Provides-Extra: dpcontracts
+Requires-Dist: dpcontracts>=0.4; extra == "dpcontracts"
+Provides-Extra: redis
+Requires-Dist: redis>=3.0.0; extra == "redis"
+Provides-Extra: crosshair
+Requires-Dist: hypothesis-crosshair>=0.0.26; extra == "crosshair"
+Requires-Dist: crosshair-tool>=0.0.99; extra == "crosshair"
+Provides-Extra: zoneinfo
+Requires-Dist: tzdata>=2025.2; (sys_platform == "win32" or sys_platform == "emscripten") and extra == "zoneinfo"
+Provides-Extra: django
+Requires-Dist: django>=4.2; extra == "django"
+Provides-Extra: watchdog
+Requires-Dist: watchdog>=4.0.0; extra == "watchdog"
+Provides-Extra: all
+Requires-Dist: black>=20.8b0; extra == "all"
+Requires-Dist: click>=7.0; extra == "all"
+Requires-Dist: crosshair-tool>=0.0.99; extra == "all"
+Requires-Dist: django>=4.2; extra == "all"
+Requires-Dist: dpcontracts>=0.4; extra == "all"
+Requires-Dist: hypothesis-crosshair>=0.0.26; extra == "all"
+Requires-Dist: lark>=0.10.1; extra == "all"
+Requires-Dist: libcst>=0.3.16; extra == "all"
+Requires-Dist: numpy>=1.21.6; extra == "all"
+Requires-Dist: pandas>=1.1; extra == "all"
+Requires-Dist: pytest>=4.6; extra == "all"
+Requires-Dist: python-dateutil>=1.4; extra == "all"
+Requires-Dist: pytz>=2014.1; extra == "all"
+Requires-Dist: redis>=3.0.0; extra == "all"
+Requires-Dist: rich>=9.0.0; extra == "all"
+Requires-Dist: tzdata>=2025.2; (sys_platform == "win32" or sys_platform == "emscripten") and extra == "all"
+Requires-Dist: watchdog>=4.0.0; extra == "all"
+Dynamic: license-file
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/HypothesisWorks/hypothesis/master/brand/dragonfly-rainbow.svg" width="300">
+</div>
+
+# Hypothesis
+
+* [Website](https://hypothesis.works/)
+* [Documentation](https://hypothesis.readthedocs.io/en/latest/)
+* [Source code](https://github.com/hypothesisWorks/hypothesis/)
+* [Contributing](https://github.com/HypothesisWorks/hypothesis/blob/master/CONTRIBUTING.rst)
+* [Community](https://hypothesis.readthedocs.io/en/latest/community.html)
+
+Hypothesis is the property-based testing library for Python. With Hypothesis, you write tests which should pass for all inputs in whatever range you describe, and let Hypothesis randomly choose which of those inputs to check - including edge cases you might not have thought about. For example:
+
+```python
+from hypothesis import given, strategies as st
+
+
+@given(st.lists(st.integers()))
+def test_matches_builtin(ls):
+    assert sorted(ls) == my_sort(ls)
+```
+
+This randomized testing can catch bugs and edge cases that you didn't think of and wouldn't have found. In addition, when Hypothesis does find a bug, it doesn't just report any failing example — it reports the simplest possible one. This makes property-based tests a powerful tool for debugging, as well as testing.
+
+For instance,
+
+```python
+def my_sort(ls):
+    return sorted(set(ls))
+```
+
+fails with the simplest possible failing example:
+
+```
+Falsifying example: test_matches_builtin(ls=[0, 0])
+```
+
+### Installation
+
+To install Hypothesis:
+
+```
+pip install hypothesis
+```
+
+There are also [optional extras available](https://hypothesis.readthedocs.io/en/latest/extras.html).

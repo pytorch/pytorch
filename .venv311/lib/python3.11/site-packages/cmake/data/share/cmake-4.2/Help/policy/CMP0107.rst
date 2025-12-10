@@ -1,0 +1,20 @@
+CMP0107
+-------
+
+.. versionadded:: 3.18
+
+It is not allowed to create an ``ALIAS`` target with the same name as an
+another target.
+
+In CMake 3.17 and below, an ``ALIAS`` target can overwrite silently an existing
+target with the same name.
+
+The ``OLD`` behavior for this policy is to allow target overwrite.
+
+The ``NEW`` behavior of this policy is to prevent target overwriting.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,26 @@
+CMP0096
+-------
+
+.. versionadded:: 3.16
+
+The :command:`project` command preserves leading zeros in version components.
+
+When a ``VERSION <major>[.<minor>[.<patch>[.<tweak>]]]]`` argument is given
+to the :command:`project` command, it stores the version string in the
+``PROJECT_VERSION`` variable and stores individual integer version components
+in ``PROJECT_VERSION_{MAJOR,MINOR,PATCH,TWEAK}`` variables (see policy
+:policy:`CMP0048`).  CMake 3.15 and below dropped leading zeros from each
+component.  CMake 3.16 and higher prefer to preserve leading zeros.  This
+policy provides compatibility for projects that have not been updated to
+expect the new behavior.
+
+The ``OLD`` behavior of this policy drops leading zeros in all components,
+e.g.  such that version ``1.07.06`` becomes ``1.7.6``.  The ``NEW`` behavior
+of this policy preserves the leading zeros in all components, such that
+version ``1.07.06`` remains unchanged.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.16
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

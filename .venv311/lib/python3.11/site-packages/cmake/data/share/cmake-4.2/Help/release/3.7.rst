@@ -1,0 +1,319 @@
+CMake 3.7 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.6 include the following.
+
+New Features
+============
+
+Platforms
+---------
+
+* CMake now supports :ref:`Cross Compiling for Android` with simple
+  toolchain files.
+
+* The Clang compiler is now supported on AIX.
+
+Generators
+----------
+
+* The :generator:`Ninja` generator learned to conditionally support
+  Fortran when using a ``ninja`` tool that has the necessary features.
+  See generator documentation for details.
+
+* The :generator:`Ninja` generator learned to produce phony targets
+  of the form ``sub/dir/{test,install,package}`` to drive the build
+  of a subdirectory installation, test or packaging target.
+  This is equivalent to ``cd sub/dir; make {test,install,package}``
+  with :ref:`Makefile Generators`.
+
+* The :generator:`Visual Studio 15 2017` generator was added.  This is
+  experimental and based on "Visual Studio 2017 RC" because this version
+  of VS has not been released.
+
+* :ref:`Visual Studio Generators` for VS 2010 and above learned to
+  place ``.natvis`` source files into VS project files properly.
+
+* The :generator:`Xcode` generator's rudimentary Swift language support
+  learned to honor a new :variable:`CMAKE_Swift_LANGUAGE_VERSION` variable
+  to tell Xcode what version of Swift is used by the source.
+
+* The :generator:`CodeLite` generator gained a new
+  :variable:`CMAKE_CODELITE_USE_TARGETS` option
+  to change project creation from projects to targets.
+
+Commands
+--------
+
+* The :command:`add_custom_command` command gained a new ``DEPFILE``
+  option that works with the :generator:`Ninja` generator to provide
+  implicit dependency information to the build tool.
+
+* The :command:`cmake_parse_arguments` command gained a new ``PARSE_ARGV``
+  mode to read arguments directly from ``ARGC`` and ``ARGV#``
+  variables inside a :command:`function` body.
+
+* The :command:`export` command gained an ``ANDROID_MK`` option
+  to generate ``Android.mk`` files referencing CMake-built
+  libraries as prebuilts for the Android NDK build system.
+
+* The :command:`file(DOWNLOAD)` and :command:`file(UPLOAD)` commands gained
+  ``HTTPHEADER <HTTP-header>`` and ``USERPWD <username>:<password>`` options.
+
+* The :command:`find_library` and :command:`find_package` commands learned
+  to search in ``lib32/`` directories when the build targets a 32-bit
+  architecture.  See the :prop_gbl:`FIND_LIBRARY_USE_LIB32_PATHS` global
+  property.
+
+* The :command:`find_package` command gained the possibility of
+  sorting compatible libraries by ``NAME`` or by ``NATURAL`` sorting by
+  setting the two new variables :variable:`CMAKE_FIND_PACKAGE_SORT_ORDER`
+  and :variable:`CMAKE_FIND_PACKAGE_SORT_DIRECTION`.
+
+* The :command:`if` command gained new boolean comparison operations
+  ``LESS_EQUAL``, ``GREATER_EQUAL``, ``STRLESS_EQUAL``, ``STRGREATER_EQUAL``,
+  ``VERSION_LESS_EQUAL``, and ``VERSION_GREATER_EQUAL``.
+
+* The :command:`install` command gained an ``EXPORT_ANDROID_MK``
+  subcommand to install ``Android.mk`` files referencing installed
+  libraries as prebuilts for the Android NDK build system.
+
+* The :command:`string(TIMESTAMP)` and :command:`file(TIMESTAMP)`
+  commands gained support for the ``%a`` and ``%b`` placeholders.
+  These are the abbreviated weekday and month names.
+
+* The :command:`try_compile` command source file signature now honors
+  configuration-specific flags (e.g. :variable:`CMAKE_<LANG>_FLAGS_DEBUG`)
+  in the generated test project.  Previously only the default such flags
+  for the current toolchain were used.  See policy :policy:`CMP0066`.
+
+Variables
+---------
+
+* Variable :variable:`CMAKE_FIND_PACKAGE_SORT_ORDER` was added to control
+  the sorting mode of the :command:`find_package` command.
+
+* Variable :variable:`CMAKE_FIND_PACKAGE_SORT_DIRECTION` was added to control
+  the sorting direction the :command:`find_package` command.
+
+* :variable:`Toolchain files <CMAKE_TOOLCHAIN_FILE>` may now set a
+  :variable:`CMAKE_<LANG>_FLAGS_INIT` variable to initialize the
+  :variable:`CMAKE_<LANG>_FLAGS` cache entry the first time a language is
+  enabled in a build tree.
+
+* :variable:`Toolchain files <CMAKE_TOOLCHAIN_FILE>` may now set
+  :variable:`CMAKE_EXE_LINKER_FLAGS_INIT`,
+  :variable:`CMAKE_SHARED_LINKER_FLAGS_INIT`, and
+  :variable:`CMAKE_MODULE_LINKER_FLAGS_INIT` variables to initialize the
+  :variable:`CMAKE_EXE_LINKER_FLAGS`,
+  :variable:`CMAKE_SHARED_LINKER_FLAGS`, and
+  :variable:`CMAKE_MODULE_LINKER_FLAGS` cache entries the first time
+  a language is enabled in a build tree.
+
+Properties
+----------
+
+* On Apple platforms the :prop_tgt:`BUNDLE_EXTENSION` target property
+  now also applies to Frameworks and App Bundles.
+
+* A :prop_dir:`BINARY_DIR` directory property was added to get the
+  absolute path to the binary directory corresponding to the source
+  directory on which the property is read.
+
+* A :prop_dir:`BUILDSYSTEM_TARGETS` directory property was added to
+  get the list of logical buildsystem target names added by the
+  project in a directory.
+
+* A :prop_tgt:`LINK_WHAT_YOU_USE` target property and supporting
+  :variable:`CMAKE_LINK_WHAT_YOU_USE` variable were introduced
+  to detect (on UNIX) shared libraries that are linked but not
+  needed by running ``ldd -r -u``.
+
+* A :prop_dir:`SOURCE_DIR` directory property was added to get the
+  absolute path to the source directory associated with a directory.
+
+* A :prop_dir:`SUBDIRECTORIES` directory property was added to
+  get the list of subdirectories added by a project in a directory.
+
+* A :prop_tgt:`VS_SDK_REFERENCES` target property was added to tell
+  :ref:`Visual Studio Generators` to reference the named SDKs.
+
+* A :prop_sf:`VS_TOOL_OVERRIDE` source file property was created to tell
+  :ref:`Visual Studio Generators` what tool to use for a source file.
+
+* The :prop_tgt:`WINDOWS_EXPORT_ALL_SYMBOLS` target property now applies
+  to executable targets with the :prop_tgt:`ENABLE_EXPORTS` property set.
+
+* A :prop_sf:`XCODE_FILE_ATTRIBUTES` source file property was
+  added to tell the :generator:`Xcode` generator to generate
+  custom content in the Xcode project attributes for the file.
+
+Modules
+-------
+
+* An :module:`AndroidTestUtilities` module was added to manage transfer
+  of test data to an Android device.
+
+* The :module:`CheckFortranSourceCompiles` module command
+  ``check_fortran_source_compiles()`` gained a ``SRC_EXT`` option
+  to specify a custom test Fortran source file extension.
+
+* The :module:`ExternalProject` module gained ``HTTP_USERNAME`` and
+  ``HTTP_PASSWORD`` options to set http download credentials.
+
+* The :module:`ExternalProject` module gained a ``HTTP_HEADER``
+  option to add http download headers.
+
+* The :module:`FindBISON` module ``bison_target()`` command learned a new
+  ``REPORT_FILE`` option to specify the bison ``--report-file=`` option.
+
+* The :module:`FindBZip2` module now provides imported targets.
+
+* A :module:`FindICU` module was introduced to find the International
+  Components for Unicode (ICU) libraries and programs.
+
+* The :module:`FindMatlab` module learned to find the SIMULINK and MAT
+  components.
+
+* The :module:`FindMatlab` module :command:`matlab_add_mex` command learned
+  to add executables and modules.
+
+* The :module:`FindMatlab` module :command:`matlab_add_unit_test` command
+  learned to support inline Matlab test code.
+
+* The :module:`FindOpenCL` module now provides imported targets.
+
+* The :module:`FindOpenMP` module learned to detect the OpenMP
+  version (specification date) from the compiler.
+
+* A :module:`FindVulkan` module was added.
+
+* The :module:`GenerateExportHeader` module learned a new
+  ``CUSTOM_CONTENT_FROM_VARIABLE`` option to specify a variable
+  containing custom content for inclusion in the generated header.
+
+* The :module:`GNUInstallDirs` module gained a new
+  :command:`GNUInstallDirs_get_absolute_install_dir` command.
+
+* The :module:`UseJava` module gained APIs to "export" jar targets
+  for use by external CMake projects.  See the ``install_jar_exports``
+  and ``export_jars`` functions.
+
+CTest
+-----
+
+* CTest now supports test fixtures through the new :prop_test:`FIXTURES_SETUP`,
+  :prop_test:`FIXTURES_CLEANUP` and :prop_test:`FIXTURES_REQUIRED` test
+  properties. When using regular expressions or ``--rerun-failed`` to limit
+  the tests to be run, a fixture's setup and cleanup tests will automatically
+  be added to the execution set if any test requires that fixture.
+
+* The :command:`ctest_configure`, :command:`ctest_build`,
+  :command:`ctest_test`, :command:`ctest_coverage`, and :command:`ctest_upload`
+  commands gained a new ``CAPTURE_CMAKE_ERROR`` option to capture any errors
+  that occur as the commands run into a variable and avoid affecting the return
+  code of the :manual:`ctest(1)` process.
+
+CPack
+-----
+
+* CPack gained a :cpack_gen:`CPack productbuild Generator` on OS X.
+
+* CPack gained a new :variable:`CPACK_PACKAGE_CHECKSUM` variable to
+  enable generation of a checksum file for each package file.
+
+* The :cpack_gen:`CPack DEB Generator` learned to support long file names
+  when archive format is set to GNU tar.
+  See :variable:`CPACK_DEBIAN_ARCHIVE_TYPE`
+
+* The :module:`CPackIFW` module gained a new
+  :command:`cpack_ifw_add_package_resources` command to include additional
+  resources in the installer binary.
+
+* The :module:`CPackIFW` module :command:`cpack_ifw_configure_component` and
+  :command:`cpack_ifw_configure_component_group` commands gained a new
+  ``USER_INTERFACES`` option to add a list of additional pages to the IFW
+  installer.
+
+* The :cpack_gen:`CPack RPM Generator` learned to generate debuginfo
+  packages on demand. See :variable:`CPACK_RPM_DEBUGINFO_PACKAGE`
+  and its per component version.
+
+* The :cpack_gen:`CPack RPM Generator` learned to generate source rpm
+  (SRPM) packages on demand. See :variable:`CPACK_RPM_PACKAGE_SOURCES`,
+  :variable:`CPACK_RPM_SOURCE_PKG_BUILD_PARAMS` and
+  :variable:`CPACK_RPM_SOURCE_PKG_PACKAGING_INSTALL_PREFIX`.
+
+* The :cpack_gen:`CPack NSIS Generator` now supports
+  :variable:`CPACK_NSIS_<compName>_INSTALL_DIRECTORY`.
+  This can be used to set component specific installation directories.
+
+* The :cpack_gen:`CPack WIX Generator` now supports
+  :variable:`CPACK_WIX_SKIP_PROGRAM_FOLDER` to allow specification
+  of a custom absolute installation prefix outside
+  of the ProgramFiles folders.
+
+* The :cpack_gen:`CPack WIX Generator` now supports
+  :variable:`CPACK_COMPONENT_<compName>_DISABLED`.
+  This can be used to deselect a component from being installed by default.
+
+* The :cpack_gen:`CPack WIX Generator` now supports
+  :variable:`CPACK_WIX_PATCH_FILE` fragments for Feature elements.
+
+* The :cpack_gen:`CPack WIX Generator` now supports
+  :variable:`CPACK_WIX_ROOT_FEATURE_TITLE` and
+  :variable:`CPACK_WIX_ROOT_FEATURE_DESCRIPTION` to allow the specification
+  of a custom title and description for the root feature element.
+
+Other
+-----
+
+* :manual:`cmake(1)` gained a ``-E capabilities`` option to provide a
+  machine-readable (JSON) description of the capabilities of the
+  cmake tool (available generators, etc.).
+
+* A new :manual:`cmake-server(7)` mode was added to provide semantic
+  information about a CMake-generated buildsystem to clients through
+  a JSON protocol.  Currently all protocols are experimental and subject
+  to change.
+
+* The :manual:`cmake(1)` command learned a ``--trace-source=<file>`` option.
+
+* :manual:`ccmake(1)` learned to support vim-like navigation bindings.
+
+* :manual:`cmake-gui(1)` gained a button to open the generated project file
+  for :ref:`Visual Studio Generators` and the :generator:`Xcode` generator.
+
+Deprecated and Removed Features
+===============================
+
+* We no longer provide Linux i386 binaries for download from ``cmake.org``
+  for new versions of CMake.
+
+* Vim support files ``cmake-indent.vim``, ``cmake-syntax.vim``, and
+  ``cmake-help.vim`` have been removed in favor of the files now provided
+  from the `vim-cmake-syntax`_ project.
+
+* Support for building CMake itself with some compilers was dropped:
+
+  * Visual Studio 7.1 and 2005 -- superseded by VS 2008 and above
+  * MinGW.org mingw32 -- superseded by MSYS2 mingw32 and mingw64
+
+  CMake still supports generating build systems for other projects using
+  these compilers.
+
+Other Changes
+=============
+
+* The Fortran dependency scanner learned to support the syntax of
+  `Fortran Submodules`_.
+
+* Vim support files ``indent/cmake.vim`` and ``syntax/cmake.vim``
+  from the `vim-cmake-syntax`_ project are now distributed with CMake.
+
+.. _`Fortran Submodules`: https://fortranwiki.org/fortran/show/Submodules
+.. _`vim-cmake-syntax`: https://github.com/pboettch/vim-cmake-syntax

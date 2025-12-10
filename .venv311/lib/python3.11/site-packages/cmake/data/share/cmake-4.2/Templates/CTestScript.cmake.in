@@ -1,0 +1,167 @@
+# This file is configured by CMake automatically as CTestScript.cmake
+# If you choose not to use CMake, this file may be hand configured, by
+# filling in the required variables.
+
+cmake_minimum_required(VERSION @CMAKE_VERSION@)
+
+# CTest Start Step
+set(CTEST_SOURCE_DIRECTORY "@PROJECT_SOURCE_DIR@")
+set(CTEST_BINARY_DIRECTORY "@PROJECT_BINARY_DIR@")
+
+# CTest Update Step
+set(CTEST_UPDATE_COMMAND "@UPDATE_COMMAND@")
+set(CTEST_UPDATE_OPTIONS "@UPDATE_OPTIONS@")
+set(CTEST_UPDATE_VERSION_ONLY "@CTEST_UPDATE_VERSION_ONLY@")
+set(CTEST_NIGHTLY_START_TIME "@NIGHTLY_START_TIME@")
+
+# CVS options
+set(CTEST_CVS_COMMAND "@CVSCOMMAND@")
+set(CTEST_CVS_UPDATE_OPTIONS "@CVS_UPDATE_OPTIONS@")
+
+# Subversion options
+set(CTEST_SVN_COMMAND "@SVNCOMMAND@")
+set(CTEST_SVN_OPTIONS "@CTEST_SVN_OPTIONS@")
+set(CTEST_SVN_UPDATE_OPTIONS "@SVN_UPDATE_OPTIONS@")
+
+# Git options
+set(CTEST_GIT_COMMAND "@GITCOMMAND@")
+set(CTEST_GIT_INIT_SUBMODULES "@CTEST_GIT_INIT_SUBMODULES@")
+set(CTEST_GIT_UPDATE_CUSTOM "@CTEST_GIT_UPDATE_CUSTOM@")
+set(CTEST_GIT_UPDATE_OPTIONS "@GIT_UPDATE_OPTIONS@")
+
+# Perforce options
+set(CTEST_P4_COMMAND "@P4COMMAND@")
+set(CTEST_P4_CLIENT "@CTEST_P4_CLIENT@")
+set(CTEST_P4_OPTIONS "@CTEST_P4_OPTIONS@")
+set(CTEST_P4_UPDATE_CUSTOM "@CTEST_P4_UPDATE_CUSTOM@")
+set(CTEST_P4_UPDATE_OPTIONS "@CTEST_P4_UPDATE_OPTIONS@")
+
+# CTest Configure Step
+set(CTEST_CMAKE_GENERATOR "@CMAKE_GENERATOR@")
+set(CTEST_LABELS_FOR_SUBPROJECTS "@CTEST_LABELS_FOR_SUBPROJECTS@")
+
+# CTest Build Step
+set(CTEST_CONFIGURATION_TYPE "@DEFAULT_CTEST_CONFIGURATION_TYPE@")
+set(CTEST_USE_LAUNCHERS "@CTEST_USE_LAUNCHERS@")
+
+# CTest Test Step
+set(CTEST_RESOURCE_SPEC_FILE "@CTEST_RESOURCE_SPEC_FILE@")
+set(CTEST_TEST_LOAD "@CTEST_TEST_LOAD@")
+set(CTEST_TEST_TIMEOUT "@DART_TESTING_TIMEOUT@")
+
+# CTest Coverage Step
+set(CTEST_COVERAGE_COMMAND "@COVERAGE_COMMAND@")
+set(CTEST_COVERAGE_EXTRA_FLAGS "@COVERAGE_EXTRA_FLAGS@")
+
+# CTest MemCheck Step
+set(CTEST_MEMORYCHECK_COMMAND "@MEMORYCHECK_COMMAND@")
+set(CTEST_MEMORYCHECK_COMMAND_OPTIONS "@MEMORYCHECK_COMMAND_OPTIONS@")
+set(CTEST_MEMORYCHECK_TYPE "@MEMORYCHECK_TYPE@")
+set(CTEST_MEMORYCHECK_SANITIZER_OPTIONS "@MEMORYCHECK_SANITIZER_OPTIONS@")
+set(CTEST_MEMORYCHECK_SUPPRESSIONS_FILE "@MEMORYCHECK_SUPPRESSIONS_FILE@")
+
+# CTest Submit Step
+set(CTEST_SITE "@SITE@")
+set(CTEST_BUILD_NAME "@BUILDNAME@")
+set(CTEST_SUBMIT_URL "@SUBMIT_URL@")
+set(CTEST_SUBMIT_INACTIVITY_TIMEOUT "@CTEST_SUBMIT_INACTIVITY_TIMEOUT@")
+set(CTEST_TLS_VERIFY "@CTEST_TLS_VERIFY@")
+set(CTEST_TLS_VERSION "@CTEST_TLS_VERSION@")
+
+################################################################################
+
+if(NOT MODEL)
+  set(MODEL "Experimental")
+endif()
+
+if(MODEL STREQUAL "NightlyMemoryCheck")
+  set(MODEL "Nightly")
+  set(ACTIONS "Start;Update;Configure;Build;MemCheck;Coverage;Submit")
+endif()
+
+if(NOT ACTIONS)
+  if(MODEL STREQUAL "Experimental")
+    set(ACTIONS "Start;Configure;Build;Test;Coverage;Submit")
+  else()
+    set(ACTIONS "Start;Update;Configure;Build;Test;Coverage;Submit")
+  endif()
+endif()
+
+################################################################################
+
+set(_exit_code 0)
+
+if("Start" IN_LIST ACTIONS OR NOT EXISTS "${CTEST_BINARY_DIRECTORY}/Testing/TAG")
+  ctest_start("${MODEL}")
+else()
+  ctest_start("${MODEL}" APPEND)
+endif()
+
+if("Update" IN_LIST ACTIONS)
+  ctest_update(RETURN_VALUE update_count)
+  if(update_count LESS 0)
+    math(EXPR _exit_code "${_exit_code} | 0x01")
+  endif()
+  if(MODEL STREQUAL "Continuous" AND update_count EQUAL 0)
+    return()
+  endif()
+endif()
+
+if("Configure" IN_LIST ACTIONS)
+  ctest_configure(RETURN_VALUE success)
+  if(success LESS 0)
+    math(EXPR _exit_code "${_exit_code} | 0x02")
+  endif()
+endif()
+
+if("Build" IN_LIST ACTIONS)
+  ctest_read_custom_files("${CTEST_BINARY_DIRECTORY}")
+  ctest_build(RETURN_VALUE success)
+  if(NOT success EQUAL 0)
+    math(EXPR _exit_code "${_exit_code} | 0x04")
+  endif()
+endif()
+
+if("Test" IN_LIST ACTIONS)
+  ctest_read_custom_files("${CTEST_BINARY_DIRECTORY}")
+  ctest_test(RETURN_VALUE success)
+  if(NOT success EQUAL 0)
+    math(EXPR _exit_code "${_exit_code} | 0x08")
+  endif()
+endif()
+
+if("Coverage" IN_LIST ACTIONS)
+  ctest_read_custom_files("${CTEST_BINARY_DIRECTORY}")
+  ctest_coverage(RETURN_VALUE success)
+  if(NOT success EQUAL 0)
+    math(EXPR _exit_code "${_exit_code} | 0x20")
+  endif()
+endif()
+
+if("MemCheck" IN_LIST ACTIONS)
+  ctest_read_custom_files("${CTEST_BINARY_DIRECTORY}")
+  ctest_memcheck(RETURN_VALUE success)
+  if(NOT success EQUAL 0)
+    math(EXPR _exit_code "${_exit_code} | 0x10")
+  endif()
+endif()
+
+file(GLOB notes_files LIST_DIRECTORIES OFF
+  "${CTEST_BINARY_DIRECTORY}/Testing/Notes/*")
+if(notes_files)
+  list(APPEND CTEST_NOTES_FILES "${notes_files}")
+endif()
+
+if("Submit" IN_LIST ACTIONS)
+  ctest_read_custom_files("${CTEST_BINARY_DIRECTORY}")
+  ctest_submit(
+    RETRY_COUNT "@CTEST_SUBMIT_RETRY_COUNT@"
+    RETRY_DELAY "@CTEST_SUBMIT_RETRY_DELAY@"
+    RETURN_VALUE success
+    )
+  if(NOT success EQUAL 0)
+    math(EXPR _exit_code "${_exit_code} | 0x40")
+  endif()
+endif()
+
+cmake_language(EXIT "${_exit_code}")

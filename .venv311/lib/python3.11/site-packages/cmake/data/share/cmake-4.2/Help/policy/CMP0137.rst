@@ -1,0 +1,32 @@
+CMP0137
+-------
+
+.. versionadded:: 3.24
+
+:command:`try_compile` passes platform variables in project mode.
+
+The :command:`try_compile` command :ref:`source file <Try Compiling Source
+Files>` signature propagates CMake variables containing platform settings,
+and those specified by the :variable:`CMAKE_TRY_COMPILE_PLATFORM_VARIABLES`
+variable, into the generated test project.  This helps the test project drive
+the toolchain the same way the calling project will.  In CMake 3.23 and below,
+the :ref:`whole-project <Try Compiling Whole Projects>` signature does not
+propagate platform variables automatically.  CMake 3.24 and above prefer to
+propagate platform variables in the :ref:`whole-project <Try Compiling Whole
+Projects>` signature.  This policy provides compatibility with projects that
+have not been updated to expect the behavior.
+
+The ``OLD`` behavior for this policy is to not pass any additional variables to
+the :ref:`whole-project <Try Compiling Whole Projects>` signature.
+The ``NEW`` behavior for this policy is to pass the same variables that the
+:ref:`source file <Try Compiling Source Files>` signature does.
+
+Regardless of the policy setting, the
+:variable:`CMAKE_TRY_COMPILE_NO_PLATFORM_VARIABLES` variable may be set
+to suppress passing the platform variables through either signature.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

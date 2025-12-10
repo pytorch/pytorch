@@ -1,0 +1,27 @@
+CMP0111
+-------
+
+.. versionadded:: 3.19
+
+An imported target missing its location property fails during generation.
+
+:ref:`Imported Targets` for library files and executables require that
+their location on disk is specified in a target property such as
+:prop_tgt:`IMPORTED_LOCATION`, :prop_tgt:`IMPORTED_IMPLIB`, or a
+per-configuration equivalent.  If a needed location property is not set,
+CMake 3.18 and below generate the string ``<TARGET_NAME>-NOTFOUND`` in
+its place, which results in failures of the corresponding rules at build
+time.  CMake 3.19 and above prefer instead to raise an error during
+generation.  This policy provides compatibility for projects that have
+not been updated to expect the new behavior.
+
+The ``OLD`` behavior of this policy is to generate the location of an imported
+unknown, static or shared library target as ``<TARGET_NAME>-NOTFOUND`` if not
+set.
+The ``NEW`` behavior is to raise an error.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.19
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

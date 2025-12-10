@@ -1,0 +1,41 @@
+CMP0181
+-------
+
+.. versionadded:: 4.0
+
+The :variable:`CMAKE_EXE_LINKER_FLAGS`,
+:variable:`CMAKE_EXE_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_MODULE_LINKER_FLAGS`,
+and :variable:`CMAKE_MODULE_LINKER_FLAGS_<CONFIG>` variables are parsed and
+re-quoted and support the ``LINKER:`` prefix.
+
+CMake 3.31 and below use the content of these variables as is.
+
+CMake 4.0 and above parse the content of these variables and manage the
+escaping of special characters. Moreover, the ``LINKER:`` prefix is now
+recognized and expanded.
+
+The ``OLD`` behavior of this policy is to consume the content of the
+:variable:`CMAKE_EXE_LINKER_FLAGS`,
+:variable:`CMAKE_EXE_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_MODULE_LINKER_FLAGS`,
+and :variable:`CMAKE_MODULE_LINKER_FLAGS_<CONFIG>` variables as is.
+
+The ``NEW`` behavior of this policy is to parse and re-quote the content of the
+:variable:`CMAKE_EXE_LINKER_FLAGS`,
+:variable:`CMAKE_EXE_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS`,
+:variable:`CMAKE_SHARED_LINKER_FLAGS_<CONFIG>`,
+:variable:`CMAKE_MODULE_LINKER_FLAGS`,
+and :variable:`CMAKE_MODULE_LINKER_FLAGS_<CONFIG>` variables as well as to
+expand the ``LINKER:`` prefix.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.0
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

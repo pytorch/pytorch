@@ -1,0 +1,26 @@
+CMP0080
+-------
+
+.. versionadded:: 3.13
+
+:module:`BundleUtilities` cannot be included at configure time.
+
+The macros provided by :module:`BundleUtilities` are intended to be invoked
+at install time rather than at configure time, because they depend on the
+listed targets already existing at the time they are invoked. If they are
+invoked at configure time, the targets haven't been built yet, and the
+commands will fail.
+
+This policy restricts the inclusion of :module:`BundleUtilities` to
+``cmake -P`` style scripts and install rules. Specifically, it looks for the
+presence of :variable:`CMAKE_GENERATOR` and throws a fatal error if it exists.
+
+The ``OLD`` behavior of this policy is to allow :module:`BundleUtilities` to
+be included at configure time. The ``NEW`` behavior of this policy is to
+disallow such inclusion.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.13
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

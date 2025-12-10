@@ -1,0 +1,37 @@
+CMP0174
+-------
+
+.. versionadded:: 3.31
+
+:command:`cmake_parse_arguments(PARSE_ARGV)` defines a variable for an empty
+string after a single-value keyword.
+
+One of the main reasons for using the ``PARSE_ARGV`` form of the
+:command:`cmake_parse_arguments` command is to more robustly handle corner
+cases related to empty values.  The non-``PARSE_ARGV`` form doesn't preserve
+empty arguments, but the ``PARSE_ARGV`` form does.  For each single-value
+keyword given, a variable should be defined if the keyword is present, even
+if it is followed by an empty string.
+
+Prior to CMake 3.31, no variable would be defined if the value given after a
+single-value keyword was an empty string.  This meant the code could not detect
+the difference between the keyword not being given, and it being given but with
+an empty value, except by iterating over all the arguments and checking if the
+keyword is present.
+
+For the ``OLD`` behavior of this policy,
+:command:`cmake_parse_arguments(PARSE_ARGV)` does not define a variable for a
+single-value keyword followed by an empty string, or followed by no value at
+all.
+
+For the ``NEW`` behavior, :command:`cmake_parse_arguments(PARSE_ARGV)` always
+defines a variable for each keyword given in the arguments, even a single-value
+keyword with an empty string as its value or no value at all.  With the
+``NEW`` behavior, the code can robustly check if a single-value keyword was
+given using just ``if(DEFINED <prefix>_<keyword>)``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

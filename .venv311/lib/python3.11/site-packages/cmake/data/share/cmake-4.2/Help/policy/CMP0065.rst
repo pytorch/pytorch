@@ -1,0 +1,32 @@
+CMP0065
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.4
+
+Do not add flags to export symbols from executables without
+the :prop_tgt:`ENABLE_EXPORTS` target property.
+
+CMake 3.3 and below, for historical reasons, always linked executables
+on some platforms with flags like ``-rdynamic`` to export symbols from
+the executables for use by any plugins they may load via ``dlopen``.
+CMake 3.4 and above prefer to do this only for executables that are
+explicitly marked with the :prop_tgt:`ENABLE_EXPORTS` target property.
+
+The ``OLD`` behavior of this policy is to always use the additional link
+flags when linking executables regardless of the value of the
+:prop_tgt:`ENABLE_EXPORTS` target property.
+
+The ``NEW`` behavior of this policy is to only use the additional link
+flags when linking executables if the :prop_tgt:`ENABLE_EXPORTS` target
+property is set to ``True``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.4
+.. |WARNED_OR_DID_NOT_WARN| replace:: did *not* warn by default
+.. include:: include/REMOVED_EPILOGUE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0065 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning in CMake versions before 4.0.

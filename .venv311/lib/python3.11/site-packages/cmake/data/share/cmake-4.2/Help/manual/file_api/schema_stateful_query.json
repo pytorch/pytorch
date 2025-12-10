@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for CMake file API query.json files",
+  "type": "object",
+  "required": [
+    "requests"
+  ],
+  "properties": {
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "version"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Specifies one of the Object Kinds to be included in the reply"
+          },
+          "version": {
+            "description": "Version(s) of the object kind that the client understands",
+            "oneOf": [
+              {
+                "$ref": "#/definitions/versionMajorOnly"
+              },
+              {
+                "$ref": "#/definitions/versionObject"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/definitions/versionMajorOnly"
+                    },
+                    {
+                      "$ref": "#/definitions/versionObject"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "client": {
+            "description": "Optional member reserved for use by the client. This value is preserved in the reply."
+          }
+        }
+      }
+    },
+    "client": {
+      "description": "Optional member reserved for use by the client. This value is preserved in the reply."
+    }
+  },
+  "$comment": "Other top level properties are reserved for future use. If present, they are ignored for forward compatibility.",
+  "additionalProperties": true,
+  "definitions": {
+    "versionMajorOnly": {
+      "type": "integer",
+      "description": "A non-negative major version number",
+      "minimum": 0
+    },
+    "versionObject": {
+      "type": "object",
+      "required": [
+        "major"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "description": "The major version number",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "description": "The minor version number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

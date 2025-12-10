@@ -1,0 +1,7 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The patch step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+command (connected)=@cmd@
+command (disconnected)=@cmd_disconnected@
+work_dir=@work_dir@

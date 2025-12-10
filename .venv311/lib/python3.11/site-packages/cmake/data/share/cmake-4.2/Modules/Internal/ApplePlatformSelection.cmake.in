@@ -1,0 +1,48 @@
+# Save this now so we can restore it before returning
+if(NOT DEFINED PACKAGE_PREFIX_DIR)
+  list(APPEND _gpsf_PACKAGE_PREFIX_DIR "<__CMAKE_UNDEFINED__>")
+elseif("${PACKAGE_PREFIX_DIR}" STREQUAL "")
+  list(APPEND _gpsf_PACKAGE_PREFIX_DIR "<__CMAKE_EMPTY__>")
+else()
+  list(APPEND _gpsf_PACKAGE_PREFIX_DIR "${PACKAGE_PREFIX_DIR}")
+endif()
+
+@PACKAGE_INIT@
+
+string(TOLOWER "${CMAKE_OSX_SYSROOT}" _CMAKE_OSX_SYSROOT_LOWER)
+@_branch_INIT@
+if(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)iphonesimulator")
+  @_branch_IOS_SIMULATOR_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)iphoneos")
+  @_branch_IOS_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)appletvsimulator")
+  @_branch_TVOS_SIMULATOR_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)appletvos")
+  @_branch_TVOS_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)watchsimulator")
+  @_branch_WATCHOS_SIMULATOR_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)watchos")
+  @_branch_WATCHOS_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)xrsimulator")
+  @_branch_VISIONOS_SIMULATOR_INCLUDE_FILE@
+elseif(_CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)xros")
+  @_branch_VISIONOS_INCLUDE_FILE@
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND _CMAKE_OSX_SYSROOT_LOWER MATCHES "(^|/)macosx")
+  @_branch_IOS_CATALYST_INCLUDE_FILE@
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  @_branch_MACOS_INCLUDE_FILE@
+else()
+  @_branch_ELSE@
+endif()
+
+# Restore PACKAGE_PREFIX_DIR
+list(LENGTH _gpsf_PACKAGE_PREFIX_DIR _gpsf_tmp)
+math(EXPR _gpsf_tmp "${_gpsf_tmp} - 1")
+list(GET _gpsf_PACKAGE_PREFIX_DIR ${_gpsf_tmp} PACKAGE_PREFIX_DIR)
+list(REMOVE_AT _gpsf_PACKAGE_PREFIX_DIR ${_gpsf_tmp})
+unset(_gpsf_tmp)
+if("${PACKAGE_PREFIX_DIR}" STREQUAL "<__CMAKE_UNDEFINED__>")
+  unset(PACKAGE_PREFIX_DIR)
+elseif("${PACKAGE_PREFIX_DIR}" STREQUAL "<__CMAKE_EMPTY__>")
+  set(PACKAGE_PREFIX_DIR "")
+endif()

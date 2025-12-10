@@ -1,0 +1,28 @@
+CMP0203
+-------
+
+.. versionadded:: 4.2
+
+``_WINDLL`` is defined for shared libraries targeting the MSVC ABI.
+
+In CMake 4.1 and below, :ref:`Visual Studio Generators` compile sources in
+shared libraries with ``_WINDLL`` defined due to behavior of Visual Studio
+itself.  The preprocessor definition is not modeled by CMake and is therefore
+not added by other generators, such as :generator:`Ninja`.
+
+CMake 4.2 and above, when targeting the MSVC ABI, prefer to compile sources
+in shared libraries with ``_WINDLL`` defined by all generators.
+This policy provides compatibility with projects that have not been updated
+to be aware of the definition.  Its setting is recorded by each target as
+it is created, and affects compilation of sources in that target.
+
+The ``OLD`` behavior for this policy does not model the ``_WINDLL``
+preprocessor definition in CMake itself.  The ``NEW`` behavior for this
+policy adds the ``_WINDLL`` preprocessor definition to sources in shared
+libraries when targeting the MSVC ABI.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

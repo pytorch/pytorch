@@ -1,0 +1,23 @@
+CMP0198
+-------
+
+.. versionadded:: 4.2
+
+:variable:`CMAKE_PARENT_LIST_FILE` is not defined in ``CMakeLists.txt``.
+
+CMake 4.1 and below defined ``CMAKE_PARENT_LIST_FILE`` when processing
+a ``CMakeLists.txt`` even though there is no parent file.  CMake 4.2
+and above prefer to not define ``CMAKE_PARENT_LIST_FILE``.  This policy
+provides compatibility for projects that accidentally relied on the
+old behavior.
+
+The ``OLD`` behavior for this policy is to set
+:variable:`CMAKE_PARENT_LIST_FILE` to :variable:`CMAKE_CURRENT_LIST_FILE`
+when processing a ``CMakeLists.txt``.  The ``NEW`` behavior for this policy
+is to not set :variable:`CMAKE_PARENT_LIST_FILE`.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

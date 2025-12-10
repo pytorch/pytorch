@@ -1,0 +1,32 @@
+CMP0130
+-------
+
+.. versionadded:: 3.24
+
+:command:`while` diagnoses condition evaluation errors.
+
+CMake 3.23 and below accidentally tolerated errors encountered while
+evaluating the condition passed to the :command:`while` command
+(but not the :command:`if` command).  For example, the code
+
+.. code-block:: cmake
+
+  set(paren "(")
+  while(${paren})
+  endwhile()
+
+creates an unbalanced parenthesis during condition evaluation.
+
+CMake 3.24 and above prefer to diagnose such errors.  This policy
+provides compatibility for projects that have not been updated to
+fix their condition errors.
+
+The ``OLD`` behavior for this policy is to ignore errors in
+:command:`while` conditions.  The ``NEW`` behavior for this
+policy is to diagnose errors in :command:`while` conditions.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,4 @@
+const char* @symbol@(void)
+{
+  return "INFO:symbol[@symbol@]";
+}

@@ -1,0 +1,13 @@
+CMP0029
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`subdir_depends` command should not be called.
+
+The implementation of this command has been empty since December 2001
+but was kept in CMake for compatibility for a long time.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst

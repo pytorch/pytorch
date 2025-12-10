@@ -1,0 +1,305 @@
+CMake 3.12 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.11 include the following.
+
+New Features
+============
+
+Generators
+----------
+
+* The :ref:`Visual Studio Generators` for VS 2017 learned to support a
+  ``version=14.##`` option in the :variable:`CMAKE_GENERATOR_TOOLSET`
+  value (e.g. via the :manual:`cmake(1)` ``-T`` option) to specify a
+  toolset version number.
+
+Command-Line
+------------
+
+* The :manual:`cmake(1)` :ref:`Build Tool Mode` (``cmake --build``) gained
+  ``--parallel [<jobs>]`` and ``-j [<jobs>]`` options to specify a parallel
+  build level.  They map to corresponding options of the native build tool.
+
+Commands
+--------
+
+* The :command:`add_compile_definitions` command was added to set preprocessor
+  definitions at directory level.  This supersedes :command:`add_definitions`.
+
+* The :command:`cmake_minimum_required` and :command:`cmake_policy(VERSION)`
+  commands now accept a version range using the form ``<min>[...<max>]``.
+  The ``<min>`` version is required but policies are set based on the
+  older of the running CMake version and the version specified by
+  ``<max>``.  This allows projects to specify a range of versions
+  for which they have been updated and avoid explicit policy settings.
+
+* The :command:`file(GLOB)` and :command:`file(GLOB_RECURSE)` commands
+  learned a new flag ``CONFIGURE_DEPENDS`` which enables expression of
+  build system dependency on globbed directory's contents.
+
+* The :command:`file(TOUCH)` and :command:`file(TOUCH_NOCREATE)` commands
+  were added to expose ``TOUCH`` functionality without having to use
+  CMake's command-line tool mode with :command:`execute_process`.
+
+* The :command:`find_package` command now searches prefixes specified by
+  the :variable:`<PackageName>_ROOT` CMake variable and the
+  :envvar:`<PackageName>_ROOT` environment variable.  Package roots are
+  maintained as a stack so nested calls to all ``find_*`` commands inside
+  find modules also search the roots as prefixes.
+  See policy :policy:`CMP0074`.
+
+* The :command:`install` command learned an optional ``NAMELINK_COMPONENT``
+  parameter, which allows you to change the component for a shared library's
+  namelink. If none is specified, the value of ``COMPONENT`` is used by
+  default.
+
+* The :command:`list` command learned a ``JOIN`` sub-command
+  to concatenate list's elements separated by a glue string.
+
+* The :command:`list` command learned a ``SUBLIST`` sub-command
+  to get a sublist of the list.
+
+* The :command:`list` command learned a ``TRANSFORM`` sub-command
+  to apply various string transformation to list's elements.
+
+* The :command:`project` command learned an optional ``HOMEPAGE_URL``
+  parameter which has the effect of setting variables like
+  :variable:`PROJECT_HOMEPAGE_URL`, :variable:`<PROJECT-NAME>_HOMEPAGE_URL`
+  and :variable:`CMAKE_PROJECT_HOMEPAGE_URL`.
+
+* The :command:`string` command learned a ``JOIN`` sub-command
+  to concatenate input strings separated by a glue string.
+
+* :command:`target_compile_options` and :command:`add_compile_options`
+  commands gained a ``SHELL:`` prefix to specify a group of related
+  options using shell-like quoting.
+
+* The :command:`target_link_libraries` command now supports
+  :ref:`Object Libraries`.  Linking to an object library uses its object
+  files in direct dependents and also propagates usage requirements.
+
+Variables
+---------
+
+* The :variable:`CMAKE_FOLDER` variable was added to initialize the
+  :prop_tgt:`FOLDER` property on all targets.
+
+* The :variable:`CMAKE_DOTNET_TARGET_FRAMEWORK_VERSION` variable
+  was defined to initialize all
+  :prop_tgt:`DOTNET_TARGET_FRAMEWORK_VERSION` target properties.
+
+* ``CMAKE_PROJECT_VERSION*`` variables have been introduced:
+
+  - :variable:`CMAKE_PROJECT_VERSION`
+  - :variable:`CMAKE_PROJECT_VERSION_MAJOR`
+  - :variable:`CMAKE_PROJECT_VERSION_MINOR`
+  - :variable:`CMAKE_PROJECT_VERSION_PATCH`
+  - :variable:`CMAKE_PROJECT_VERSION_TWEAK`
+
+* The :variable:`CMAKE_SUPPRESS_REGENERATION` variable was extended to
+  support the :generator:`Ninja` and :ref:`Makefile Generators`.
+  It is also now documented.
+
+* ``CMAKE_VS_SDK_*_DIRECTORIES`` variables were defined to tell
+  :ref:`Visual Studio Generators` for VS 2010 and above how to populate
+  fields in ``.vcxproj`` files that specify SDK directories.  The
+  variables are:
+
+  - :variable:`CMAKE_VS_SDK_EXCLUDE_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_EXECUTABLE_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_INCLUDE_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_LIBRARY_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_LIBRARY_WINRT_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_REFERENCE_DIRECTORIES`
+  - :variable:`CMAKE_VS_SDK_SOURCE_DIRECTORIES`
+
+* A :variable:`MSVC_TOOLSET_VERSION` variable was added to provide the
+  MSVC toolset version associated with the current MSVC compiler version
+  in :variable:`MSVC_VERSION`.
+
+Properties
+----------
+
+* The :prop_tgt:`COMMON_LANGUAGE_RUNTIME` target property was introduced
+  to configure the use of managed C++ for :ref:`Visual Studio Generators`
+  for VS 2010 and above.
+  A corresponding :prop_tgt:`IMPORTED_COMMON_LANGUAGE_RUNTIME` target
+  property was added to support ``C++/CLI`` for imported targets.
+
+* The :prop_tgt:`DOTNET_TARGET_FRAMEWORK_VERSION` target property
+  was introduced as replacement for
+  :prop_tgt:`VS_DOTNET_TARGET_FRAMEWORK_VERSION`, which is considered
+  deprecated now.
+
+* An :prop_tgt:`EXPORT_PROPERTIES` target property was added to specify a
+  custom list of target properties to include in targets exported by the
+  :command:`install(EXPORT)` and :command:`export` commands.
+
+* The :prop_tgt:`PDB_OUTPUT_DIRECTORY` property learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* A :prop_dir:`TESTS` directory property was added to hold the list of
+  tests defined by the :command:`add_test` command.
+
+* A :prop_tgt:`VS_DEBUGGER_COMMAND` target property was created to set the
+  debugging command line with :ref:`Visual Studio Generators` for VS 2010
+  and above.
+
+* HLSL source file properties :prop_sf:`VS_SHADER_DISABLE_OPTIMIZATIONS`
+  and :prop_sf:`VS_SHADER_ENABLE_DEBUG` gained support for generator
+  expressions.
+
+* HLSL source file property :prop_sf:`VS_SHADER_OBJECT_FILE_NAME` has been
+  added to the :ref:`Visual Studio Generators` for VS 2010 and above.
+  The property specifies the file name of the compiled shader object.
+
+Modules
+-------
+
+* The :module:`FindALSA` module now provides imported targets.
+
+* The :module:`FindCURL` module now provides imported targets.
+
+* The :module:`FindJPEG` module now provides imported targets.
+
+* The :module:`FindLibXml2` module now provides imported targets.
+
+* The :module:`FindMatlab` module now supports the Matlab Runtime
+  Compiler (MCR) for compiling and linking matlab extensions.
+
+* A :module:`FindODBC` module was added to find an Open Database Connectivity
+  (ODBC) library.
+
+* The :module:`FindPkgConfig` module has learned to export the found
+  libraries with full path for direct consumption with the
+  :command:`target_link_libraries` command.
+
+* New :module:`FindPython3` and :module:`FindPython2` modules, as well as
+  a new :module:`FindPython` module, have been added to provide a new way
+  to locate python environments.
+
+* The :module:`UseSWIG` module gained a whole refresh and is now more
+  consistent with standard CMake commands to generate libraries and is
+  fully configurable through properties.
+
+* The :module:`UseSWIG` module learned to manage multiple behaviors through
+  ``UseSWIG_MODULE_VERSION`` variable to ensure legacy support as well as more
+  robust handling of ``SWIG`` advanced features (like ``%template``).
+
+* The :module:`UseSWIG` module learned to support CSHARP variant
+  wrapper files.
+
+* The :module:`WriteCompilerDetectionHeader` module gained a ``BARE_FEATURES``
+  option to add a compatibility define for the exact keyword of a new language
+  feature.
+
+Generator Expressions
+---------------------
+
+* A new ``$<GENEX_EVAL:...>`` and ``$<TARGET_GENEX_EVAL:target,...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  has been added to enable consumption of generator expressions whose
+  evaluation results itself in generator expressions.
+
+* A new ``$<IN_LIST:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  has been added.
+
+* A new ``$<TARGET_EXISTS:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  has been added.
+
+* A new ``$<TARGET_NAME_IF_EXISTS:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  has been added.
+
+CTest
+-----
+
+* The :command:`ctest_start` command has been reworked so that you can simply
+  call ``ctest_start(APPEND)`` and it will read all the needed information from
+  the TAG file. The argument parsing has also been relaxed so that the order of
+  the arguments is less significant.
+
+* A :prop_test:`PROCESSOR_AFFINITY` test property was added to request
+  that CTest run a test with CPU affinity for a set of processors
+  disjoint from other concurrently running tests with the property set.
+
+CPack
+-----
+
+* The :module:`CPack` module now uses variables
+  :variable:`CMAKE_PROJECT_VERSION_MAJOR`,
+  :variable:`CMAKE_PROJECT_VERSION_MINOR` and
+  :variable:`CMAKE_PROJECT_VERSION_PATCH`
+  to initialize corresponding CPack variables.
+
+* A :cpack_gen:`CPack NuGet Generator` was was added with basic
+  support for `NuGet`_.
+
+.. _NuGet: https://learn.microsoft.com/en-us/nuget/what-is-nuget
+
+Other
+-----
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of C++ 20.  No specific features are yet enumerated besides
+  the ``cxx_std_20`` meta-feature.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of the availability of C features in MSVC since VS 2010.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of C language standards supported by Texas Instruments C
+  compilers.
+
+Deprecated and Removed Features
+===============================
+
+* The :generator:`Visual Studio 8 2005` generator has been removed.
+
+* CMake no longer produces ``<tgt>_LIB_DEPENDS`` cache entries
+  for library targets.  See policy :policy:`CMP0073`.
+
+Other Changes
+=============
+
+* Include flags for directories marked as ``SYSTEM`` are now moved after
+  non-system directories.  The ``-isystem`` flag does this automatically,
+  so moving them explicitly to the end makes the behavior consistent on
+  compilers that do not have any ``-isystem`` flag.
+
+* Fortran dependency scanning now supports dependencies implied by
+  `Fortran Submodules`_.
+
+* The existence and functionality of the file
+  ``${CMAKE_BINARY_DIR}/cmake_install.cmake`` has now been documented in the
+  :command:`install` documentation so that external packaging software can take
+  advantage of CPack-style component installs.
+
+* The :module:`CheckIncludeFile` module ``check_include_file()`` command
+  learned to honor the ``CMAKE_REQUIRED_LIBRARIES`` variable.
+  See policy :policy:`CMP0075`.
+
+* The :module:`CheckIncludeFileCXX` module ``check_include_file_cxx()`` command
+  learned to honor the ``CMAKE_REQUIRED_LIBRARIES`` variable.
+  See policy :policy:`CMP0075`.
+
+* The :module:`CheckIncludeFiles` module ``check_include_files()`` command
+  learned to honor the ``CMAKE_REQUIRED_LIBRARIES`` variable.
+  See policy :policy:`CMP0075`.
+
+* The :manual:`cmake(1)` ``-E copy_directory`` tool now fails when the
+  source directory does not exist.  Previously it succeeded by creating
+  an empty destination directory.
+
+* The :module:`UseSWIG` module :command:`swig_add_library` command
+  (and legacy ``swig_add_module`` command) now set the prefix of
+  Java modules to ``""`` for MINGW, MSYS, and CYGWIN environments.
+
+.. _Fortran Submodules: https://fortranwiki.org/fortran/show/Submodules

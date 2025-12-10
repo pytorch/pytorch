@@ -1,0 +1,27 @@
+CMP0072
+-------
+
+.. versionadded:: 3.11
+
+:module:`FindOpenGL` prefers GLVND by default when available.
+
+The :module:`FindOpenGL` module provides an ``OpenGL::GL`` target and an
+``OPENGL_LIBRARIES`` variable for projects to use for legacy GL interfaces.
+When both a legacy GL library (e.g. ``libGL.so``) and GLVND libraries
+for OpenGL and GLX (e.g. ``libOpenGL.so`` and ``libGLX.so``) are available,
+the module must choose between them.  It documents an ``OpenGL_GL_PREFERENCE``
+variable that can be used to specify an explicit preference.  When no such
+preference is set, the module must choose a default preference.
+
+CMake 3.11 and above prefer to choose GLVND libraries.  This policy provides
+compatibility with projects that expect the legacy GL library to be used.
+
+The ``OLD`` behavior for this policy is to set ``OpenGL_GL_PREFERENCE`` to
+``LEGACY``.  The ``NEW`` behavior for this policy is to set
+``OpenGL_GL_PREFERENCE`` to ``GLVND``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.11
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

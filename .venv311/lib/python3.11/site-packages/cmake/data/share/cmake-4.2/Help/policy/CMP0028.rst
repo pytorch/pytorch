@@ -1,0 +1,28 @@
+CMP0028
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Double colon in target name means ``ALIAS`` or ``IMPORTED`` target.
+
+CMake 2.8.12 and lower allowed the use of targets and files with double
+colons in :command:`target_link_libraries`, with some buildsystem generators.
+
+The use of double-colons is a common pattern used to namespace ``IMPORTED``
+targets and ``ALIAS`` targets.  When computing the link dependencies of
+a target, the name of each dependency could either be a target, or a file
+on disk.  Previously, if a target was not found with a matching name, the name
+was considered to refer to a file on disk.  This can lead to confusing error
+messages if there is a typo in what should be a target name.
+
+See also the :prop_tgt:`LINK_LIBRARIES_ONLY_TARGETS` target property.
+
+The ``OLD`` behavior for this policy is to search for targets, then files on
+disk, even if the search term contains double-colons.  The ``NEW`` behavior
+for this policy is to issue a ``FATAL_ERROR`` if a link dependency contains
+double-colons but is not an ``IMPORTED`` target or an ``ALIAS`` target.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

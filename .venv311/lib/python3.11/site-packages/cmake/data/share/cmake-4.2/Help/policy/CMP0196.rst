@@ -1,0 +1,23 @@
+CMP0196
+-------
+
+.. versionadded:: 4.1
+
+The :module:`CMakeDetermineVSServicePack` module is removed.
+
+The ``CMakeDetermineVSServicePack`` module has long been superseded by
+the :variable:`CMAKE_<LANG>_COMPILER_VERSION` variable, and the module
+has been documented as deprecated since CMake 3.0.  CMake 4.1 and above
+prefer to not provide the module.  This policy provides compatibility
+for projects that have not been ported away from it.
+
+The ``OLD`` behavior of this policy is for
+``include(CMakeDetermineVSServicePack)`` to load the deprecated module.
+The ``NEW`` behavior halts with a fatal error if anything tries to include
+the module.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.1
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

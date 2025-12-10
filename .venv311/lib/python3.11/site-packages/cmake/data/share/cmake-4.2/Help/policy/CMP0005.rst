@@ -1,0 +1,27 @@
+CMP0005
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Preprocessor definition values are now escaped automatically.
+
+This policy determines whether or not CMake should generate escaped
+preprocessor definition values added via add_definitions.  CMake
+versions 2.4 and below assumed that only trivial values would be given
+for macros in add_definitions calls.  It did not attempt to escape
+non-trivial values such as string literals in generated build rules.
+CMake versions 2.6 and above support escaping of most values, but
+cannot assume the user has not added escapes already in an attempt to
+work around limitations in earlier versions.
+
+The ``OLD`` behavior for this policy is to place definition values given
+to add_definitions directly in the generated build rules without
+attempting to escape anything.  The ``NEW`` behavior for this policy is to
+generate correct escapes for all native build tools automatically.
+See documentation of the ``COMPILE_DEFINITIONS`` target property for
+limitations of the escaping implementation.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

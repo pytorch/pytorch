@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+<plist version="1.0">
+<dict>
+<key>IFMajorVersion</key>
+<integer>@CPACK_PACKAGE_VERSION_MAJOR@</integer>
+<key>IFMinorVersion</key>
+<integer>@CPACK_PACKAGE_VERSION_MINOR@</integer>
+<key>IFPkgFlagAllowBackRev</key>
+<false/>
+<key>IFPkgFlagAuthorizationAction</key>
+<string>AdminAuthorization</string>
+<key>IFPkgFlagDefaultLocation</key>
+<string>@CPACK_PACKAGE_DEFAULT_LOCATION@</string>
+<key>IFPkgFlagInstallFat</key>
+<false/>
+<key>IFPkgFlagIsRequired</key>
+<false/>
+<key>IFPkgFlagOverwritePermissions</key>
+<true/>
+<key>IFPkgFlagRelocatable</key>
+<@CPACK_PACKAGE_RELOCATABLE@/>
+<key>IFPkgFlagRestartAction</key>
+<string>NoRestart</string>
+<key>IFPkgFlagRootVolumeOnly</key>
+<false/>
+<key>IFPkgFlagUpdateInstalledLanguages</key>
+<false/>
+<key>IFPkgFlagUseUserMask</key>
+<false/>
+<key>IFPkgFormatVersion</key>
+<real>0.10000000149011612</real>
+<key>CFBundleIdentifier</key>
+<string>com.@CPACK_PACKAGE_VENDOR@.@CPACK_PACKAGE_NAME@@CPACK_MODULE_VERSION_SUFFIX@</string>
+</dict>
+</plist>

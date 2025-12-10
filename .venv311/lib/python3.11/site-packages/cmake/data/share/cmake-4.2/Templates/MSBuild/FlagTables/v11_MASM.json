@@ -1,0 +1,295 @@
+[
+  {
+    "name": "PreserveIdentifierCase",
+    "switch": "",
+    "comment": "Default",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "PreserveIdentifierCase",
+    "switch": "Cp",
+    "comment": "Preserves Identifier Case (/Cp)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "PreserveIdentifierCase",
+    "switch": "Cu",
+    "comment": "Maps all identifiers to upper case. (/Cu)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "PreserveIdentifierCase",
+    "switch": "Cx",
+    "comment": "Preserves case in public and extern symbols. (/Cx)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W0",
+    "comment": "Warning Level 0 (/W0)",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W1",
+    "comment": "Warning Level 1 (/W1)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W2",
+    "comment": "Warning Level 2 (/W2)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "WarningLevel",
+    "switch": "W3",
+    "comment": "Warning Level 3 (/W3)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "",
+    "comment": "Default",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "Zp1",
+    "comment": "One Byte Boundary (/Zp1)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "Zp2",
+    "comment": "Two Byte Boundary (/Zp2)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "Zp4",
+    "comment": "Four Byte Boundary (/Zp4)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "Zp8",
+    "comment": "Eight Byte Boundary (/Zp8)",
+    "value": "4",
+    "flags": []
+  },
+  {
+    "name": "PackAlignmentBoundary",
+    "switch": "Zp16",
+    "comment": "Sixteen Byte Boundary (/Zp16)",
+    "value": "5",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "",
+    "comment": "Default",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gd",
+    "comment": "Use C-style Calling Convention (/Gd)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gz",
+    "comment": "Use stdcall Calling Convention (/Gz)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "CallingConvention",
+    "switch": "Gc",
+    "comment": "Use Pascal Calling Convention (/Gc)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:prompt",
+    "comment": "Prompt to send report immediately (/errorReport:prompt)",
+    "value": "0",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:queue",
+    "comment": "Prompt to send report at the next logon (/errorReport:queue)",
+    "value": "1",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:send",
+    "comment": "Automatically send report (/errorReport:send)",
+    "value": "2",
+    "flags": []
+  },
+  {
+    "name": "ErrorReporting",
+    "switch": "errorReport:none",
+    "comment": "Do not send report (/errorReport:none)",
+    "value": "3",
+    "flags": []
+  },
+  {
+    "name": "NoLogo",
+    "switch": "nologo",
+    "comment": "Suppress Startup Banner",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GeneratePreprocessedSourceListing",
+    "switch": "EP",
+    "comment": "Generate Preprocessed Source Listing",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "ListAllAvailableInformation",
+    "switch": "Sa",
+    "comment": "List All Available Information",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "UseSafeExceptionHandlers",
+    "switch": "safeseh",
+    "comment": "Use Safe Exception Handlers",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "AddFirstPassListing",
+    "switch": "Sf",
+    "comment": "Add First Pass Listing",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableAssemblyGeneratedCodeListing",
+    "switch": "Sg",
+    "comment": "Enable Assembly Generated Code Listing",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "DisableSymbolTable",
+    "switch": "Sn",
+    "comment": "Disable Symbol Table",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableFalseConditionalsInListing",
+    "switch": "Sx",
+    "comment": "Enable False Conditionals In Listing",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "TreatWarningsAsErrors",
+    "switch": "WX",
+    "comment": "Treat Warnings As Errors",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "MakeAllSymbolsPublic",
+    "switch": "Zf",
+    "comment": "Make All Symbols Public",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "GenerateDebugInformation",
+    "switch": "Zi",
+    "comment": "Generate Debug Information",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "EnableMASM51Compatibility",
+    "switch": "Zm",
+    "comment": "Enable MASM 5.1 Compatibility",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PerformSyntaxCheckOnly",
+    "switch": "Zs",
+    "comment": "Perform Syntax Check Only",
+    "value": "true",
+    "flags": []
+  },
+  {
+    "name": "PreprocessorDefinitions",
+    "switch": "D",
+    "comment": "Preprocessor Definitions",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "IncludePaths",
+    "switch": "I",
+    "comment": "Include Paths",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "BrowseFile",
+    "switch": "FR",
+    "comment": "Generate Browse Information File",
+    "value": "",
+    "flags": [
+      "UserValue",
+      "SemicolonAppendable"
+    ]
+  },
+  {
+    "name": "ObjectFileName",
+    "switch": "Fo",
+    "comment": "Object File Name",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  },
+  {
+    "name": "AssembledCodeListingFile",
+    "switch": "Fl",
+    "comment": "Assembled Code Listing File",
+    "value": "",
+    "flags": [
+      "UserValue"
+    ]
+  }
+]

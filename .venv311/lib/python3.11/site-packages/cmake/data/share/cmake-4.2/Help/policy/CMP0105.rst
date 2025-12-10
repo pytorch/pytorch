@@ -1,0 +1,21 @@
+CMP0105
+-------
+
+.. versionadded:: 3.18
+
+:prop_tgt:`LINK_OPTIONS` and :prop_tgt:`INTERFACE_LINK_OPTIONS` target
+properties are now used for the device link step.
+
+In CMake 3.17 and below, link options are not used by the device link step.
+
+The ``OLD`` behavior for this policy is to ignore the link options during the
+device link step.
+
+The ``NEW`` behavior of this policy is to use the link options during the
+device link step.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.18
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

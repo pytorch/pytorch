@@ -1,0 +1,18 @@
+CMP0057
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+Support new :command:`if` IN_LIST operator.
+
+CMake 3.3 adds support for the new IN_LIST operator.
+
+The ``OLD`` behavior for this policy is to ignore the IN_LIST operator.
+The ``NEW`` behavior is to interpret the IN_LIST operator.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

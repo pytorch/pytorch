@@ -1,0 +1,636 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake codemodel directory object",
+  "type": "object",
+  "oneOf": [
+    {
+      "$comment": "The top level codemodelVersion field was only added in version 2.9, so we can't differentiate between earlier versions",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/codemodelV2_0"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_4"
+        },
+        {
+          "$ref": "#/definitions/codemodelV2_5"
+        }
+      ]
+    },
+    {
+      "$ref": "#/definitions/codemodelV2_9"
+    }
+  ],
+  "definitions": {
+    "codemodelVersionV2_9": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 9
+        }
+      },
+      "additionalProperties": false
+    },
+    "backtraceGraph": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "commands",
+        "files"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "file"
+            ],
+            "properties": {
+              "file": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "0-based index into the backtrace files array"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This is present when the node represents a line within the file. The line number is a 1-based value."
+              },
+              "command": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "This is present when the node represents a command invocation. It is a 0-based index into the backtrace commands array."
+              },
+              "parent": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "This is present when the node is not the bottom of the call stack. It is a 0-based index of another node in the backtrace nodes array."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "commands": {
+          "type": "array",
+          "description": "Each list item is a string specifying a command name",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "Each list item is a string specifying the path to a file, represented with forward slashes. If the file is inside the top level source directory, the path is specified relative to that directory. Otherwise, the path is absolute.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "source",
+        "build"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Path to the source directory. If it is inside the top level source directory, the path will be relative to that directory. For the top level source directory, this will simply be '.'. Paths outside the top level source directory will be absolute."
+        },
+        "build": {
+          "type": "string",
+          "description": "Path to the build directory. If it is inside the top level build directory, the path will be relative to that directory. For the top level build directory, this will simply be '.'. Paths outside the top level build directory will be absolute."
+        }
+      },
+      "additionalProperties": false
+    },
+    "installerComponent": {
+      "type": "string",
+      "description": "Specifies the component selected by the corresponding install command invocation"
+    },
+    "installerDestination": {
+      "type": "string",
+      "description": "The install destination path. May be absolute or relative to the install prefix"
+    },
+    "installerPaths": {
+      "type": "array",
+      "description": "Paths (files or directories) to be installed",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Path from which a file/directory is installed, also specifying the install path"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Path from which a file/directory is installed"
+              },
+              "to": {
+                "type": "string",
+                "description": "Path to which the file/directory is installed under the destination"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          }
+        ]
+      }
+    },
+    "installerItemTypesV2_0": {
+      "type": "string",
+      "enum": [
+        "file",
+        "directory",
+        "target",
+        "export",
+        "script",
+        "code",
+        "importedRuntimeArtifacts",
+        "runtimeDependencySet"
+      ]
+    },
+    "installerItemTypesV2_4": {
+      "type": "string",
+      "enum": [
+        "fileSet"
+      ]
+    },
+    "installerItemTypesV2_5": {
+      "type": "string",
+      "enum": [
+        "cxxModuleBmi"
+      ]
+    },
+    "installerTypeV2_0": {
+      "$ref": "#/definitions/installerItemTypesV2_0",
+      "description": "Type of installation rule"
+    },
+    "installerTypeV2_4": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/installerItemTypesV2_0"
+        },
+        {
+          "$ref": "#/definitions/installerItemTypesV2_4"
+        }
+      ],
+      "description": "Type of installation rule"
+    },
+    "installerTypeV2_5": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/installerItemTypesV2_0"
+        },
+        {
+          "$ref": "#/definitions/installerItemTypesV2_4"
+        },
+        {
+          "$ref": "#/definitions/installerItemTypesV2_5"
+        }
+      ],
+      "description": "Type of installation rule"
+    },
+    "installerIsExcludeFromAll": {
+      "type": "boolean",
+      "description": "Present when install is called with EXCLUDE_FROM_ALL option"
+    },
+    "installerIsForAllComponents": {
+      "type": "boolean",
+      "description": "Present when install(SCRIPT|CODE) is called with ALL_COMPONENTS option"
+    },
+    "installerIsOptional": {
+      "type": "boolean",
+      "description": "Present when install is called with OPTIONAL option"
+    },
+    "installerTargetId": {
+      "type": "string",
+      "description": "Uniquely identifying string for the target to be installed"
+    },
+    "installerTargetIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based index into the codemodel targets array"
+    },
+    "installerTargetIsImportLibrary": {
+      "type": "boolean",
+      "description": "Present for Windows DLL import library or AIX linker import file"
+    },
+    "installerTargetInstallNamelink": {
+      "type": "string",
+      "enum": [
+        "skip",
+        "only"
+      ],
+      "description": "How to handle symlinks for VERSION/SOVERSION target properties"
+    },
+    "installerExportName": {
+      "type": "string",
+      "description": "Name of the export for export type"
+    },
+    "installerExportTargets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "String uniquely identifying the target"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0-based index into the codemodel targets array"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "index"
+        ]
+      }
+    },
+    "installerRuntimeDependencySetName": {
+      "type": "string",
+      "description": "Name of the runtime dependency set"
+    },
+    "installerRuntimeDependencySetType": {
+      "type": "string",
+      "enum": [
+        "library",
+        "framework"
+      ],
+      "description": "Type of runtime dependency set"
+    },
+    "installerScriptFile": {
+      "type": "string",
+      "description": "Path to the script file on disk"
+    },
+    "installerBacktrace": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based index into the backtraceGraph nodes array"
+    },
+    "installerFileSetNameV2_4": {
+      "type": "string",
+      "description": "Name of the file set"
+    },
+    "installerFileSetTypeV2_4": {
+      "type": "string",
+      "description": "Type of the file set"
+    },
+    "installerFileSetDirectoriesV2_4": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "File set's base directories"
+    },
+    "installerFileSetTargetV2_4": {
+      "type": "object",
+      "required": [
+        "id",
+        "index"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "String uniquely identifying the target"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based index into the codemodel targets array"
+        }
+      },
+      "additionalProperties": false
+    },
+    "installerCxxModuleBmiTargetV2_5": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "installersV2_0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "component",
+          "type"
+        ],
+        "properties": {
+          "component": {
+            "$ref": "#/definitions/installerComponent"
+          },
+          "destination": {
+            "$ref": "#/definitions/installerDestination"
+          },
+          "paths": {
+            "$ref": "#/definitions/installerPaths"
+          },
+          "type": {
+            "$ref": "#/definitions/installerTypeV2_0"
+          },
+          "isExcludeFromAll": {
+            "$ref": "#/definitions/installerIsExcludeFromAll"
+          },
+          "isForAllComponents": {
+            "$ref": "#/definitions/installerIsForAllComponents"
+          },
+          "isOptional": {
+            "$ref": "#/definitions/installerIsOptional"
+          },
+          "targetId": {
+            "$ref": "#/definitions/installerTargetId"
+          },
+          "targetIndex": {
+            "$ref": "#/definitions/installerTargetIndex"
+          },
+          "targetIsImportLibrary": {
+            "$ref": "#/definitions/installerTargetIsImportLibrary"
+          },
+          "targetInstallNamelink": {
+            "$ref": "#/definitions/installerTargetInstallNamelink"
+          },
+          "exportName": {
+            "$ref": "#/definitions/installerExportName"
+          },
+          "exportTargets": {
+            "$ref": "#/definitions/installerExportTargets"
+          },
+          "runtimeDependencySetName": {
+            "$ref": "#/definitions/installerRuntimeDependencySetName"
+          },
+          "runtimeDependencySetType": {
+            "$ref": "#/definitions/installerRuntimeDependencySetType"
+          },
+          "scriptFile": {
+            "$ref": "#/definitions/installerScriptFile"
+          },
+          "backtrace": {
+            "$ref": "#/definitions/installerBacktrace"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "installersV2_4": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "component",
+          "type"
+        ],
+        "properties": {
+          "component": {
+            "$ref": "#/definitions/installerComponent"
+          },
+          "destination": {
+            "$ref": "#/definitions/installerDestination"
+          },
+          "paths": {
+            "$ref": "#/definitions/installerPaths"
+          },
+          "type": {
+            "$ref": "#/definitions/installerTypeV2_0"
+          },
+          "isExcludeFromAll": {
+            "$ref": "#/definitions/installerIsExcludeFromAll"
+          },
+          "isForAllComponents": {
+            "$ref": "#/definitions/installerIsForAllComponents"
+          },
+          "isOptional": {
+            "$ref": "#/definitions/installerIsOptional"
+          },
+          "targetId": {
+            "$ref": "#/definitions/installerTargetId"
+          },
+          "targetIndex": {
+            "$ref": "#/definitions/installerTargetIndex"
+          },
+          "targetIsImportLibrary": {
+            "$ref": "#/definitions/installerTargetIsImportLibrary"
+          },
+          "targetInstallNamelink": {
+            "$ref": "#/definitions/installerTargetInstallNamelink"
+          },
+          "exportName": {
+            "$ref": "#/definitions/installerExportName"
+          },
+          "exportTargets": {
+            "$ref": "#/definitions/installerExportTargets"
+          },
+          "runtimeDependencySetName": {
+            "$ref": "#/definitions/installerRuntimeDependencySetName"
+          },
+          "runtimeDependencySetType": {
+            "$ref": "#/definitions/installerRuntimeDependencySetType"
+          },
+          "scriptFile": {
+            "$ref": "#/definitions/installerScriptFile"
+          },
+          "backtrace": {
+            "$ref": "#/definitions/installerBacktrace"
+          },
+          "fileSetName": {
+            "$ref": "#/definitions/installerFileSetNameV2_4"
+          },
+          "fileSetType": {
+            "$ref": "#/definitions/installerFileSetTypeV2_4"
+          },
+          "fileSetDirectories": {
+            "$ref": "#/definitions/installerFileSetDirectoriesV2_4"
+          },
+          "fileSetTarget": {
+            "$ref": "#/definitions/installerFileSetTargetV2_4"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "installersV2_5": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "component",
+          "type"
+        ],
+        "properties": {
+          "component": {
+            "$ref": "#/definitions/installerComponent"
+          },
+          "destination": {
+            "$ref": "#/definitions/installerDestination"
+          },
+          "paths": {
+            "$ref": "#/definitions/installerPaths"
+          },
+          "type": {
+            "$ref": "#/definitions/installerTypeV2_5"
+          },
+          "isExcludeFromAll": {
+            "$ref": "#/definitions/installerIsExcludeFromAll"
+          },
+          "isForAllComponents": {
+            "$ref": "#/definitions/installerIsForAllComponents"
+          },
+          "isOptional": {
+            "$ref": "#/definitions/installerIsOptional"
+          },
+          "targetId": {
+            "$ref": "#/definitions/installerTargetId"
+          },
+          "targetIndex": {
+            "$ref": "#/definitions/installerTargetIndex"
+          },
+          "targetIsImportLibrary": {
+            "$ref": "#/definitions/installerTargetIsImportLibrary"
+          },
+          "targetInstallNamelink": {
+            "$ref": "#/definitions/installerTargetInstallNamelink"
+          },
+          "exportName": {
+            "$ref": "#/definitions/installerExportName"
+          },
+          "exportTargets": {
+            "$ref": "#/definitions/installerExportTargets"
+          },
+          "runtimeDependencySetName": {
+            "$ref": "#/definitions/installerRuntimeDependencySetName"
+          },
+          "runtimeDependencySetType": {
+            "$ref": "#/definitions/installerRuntimeDependencySetType"
+          },
+          "scriptFile": {
+            "$ref": "#/definitions/installerScriptFile"
+          },
+          "backtrace": {
+            "$ref": "#/definitions/installerBacktrace"
+          },
+          "fileSetName": {
+            "$ref": "#/definitions/installerFileSetNameV2_4"
+          },
+          "fileSetType": {
+            "$ref": "#/definitions/installerFileSetTypeV2_4"
+          },
+          "fileSetDirectories": {
+            "$ref": "#/definitions/installerFileSetDirectoriesV2_4"
+          },
+          "fileSetTarget": {
+            "$ref": "#/definitions/installerFileSetTargetV2_4"
+          },
+          "cxxModuleBmiTarget": {
+            "$ref": "#/definitions/installerCxxModuleBmiTargetV2_5"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "codemodelV2_0": {
+      "required": [
+        "backtraceGraph",
+        "paths",
+        "installers"
+      ],
+      "properties": {
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "installers": {
+          "$ref": "#/definitions/installersV2_0"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_4": {
+      "required": [
+        "backtraceGraph",
+        "paths",
+        "installers"
+      ],
+      "properties": {
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "installers": {
+          "$ref": "#/definitions/installersV2_4"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_5": {
+      "required": [
+        "backtraceGraph",
+        "paths",
+        "installers"
+      ],
+      "properties": {
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "installers": {
+          "$ref": "#/definitions/installersV2_5"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codemodelV2_9": {
+      "required": [
+        "codemodelVersion",
+        "backtraceGraph",
+        "paths",
+        "installers"
+      ],
+      "properties": {
+        "codemodelVersion": {
+          "$ref": "#/definitions/codemodelVersionV2_9"
+        },
+        "backtraceGraph": {
+          "$ref": "#/definitions/backtraceGraph"
+        },
+        "paths": {
+          "$ref": "#/definitions/paths"
+        },
+        "installers": {
+          "$ref": "#/definitions/installersV2_5"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

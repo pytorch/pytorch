@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.4">
+<dict>
+	<key>IFPkgDescriptionTitle</key>
+	<string>@CPACK_PACKAGE_NAME@</string>
+  <key>IFPkgDescriptionVersion</key>
+  <string>@CPACK_PACKAGE_VERSION@</string>
+  <key>IFPkgDescriptionDescription</key>
+  <string>@CPACK_PACKAGE_DESCRIPTION@</string>
+</dict>
+</plist>

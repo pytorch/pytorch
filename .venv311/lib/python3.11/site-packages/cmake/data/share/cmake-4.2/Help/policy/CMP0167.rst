@@ -1,0 +1,28 @@
+CMP0167
+-------
+
+.. versionadded:: 3.30
+
+The :module:`FindBoost` module is removed.
+
+CMake 3.29 and below provide a ``FindBoost`` module, but it needs constant
+updates to keep up with upstream Boost releases.  Upstream Boost 1.70
+and above provide a ``BoostConfig.cmake`` package configuration file.
+``find_package(Boost CONFIG)`` finds the upstream package directly,
+without the find module.
+
+CMake 3.30 and above prefer to not provide the ``FindBoost`` module
+so that ``find_package(Boost)`` calls, without the ``CONFIG`` or
+``NO_MODULE`` options, find the upstream ``BoostConfig.cmake`` directly.
+This policy provides compatibility for projects that have not been ported
+to use the upstream Boost package.
+
+The ``OLD`` behavior of this policy is for ``find_package(Boost)`` to
+load CMake's :module:`FindBoost` module.  The ``NEW`` behavior is for
+``find_package(Boost)`` to search for the upstream ``BoostConfig.cmake``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

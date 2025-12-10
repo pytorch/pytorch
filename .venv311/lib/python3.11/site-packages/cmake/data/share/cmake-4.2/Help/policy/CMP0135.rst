@@ -1,0 +1,29 @@
+CMP0135
+-------
+
+.. versionadded:: 3.24
+
+When using the ``URL`` download method with the :command:`ExternalProject_Add`
+or :command:`FetchContent_Declare` commands, CMake 3.23 and below sets the
+timestamps of the extracted contents to the same as the timestamps in the
+archive. When the ``URL`` changes, the new archive is downloaded and extracted,
+but the timestamps of the extracted contents might not be newer than the
+previous contents. Anything that depends on the extracted contents might not
+be rebuilt, even though the contents may change.
+
+CMake 3.24 and above prefers to set the timestamps of all extracted contents
+to the time of the extraction. This ensures that anything that depends on the
+extracted contents will be rebuilt whenever the ``URL`` changes.
+
+The ``DOWNLOAD_EXTRACT_TIMESTAMP`` option to the :command:`ExternalProject_Add`
+and :command:`FetchContent_Declare` commands can be used to explicitly specify
+how timestamps should be handled. When ``DOWNLOAD_EXTRACT_TIMESTAMP`` is not
+given, this policy controls the default behavior. The ``OLD`` behavior for
+this policy is to restore the timestamps from the archive. The ``NEW``
+behavior sets the timestamps of extracted contents to the time of extraction.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

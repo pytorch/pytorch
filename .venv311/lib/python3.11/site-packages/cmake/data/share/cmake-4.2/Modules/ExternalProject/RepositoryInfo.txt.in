@@ -1,0 +1,9 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=@method@
+command=@cmd@
+source_dir=@source_dir@
+work_dir=@work_dir@
+@extra_repo_info@

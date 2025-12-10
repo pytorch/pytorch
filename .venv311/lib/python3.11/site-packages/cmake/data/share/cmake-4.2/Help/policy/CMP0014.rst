@@ -1,0 +1,18 @@
+CMP0014
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Input directories must have ``CMakeLists.txt``.
+
+CMake versions before 2.8 silently ignored missing ``CMakeLists.txt``
+files in directories referenced by :command:`add_subdirectory` or  :command:`subdirs`,
+treating them as if present but empty.  In CMake 2.8.0 and above this
+:command:`cmake_policy` determines whether or not the case is an error.
+The ``OLD`` behavior for this policy is to silently ignore the problem.
+The ``NEW`` behavior for this policy is to report an error.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

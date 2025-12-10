@@ -1,0 +1,30 @@
+CMP0138
+-------
+
+.. versionadded:: 3.24
+
+:module:`CheckIPOSupported` uses flags from calling project.
+
+The :module:`CheckIPOSupported` module :command:`check_ipo_supported`
+command compiles a test project to determine whether the toolchain
+supports :prop_tgt:`INTERPROCEDURAL_OPTIMIZATION`.  CMake 3.23 and
+below run the check with the default values of the
+:variable:`CMAKE_<LANG>_FLAGS` and :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>`
+variables for the current environment and toolchain settings.
+However, some projects may modify these flag variables to add
+flags that affect availability of the toolchain's IPO features.
+CMake 3.24 and above prefer to honor the calling project's values
+for these variables.  This policy provides compatibility for projects
+that have not been updated to expect this behavior.
+
+The ``OLD`` behavior for this policy is to ignore the calling
+project's values of :variable:`CMAKE_<LANG>_FLAGS` and
+:variable:`CMAKE_<LANG>_FLAGS_<CONFIG>`.  The ``NEW`` behavior
+for this policy is to use the values of those variables as
+compiler flags in the test project.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.24
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

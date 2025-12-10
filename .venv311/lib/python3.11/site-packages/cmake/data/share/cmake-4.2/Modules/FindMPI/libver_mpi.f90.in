@@ -1,0 +1,7 @@
+      program mpi_ver
+      @MPI_Fortran_INCLUDE_LINE@
+      character(len=MPI_MAX_LIBRARY_VERSION_STRING) :: mpilibver_str
+      integer(kind=MPI_INTEGER_KIND) :: ierror, reslen
+      call MPI_GET_LIBRARY_VERSION(mpilibver_str, reslen, ierror)
+      print *, mpilibver_str
+      end program mpi_ver

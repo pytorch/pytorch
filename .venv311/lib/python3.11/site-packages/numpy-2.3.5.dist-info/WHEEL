@@ -1,0 +1,6 @@
+Wheel-Version: 1.0
+Generator: meson
+Root-Is-Purelib: false
+Tag: cp311-cp311-macosx_14_0_arm64
+Generator: delocate 0.13.0
+

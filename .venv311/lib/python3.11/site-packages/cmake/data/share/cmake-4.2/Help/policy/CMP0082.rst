@@ -1,0 +1,30 @@
+CMP0082
+-------
+
+.. versionadded:: 3.14
+
+Install rules from :command:`add_subdirectory` calls are interleaved with
+those in caller.
+
+CMake 3.13 and lower ran the install rules from :command:`add_subdirectory`
+after all other install rules, even if :command:`add_subdirectory` was called
+before the other install rules.  CMake 3.14 and above prefer to interleave
+these :command:`add_subdirectory` install rules with the others so that
+they are run in the order they are declared.  This policy provides
+compatibility for projects that have not been updated to expect the
+new behavior.
+
+The ``OLD`` behavior for this policy is to run the install rules from
+:command:`add_subdirectory` after the other install rules.  The ``NEW``
+behavior for this policy is to run all install rules in the order they are
+declared.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.14
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0082 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

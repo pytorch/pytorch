@@ -1,0 +1,39 @@
+This file provides a few notes to CMake developers about how to add
+support for a new language to CMake.  It is also possible to place
+these files in :variable:`CMAKE_MODULE_PATH` within an outside project
+to add languages not supported by upstream CMake.  However, this is not
+a fully supported use case.
+
+The implementation behind the scenes of project/enable_language,
+including the compiler/platform modules, is an *internal* API that
+does not make any compatibility guarantees.  It is not covered in the
+official reference documentation that is versioned with the source code.
+Maintainers of external language support are responsible for porting
+it to each version of CMake as upstream changes are made.  Since
+the API is internal we will not necessarily include notice of any
+changes in release notes.
+
+
+CMakeDetermine(LANG)Compiler.cmake  -> this should find the compiler for LANG and configure CMake(LANG)Compiler.cmake.in
+
+CMake(LANG)Compiler.cmake.in  -> used by CMakeDetermine(LANG)Compiler.cmake
+  This file is used to store compiler information and is copied down into try
+  compile directories so that try compiles do not need to re-determine and test the LANG
+
+CMake(LANG)Information.cmake => set compiler configuration:
+  CMAKE_(LANG)_CREATE_SHARED_LIBRARY
+  CMAKE_(LANG)_CREATE_SHARED_MODULE
+  CMAKE_(LANG)_CREATE_STATIC_LIBRARY
+  CMAKE_(LANG)_COMPILE_OBJECT
+  CMAKE_(LANG)_LINK_EXECUTABLE
+
+  CMAKE_(LANG)_USE_LINKER_INFORMATION
+
+CMakeTest(LANG)Compiler.cmake -> test the compiler and set:
+  set(CMAKE_(LANG)_COMPILER_WORKS 1 CACHE INTERNAL "")
+
+
+If the variable CMAKE_(LANG)_USE_LINKER_INFORMATION has value TRUE, the file CMake(LANG)LinkerInformation.cmake
+should be defined.
+
+CMake(LANG)LinkerInformation.cmake  -> set up linker configuration for LANG.

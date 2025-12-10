@@ -32,6 +32,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_ARM64,
     IS_MACOS,
     parametrize,
     skipIfRocm,
@@ -3951,6 +3952,21 @@ class CPUReproTests(TestCase):
             y = torch.randn(100, 50, 50).to(dtype).transpose(1, 2)
             self.common(fn, (x, y))
             check_metrics_vec_kernel_count(2)
+
+    @requires_vectorization
+    @unittest.skipUnless(IS_ARM64, "AArch64 vector path only")
+    def test_bf16_vec_transpose_correctness(self):
+        def fn(a):
+            return a.t().contiguous()
+
+        for shape in [(7, 7), (5, 8), (8, 3)]:
+            metrics.reset()
+            x = torch.randn(shape, device="cpu").to(torch.bfloat16)
+            compiled = torch.compile(fn, backend="inductor", dynamic=True)
+            expected = x.float().t().to(torch.bfloat16)
+            actual = compiled(x)
+            torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)
+            check_metrics_vec_kernel_count(1)
 
     def test_transpose_mxn_32_32_bf16_fp16(self):
         def fn(a):

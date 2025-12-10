@@ -1,0 +1,23 @@
+CMP0103
+-------
+
+.. versionadded:: 3.18
+
+Multiple calls to :command:`export` command with same ``FILE`` without
+``APPEND`` is no longer allowed.
+
+In CMake 3.17 and below, multiple calls to :command:`export` command with the
+same ``FILE`` without ``APPEND`` are accepted silently but only the last
+occurrence is taken into account during the generation.
+
+The ``OLD`` behavior for this policy is to ignore the multiple occurrences of
+ :command:`export` command except the last one.
+
+The ``NEW`` behavior of this policy is to raise an error on second call to
+:command:`export` command with same ``FILE`` without ``APPEND``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.18
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

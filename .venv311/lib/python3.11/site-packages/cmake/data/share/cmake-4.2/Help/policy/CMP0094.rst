@@ -1,0 +1,23 @@
+CMP0094
+-------
+
+.. versionadded:: 3.15
+
+Modules :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+use ``LOCATION`` for lookup strategy.
+
+Starting with CMake 3.15, Modules :module:`FindPython3`, :module:`FindPython2`
+and :module:`FindPython` set value ``LOCATION`` for, respectively, variables
+``Python3_FIND_STRATEGY``, ``Python2_FIND_STRATEGY`` and
+``Python_FIND_STRATEGY``. This policy provides compatibility with projects that
+expect the legacy behavior.
+
+The ``OLD`` behavior for this policy set value ``VERSION`` for variables
+``Python3_FIND_STRATEGY``, ``Python2_FIND_STRATEGY`` and
+``Python_FIND_STRATEGY``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.15
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

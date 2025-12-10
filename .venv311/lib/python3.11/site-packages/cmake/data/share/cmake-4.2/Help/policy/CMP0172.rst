@@ -1,0 +1,39 @@
+CMP0172
+-------
+
+.. versionadded:: 3.31
+
+The :module:`CPack` module enables per-machine installation by default
+in the :cpack_gen:`CPack WIX Generator`.
+
+The :cpack_gen:`CPack WIX Generator`'s :variable:`CPACK_WIX_INSTALL_SCOPE`
+option controls the scope of the generated Windows Installer package.
+When :variable:`CPACK_WIX_VERSION` is set to 4 or higher, the default scope
+is ``perMachine``.  However, when using WIX 3 the default scope is ``NONE``,
+and CPack does not set any ``InstallScope`` in the package specification.
+The resulting installer requires administrative privileges and installs
+into the system-wide ``ProgramFiles`` directory, but the start menu entry
+and uninstaller registration are created only for the current user.
+
+The :module:`CPack` module in CMake 3.30 and older does not specify any
+:variable:`CPACK_WIX_INSTALL_SCOPE` value by default, so CPack uses no
+installation scope by default with WIX 3.  CMake 3.31 and newer instead
+prefer to set :variable:`CPACK_WIX_INSTALL_SCOPE` to ``perMachine`` by
+default to make the behavior consistent across all WIX versions.  This
+policy provides compatibility for projects that have not been updated
+to expect ``perMachine`` behavior.
+
+The ``OLD`` behavior for this policy is to not set
+:variable:`CPACK_WIX_INSTALL_SCOPE` by default.  The ``NEW`` behavior for
+this policy is to set :variable:`CPACK_WIX_INSTALL_SCOPE` to ``perMachine``
+by default.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0172 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

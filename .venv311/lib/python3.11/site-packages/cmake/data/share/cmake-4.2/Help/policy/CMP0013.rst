@@ -1,0 +1,22 @@
+CMP0013
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Duplicate binary directories are not allowed.
+
+CMake 2.6.3 and below silently permitted add_subdirectory() calls to
+create the same binary directory multiple times.  During build system
+generation files would be written and then overwritten in the build
+tree and could lead to strange behavior.  CMake 2.6.4 and above
+explicitly detect duplicate binary directories.  CMake 2.6.4 always
+considers this case an error.  In CMake 2.8.0 and above this policy
+determines whether or not the case is an error.  The ``OLD`` behavior for
+this policy is to allow duplicate binary directories.  The NEW
+behavior for this policy is to disallow duplicate binary directories
+with an error.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

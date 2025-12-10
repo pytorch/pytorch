@@ -1,0 +1,417 @@
+CMake 3.8 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.7 include the following.
+
+New Features
+============
+
+Languages
+---------
+
+C#
+^^
+
+* CMake learned to support ``CSharp`` (C#) as a first-class language that
+  can be enabled via the :command:`project` and :command:`enable_language`
+  commands.  It is currently supported by the :ref:`Visual Studio Generators`
+  for VS 2010 and above.
+
+  C# assemblies and programs can be added just like common C++ targets using
+  the :command:`add_library` and :command:`add_executable` commands.
+  References between C# targets in the same source tree may be specified by
+  :command:`target_link_libraries` like for C++.  References to system or
+  3rd-party assemblies may be specified by the target properties
+  :prop_tgt:`VS_DOTNET_REFERENCE_<refname>` and
+  :prop_tgt:`VS_DOTNET_REFERENCES`.
+
+* More fine tuning of C# targets may be done using target and source
+  file properties.  Specifically the target properties related to
+  Visual Studio (``VS_*``) are worth a look (for setting toolset
+  versions, root namespaces, assembly icons, ...).
+
+CUDA
+^^^^
+
+* CMake learned to support ``CUDA`` as a first-class language that can be
+  enabled via the :command:`project` and :command:`enable_language` commands.
+
+* ``CUDA`` is currently supported by the :ref:`Makefile Generators`
+  and the :generator:`Ninja` generator on Linux, macOS, and Windows.
+  Support for the Visual Studio IDE is under development but not
+  included in this release.
+
+* The NVIDIA CUDA Toolkit compiler (``nvcc``) is supported.
+
+C & C++
+^^^^^^^
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  now offers meta-features that request compiler modes for specific language
+  standard levels (e.g. ``cxx_std_11``).  See
+  :prop_gbl:`CMAKE_C_KNOWN_FEATURES` and :prop_gbl:`CMAKE_CXX_KNOWN_FEATURES`.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of C++ 17.  No specific features are yet enumerated besides
+  the ``cxx_std_17`` meta-feature.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of the availability of C99 in gcc since version 3.4.
+
+Platforms
+---------
+
+* A new minimal platform file for ``Fuchsia`` was added.
+
+Generators
+----------
+
+* The :generator:`CodeBlocks` extra generator may now be used to
+  generate with :generator:`NMake Makefiles JOM`.
+
+* The :ref:`Visual Studio Generators` for VS 2013 and above learned to
+  support a ``host=x64`` option in the :variable:`CMAKE_GENERATOR_TOOLSET`
+  value (e.g.  via the :manual:`cmake(1)` ``-T`` option) to request use
+  of a VS 64-bit toolchain on 64-bit hosts.
+
+* The :ref:`Visual Studio Generators` learned to treat files passed to
+  :command:`target_link_libraries` whose names end in ``.targets``
+  as MSBuild "targets" files to be imported into generated project files.
+
+Commands
+--------
+
+* The :command:`add_custom_command` and :command:`add_custom_target` commands
+  learned the option ``COMMAND_EXPAND_LISTS`` which causes lists in the
+  ``COMMAND`` argument to be expanded, including lists created by generator
+  expressions.
+
+* The :command:`execute_process` command gained an ``ENCODING`` option to
+  specify on Windows which encoding is used for output from child process.
+
+* The :command:`math(EXPR)` command gained support for unary
+  ``+`` and ``-`` operators.
+
+* The :command:`source_group` command gained ``TREE`` and ``PREFIX``
+  options to add groups following source tree directory structure.
+
+* The :command:`string(TIMESTAMP)` command learned to treat ``%%``
+  as a way to encode plain ``%``.
+
+* The :command:`string(TIMESTAMP)` command will now honor the
+  ``SOURCE_DATE_EPOCH`` environment variable and use its value
+  instead of the current time.
+
+* The :command:`try_compile` command source file signature gained new options
+  to specify the language standard to use in the generated test project.
+
+* The :command:`try_compile` command source file signature now honors
+  language standard variables like :variable:`CMAKE_CXX_STANDARD`.
+  See policy :policy:`CMP0067`.
+
+Variables
+---------
+
+* A :variable:`CMAKE_CODELITE_USE_TARGETS` variable was added to tell the
+  :generator:`CodeLite` extra generator to change the generated project
+  to have target-centric organization.
+  The ``build``, ``rebuild``, and ``clean`` operations within ``CodeLite``
+  then work on a selected target rather than the whole workspace.
+  (Note that the :generator:`Ninja` clean operation on a target
+  includes its dependencies, though.)
+
+* The :variable:`CMAKE_SUBLIME_TEXT_2_ENV_SETTINGS` variable was added to
+  tell the :generator:`Sublime Text 2` extra generator to place specified
+  environment variables in the generated ``.sublime-project``.
+
+* The :variable:`CMAKE_SUBLIME_TEXT_2_EXCLUDE_BUILD_TREE` variable was added
+  to tell the :generator:`Sublime Text 2` extra generator whether to exclude
+  the build tree from the ``.sublime-project`` when it is inside the source
+  tree.
+
+* A :variable:`CMAKE_VS_INCLUDE_PACKAGE_TO_DEFAULT_BUILD` variable was
+  added to tell :ref:`Visual Studio Generators` for VS 2010 and above
+  to include the ``PACKAGE`` target in the default build, similar to
+  the existing :variable:`CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD`
+  variable for the ``INSTALL`` target.
+
+Properties
+----------
+
+* A :prop_tgt:`BUILD_RPATH` target property and corresponding
+  :variable:`CMAKE_BUILD_RPATH` variable were added to support custom
+  ``RPATH`` locations to be added to binaries in the build tree.
+
+* The :prop_sf:`COMPILE_FLAGS` source file property learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`FRAMEWORK` target property may now also be applied to
+  static libraries on Apple targets.  It will result in a proper
+  Framework but with a static library inside.
+
+* :ref:`Imported <Imported Targets>` :ref:`Interface Libraries` learned new
+  :prop_tgt:`IMPORTED_LIBNAME` and :prop_tgt:`IMPORTED_LIBNAME_<CONFIG>`
+  target properties to specify a link library name since interface libraries
+  do not build their own library files.
+
+* A :prop_tgt:`<LANG>_CPPLINT` target property and supporting
+  :variable:`CMAKE_<LANG>_CPPLINT` variable were introduced to tell
+  the :ref:`Makefile Generators` and the :generator:`Ninja` generator to
+  run the ``cpplint`` style checker along with the compiler for ``C`` and
+  ``CXX`` languages.
+
+* A :prop_tgt:`MANUALLY_ADDED_DEPENDENCIES` target property has been added.
+  It provides a read-only list of dependencies that have been added with
+  the :command:`add_dependencies` command.
+
+* The :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>` target property learned
+  to interpret empty list elements as referring to the configuration-less
+  imported location specified by :prop_tgt:`IMPORTED_LOCATION`.
+
+* The :prop_tgt:`NO_SYSTEM_FROM_IMPORTED` target property is now supported
+  on :ref:`Imported <Imported Targets>` :ref:`Interface Libraries`.
+
+* New source file properties :prop_sf:`SKIP_AUTOMOC`, :prop_sf:`SKIP_AUTOUIC`,
+  :prop_sf:`SKIP_AUTORCC`, and :prop_sf:`SKIP_AUTOGEN` were added to allow
+  source files to be excluded from processing by :prop_tgt:`AUTOMOC`,
+  :prop_tgt:`AUTOUIC`, and :prop_tgt:`AUTORCC` target properties.
+
+* A :prop_sf:`VS_COPY_TO_OUT_DIR` source file property was added to
+  tell :ref:`Visual Studio Generators` for VS 2010 and above whether
+  or not a file should e copied to the output directory.
+
+* A :prop_tgt:`VS_DEBUGGER_WORKING_DIRECTORY` target property was added
+  to tell :ref:`Visual Studio Generators` for VS 2010 and above what
+  debugger working directory should be set for the target.
+
+* A :prop_tgt:`VS_DOTNET_REFERENCES_COPY_LOCAL` target property was added
+  to specify whether to copy referenced assemblies to the output directory.
+
+* A :prop_tgt:`VS_DOTNET_REFERENCE_<refname>` target property was added
+  to tell :ref:`Visual Studio Generators` for VS 2010 and above to add
+  a .NET reference with a given hint path.
+
+* A :prop_sf:`VS_INCLUDE_IN_VSIX` source file property was added to
+  tell :ref:`Visual Studio Generators` for VS 2010 and above whether
+  to include the file in a Visual Studio extension package.
+
+* A :prop_sf:`VS_RESOURCE_GENERATOR` source file property was added to
+  give :ref:`Visual Studio Generators` for VS 2010 and above a setting
+  for the resource generator (``C#`` only).
+
+* A :prop_tgt:`VS_USER_PROPS` target property was added to tell
+  :ref:`Visual Studio Generators` for VS 2010 and above to use a
+  custom MSBuild user ``.props`` file.
+
+* A :prop_gbl:`XCODE_EMIT_EFFECTIVE_PLATFORM_NAME` global property was
+  added to tell the :generator:`Xcode` generator whether to emit the
+  ``EFFECTIVE_PLATFORM_NAME`` variable.  This is useful when building
+  with multiple SDKs like ``macosx`` and ``iphoneos`` in parallel.
+
+* New :prop_tgt:`XCODE_PRODUCT_TYPE` and :prop_tgt:`XCODE_EXPLICIT_FILE_TYPE`
+  target properties were created to tell the :generator:`Xcode` generator
+  to use custom values of the corresponding attributes for a target in the
+  generated Xcode project.
+
+Modules
+-------
+
+* A :module:`CSharpUtilities` module was added to aid parameterization of
+  Visual Studio C# targets.  It provides functions to allow automated
+  setting of source file properties to support Windows Forms, WPF/XAML or
+  other technologies as needed.
+
+* The :module:`ExternalData` module learned to support multiple
+  content links for one data file using different hashes, e.g.
+  ``img.png.sha256`` and ``img.png.sha1``.  This allows objects
+  to be fetched from sources indexed by different hash algorithms.
+
+* The :module:`ExternalProject` module gained the ``GIT_PROGRESS`` option to
+  force Git to show progress when cloning repositories.
+
+* The :module:`ExternalProject` module gained a ``GIT_CONFIG`` option
+  to pass ``--config`` options to Git when cloning repositories.
+
+* The :module:`FeatureSummary` module :command:`feature_summary` command now
+  accepts a new ``QUIET_ON_EMPTY`` option that suppresses the output when
+  the list of packages that belong to the selected category is empty.
+
+* The :module:`FeatureSummary` module :command:`add_feature_info` command
+  now accepts lists of dependencies for deciding whether a feature is enabled
+  or not.
+
+* The package types accepted by the :module:`FeatureSummary` module can now
+  be tweaked by changing the :variable:`FeatureSummary_PKG_TYPES`,
+  :variable:`FeatureSummary_REQUIRED_PKG_TYPES` and
+  :variable:`FeatureSummary_DEFAULT_PKG_TYPE` global properties.
+
+* The :module:`FindOpenGL` module now provides imported targets
+  ``OpenGL::GL`` and ``OpenGL::GLU`` when the libraries are found.
+
+* The :module:`UseSWIG` module gained a ``swig_add_library`` command
+  to give more flexibility over the old ``swig_add_module`` command.
+
+* The :module:`UseSWIG` module ``swig_add_source_to_module`` command
+  learned a new ``SWIG_OUTFILE_DIR`` option to control the output
+  file location (``swig -o``).
+
+* The :module:`WriteCompilerDetectionHeader` module gained the
+  ``ALLOW_UNKNOWN_COMPILERS`` and ``ALLOW_UNKNOWN_COMPILER_VERSIONS`` options
+  that allow creation of headers that will work also with unknown or old
+  compilers by simply assuming they do not support any of the requested
+  features.
+
+CTest
+-----
+
+* The :command:`ctest_memcheck` command gained a ``DEFECT_COUNT <var>``
+  option to capture the number of memory defects detected.
+
+* The :command:`ctest_memcheck` command learned to read the location of
+  suppressions files for sanitizers from the
+  :variable:`CTEST_MEMORYCHECK_SUPPRESSIONS_FILE` variable.
+
+* The :command:`ctest_memcheck` command learned to support ``LeakSanitizer``
+  independently from ``AddressSanitizer``.
+
+* The :command:`ctest_update` command ``CDASH_UPLOAD`` signature was taught
+  to honor the ``RETRY_COUNT``, ``RETRY_DELAY``, and ``QUIET`` options.
+
+CPack
+-----
+
+* The :module:`CPackIFWConfigureFile` module was added to define a new
+  :command:`cpack_ifw_configure_file` command to configure file templates
+  prepared in QtIFW/SDK/Creator style.
+
+* The :module:`CPackIFW` module :command:`cpack_ifw_configure_component` and
+  :command:`cpack_ifw_configure_component_group` commands gained a new
+  ``DEFAULT``, ``VIRTUAL``, ``FORCED_INSTALLATION``, ``REQUIRES_ADMIN_RIGHTS``,
+  ``DISPLAY_NAME``, ``UPDATE_TEXT``, ``DESCRIPTION``, ``RELEASE_DATE``,
+  ``AUTO_DEPEND_ON`` and ``TRANSLATIONS`` options to more specific
+  configuration.
+
+* The :module:`CPackIFW` module :command:`cpack_ifw_configure_component`
+  command gained a new ``DEPENDENCIES`` alias for ``DEPENDS`` option.
+
+* The :module:`CPackIFW` module :command:`cpack_ifw_configure_component_group`
+  command gained a new ``DEPENDS`` option. The ``DEPENDENCIES`` alias also
+  added.
+
+* The :module:`CPackIFW` module :command:`cpack_ifw_configure_component` and
+  :command:`cpack_ifw_configure_component_group` commands ``PRIORITY``
+  option now is deprecated and will be removed in a future version of CMake.
+  Please use new ``SORTING_PRIORITY`` option instead.
+
+* The :cpack_gen:`CPack IFW Generator` gained new
+  :variable:`CPACK_IFW_PACKAGE_WATERMARK`,
+  :variable:`CPACK_IFW_PACKAGE_BANNER`,
+  :variable:`CPACK_IFW_PACKAGE_BACKGROUND`,
+  :variable:`CPACK_IFW_PACKAGE_WIZARD_STYLE`,
+  :variable:`CPACK_IFW_PACKAGE_WIZARD_DEFAULT_WIDTH`,
+  :variable:`CPACK_IFW_PACKAGE_WIZARD_DEFAULT_HEIGHT`, and
+  :variable:`CPACK_IFW_PACKAGE_TITLE_COLOR`
+  variables to customize a QtIFW installer look.
+
+* The :cpack_gen:`CPack productbuild Generator` gained options to sign packages.
+  See the variables :variable:`CPACK_PRODUCTBUILD_IDENTITY_NAME`,
+  :variable:`CPACK_PRODUCTBUILD_KEYCHAIN_PATH`,
+  :variable:`CPACK_PKGBUILD_IDENTITY_NAME`, and
+  :variable:`CPACK_PKGBUILD_KEYCHAIN_PATH`.
+
+* The :cpack_gen:`CPack RPM Generator` learned to omit tags that are not
+  supported by provided ``rpmbuild`` tool. If unsupported tags are set they
+  are ignored and a developer warning is printed out.
+
+* The :cpack_gen:`CPack RPM Generator` learned to generate main component
+  package which forces generation of a rpm for defined component without
+  component suffix in filename and package name.
+  See :variable:`CPACK_RPM_MAIN_COMPONENT` variable.
+
+* The :cpack_gen:`CPack RPM Generator` learned to generate a single
+  ``debuginfo`` package on demand even if components packaging is used.
+  See :variable:`CPACK_RPM_DEBUGINFO_SINGLE_PACKAGE` variable.
+
+* The :cpack_gen:`CPack RPM Generator` learned to support
+  multiple directives per file when using
+  :variable:`CPACK_RPM_USER_FILELIST` variable.
+
+Other
+-----
+
+* CMake functionality using cryptographic hashes now supports SHA-3 algorithms.
+
+* A new generator expression ``$<IF:cond,true-value,false-value>`` was added.
+  It resolves to the true-value if the condition is ``1`` and resolves to
+  the false-value if the condition is ``0``.
+
+Deprecated and Removed Features
+===============================
+
+* The :module:`FeatureSummary` module commands :command:`set_package_info`,
+  :command:`set_feature_info`, :command:`print_enabled_features`, and
+  :command:`print_disabled_features` are now deprecated.
+
+* The :module:`UseSWIG` module ``swig_add_module`` command is now
+  deprecated in favor of ``swig_add_library``.
+
+Other Changes
+=============
+
+* If a command specified by the :prop_tgt:`<LANG>_CLANG_TIDY` target property
+  returns non-zero at build time this is now treated as an error instead of
+  silently ignored.
+
+* The :command:`ctest_memcheck` command no longer automatically adds
+  ``leak_check=1`` to the options used by ``AddressSanitizer``. The default
+  behavior of ``AddressSanitizer`` is to run ``LeakSanitizer`` to check leaks
+  unless ``leak_check=0``.
+
+* The :command:`ctest_memcheck` command was fixed to correctly append extra
+  sanitizer options read from the
+  :variable:`CTEST_MEMORYCHECK_SANITIZER_OPTIONS` variable to the environment
+  variables used internally by the sanitizers.
+
+* The :module:`FeatureSummary` module :command:`set_package_properties`
+  command no longer forces the package type to ``OPTIONAL`` when the type
+  is not explicitly set.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  is now aware of features supported by Intel C++ compilers versions 12.1
+  through 17.0 on UNIX and Windows platforms.
+
+* Calls to the :module:`FindPkgConfig` module :command:`pkg_check_modules`
+  command following a successful call learned to re-evaluate the cached values
+  for a given prefix after changes to the parameters to the command for that
+  prefix.
+
+* When using :prop_tgt:`AUTOMOC` or :prop_tgt:`AUTOUIC`, generated
+  ``moc_*``, ``*.moc`` and ``ui_*`` are placed in the
+  ``<CMAKE_CURRENT_BINARY_DIR>/<TARGETNAME>_autogen/include`` directory which
+  is automatically added to the target's :prop_tgt:`INCLUDE_DIRECTORIES`.
+  It is therefore not necessary anymore to have
+  :variable:`CMAKE_CURRENT_BINARY_DIR` in the target's
+  :prop_tgt:`INCLUDE_DIRECTORIES`.
+
+* The :generator:`Sublime Text 2` generator no longer runs the native
+  build command (e.g. ``ninja`` or ``make``) with verbose build output
+  enabled.
+
+* The :command:`try_compile` command source file signature now
+  honors the :variable:`CMAKE_WARN_DEPRECATED` variable value
+  in the generated test project.
+
+* The :ref:`Visual Studio Generators` for VS 2010 and above now place
+  per-source file flags after target-wide flags when they are classified
+  as raw flags with no project file setting (``AdditionalOptions``).
+  This behavior is more consistent with the ordering of flags produced
+  by other generators, and allows flags on more-specific properties
+  (per-source) to override those on more general ones (per-target).
+
+* The precompiled Windows binary MSI package provided on ``cmake.org`` now
+  records the installation directory in the Windows Registry under the key
+  ``HKLM\Software\Kitware\CMake`` with a value named ``InstallDir``.

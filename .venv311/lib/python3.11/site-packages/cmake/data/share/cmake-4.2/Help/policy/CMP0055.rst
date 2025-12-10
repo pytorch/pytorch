@@ -1,0 +1,21 @@
+CMP0055
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.2
+
+Strict checking for the :command:`break` command.
+
+CMake 3.1 and lower allowed calls to the :command:`break` command
+outside of a loop context and also ignored any given arguments.
+This was undefined behavior.
+
+The ``OLD`` behavior for this policy is to allow :command:`break` to be placed
+outside of loop contexts and ignores any arguments.  The ``NEW`` behavior for this
+policy is to issue an error if a misplaced break or any arguments are found.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.2
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

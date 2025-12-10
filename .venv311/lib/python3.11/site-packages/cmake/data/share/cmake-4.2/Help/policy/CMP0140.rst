@@ -1,0 +1,16 @@
+CMP0140
+-------
+
+.. versionadded:: 3.25
+
+The :command:`return` command checks its parameters.
+
+The ``OLD`` behavior for this policy is to ignore any parameters given to the
+command.
+The ``NEW`` behavior is to check the validity of the parameters.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.25
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

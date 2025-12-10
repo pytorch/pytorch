@@ -1,0 +1,31 @@
+CMP0066
+-------
+
+.. versionadded:: 3.7
+
+Honor per-config flags in :command:`try_compile` source-file signature.
+
+The source file signature of the :command:`try_compile` command uses the value
+of the :variable:`CMAKE_<LANG>_FLAGS` variable in the test project so that the
+test compilation works as it would in the main project.  However, CMake 3.6 and
+below do not also honor config-specific compiler flags such as those in the
+:variable:`CMAKE_<LANG>_FLAGS_DEBUG` variable.  CMake 3.7 and above prefer to
+honor config-specific compiler flags too.  This policy provides compatibility
+for projects that do not expect config-specific compiler flags to be used.
+
+The ``OLD`` behavior of this policy is to ignore config-specific flag
+variables like :variable:`CMAKE_<LANG>_FLAGS_DEBUG` and only use CMake's
+built-in defaults for the current compiler and platform.
+
+The ``NEW`` behavior of this policy is to honor config-specific flag
+variables like :variable:`CMAKE_<LANG>_FLAGS_DEBUG`.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.7
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0066 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

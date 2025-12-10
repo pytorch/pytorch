@@ -1,0 +1,72 @@
+CMP0128
+-------
+
+.. versionadded:: 3.22
+
+When this policy is set to ``NEW``:
+
+* :prop_tgt:`<LANG>_EXTENSIONS` is initialized to
+  :variable:`CMAKE_<LANG>_EXTENSIONS` if set, otherwise falling back to
+  :variable:`CMAKE_<LANG>_EXTENSIONS_DEFAULT`.
+
+* Extensions are correctly enabled/disabled if :prop_tgt:`<LANG>_STANDARD` is
+  unset or satisfied by the default.
+
+* Standard mode-affecting flags aren't added unless necessary to achieve the
+  specified mode.
+
+The ``OLD`` behavior:
+
+* Initializes :prop_tgt:`<LANG>_EXTENSIONS` to
+  :variable:`CMAKE_<LANG>_EXTENSIONS` if set, otherwise falling back to ``ON``.
+
+* Always adds a flag if :prop_tgt:`<LANG>_STANDARD` is set and
+  :prop_tgt:`<LANG>_STANDARD_REQUIRED` is ``OFF``.
+
+* If :prop_tgt:`<LANG>_STANDARD` is unset:
+
+  * Doesn't disable extensions even if :prop_tgt:`<LANG>_EXTENSIONS` is
+    ``OFF``.
+
+  * Fails to enable extensions if :prop_tgt:`<LANG>_EXTENSIONS` is ``ON``
+    except for the ``IAR`` compiler.
+
+Code may need to be updated for the ``NEW`` behavior in the following cases:
+
+* If a standard mode flag previously overridden by CMake's and not used during
+  compiler detection now takes effect due to CMake no longer adding one as the
+  default detected is appropriate.
+
+  Such code should be converted to either:
+
+  * Use :prop_tgt:`<LANG>_STANDARD` and :prop_tgt:`<LANG>_EXTENSIONS` instead
+    of manually adding flags.
+
+  * Or ensure the manually-specified flags are used during compiler detection.
+
+* If extensions were disabled without :prop_tgt:`<LANG>_STANDARD` being set
+  CMake previously wouldn't actually disable extensions.
+
+  Such code should be updated to not disable extensions if they are required.
+
+* If extensions were enabled/disabled when :prop_tgt:`<LANG>_STANDARD` was
+  satisfied by the compiler's default CMake previously wouldn't actually
+  enable/disable extensions.
+
+  Such code should be updated to set the correct extensions mode.
+
+If compiler flags affecting the standard mode are used during compiler
+detection (for example in :manual:`a toolchain file <cmake-toolchains(7)>`
+using :variable:`CMAKE_<LANG>_FLAGS_INIT`) then they will affect the detected
+default :variable:`standard <CMAKE_<LANG>_STANDARD_DEFAULT>` and
+:variable:`extensions <CMAKE_<LANG>_EXTENSIONS_DEFAULT>`.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.22
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0128 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

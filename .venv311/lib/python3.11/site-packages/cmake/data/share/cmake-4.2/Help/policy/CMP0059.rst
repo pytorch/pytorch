@@ -1,0 +1,21 @@
+CMP0059
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+Do not treat ``DEFINITIONS`` as a built-in directory property.
+
+CMake 3.3 and above no longer make a list of definitions available through
+the :prop_dir:`DEFINITIONS` directory property.  The
+:prop_dir:`COMPILE_DEFINITIONS` directory property may be used instead.
+
+The ``OLD`` behavior for this policy is to provide the list of flags given
+so far to the :command:`add_definitions` command.  The ``NEW`` behavior is
+to behave as a normal user-defined directory property.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

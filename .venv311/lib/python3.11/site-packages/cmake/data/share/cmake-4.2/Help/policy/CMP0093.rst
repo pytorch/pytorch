@@ -1,0 +1,25 @@
+CMP0093
+-------
+
+.. versionadded:: 3.15
+
+:module:`FindBoost` reports ``Boost_VERSION`` in ``x.y.z`` format.
+
+In CMake 3.14 and below the module would report the Boost version
+number as specified in the preprocessor definition ``BOOST_VERSION`` in
+the ``boost/version.hpp`` file. In CMake 3.15 and later it is preferred
+that the reported version number matches the ``x.y.z`` format reported
+by the CMake package shipped with Boost ``1.70.0`` and later. The macro
+value is still reported in the ``Boost_VERSION_MACRO`` variable.
+
+The ``OLD`` behavior for this policy is for :module:`FindBoost` to report
+``Boost_VERSION`` as specified in the preprocessor definition
+``BOOST_VERSION`` in ``boost/version.hpp``. The ``NEW`` behavior for this
+policy is for :module:`FindBoost` to report ``Boost_VERSION`` in
+``x.y.z`` format.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.15
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,61 @@
+CMP0077
+-------
+
+.. versionadded:: 3.13
+
+:command:`option` honors normal variables.
+
+The :command:`option` command is typically used to create a cache entry
+to allow users to set the option.  However, there are cases in which a
+normal (non-cached) variable of the same name as the option may be
+defined by the project prior to calling the :command:`option` command.
+For example, a project that embeds another project as a subdirectory
+may want to hard-code options of the subproject to build the way it needs.
+
+For historical reasons in CMake 3.12 and below the :command:`option`
+command *removes* a normal (non-cached) variable of the same name when:
+
+* a cache entry of the specified name does not exist at all, or
+* a cache entry of the specified name exists but has not been given
+  a type (e.g. via ``-D<name>=ON`` on the command line).
+
+In both of these cases (typically on the first run in a new build tree),
+the :command:`option` command gives the cache entry type ``BOOL`` and
+removes any normal (non-cached) variable of the same name.  In the
+remaining case that the cache entry of the specified name already
+exists and has a type (typically on later runs in a build tree), the
+:command:`option` command changes nothing and any normal variable of
+the same name remains set.
+
+In CMake 3.13 and above the :command:`option` command prefers to
+do nothing when a normal variable of the given name already exists.
+It does not create or update a cache entry or remove the normal variable.
+The new behavior is consistent between the first and later runs in a
+build tree.  This policy provides compatibility with projects that have
+not been updated to expect the new behavior.
+
+When the :command:`option` command sees a normal variable of the given
+name:
+
+* The ``OLD`` behavior for this policy is to proceed even when a normal
+  variable of the same name exists.  If the cache entry does not already
+  exist and have a type then it is created and/or given a type and the
+  normal variable is removed.
+
+* The ``NEW`` behavior for this policy is to do nothing when a normal
+  variable of the same name exists.  The normal variable is not removed.
+  The cache entry is not created or updated and is ignored if it exists.
+
+See :policy:`CMP0126` for a similar policy for the :command:`set(CACHE)`
+command, but note that there are some differences in ``NEW`` behavior
+between the two policies.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.13
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+Use the :variable:`CMAKE_POLICY_DEFAULT_CMP0077
+<CMAKE_POLICY_DEFAULT_CMP\<NNNN\>>` variable to set the policy for
+a third-party project in a subdirectory without modifying it.
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,41 @@
+CMP0100
+-------
+
+.. versionadded:: 3.17
+
+Let :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` process
+header files that end with a ``.hh`` extension.
+
+Since version 3.17, CMake processes header files that end with a
+``.hh`` extension in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+In earlier CMake versions, these header files were ignored by
+:prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+
+This policy affects how header files that end with a ``.hh`` extension
+get treated in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+
+The ``OLD`` behavior for this policy is to ignore ``.hh`` header files
+in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC`.
+
+The ``NEW`` behavior for this policy is to process ``.hh`` header files
+in :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` just like other header files.
+
+.. note::
+
+  To silence the ``CMP0100`` warning source files can be excluded from
+  :prop_tgt:`AUTOMOC` and :prop_tgt:`AUTOUIC` processing by setting the
+  source file properties :prop_sf:`SKIP_AUTOMOC`, :prop_sf:`SKIP_AUTOUIC` or
+  :prop_sf:`SKIP_AUTOGEN`.
+
+  .. code-block:: cmake
+
+    # Source skip example:
+    set_property(SOURCE /path/to/file1.hh PROPERTY SKIP_AUTOMOC ON)
+    set_property(SOURCE /path/to/file2.hh PROPERTY SKIP_AUTOUIC ON)
+    set_property(SOURCE /path/to/file3.hh PROPERTY SKIP_AUTOGEN ON)
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.17.0
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,178 @@
+CMake 3.22 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.21 include the following.
+
+New Features
+============
+
+Commands
+--------
+
+* The :command:`cmake_host_system_information` command can now query
+  `OS identification variables`_ from the :file:`/etc/os-release` file.
+
+* The :command:`string(TIMESTAMP)` command now supports the ``%V``
+  specifier for ISO 8601 week numbers.
+
+.. _`OS identification variables`: https://www.freedesktop.org/software/systemd/man/latest/os-release.html
+
+Variables
+---------
+
+* The :envvar:`CMAKE_BUILD_TYPE` environment variable was added to
+  provide a default value for the :variable:`CMAKE_BUILD_TYPE` variable.
+
+* The :envvar:`CMAKE_CONFIGURATION_TYPES` environment variable was added to
+  provide a default value for the :variable:`CMAKE_CONFIGURATION_TYPES`
+  variable.
+
+* The :envvar:`CMAKE_INSTALL_MODE` environment variable was added to
+  tell :command:`install` rules (implemented by :command:`file(INSTALL)`)
+  to install symbolic links instead of copying of files.
+
+* The :variable:`CMAKE_<LANG>_LINK_WHAT_YOU_USE_FLAG` and
+  :variable:`CMAKE_LINK_WHAT_YOU_USE_CHECK` variables were added to
+  control the linker flag and check used by the
+  :prop_tgt:`LINK_WHAT_YOU_USE` target property.
+
+* The :variable:`CMAKE_REQUIRE_FIND_PACKAGE_<PackageName>` variable
+  was added to turn a non-REQUIRED :command:`find_package` call into
+  a REQUIRED one.
+
+Properties
+----------
+
+* The :prop_tgt:`<LANG>_EXTENSIONS` target property is now initialized to
+  :variable:`CMAKE_<LANG>_EXTENSIONS_DEFAULT`, detected from the compiler.
+  See :policy:`CMP0128`.
+
+* The :prop_sf:`VS_SETTINGS` source file property is now supported for
+  all source file types.  Previously it worked only for non-built sources.
+
+Modules
+-------
+
+* The :module:`CMakeDependentOption` module :command:`cmake_dependent_option`
+  command now supports full :ref:`Condition Syntax`.
+  See policy :policy:`CMP0127`.
+
+* The :module:`FetchContent` module now passes through the
+  :variable:`CMAKE_TLS_VERIFY`, :variable:`CMAKE_TLS_CAINFO`,
+  :variable:`CMAKE_NETRC` and :variable:`CMAKE_NETRC_FILE` variables (when
+  defined) to the underlying :module:`ExternalProject` sub-build.
+  Previously, those variables were silently ignored by :module:`FetchContent`.
+
+* The :module:`FindBLAS` and :module:`FindLAPACK` modules gained
+  a ``BLA_SIZEOF_INTEGER`` option to find a BLAS/LAPACK whose ABI
+  uses a specific integer size.
+
+* The :module:`FindJasper` module now provides an imported target.
+
+* The :module:`FindMatlab` module now provides imported targets.
+
+* The :module:`FindPkgConfig` module gained a ``PKG_CONFIG_ARGN``
+  variable to specify arguments to ``pkg-config`` calls.
+
+* The :module:`GoogleTest` module :command:`gtest_discover_tests`
+  function gained a ``TEST_FILTER`` option to filter tests using
+  ``--gtest_filter`` during test discovery.
+
+* The :module:`UseSWIG` module, for :ref:`Visual Studio Generators`,
+  can now use the ``swig`` tool to generate implicit dependencies.
+
+CTest
+-----
+
+* :manual:`ctest(1)` learned to recognize labels attached to a test at run time.
+  Previously it was only possible to attach labels to tests at configure time
+  by using the :prop_test:`LABELS` test property.
+  See :ref:`Additional Test Measurements` for more information.
+
+* :manual:`ctest(1)` learned to be able to modify the environment for a test
+  through the :prop_test:`ENVIRONMENT_MODIFICATION` property. This is allows
+  for updates to environment variables based on the environment present at
+  test time.
+
+* The :command:`ctest_memcheck` command now also generates a
+  :file:`DynamicAnalysis-Test.xml` file which may be used to submit test
+  results to CDash.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack DEB Generator` gained the
+  option to set :variable:`CPACK_DEBIAN_COMPRESSION_TYPE` to ``zstd``,
+  which enables Zstandard compression for deb packages.
+
+* The :cpack_gen:`CPack NSIS Generator` gained a new
+  :variable:`CPACK_NSIS_IGNORE_LICENSE_PAGE` variable to suppress
+  the license page in the installer.
+
+* The :cpack_gen:`CPack RPM Generator` gained the
+  :variable:`CPACK_RPM_REQUIRES_EXCLUDE_FROM` option to avoid scanning
+  specific paths for dependencies.
+
+Deprecated and Removed Features
+===============================
+
+* The :generator:`Visual Studio 10 2010` generator is now deprecated
+  and will be removed in a future version of CMake.
+
+Other Changes
+=============
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality now
+  correctly disables or enables compiler extensions when no standard level is
+  specified and avoids unnecessarily adding language standard flags if the
+  requested settings match the compiler's defaults. See :policy:`CMP0128`.
+
+* The :manual:`Compile Features <cmake-compile-features(7)>` functionality
+  now ignores features for languages that are not enabled.
+
+* The :ref:`Ninja Generators` now implement the ``edit_cache`` target
+  using :manual:`ccmake(1)` if available.
+
+* The :generator:`Ninja` and :generator:`NMake Makefiles` generators
+  now use the MSVC ``-external:I`` flag for system includes.
+  This became available as of VS 16.10 (toolchain version 14.29.30037).
+
+* The :cpack_gen:`CPack NSIS Generator` now requires NSIS 3.03 or later.
+
+Updates
+=======
+
+Changes made since CMake 3.22.0 include the following.
+
+3.22.1
+------
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.
+
+3.22.2
+------
+
+* The ``OLD`` behavior of :policy:`CMP0128` was fixed to add flags even when
+  the specified standard matches the compiler default.
+
+3.22.3
+------
+
+* The :command:`while` command again ignores errors in condition evaluation
+  as CMake 3.21 and below did.  This bug was fixed in 3.22.0, but exposed
+  errors in existing projects.  The fix has been reverted to restore
+  compatibility.  The fix may be restored in a future version of CMake
+  via a policy.
+
+3.22.4, 3.22.5, 3.22.6
+----------------------
+
+* These versions made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

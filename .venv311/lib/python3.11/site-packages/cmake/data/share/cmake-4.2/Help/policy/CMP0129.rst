@@ -1,0 +1,34 @@
+CMP0129
+-------
+
+.. versionadded:: 3.23
+
+Compiler id for MCST LCC compilers is now ``LCC``, not ``GNU``.
+
+CMake 3.23 and above recognize MCST LCC compiler as a different from ``GNU``,
+with its own command line and set of capabilities.
+CMake now prefers to present this to projects by setting the
+:variable:`CMAKE_<LANG>_COMPILER_ID` variable to ``LCC`` instead
+of ``GNU``. However, existing projects may assume the compiler id for
+LCC is ``GNU`` as it was in CMake versions prior to 3.23.
+Therefore this policy determines for MCST LCC compiler which
+compiler id to report in the :variable:`CMAKE_<LANG>_COMPILER_ID`
+variable after language ``<LANG>`` is enabled by the :command:`project`
+or :command:`enable_language` command.  The policy must be set prior
+to the invocation of either command.
+
+The ``OLD`` behavior for this policy is to use compiler id ``GNU`` (and set
+:variable:`CMAKE_<LANG>_COMPILER_VERSION` to the supported GNU compiler version.)
+``NEW`` behavior for this policy is to use compiler id ``LCC``, and set
+:variable:`CMAKE_<LANG>_SIMULATE_ID` to ``GNU``, and
+:variable:`CMAKE_<LANG>_SIMULATE_VERSION` to the supported GNU compiler version.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.23
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0129 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

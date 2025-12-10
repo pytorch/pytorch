@@ -1,0 +1,22 @@
+CMP0009
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+FILE GLOB_RECURSE calls should not follow symlinks by default.
+
+In CMake 2.6.1 and below, :command:`file(GLOB_RECURSE)` calls would follow
+through symlinks, sometimes coming up with unexpectedly large result sets
+because of symlinks to top level directories that contain hundreds of
+thousands of files.
+
+This policy determines whether or not to follow symlinks encountered
+during a :command:`file(GLOB_RECURSE)` call.  The ``OLD`` behavior for this
+policy is to follow the symlinks.  The ``NEW`` behavior for this policy is not
+to follow the symlinks by default, but only if ``FOLLOW_SYMLINKS`` is given
+as an additional argument to the ``FILE`` command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.2
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

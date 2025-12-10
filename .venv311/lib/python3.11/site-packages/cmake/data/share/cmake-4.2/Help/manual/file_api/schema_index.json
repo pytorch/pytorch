@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "cmake",
+    "objects",
+    "reply"
+  ],
+  "properties": {
+    "cmake": {
+      "type": "object",
+      "description": "High level details about CMake itself and the CMake generator used",
+      "required": [
+        "version",
+        "paths",
+        "generator"
+      ],
+      "properties": {
+        "version": {
+          "description": "Full version details of the CMake used to produce the replies",
+          "type": "object",
+          "required": [
+            "major",
+            "minor",
+            "patch",
+            "string",
+            "isDirty"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "minimum": 3
+            },
+            "minor": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "patch": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "suffix": {
+              "type": "string",
+              "description": "A version suffix may be present when CMake is built from sources, or for release candidates. Official releases do not normally have a suffix."
+            },
+            "string": {
+              "type": "string",
+              "description": "The full version string in the format <major>.<minor>.<patch>[-<suffix>]"
+            },
+            "isDirty": {
+              "type": "boolean",
+              "description": "When this is true, it indicates CMake was built from a version-controlled source tree with local modifications"
+            }
+          },
+          "additionalProperties": false
+        },
+        "paths": {
+          "description": "Absolute paths to tools and locations within the CMake installation",
+          "type": "object",
+          "required": [
+            "cmake",
+            "ctest",
+            "cpack",
+            "root"
+          ],
+          "properties": {
+            "cmake": {
+              "description": "Absolute path to the cmake executable",
+              "type": "string"
+            },
+            "ctest": {
+              "description": "Absolute path to the ctest executable",
+              "type": "string"
+            },
+            "cpack": {
+              "description": "Absolute path to the cpack executable",
+              "type": "string"
+            },
+            "root": {
+              "description": "Absolute path to the directory containing CMake resources like the Modules directory",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "generator": {
+          "description": "Details for the CMake generator used",
+          "type": "object",
+          "required": [
+            "multiConfig",
+            "name"
+          ],
+          "properties": {
+            "multiConfig": {
+              "description": "True for multi-configuration generators, false for single-configuration generators",
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "description": "This string will only be set if the generator supports the CMAKE_GENERATOR_PLATFORM variable, which specifies the generator platform name",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/kindJsonFile"
+      }
+    },
+    "reply": {
+      "type": "object",
+      "patternProperties": {
+        "^[^-]+-v\\d+$": {
+          "description": "A member of this form appears for each of the shared stateless query files that CMake recognized as a request for the specified object kind and major version",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/kindJsonFile"
+            },
+            {
+              "description": "A member of this form appears if the query's object kind is not recognized or is malformed",
+              "$ref": "#/definitions/replyError"
+            }
+          ]
+        },
+        "^client-[^/]+$": {
+          "description": "A member of this form appears for each client-owned directory holding client stateless query files. The value is a JSON object mirroring the content of the query/client-<client>/ directory.",
+          "patternProperties": {
+            "^[^-]+-v\\d+$": {
+              "description": "A member of this form appears for each of the client stateless query files that CMake recognized as a request for the specified object kind and major version",
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/kindJsonFile"
+                },
+                {
+                  "description": "A member of this form appears if the client query's object kind is not recognized or is malformed",
+                  "$ref": "#/definitions/replyError"
+                }
+              ]
+            },
+            "^query\\.json$": {
+              "description": "This member appears for clients using client stateful query files",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "client": {
+                      "type": "object"
+                    },
+                    "requests": {},
+                    "responses": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/definitions/replyError"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "$ref": "#/definitions/kindJsonFile"
+                              },
+                              {
+                                "$ref": "#/definitions/replyError"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "description": "A member of this form appears if the query.json file failed to read or parse as a JSON object",
+                  "$ref": "#/definitions/replyError"
+                }
+              ]
+            }
+          },
+          "additionalProperties": {
+            "description": "A member of this form appears for each of the client stateless query files that CMake did not recognize.",
+            "$ref": "#/definitions/replyError"
+          }
+        }
+      },
+      "additionalProperties": {
+        "description": "A member of this form appears for each of the shared stateless query files that CMake did not recognize.",
+        "$ref": "#/definitions/replyError"
+      }
+    }
+  },
+  "definitions": {
+    "kindJsonFile": {
+      "type": "object",
+      "required": [
+        "kind",
+        "version",
+        "jsonFile"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "version": {
+          "type": "object",
+          "required": [
+            "major",
+            "minor"
+          ],
+          "properties": {
+            "major": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minor": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "jsonFile": {
+          "type": "string",
+          "description": "Specifies a path relative to the reply index file to another JSON file containing the object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "replyError": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

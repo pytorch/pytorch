@@ -1,0 +1,31 @@
+CMP0143
+-------
+
+.. versionadded:: 3.26
+
+:prop_gbl:`USE_FOLDERS` global property is treated as ``ON`` by default.
+
+When using CMake 3.25 or earlier, :prop_gbl:`USE_FOLDERS` is treated
+as ``OFF`` by default unless projects enable the feature.  For example:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION 3.25)
+  project(foobar LANGUAGES CXX)
+  set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+CMake 3.26 and later prefer to enable the feature by default.
+
+Note that it is the policy setting at the **end** of the top level
+``CMakeLists.txt`` file that matters.  The policy setting applies globally
+to the whole project.
+
+This policy provides compatibility with projects that have not been updated
+to expect enabling of folders.  Enabling folders causes projects to appear
+differently in IDEs.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.26
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

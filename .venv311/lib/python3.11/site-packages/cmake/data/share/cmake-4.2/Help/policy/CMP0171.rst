@@ -1,0 +1,26 @@
+CMP0171
+-------
+
+.. versionadded:: 3.31
+
+``codegen`` is a reserved target name.
+
+CMake 3.30 and earlier did not reserve ``codegen`` as a builtin target name,
+leaving projects free to create their own target with that name.
+CMake 3.31 and later prefer to reserve ``codegen`` as a builtin target name
+to drive custom commands created with the ``CODEGEN`` option to
+:command:`add_custom_command`.  In order to support building the ``codegen``
+target in scripted environments, e.g., ``cmake --build . --target codegen``,
+the ``codegen`` target needs to be generated even if no custom commands
+use the ``CODEGEN`` option.  This policy provides compatibility for projects
+that have not been updated to avoid creating a target named ``codegen``.
+
+The ``OLD`` behavior of this policy allows projects to create a target
+with the name ``codegen``.  The ``NEW`` behavior halts with a fatal error
+if a target with the name ``codegen`` is created.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.31
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

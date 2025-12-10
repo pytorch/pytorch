@@ -1,0 +1,54 @@
+CMP0054
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.1
+
+Only interpret :command:`if` arguments as variables or keywords when unquoted.
+
+CMake 3.1 and above no longer implicitly dereference variables or
+interpret keywords in an :command:`if` command argument when
+it is a :ref:`Quoted Argument` or a :ref:`Bracket Argument`.
+
+The ``OLD`` behavior for this policy is to dereference variables and
+interpret keywords even if they are quoted or bracketed.
+The ``NEW`` behavior is to not dereference variables or interpret keywords
+that have been quoted or bracketed.
+
+Given the following partial example:
+
+.. code-block:: cmake
+
+  set(A E)
+  set(E "")
+
+  if("${A}" STREQUAL "")
+    message("Result is TRUE before CMake 3.1 or when CMP0054 is OLD")
+  else()
+    message("Result is FALSE in CMake 3.1 and above if CMP0054 is NEW")
+  endif()
+
+After explicit expansion of variables this gives:
+
+.. code-block:: cmake
+
+  if("E" STREQUAL "")
+
+With the policy set to ``OLD`` implicit expansion reduces this semantically to:
+
+.. code-block:: cmake
+
+  if("" STREQUAL "")
+
+With the policy set to ``NEW`` the quoted arguments will not be
+further dereferenced:
+
+.. code-block:: cmake
+
+  if("E" STREQUAL "")
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.1
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

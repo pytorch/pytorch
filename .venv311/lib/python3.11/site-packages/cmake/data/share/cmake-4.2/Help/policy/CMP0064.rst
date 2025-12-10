@@ -1,0 +1,19 @@
+CMP0064
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.4
+
+Recognize ``TEST`` as a operator for the :command:`if` command.
+
+The ``TEST`` operator was added to the :command:`if` command to determine if a
+given test name was created by the :command:`add_test` command.
+
+The ``OLD`` behavior for this policy is to ignore the ``TEST`` operator.
+The ``NEW`` behavior is to interpret the ``TEST`` operator.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.4
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

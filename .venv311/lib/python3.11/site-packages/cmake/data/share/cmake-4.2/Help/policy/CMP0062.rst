@@ -1,0 +1,31 @@
+CMP0062
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+.. versionadded:: 3.3
+
+Disallow :command:`install` of :command:`export` result.
+
+The :command:`export()` command generates a file containing
+:ref:`Imported Targets`, which is suitable for use from the build
+directory.  It is not suitable for installation because it contains absolute
+paths to buildsystem locations, and is particular to a single build
+configuration.
+
+The :command:`install(EXPORT)` generates and installs files which contain
+:ref:`Imported Targets`.  These files are generated with relative paths
+(unless the user specifies absolute paths), and are designed for
+multi-configuration use.  See :ref:`Creating Packages` for more.
+
+CMake 3.3 no longer allows the use of the :command:`install(FILES)` command
+with the result of the :command:`export()` command.
+
+The ``OLD`` behavior for this policy is to allow installing the result of
+an :command:`export()` command.  The ``NEW`` behavior for this policy is
+not to allow installing the result of an :command:`export()` command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.3
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

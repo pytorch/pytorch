@@ -1,0 +1,264 @@
+CMake 3.25 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.24 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* The :manual:`cmake-presets(7)` schema version has been bumped to ``6``.
+
+* The :manual:`cmake-presets(7)` format now supports a
+  ``packagePresets`` field to specify presets for :option:`cpack --preset`.
+
+* The :manual:`cmake-presets(7)` format now supports a
+  ``workflowPresets`` field to specify presets for :option:`cmake --workflow`.
+
+* The :manual:`cmake-presets(7)` format now supports an
+  ``outputJUnitFile`` field to specify JUnit output in test presets.
+
+Languages
+---------
+
+* C++26 compiler modes may now be specified via the :prop_tgt:`CXX_STANDARD`,
+  :prop_tgt:`CUDA_STANDARD`, :prop_tgt:`HIP_STANDARD`,
+  or :prop_tgt:`OBJCXX_STANDARD` target properties.
+
+* ``CUDA`` language support now includes device link-time optimization when
+  using ``nvcc``.  The :variable:`CMAKE_INTERPROCEDURAL_OPTIMIZATION` variable
+  and the associated :prop_tgt:`INTERPROCEDURAL_OPTIMIZATION` target property
+  will activate device LTO.
+
+Command-Line
+------------
+
+* A :option:`cmake --workflow --preset <cmake--workflow --preset>` mode was
+  added to drive sequences of configure, build, test, and package operations
+  through a single command.
+
+* The :option:`cmake -E capabilities <cmake-E capabilities>` command
+  gained a new ``tls`` field that tells whether or not TLS is enabled.
+
+* The :option:`cmake -E env <cmake-E env>` command-line tool gained
+  a ``--modify`` flag to support :prop_test:`ENVIRONMENT_MODIFICATION`
+  operations.
+
+* The :option:`cmake --debug-trycompile` option now prints log messages
+  reporting the directory in which each try-compile check is done.
+
+Compilers
+---------
+
+* Support for the `Tasking compiler toolsets`_ (SmartCode, TriCore,
+  Standalone: ARM, MCS, 8051) was added with compiler id ``Tasking``.
+  See the :variable:`CMAKE_TASKING_TOOLSET` variable.
+
+.. _Tasking compiler toolsets: https://www.tasking.com
+
+Commands
+--------
+
+* The :command:`add_subdirectory` command gained a ``SYSTEM`` option
+  to enable the :prop_dir:`SYSTEM` directory property in the subdirectory.
+
+* The :command:`block` and :command:`endblock` commands were added to manage
+  specific scopes (policy or variable) for a contained block of commands.
+
+* The :command:`cmake_language` command gained a new
+  ``GET_MESSAGE_LOG_LEVEL`` sub-command.  It can be used to
+  query the current message logging level.
+
+* The :command:`find_file`, :command:`find_path`, :command:`find_library`, and
+  :command:`find_program` commands gained a ``VALIDATOR`` option to specify a
+  function to be called for each candidate item to validate it.
+
+* The :command:`find_package` command now considers paths of
+  the form ``<prefix>/<name>*/(cmake|CMake)/<name>*/`` when
+  searching for package configuration files.
+
+* The :command:`return` command gained a ``PROPAGATE`` option to propagate
+  variables to the scope to which control returns.
+  See policy :policy:`CMP0140`.
+
+* The :command:`try_compile` and :command:`try_run` commands gained new
+  signatures that more consistently use keyword dispatch and do not require a
+  binary directory to be specified.  Additionally, these signatures use a
+  unique directory for each invocation, which allows multiple outputs to be
+  preserved when using :option:`cmake --debug-trycompile`.
+
+* The :command:`try_compile` and :command:`try_run` commands gained the
+  option ``NO_CACHE`` to store results in normal variables.
+
+* The :command:`try_run` command gained ``RUN_OUTPUT_STDOUT_VARIABLE``
+  and ``RUN_OUTPUT_STDERR_VARIABLE`` options to capture stdout and stderr
+  separately from the output of the compiled program.
+
+Variables
+---------
+
+* The :variable:`BSD` and :variable:`CMAKE_HOST_BSD` variables are now set
+  to a string value when the target or host system is BSD, respectively.
+
+* The :variable:`LINUX` and :variable:`CMAKE_HOST_LINUX` variables are
+  now set to true when the target or host system is Linux, respectively.
+
+* The :variable:`CMAKE_MSVC_DEBUG_INFORMATION_FORMAT` variable and
+  :prop_tgt:`MSVC_DEBUG_INFORMATION_FORMAT` target property were introduced
+  to select the debug information format for compilers targeting the MSVC ABI.
+  See policy :policy:`CMP0141`.
+
+* The :variable:`CMAKE_XCODE_SCHEME_ENABLE_GPU_API_VALIDATION` variable and
+  corresponding :prop_tgt:`XCODE_SCHEME_ENABLE_GPU_API_VALIDATION` target
+  property were added to tell the :generator:`Xcode` generator what to put
+  in the scheme's ``Metal: API Validation`` setting.
+
+* The :variable:`CMAKE_XCODE_SCHEME_ENABLE_GPU_SHADER_VALIDATION` variable and
+  corresponding :prop_tgt:`XCODE_SCHEME_ENABLE_GPU_SHADER_VALIDATION` target
+  property were added to tell the :generator:`Xcode` generator what to put
+  in the scheme's ``Metal: Shader Validation`` setting.
+
+* The :variable:`CMAKE_XCODE_SCHEME_LAUNCH_MODE` variable and corresponding
+  :prop_tgt:`XCODE_SCHEME_LAUNCH_MODE` target property were added to tell
+  the :generator:`Xcode` generator what to put in the scheme's "Launch"
+  mode setting.
+
+* The :variable:`CMAKE_XCODE_SCHEME_LAUNCH_CONFIGURATION` variable and
+  corresponding :prop_tgt:`XCODE_SCHEME_LAUNCH_CONFIGURATION` target
+  property were added to tell the :generator:`Xcode` generator what
+  configuration to put in the scheme's Launch action.
+
+Properties
+----------
+
+* The :prop_tgt:`<LANG>_COMPILER_LAUNCHER` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`EXPORT_NO_SYSTEM` target property was added to
+  specify that :command:`install(EXPORT)` and :command:`export`
+  commands will generate na imported target with
+  :prop_tgt:`SYSTEM` property ``OFF``.
+
+* The :prop_tgt:`SYSTEM` target property was added to specify
+  whether a target should be treated as a system library (i.e.
+  its include directories are automatically ``SYSTEM`` when
+  compiling consumers).  If not set, the default is the previous
+  behavior: on for imported targets and off for other targets.
+
+* The :prop_dir:`SYSTEM` directory property was added to initialize the
+  :prop_tgt:`SYSTEM` target property for targets created in that directory.
+
+Modules
+-------
+
+* The :module:`FetchContent` module's :command:`FetchContent_Declare`
+  command gained a ``SYSTEM`` option which sets the :prop_dir:`SYSTEM`
+  directory property on subdirectories created by
+  :command:`FetchContent_MakeAvailable`.
+
+* The :module:`FindCUDAToolkit` module now provides a target for
+  :ref:`nvtx3 <FindCUDAToolkit_nvtx3>` for CUDA 10.0+, which supersedes
+  :ref:`nvToolsExt <FindCUDAToolkit_nvToolsExt>`. A deprecation warning
+  is emitted when using ``nvToolsExt`` if the project requires CMake
+  3.25 and CUDA 10.0+ is used.
+
+* The :module:`FindDoxygen` module's version handling has been improved:
+
+  * Multiple candidate installations will now be considered, if needed,
+    to satisfy version constraints.  Previously, only the first one
+    encountered would be considered.
+
+  * Version ranges are supported.
+
+  * Variations in the version format reported by Doxygen are now
+    tolerated (e.g. a trailing git commit hash).
+
+* The :module:`FindOpenAL` module now provides an imported target.
+
+* The :module:`FindOpenSP` module was added to find the OpenSP library.
+
+* The :module:`FindVulkan` module gained support for new components:
+
+  ``dxc``
+    DirectX Shader Compiler.
+
+  ``volk``
+    Volk open-source vulkan meta-loader.
+
+CPack
+-----
+
+* The :cpack_gen:`CPack Archive Generator` gained a new
+  :variable:`CPACK_ARCHIVE_FILE_EXTENSION` variable to control
+  the package file name extension.
+
+* The :cpack_gen:`CPack NSIS Generator` gained two new variables
+  :variable:`CPACK_NSIS_EXECUTABLE_PRE_ARGUMENTS` and
+  :variable:`CPACK_NSIS_EXECUTABLE_POST_ARGUMENTS`
+  to provide arguments to the nsis executable invocation.
+
+* The :module:`CPack` module gained the :variable:`CPACK_READELF_EXECUTABLE`,
+  :variable:`CPACK_OBJCOPY_EXECUTABLE`, and
+  :variable:`CPACK_OBJDUMP_EXECUTABLE` variables to control the locations
+  of binutils used by :manual:`cpack(1)`.
+
+Deprecated and Removed Features
+===============================
+
+* The :prop_tgt:`IMPORTED_NO_SYSTEM` target property has been deprecated
+  in favor of :prop_tgt:`SYSTEM` and :prop_tgt:`EXPORT_NO_SYSTEM`.
+
+* The :generator:`Visual Studio 10 2010` generator has been removed.
+
+* The :generator:`Visual Studio 11 2012` generator is now deprecated
+  and will be removed in a future version of CMake.
+
+Other Changes
+=============
+
+* The :envvar:`SSL_CERT_FILE` and :envvar:`SSL_CERT_DIR` environment
+  variables can now be used to override where to find certificate
+  authorities for TLS/SSL operations.
+
+* If :prop_tgt:`<LANG>_CLANG_TIDY` includes a ``-p`` argument, the
+  full compiler command line is no longer appended after ``--``.
+
+* The :generator:`Xcode` generator no longer adds the per-config suffix
+  ``$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)`` to library search paths.
+  See policy :policy:`CMP0142`.
+
+Updates
+=======
+
+Changes made since CMake 3.25.0 include the following.
+
+3.25.1
+------
+
+* On Windows, when targeting the MSVC ABI, the :command:`find_library`
+  command no longer accepts ``.a`` file names.  This behavior was added
+  in CMake 3.25.0, but has been reverted due finding GNU-ABI libraries
+  in cases we did not previously.
+
+3.25.2
+------
+
+* CUDA language level 20 (corresponding to C++20) is now supported with
+  NVCC 12.0 and above.
+
+* On Windows, the ``icpx`` compiler now provided by Intel oneAPI 2023.0
+  and above is no longer selected because its GNU-like command-line is
+  not yet supported by CMake.
+
+3.25.3
+------
+
+* This version made no changes to documented features or interfaces.
+  Some implementation updates were made to support ecosystem changes
+  and/or fix regressions.

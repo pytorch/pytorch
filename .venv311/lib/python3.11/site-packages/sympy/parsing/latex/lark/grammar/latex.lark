@@ -1,0 +1,403 @@
+%ignore /[ \t\n\r]+/
+
+%ignore "\\," | "\\thinspace" | "\\:" | "\\medspace" | "\\;" | "\\thickspace"
+%ignore "\\quad" | "\\qquad"
+%ignore "\\!" | "\\negthinspace" | "\\negmedspace" | "\\negthickspace"
+%ignore "\\vrule" | "\\vcenter" | "\\vbox" | "\\vskip" | "\\vspace" | "\\hfill"
+%ignore "\\*" | "\\-" | "\\." | "\\/" | "\\(" | "\\="
+
+%ignore "\\left" | "\\right"
+%ignore "\\limits" | "\\nolimits"
+%ignore "\\displaystyle"
+
+///////////////////// tokens ///////////////////////
+
+// basic binary operators
+ADD: "+"
+SUB: "-"
+MUL: "*"
+DIV: "/"
+
+// tokens with distinct left and right symbols
+L_BRACE: "{"
+R_BRACE: "}"
+L_BRACE_LITERAL: "\\{"
+R_BRACE_LITERAL: "\\}"
+L_BRACKET: "["
+R_BRACKET: "]"
+L_CEIL: "\\lceil"
+R_CEIL: "\\rceil"
+L_FLOOR: "\\lfloor"
+R_FLOOR: "\\rfloor"
+L_PAREN: "("
+R_PAREN: ")"
+
+// limit, integral, sum, and product symbols
+FUNC_LIM:  "\\lim"
+LIM_APPROACH_SYM: "\\to" | "\\rightarrow" | "\\Rightarrow" | "\\longrightarrow" | "\\Longrightarrow"
+FUNC_INT:  "\\int" | "\\intop"
+FUNC_SUM:  "\\sum"
+FUNC_PROD: "\\prod"
+
+// common functions
+FUNC_EXP:  "\\exp"
+FUNC_LOG:  "\\log"
+FUNC_LN:   "\\ln"
+FUNC_LG:   "\\lg"
+FUNC_MIN: "\\min"
+FUNC_MAX: "\\max"
+
+// trigonometric functions
+FUNC_SIN:  "\\sin"
+FUNC_COS:  "\\cos"
+FUNC_TAN:  "\\tan"
+FUNC_CSC:  "\\csc"
+FUNC_SEC:  "\\sec"
+FUNC_COT:  "\\cot"
+
+// inverse trigonometric functions
+FUNC_ARCSIN: "\\arcsin"
+FUNC_ARCCOS: "\\arccos"
+FUNC_ARCTAN: "\\arctan"
+FUNC_ARCCSC: "\\arccsc"
+FUNC_ARCSEC: "\\arcsec"
+FUNC_ARCCOT: "\\arccot"
+
+// hyperbolic trigonometric functions
+FUNC_SINH: "\\sinh"
+FUNC_COSH: "\\cosh"
+FUNC_TANH: "\\tanh"
+FUNC_ARSINH: "\\arsinh"
+FUNC_ARCOSH: "\\arcosh"
+FUNC_ARTANH: "\\artanh"
+
+FUNC_SQRT: "\\sqrt"
+
+// miscellaneous symbols
+CMD_TIMES: "\\times"
+CMD_CDOT:  "\\cdot"
+CMD_DIV:   "\\div"
+CMD_FRAC:  "\\frac" | "\\dfrac" | "\\tfrac" | "\\nicefrac"
+CMD_BINOM: "\\binom" | "\\dbinom" | "\\tbinom"
+CMD_OVERLINE: "\\overline"
+CMD_LANGLE: "\\langle"
+CMD_RANGLE: "\\rangle"
+
+CMD_MATHIT: "\\mathit"
+
+CMD_INFTY: "\\infty"
+
+BANG: "!"
+BAR: "|"
+CARET: "^"
+COLON: ":"
+UNDERSCORE: "_"
+
+// relational symbols
+EQUAL: "="
+NOT_EQUAL: "\\neq" | "\\ne"
+LT: "<"
+LTE: "\\leq" | "\\le" | "\\leqslant"
+GT: ">"
+GTE: "\\geq" | "\\ge" | "\\geqslant"
+
+DIV_SYMBOL: CMD_DIV | DIV
+MUL_SYMBOL: MUL | CMD_TIMES | CMD_CDOT
+
+%import .greek_symbols.GREEK_SYMBOL
+
+UPRIGHT_DIFFERENTIAL_SYMBOL: "\\text{d}" | "\\mathrm{d}"
+DIFFERENTIAL_SYMBOL: "d" | UPRIGHT_DIFFERENTIAL_SYMBOL
+
+// disallow "d" as a variable name because we want to parse "d" as a differential symbol.
+SYMBOL: /[a-zA-Z]'*/
+GREEK_SYMBOL_WITH_PRIMES: GREEK_SYMBOL "'"*
+LATIN_SYMBOL_WITH_LATIN_SUBSCRIPT: /([a-zA-Z]'*)_(([A-Za-z0-9]|[a-zA-Z]+)|\{([A-Za-z0-9]|[a-zA-Z]+'*)\})/
+LATIN_SYMBOL_WITH_GREEK_SUBSCRIPT: /([a-zA-Z]'*)_/ GREEK_SYMBOL | /([a-zA-Z]'*)_/ L_BRACE GREEK_SYMBOL_WITH_PRIMES R_BRACE
+// best to define the variant with braces like that instead of shoving it all into one case like in
+// /([a-zA-Z])_/ L_BRACE? GREEK_SYMBOL R_BRACE? because then we can easily error out on input like
+// r"h_{\theta"
+GREEK_SYMBOL_WITH_LATIN_SUBSCRIPT: GREEK_SYMBOL_WITH_PRIMES /_(([A-Za-z0-9]|[a-zA-Z]+)|\{([A-Za-z0-9]|[a-zA-Z]+'*)\})/
+GREEK_SYMBOL_WITH_GREEK_SUBSCRIPT: GREEK_SYMBOL_WITH_PRIMES /_/ (GREEK_SYMBOL | L_BRACE GREEK_SYMBOL_WITH_PRIMES R_BRACE)
+MULTI_LETTER_SYMBOL: /[a-zA-Z]+(\s+[a-zA-Z]+)*'*/
+
+%import common.DIGIT -> DIGIT
+
+CMD_PRIME: "\\prime"
+CMD_ASTERISK: "\\ast"
+
+PRIMES: "'"+
+STARS: "*"+
+PRIMES_VIA_CMD: CMD_PRIME+
+STARS_VIA_CMD: CMD_ASTERISK+
+
+CMD_IMAGINARY_UNIT: "\\imaginaryunit"
+
+CMD_BEGIN: "\\begin"
+CMD_END: "\\end"
+
+// matrices
+IGNORE_L: /[ \t\n\r]*/ L_BRACE* /[ \t\n\r]*/
+IGNORE_R: /[ \t\n\r]*/ R_BRACE* /[ \t\n\r]*/
+ARRAY_MATRIX_BEGIN: L_BRACE "array" R_BRACE L_BRACE /[^}]*/ R_BRACE
+ARRAY_MATRIX_END: L_BRACE "array" R_BRACE
+AMSMATH_MATRIX: L_BRACE "matrix" R_BRACE
+AMSMATH_PMATRIX: L_BRACE "pmatrix" R_BRACE
+AMSMATH_BMATRIX: L_BRACE "bmatrix" R_BRACE
+// Without the (L|R)_PARENs and (L|R)_BRACKETs, a matrix defined using
+// \begin{array}...\end{array} or \begin{matrix}...\end{matrix} must
+// not qualify as a complete matrix expression; this is done so that
+// if we have \begin{array}...\end{array} or \begin{matrix}...\end{matrix}
+// between BAR pairs, then they should be interpreted as determinants as
+// opposed to sympy.Abs (absolute value) applied to a matrix.
+CMD_BEGIN_AMSPMATRIX_AMSBMATRIX: CMD_BEGIN (AMSMATH_PMATRIX | AMSMATH_BMATRIX)
+CMD_BEGIN_ARRAY_AMSMATRIX: (L_PAREN | L_BRACKET) IGNORE_L CMD_BEGIN (ARRAY_MATRIX_BEGIN | AMSMATH_MATRIX)
+CMD_MATRIX_BEGIN: CMD_BEGIN_AMSPMATRIX_AMSBMATRIX | CMD_BEGIN_ARRAY_AMSMATRIX
+CMD_END_AMSPMATRIX_AMSBMATRIX: CMD_END (AMSMATH_PMATRIX | AMSMATH_BMATRIX)
+CMD_END_ARRAY_AMSMATRIX: CMD_END (ARRAY_MATRIX_END | AMSMATH_MATRIX) IGNORE_R "\\right"? (R_PAREN | R_BRACKET)
+CMD_MATRIX_END: CMD_END_AMSPMATRIX_AMSBMATRIX | CMD_END_ARRAY_AMSMATRIX
+MATRIX_COL_DELIM: "&"
+MATRIX_ROW_DELIM: "\\\\"
+FUNC_MATRIX_TRACE: "\\trace"
+FUNC_MATRIX_ADJUGATE: "\\adjugate"
+
+// determinants
+AMSMATH_VMATRIX: L_BRACE "vmatrix" R_BRACE
+CMD_DETERMINANT_BEGIN_SIMPLE: CMD_BEGIN AMSMATH_VMATRIX
+CMD_DETERMINANT_BEGIN_VARIANT: BAR IGNORE_L CMD_BEGIN (ARRAY_MATRIX_BEGIN | AMSMATH_MATRIX)
+CMD_DETERMINANT_BEGIN: CMD_DETERMINANT_BEGIN_SIMPLE | CMD_DETERMINANT_BEGIN_VARIANT
+CMD_DETERMINANT_END_SIMPLE: CMD_END AMSMATH_VMATRIX
+CMD_DETERMINANT_END_VARIANT: CMD_END (ARRAY_MATRIX_END | AMSMATH_MATRIX) IGNORE_R "\\right"? BAR
+CMD_DETERMINANT_END: CMD_DETERMINANT_END_SIMPLE | CMD_DETERMINANT_END_VARIANT
+FUNC_DETERMINANT: "\\det"
+
+//////////////////// grammar //////////////////////
+
+latex_string: _relation | _expression
+
+_one_letter_symbol: SYMBOL
+    | LATIN_SYMBOL_WITH_LATIN_SUBSCRIPT
+    | LATIN_SYMBOL_WITH_GREEK_SUBSCRIPT
+    | GREEK_SYMBOL_WITH_LATIN_SUBSCRIPT
+    | GREEK_SYMBOL_WITH_GREEK_SUBSCRIPT
+    | GREEK_SYMBOL_WITH_PRIMES
+// LuaTeX-generated outputs of \mathit{foo'} and \mathit{foo}'
+// seem to be the same on the surface. We allow both styles.
+multi_letter_symbol: CMD_MATHIT L_BRACE MULTI_LETTER_SYMBOL R_BRACE
+    | CMD_MATHIT L_BRACE MULTI_LETTER_SYMBOL R_BRACE /'+/
+number: /\d+(\.\d*)?/ | CMD_IMAGINARY_UNIT
+
+_atomic_expr: _one_letter_symbol
+    | multi_letter_symbol
+    | number
+    | CMD_INFTY
+
+group_round_parentheses: L_PAREN _expression R_PAREN
+group_square_brackets: L_BRACKET _expression R_BRACKET
+group_curly_parentheses: L_BRACE _expression R_BRACE
+
+_relation: eq | ne | lt | lte | gt | gte
+
+eq: _expression EQUAL _expression
+ne: _expression NOT_EQUAL _expression
+lt: _expression LT _expression
+lte: _expression LTE _expression
+gt: _expression GT _expression
+gte: _expression GTE _expression
+
+_expression_core: _atomic_expr | group_curly_parentheses
+
+add: _expression ADD _expression_mul
+    | ADD _expression_mul
+sub: _expression SUB _expression_mul
+    | SUB _expression_mul
+mul: _expression_mul MUL_SYMBOL _expression_power
+div: _expression_mul DIV_SYMBOL _expression_power
+
+adjacent_expressions: (_one_letter_symbol | number) _expression_mul
+    | group_round_parentheses (group_round_parentheses | _one_letter_symbol)
+    | _function _function
+    | fraction _expression_mul
+
+_expression_func: _expression_core
+    | group_round_parentheses
+    | fraction
+    | binomial
+    | _function
+    | _integral// | derivative
+    | limit
+    | matrix
+
+_expression_power: _expression_func | superscript | matrix_prime | symbol_prime
+
+_expression_mul: _expression_power
+    | mul | div | adjacent_expressions
+    | summation | product
+
+_expression: _expression_mul | add | sub
+
+_limit_dir: "+" | "-" | L_BRACE ("+" | "-") R_BRACE
+
+limit_dir_expr: _expression CARET _limit_dir
+
+group_curly_parentheses_lim: L_BRACE _expression LIM_APPROACH_SYM (limit_dir_expr | _expression) R_BRACE
+
+limit: FUNC_LIM UNDERSCORE group_curly_parentheses_lim _expression
+
+differential: DIFFERENTIAL_SYMBOL _one_letter_symbol
+
+//_derivative_operator: CMD_FRAC L_BRACE DIFFERENTIAL_SYMBOL R_BRACE L_BRACE differential R_BRACE
+
+//derivative: _derivative_operator _expression
+
+_integral: normal_integral | integral_with_special_fraction
+
+normal_integral: FUNC_INT _expression DIFFERENTIAL_SYMBOL _one_letter_symbol
+    | FUNC_INT (CARET _expression_core UNDERSCORE _expression_core)? _expression? DIFFERENTIAL_SYMBOL _one_letter_symbol
+    | FUNC_INT (UNDERSCORE _expression_core CARET _expression_core)? _expression? DIFFERENTIAL_SYMBOL _one_letter_symbol
+
+group_curly_parentheses_int: L_BRACE _expression? differential R_BRACE
+
+special_fraction: CMD_FRAC group_curly_parentheses_int group_curly_parentheses
+
+integral_with_special_fraction: FUNC_INT special_fraction
+    | FUNC_INT (CARET _expression_core UNDERSCORE _expression_core)? special_fraction
+    | FUNC_INT (UNDERSCORE _expression_core CARET _expression_core)? special_fraction
+
+group_curly_parentheses_special: UNDERSCORE L_BRACE _atomic_expr EQUAL _atomic_expr R_BRACE CARET _expression_core
+    | CARET _expression_core UNDERSCORE L_BRACE _atomic_expr EQUAL _atomic_expr R_BRACE
+
+summation: FUNC_SUM group_curly_parentheses_special _expression
+    | FUNC_SUM group_curly_parentheses_special _expression
+
+product: FUNC_PROD group_curly_parentheses_special _expression
+    | FUNC_PROD group_curly_parentheses_special _expression
+
+superscript: _expression_func CARET (_expression_power | CMD_PRIME | CMD_ASTERISK)
+    | _expression_func CARET L_BRACE (PRIMES | STARS | PRIMES_VIA_CMD | STARS_VIA_CMD) R_BRACE
+
+matrix_prime: (matrix | group_round_parentheses) PRIMES
+
+symbol_prime: (LATIN_SYMBOL_WITH_LATIN_SUBSCRIPT
+    | LATIN_SYMBOL_WITH_GREEK_SUBSCRIPT
+    | GREEK_SYMBOL_WITH_LATIN_SUBSCRIPT
+    | GREEK_SYMBOL_WITH_GREEK_SUBSCRIPT) PRIMES
+
+fraction: _basic_fraction
+    | _simple_fraction
+    | _general_fraction
+
+_basic_fraction: CMD_FRAC DIGIT (DIGIT | SYMBOL | GREEK_SYMBOL_WITH_PRIMES)
+
+_simple_fraction: CMD_FRAC DIGIT group_curly_parentheses
+    | CMD_FRAC group_curly_parentheses (DIGIT | SYMBOL | GREEK_SYMBOL_WITH_PRIMES)
+
+_general_fraction: CMD_FRAC group_curly_parentheses group_curly_parentheses
+
+binomial: _basic_binomial
+    | _simple_binomial
+    | _general_binomial
+
+_basic_binomial: CMD_BINOM DIGIT (DIGIT | SYMBOL | GREEK_SYMBOL_WITH_PRIMES)
+
+_simple_binomial: CMD_BINOM DIGIT group_curly_parentheses
+    | CMD_BINOM group_curly_parentheses (DIGIT | SYMBOL | GREEK_SYMBOL_WITH_PRIMES)
+
+_general_binomial: CMD_BINOM group_curly_parentheses group_curly_parentheses
+
+list_of_expressions: _expression ("," _expression)*
+
+function_applied: _one_letter_symbol L_PAREN list_of_expressions R_PAREN
+
+min: FUNC_MIN L_PAREN list_of_expressions R_PAREN
+
+max: FUNC_MAX L_PAREN list_of_expressions R_PAREN
+
+bra: CMD_LANGLE _expression BAR
+
+ket: BAR _expression CMD_RANGLE
+
+inner_product: CMD_LANGLE _expression BAR _expression CMD_RANGLE
+
+_function: function_applied
+    | abs | floor | ceil
+    | _trigonometric_function | _inverse_trigonometric_function
+    | _trigonometric_function_power
+    | _hyperbolic_trigonometric_function | _inverse_hyperbolic_trigonometric_function
+    | exponential
+    | log
+    | square_root
+    | factorial
+    | conjugate
+    | max | min
+    | bra | ket | inner_product
+    | determinant
+    | trace
+    | adjugate
+
+exponential: FUNC_EXP _expression
+
+log: FUNC_LOG _expression
+    | FUNC_LN _expression
+    | FUNC_LG _expression
+    | FUNC_LOG UNDERSCORE (DIGIT | _one_letter_symbol) _expression
+    | FUNC_LOG UNDERSCORE group_curly_parentheses _expression
+
+square_root: FUNC_SQRT group_curly_parentheses
+    | FUNC_SQRT group_square_brackets group_curly_parentheses
+
+factorial: _expression_func BANG
+
+conjugate: CMD_OVERLINE group_curly_parentheses
+    | CMD_OVERLINE DIGIT
+
+_trigonometric_function: sin | cos | tan | csc | sec | cot
+
+sin: FUNC_SIN _expression
+cos: FUNC_COS _expression
+tan: FUNC_TAN _expression
+csc: FUNC_CSC _expression
+sec: FUNC_SEC _expression
+cot: FUNC_COT _expression
+
+_trigonometric_function_power: sin_power | cos_power | tan_power | csc_power | sec_power | cot_power
+
+sin_power: FUNC_SIN CARET _expression_core _expression
+cos_power: FUNC_COS CARET _expression_core _expression
+tan_power: FUNC_TAN CARET _expression_core _expression
+csc_power: FUNC_CSC CARET _expression_core _expression
+sec_power: FUNC_SEC CARET _expression_core _expression
+cot_power: FUNC_COT CARET _expression_core _expression
+
+_hyperbolic_trigonometric_function: sinh | cosh | tanh
+
+sinh: FUNC_SINH _expression
+cosh: FUNC_COSH _expression
+tanh: FUNC_TANH _expression
+
+_inverse_trigonometric_function: arcsin | arccos | arctan | arccsc | arcsec | arccot
+
+arcsin: FUNC_ARCSIN _expression
+arccos: FUNC_ARCCOS _expression
+arctan: FUNC_ARCTAN _expression
+arccsc: FUNC_ARCCSC _expression
+arcsec: FUNC_ARCSEC _expression
+arccot: FUNC_ARCCOT _expression
+
+_inverse_hyperbolic_trigonometric_function: asinh | acosh | atanh
+
+asinh: FUNC_ARSINH _expression
+acosh: FUNC_ARCOSH _expression
+atanh: FUNC_ARTANH _expression
+
+abs: BAR _expression BAR
+floor: L_FLOOR _expression R_FLOOR
+ceil: L_CEIL _expression R_CEIL
+
+matrix: CMD_MATRIX_BEGIN matrix_body CMD_MATRIX_END
+matrix_body: matrix_row (MATRIX_ROW_DELIM matrix_row)* (MATRIX_ROW_DELIM)?
+matrix_row: _expression (MATRIX_COL_DELIM _expression)*
+determinant: (CMD_DETERMINANT_BEGIN matrix_body CMD_DETERMINANT_END)
+    | FUNC_DETERMINANT _expression
+trace: FUNC_MATRIX_TRACE _expression
+adjugate: FUNC_MATRIX_ADJUGATE _expression

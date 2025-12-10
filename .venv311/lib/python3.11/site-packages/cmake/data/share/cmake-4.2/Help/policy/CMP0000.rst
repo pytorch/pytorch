@@ -1,0 +1,33 @@
+CMP0000
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+A minimum required CMake version must be specified.
+
+CMake requires that projects specify the version of CMake to which
+they have been written.  This policy has been put in place so users
+trying to build the project may be told when they need to update their
+CMake.  Specifying a version also helps the project build with CMake
+versions newer than that specified.  Use the :command:`cmake_minimum_required`
+command at the top of your main ``CMakeLists.txt`` file:
+
+.. code-block:: cmake
+
+  cmake_minimum_required(VERSION <major>.<minor>)
+
+where ``<major>.<minor>`` is the version of CMake you want to support
+(such as ``3.14``).  The command will ensure that at least the given
+version of CMake is running and help newer versions be compatible with
+the project.  See documentation of :command:`cmake_minimum_required` for
+details.
+
+Note that the command invocation must appear in the ``CMakeLists.txt``
+file itself; a call in an included file is not sufficient.  The ``OLD``
+behavior was to silently ignore the missing invocation.  The ``NEW``
+behavior is to issue an error instead of a warning.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

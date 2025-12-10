@@ -1,0 +1,26 @@
+CMP0070
+-------
+
+.. versionadded:: 3.10
+
+Define :command:`file(GENERATE)` behavior for relative paths.
+
+CMake 3.10 and newer define that relative paths given to ``INPUT`` and
+``OUTPUT`` arguments of ``file(GENERATE)`` are interpreted relative to the
+current source and binary directories, respectively.  CMake 3.9 and lower did
+not define any behavior for relative paths but did not diagnose them either
+and accidentally treated them relative to the process working directory.
+Policy ``CMP0070`` provides compatibility with projects that used the old
+undefined behavior.
+
+This policy affects behavior of relative paths given to ``file(GENERATE)``.
+The ``OLD`` behavior for this policy is to treat the paths relative to the
+working directory of CMake.  The ``NEW`` behavior for this policy is to
+interpret relative paths with respect to the current source or binary
+directory of the caller.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.10
+.. |WARNS_OR_DOES_NOT_WARN| replace:: warns
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,19 @@
+CMP0046
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Error on non-existent dependency in add_dependencies.
+
+CMake 2.8.12 and lower silently ignored non-existent dependencies
+listed in the :command:`add_dependencies` command.
+
+The ``OLD`` behavior for this policy is to silently ignore non-existent
+dependencies. The ``NEW`` behavior for this policy is to report an error
+if non-existent dependencies are listed in the :command:`add_dependencies`
+command.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

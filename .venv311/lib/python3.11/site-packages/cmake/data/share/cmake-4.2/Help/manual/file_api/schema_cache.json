@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Schema for the CMake cache object kind",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "entries"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "cache"
+    },
+    "version": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "const": 2
+        },
+        "minor": {
+          "type": "integer",
+          "const": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "entries": {
+      "type": "array",
+      "description": "Array of CMake cache entries",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "value",
+          "type",
+          "properties"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the cache entry"
+          },
+          "value": {
+            "type": "string",
+            "description": "Value of the cache entry"
+          },
+          "type": {
+            "type": "string",
+            "description": "Type of the cache entry used by CMake GUI to choose a widget for editing"
+          },
+          "properties": {
+            "type": "array",
+            "description": "Associated properties for the cache entry",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "value"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

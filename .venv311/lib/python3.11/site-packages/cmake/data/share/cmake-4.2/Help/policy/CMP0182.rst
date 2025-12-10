@@ -1,0 +1,31 @@
+CMP0182
+-------
+
+.. versionadded:: 4.0
+
+Create shared library archives by default on AIX.
+
+CMake 3.30 and below always represented ``SHARED`` library targets
+as plain shared object ``.so`` files.  This is consistent with other
+UNIX platforms, but is not the preferred convention on AIX.
+CMake 3.31 added the :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE` target
+property to create a shared library archive: the shared object ``.so``
+file is placed inside an archive ``.a`` file.  However, the behavior
+was disabled by default for compatibility with existing projects that
+do not set :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE`.
+
+CMake 4.0 and above prefer, when :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE`
+is not set, to enable creation of shared library archives by default
+because it is the preferred convention on AIX.  This policy provides
+compatibility for projects that have not been updated.
+
+The ``OLD`` behavior for this policy is to disable shared library
+archives when :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE` is not set.
+The ``NEW`` behavior for this policy is to enable shared library
+archives when :prop_tgt:`AIX_SHARED_LIBRARY_ARCHIVE` is not set.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.0
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

@@ -1,0 +1,31 @@
+CMP0164
+-------
+
+.. versionadded:: 3.30
+
+:command:`add_library` rejects ``SHARED`` libraries when not supported by
+the platform.
+
+In CMake 3.29 and below, on platforms that do not support shared libraries
+(:prop_gbl:`TARGET_SUPPORTS_SHARED_LIBS` is false), the
+:command:`add_library` command automatically converts ``SHARED`` libraries to
+``STATIC`` libraries to help users build projects on such platforms.  However,
+the semantics of shared and static libraries are different enough that such
+automatic conversion cannot work in general.  Projects using shared libraries
+need to be ported to such platforms on a case-by-case basis.
+
+In CMake 3.30 and above, :command:`add_library` prefers to reject creation
+of shared libraries on platforms that do not support them, and fail with a
+fatal error message.  This policy provides compatibility for projects that
+happened to work with the automatic conversion to static libraries and have
+not been updated with an explicit port.
+
+The ``OLD`` behavior for this policy is to implicitly create a static
+library with a developer warning.  The ``NEW`` behavior for this policy is
+to fail.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn about the behavior change
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

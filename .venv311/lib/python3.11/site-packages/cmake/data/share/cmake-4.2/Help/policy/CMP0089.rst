@@ -1,0 +1,32 @@
+CMP0089
+-------
+
+.. versionadded:: 3.15
+
+Compiler id for IBM Clang-based XL compilers is now ``XLClang``.
+
+CMake 3.15 and above recognize that IBM's Clang-based XL compilers
+that define ``__ibmxl__`` are a new front-end distinct from ``xlc``
+with a different command line and set of capabilities.
+CMake now prefers to present this to projects by setting the
+:variable:`CMAKE_<LANG>_COMPILER_ID` variable to ``XLClang`` instead
+of ``XL``.  However, existing projects may assume the compiler id for
+Clang-based XL is just ``XL`` as it was in CMake versions prior to 3.15.
+Therefore this policy determines for Clang-based XL compilers which
+compiler id to report in the :variable:`CMAKE_<LANG>_COMPILER_ID`
+variable after language ``<LANG>`` is enabled by the :command:`project`
+or :command:`enable_language` command.  The policy must be set prior
+to the invocation of either command.
+
+The ``OLD`` behavior for this policy is to use compiler id ``XL``.  The
+``NEW`` behavior for this policy is to use compiler id ``XLClang``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.15
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0089 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+.. include:: include/DEPRECATED.rst

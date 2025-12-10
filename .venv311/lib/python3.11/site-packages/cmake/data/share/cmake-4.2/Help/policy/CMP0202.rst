@@ -1,0 +1,30 @@
+CMP0202
+-------
+
+.. versionadded:: 4.2
+
+PDB file names always include their target's per-config POSTFIX.
+
+Program database files (``.pdb``) are always named with their target's
+:prop_tgt:`DEBUG_POSTFIX` or :prop_tgt:`<CONFIG>_POSTFIX` target property
+value.
+
+If the :prop_tgt:`PDB_NAME` target property is defined, CMake 4.1 and below
+exclude the target's per-config postfix from the program data base file name.
+Otherwise, the per-config postfix is included.  This is inconsistent.
+CMake 4.2 and above prefer to always name the program database file with the
+per-config postfix regardless how the name is computed, i.e., using
+:prop_tgt:`OUTPUT_NAME`, or :prop_tgt:`PDB_NAME`, or neither.  This policy
+provides compatibility with projects that have not been updated to account
+for the new behavior.
+
+The ``OLD`` behavior for this policy does not use the per-config postfix in
+``.pdb`` file names if the :prop_tgt:`PDB_NAME` target property is defined.
+The ``NEW`` behavior always uses the per-config postfix in ``.pdb`` file
+names.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 4.2
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

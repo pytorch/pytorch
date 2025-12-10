@@ -1,0 +1,40 @@
+CMP0022
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+:prop_tgt:`INTERFACE_LINK_LIBRARIES` defines the link interface.
+
+CMake 2.8.11 constructed the 'link interface' of a target from
+properties matching ``(IMPORTED_)?LINK_INTERFACE_LIBRARIES(_<CONFIG>)?``.
+The modern way to specify config-sensitive content is to use generator
+expressions and the ``IMPORTED_`` prefix makes uniform processing of the
+link interface with generator expressions impossible.  The
+:prop_tgt:`INTERFACE_LINK_LIBRARIES` target property was introduced as a
+replacement in CMake 2.8.12.  This new property is named consistently
+with the ``INTERFACE_COMPILE_DEFINITIONS``, ``INTERFACE_INCLUDE_DIRECTORIES``
+and ``INTERFACE_COMPILE_OPTIONS`` properties.  For in-build targets, CMake
+will use the INTERFACE_LINK_LIBRARIES property as the source of the
+link interface only if policy ``CMP0022`` is ``NEW``.  When exporting a target
+which has this policy set to ``NEW``, only the :prop_tgt:`INTERFACE_LINK_LIBRARIES`
+property will be processed and generated for the ``IMPORTED`` target by
+default.  A new option to the :command:`install(EXPORT)` and export commands
+allows export of the old-style properties for compatibility with
+downstream users of CMake versions older than 2.8.12.  The
+:command:`target_link_libraries` command will no longer populate the properties
+matching ``LINK_INTERFACE_LIBRARIES(_<CONFIG>)?`` if this policy is ``NEW``.
+
+Warning-free future-compatible code which works with CMake 2.8.7 onwards
+can be written by using the ``LINK_PRIVATE`` and ``LINK_PUBLIC`` keywords
+of :command:`target_link_libraries`.
+
+The ``OLD`` behavior for this policy is to ignore the
+:prop_tgt:`INTERFACE_LINK_LIBRARIES` property for in-build targets.
+The ``NEW`` behavior for this policy is to use the ``INTERFACE_LINK_LIBRARIES``
+property for in-build targets, and ignore the old properties matching
+``(IMPORTED_)?LINK_INTERFACE_LIBRARIES(_<CONFIG>)?``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.12
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

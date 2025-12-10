@@ -1,0 +1,28 @@
+CMP0158
+-------
+
+.. versionadded:: 3.29
+
+:command:`add_test` honors :variable:`CMAKE_CROSSCOMPILING_EMULATOR` only
+when :variable:`cross-compiling <CMAKE_CROSSCOMPILING>`.
+
+In CMake 3.28 and below, :command:`add_test` unconditionally used the
+:prop_tgt:`CROSSCOMPILING_EMULATOR` target property (initialized by the
+:variable:`CMAKE_CROSSCOMPILING_EMULATOR` variable) to run test commands
+naming executable targets.  CMake 3.29 and above prefer to use the emulator
+only when the :variable:`CMAKE_CROSSCOMPILING` variable is enabled.  The
+:variable:`CMAKE_TEST_LAUNCHER` variable may be used instead when not
+cross-compiling.  This policy provides compatibility for projects that
+have not been updated.
+
+The ``OLD`` behavior for this policy is for :command:`add_test` to use
+the :prop_tgt:`CROSSCOMPILING_EMULATOR` target property unconditionally.
+The ``NEW`` behavior for this policy is for :command:`add_test` to use
+the :prop_tgt:`CROSSCOMPILING_EMULATOR` target property only when
+:variable:`cross-compiling <CMAKE_CROSSCOMPILING>`.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.29
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

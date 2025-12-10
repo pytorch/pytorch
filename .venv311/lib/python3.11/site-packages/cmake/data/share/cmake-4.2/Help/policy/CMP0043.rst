@@ -1,0 +1,48 @@
+CMP0043
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Ignore COMPILE_DEFINITIONS_<Config> properties
+
+CMake 2.8.12 and lower allowed setting the
+:prop_tgt:`COMPILE_DEFINITIONS_<CONFIG>` target property and
+:prop_dir:`COMPILE_DEFINITIONS_<CONFIG>` directory property to apply
+configuration-specific compile definitions.
+
+Since CMake 2.8.10, the :prop_tgt:`COMPILE_DEFINITIONS` property has supported
+:manual:`generator expressions <cmake-generator-expressions(7)>` for setting
+configuration-dependent content.  The continued existence of the suffixed
+variables is redundant, and causes a maintenance burden.  Population of the
+:prop_tgt:`COMPILE_DEFINITIONS_DEBUG <COMPILE_DEFINITIONS_<CONFIG>>` property
+may be replaced with a population of :prop_tgt:`COMPILE_DEFINITIONS` directly
+or via :command:`target_compile_definitions`:
+
+.. code-block:: cmake
+
+  # Old Interfaces:
+  set_property(TARGET tgt APPEND PROPERTY
+    COMPILE_DEFINITIONS_DEBUG DEBUG_MODE
+  )
+  set_property(DIRECTORY APPEND PROPERTY
+    COMPILE_DEFINITIONS_DEBUG DIR_DEBUG_MODE
+  )
+
+  # New Interfaces:
+  set_property(TARGET tgt APPEND PROPERTY
+    COMPILE_DEFINITIONS $<$<CONFIG:Debug>:DEBUG_MODE>
+  )
+  target_compile_definitions(tgt PRIVATE $<$<CONFIG:Debug>:DEBUG_MODE>)
+  set_property(DIRECTORY APPEND PROPERTY
+    COMPILE_DEFINITIONS $<$<CONFIG:Debug>:DIR_DEBUG_MODE>
+  )
+
+The ``OLD`` behavior for this policy is to consume the content of the suffixed
+:prop_tgt:`COMPILE_DEFINITIONS_<CONFIG>` target property when generating the
+compilation command. The ``NEW`` behavior for this policy is to ignore the content
+of the :prop_tgt:`COMPILE_DEFINITIONS_<CONFIG>` target property .
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

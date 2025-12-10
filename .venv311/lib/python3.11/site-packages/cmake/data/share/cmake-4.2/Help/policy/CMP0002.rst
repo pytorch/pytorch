@@ -1,0 +1,28 @@
+CMP0002
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Logical target names must be globally unique.
+
+Targets names created with :command:`add_executable`, :command:`add_library`, or
+:command:`add_custom_target` are logical build target names.  Logical target
+names must be globally unique because:
+
+* Unique names may be referenced unambiguously both in CMake
+  code and on make tool command lines.
+* Logical names are used by :generator:`Xcode` and
+  :ref:`Visual Studio <Visual Studio Generators>` IDE generators
+  to produce meaningful project names for the targets.
+
+The logical name of executable and library targets does not have to
+correspond to the physical file names built.  Consider using the
+:prop_tgt:`OUTPUT_NAME` target property to create two targets with the same
+physical name while keeping logical names distinct.  Custom targets
+must simply have globally unique names (unless one uses the global
+property :prop_gbl:`ALLOW_DUPLICATE_CUSTOM_TARGETS` with a Makefiles generator).
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.6.0
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

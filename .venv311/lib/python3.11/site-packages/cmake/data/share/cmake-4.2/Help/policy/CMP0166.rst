@@ -1,0 +1,40 @@
+CMP0166
+-------
+
+.. versionadded:: 3.30
+
+:genex:`TARGET_PROPERTY` evaluates link properties transitively over private
+dependencies of static libraries.
+
+In CMake 3.29 and below, the :genex:`TARGET_PROPERTY` generator expression
+evaluates properties :prop_tgt:`INTERFACE_LINK_OPTIONS`,
+:prop_tgt:`INTERFACE_LINK_DIRECTORIES`, and :prop_tgt:`INTERFACE_LINK_DEPENDS`
+as if they were :ref:`Transitive Compile Properties` rather than
+:ref:`Transitive Link Properties`, even when policy :policy:`CMP0099` is
+set to ``NEW``.  Private dependencies of static libraries, which appear in
+their :prop_tgt:`INTERFACE_LINK_LIBRARIES` guarded by :genex:`LINK_ONLY`
+generator expressions, are not followed.  This is inconsistent with
+evaluation of the same target properties during buildsystem generation.
+
+CMake 3.30 and above prefer that :genex:`TARGET_PROPERTY` evaluates
+properties :prop_tgt:`INTERFACE_LINK_OPTIONS`,
+:prop_tgt:`INTERFACE_LINK_DIRECTORIES`, and :prop_tgt:`INTERFACE_LINK_DEPENDS`
+as :ref:`Transitive Link Properties` such that private dependencies of static
+libraries, which appear in their :prop_tgt:`INTERFACE_LINK_LIBRARIES` guarded
+by :genex:`LINK_ONLY` generator expressions, are followed.
+This policy provides compatibility for projects that have not been updated
+to expect the new behavior.
+
+The ``OLD`` behavior for this policy is for :genex:`TARGET_PROPERTY` to
+evaluate properties :prop_tgt:`INTERFACE_LINK_OPTIONS`,
+:prop_tgt:`INTERFACE_LINK_DIRECTORIES`, and :prop_tgt:`INTERFACE_LINK_DEPENDS`
+as if they were :ref:`Transitive Compile Properties` by not following private
+dependencies of static libraries.  The ``NEW`` behavior for this policy is
+to evaluate them as :ref:`Transitive Link Properties` by following private
+dependencies of static libraries.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.30
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn
+.. include:: include/STANDARD_ADVICE.rst
+
+.. include:: include/DEPRECATED.rst

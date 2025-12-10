@@ -1,0 +1,43 @@
+
+#ifndef @INCLUDE_GUARD_NAME@
+#define @INCLUDE_GUARD_NAME@
+
+#ifdef @STATIC_DEFINE@
+#  define @EXPORT_MACRO_NAME@
+#  define @NO_EXPORT_MACRO_NAME@
+#else
+#  ifndef @EXPORT_MACRO_NAME@
+#    ifdef @EXPORT_IMPORT_CONDITION@
+        /* We are building this library */
+#      define @EXPORT_MACRO_NAME@ @DEFINE_EXPORT@
+#    else
+        /* We are using this library */
+#      define @EXPORT_MACRO_NAME@ @DEFINE_IMPORT@
+#    endif
+#  endif
+
+#  ifndef @NO_EXPORT_MACRO_NAME@
+#    define @NO_EXPORT_MACRO_NAME@ @DEFINE_NO_EXPORT@
+#  endif
+#endif
+
+#ifndef @DEPRECATED_MACRO_NAME@
+#  define @DEPRECATED_MACRO_NAME@ @DEFINE_DEPRECATED@
+#endif
+
+#ifndef @DEPRECATED_MACRO_NAME@_EXPORT
+#  define @DEPRECATED_MACRO_NAME@_EXPORT @EXPORT_MACRO_NAME@ @DEPRECATED_MACRO_NAME@
+#endif
+
+#ifndef @DEPRECATED_MACRO_NAME@_NO_EXPORT
+#  define @DEPRECATED_MACRO_NAME@_NO_EXPORT @NO_EXPORT_MACRO_NAME@ @DEPRECATED_MACRO_NAME@
+#endif
+
+/* NOLINTNEXTLINE(readability-avoid-unconditional-preprocessor-if) */
+#if @DEFINE_NO_DEPRECATED@ /* DEFINE_NO_DEPRECATED */
+#  ifndef @NO_DEPRECATED_MACRO_NAME@
+#    define @NO_DEPRECATED_MACRO_NAME@
+#  endif
+#endif
+@CUSTOM_CONTENT@
+#endif /* @INCLUDE_GUARD_NAME@ */

@@ -1,0 +1,39 @@
+CMP0126
+-------
+
+.. versionadded:: 3.21
+
+When this policy is set to ``NEW``, the :command:`set(CACHE)` command does not
+remove any normal variable of the same name from the current scope.
+The ``OLD`` behavior removes any normal variable of the same name from the
+current scope in the following situations:
+
+* No cache variable of that name existed previously.
+
+* A cache variable of that name existed previously, but it had no type.
+  This can occur when the variable was set on the command line using a form
+  like ``cmake -DMYVAR=blah`` instead of ``cmake -DMYVAR:STRING=blah``.
+
+* The ``FORCE`` or ``INTERNAL`` keywords were used when setting the cache
+  variable.
+
+Note that the ``NEW`` behavior has an important difference to the similar
+``NEW`` behavior of policy :policy:`CMP0077`.  The :command:`set(CACHE)`
+command always sets the cache variable if it did not exist previously,
+regardless of the ``CMP0126`` policy setting.  The :command:`option` command
+will *not* set the cache variable if a non-cache variable of the same name
+already exists and :policy:`CMP0077` is set to ``NEW``.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 3.21
+.. |WARNS_OR_DOES_NOT_WARN| replace:: does *not* warn by default
+.. include:: include/STANDARD_ADVICE.rst
+
+See documentation of the
+:variable:`CMAKE_POLICY_WARNING_CMP0126 <CMAKE_POLICY_WARNING_CMP<NNNN>>`
+variable to control the warning.
+
+The :variable:`CMAKE_POLICY_DEFAULT_CMP0126 <CMAKE_POLICY_DEFAULT_CMP\<NNNN\>>`
+variable may be used to set the policy for a third-party project in a
+subdirectory without modifying it.
+
+.. include:: include/DEPRECATED.rst

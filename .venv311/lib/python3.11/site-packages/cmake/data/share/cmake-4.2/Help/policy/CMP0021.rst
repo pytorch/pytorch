@@ -1,0 +1,22 @@
+CMP0021
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Fatal error on relative paths in :prop_tgt:`INCLUDE_DIRECTORIES` target
+property.
+
+CMake 2.8.10.2 and lower allowed the :prop_tgt:`INCLUDE_DIRECTORIES` target
+property to contain relative paths.  The base path for such relative
+entries is not well defined.  CMake 2.8.12 issues a ``FATAL_ERROR`` if the
+:prop_tgt:`INCLUDE_DIRECTORIES` property contains a relative path.
+
+The ``OLD`` behavior for this policy is not to warn about relative paths
+in the ``INCLUDE_DIRECTORIES`` target property.  The ``NEW`` behavior for this
+policy is to issue a ``FATAL_ERROR`` if ``INCLUDE_DIRECTORIES`` contains a
+relative path.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.12
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

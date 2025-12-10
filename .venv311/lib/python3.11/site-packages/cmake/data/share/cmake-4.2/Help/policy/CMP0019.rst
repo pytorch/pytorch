@@ -1,0 +1,23 @@
+CMP0019
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+Do not re-expand variables in include and link information.
+
+CMake 2.8.10 and lower re-evaluated values given to the
+include_directories, link_directories, and link_libraries commands to
+expand any leftover variable references at the end of the
+configuration step.  This was for strict compatibility with VERY early
+CMake versions because all variable references are now normally
+evaluated during CMake language processing.  CMake 2.8.11 and higher
+prefer to skip the extra evaluation.
+
+The ``OLD`` behavior for this policy is to re-evaluate the values for
+strict compatibility.  The ``NEW`` behavior for this policy is to leave
+the values untouched.
+
+.. |INTRODUCED_IN_CMAKE_VERSION| replace:: 2.8.11
+.. |WARNED_OR_DID_NOT_WARN| replace:: warned
+.. include:: include/REMOVED_EPILOGUE.rst

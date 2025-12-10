@@ -1,0 +1,475 @@
+CMake 3.0 Release Notes
+***********************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 2.8.12 include the following.
+
+Documentation Changes
+=====================
+
+* The CMake documentation has been converted to reStructuredText and
+  now transforms via Sphinx (`<https://www.sphinx-doc.org>`__) into man and
+  html pages.  This allows the documentation to be properly indexed
+  and to contain cross-references.
+
+  Conversion from the old internal documentation format was done by
+  an automatic process so some documents may still contain artifacts.
+  They will be updated incrementally over time.
+
+  A basic reStructuredText processor has been implemented to support
+  ``cmake --help-command`` and similar command-line options.
+
+* New manuals were added:
+
+  - :manual:`cmake-buildsystem(7)`
+  - :manual:`cmake-commands(7)`, replacing ``cmakecommands(1)``
+    and ``cmakecompat(1)``
+  - :manual:`cmake-developer(7)`
+  - :manual:`cmake-generator-expressions(7)`
+  - :manual:`cmake-generators(7)`
+  - :manual:`cmake-language(7)`
+  - :manual:`cmake-modules(7)`, replacing ``cmakemodules(1)``
+  - :manual:`cmake-packages(7)`
+  - :manual:`cmake-policies(7)`, replacing ``cmakepolicies(1)``
+  - :manual:`cmake-properties(7)`, replacing ``cmakeprops(1)``
+  - :manual:`cmake-qt(7)`
+  - :manual:`cmake-toolchains(7)`
+  - :manual:`cmake-variables(7)`, replacing ``cmakevars(1)``
+
+* Release notes for CMake 3.0.0 and above will now be included with
+  the html documentation.
+
+New Features
+============
+
+Syntax
+------
+
+* The CMake language has been extended with
+  :ref:`Bracket Argument` and  :ref:`Bracket Comment`
+  syntax inspired by Lua long brackets:
+
+  .. code-block:: cmake
+
+    set(x [===[bracket argument]===] #[[bracket comment]])
+
+  Content between equal-length open- and close-brackets is taken
+  literally with no variable replacements.
+
+  .. warning::
+    This syntax change could not be made in a fully compatible
+    way.  No policy is possible because syntax parsing occurs before
+    any chance to set a policy.  Existing code using an unquoted
+    argument that starts with an open bracket will be interpreted
+    differently without any diagnostic.  Fortunately the syntax is
+    obscure enough that this problem is unlikely in practice.
+
+Generators
+----------
+
+* A new :generator:`CodeLite` extra generator is available
+  for use with the Makefile or Ninja generators.
+
+* A new :generator:`Kate` extra generator is available
+  for use with the Makefile or Ninja generators.
+
+* The :generator:`Ninja` generator learned to use ``ninja`` job pools
+  when specified by a new :prop_gbl:`JOB_POOLS` global property.
+
+Commands
+--------
+
+* The :command:`add_library` command learned a new ``INTERFACE``
+  library type.  Interface libraries have no build rules but may
+  have properties defining
+  :manual:`usage requirements <cmake-buildsystem(7)>`
+  and may be installed, exported, and imported.  This is useful to
+  create header-only libraries that have concrete link dependencies
+  on other libraries.
+
+* The :command:`export()` command learned a new ``EXPORT`` mode that
+  retrieves the list of targets to export from an export set configured
+  by the :command:`install(TARGETS)` command ``EXPORT`` option.  This
+  makes it easy to export from the build tree the same targets that
+  are exported from the install tree.
+
+* The :command:`export` command learned to work with multiple dependent
+  export sets, thus allowing multiple packages to be built and exported
+  from a single tree.  The feature requires CMake to wait until the
+  generation step to write the output file.  This means one should not
+  :command:`include` the generated targets file later during project
+  configuration because it will not be available.
+  Use :ref:`Alias Targets` instead.  See policy :policy:`CMP0024`.
+
+* The :command:`install(FILES)` command learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  in the list of files.
+
+* The :command:`project` command learned to set some version variables
+  to values specified by the new ``VERSION`` option or to empty strings.
+  See policy :policy:`CMP0048`.
+
+* The :command:`string` command learned a new ``CONCAT`` mode.
+  It is particularly useful in combination with the new
+  :ref:`Bracket Argument` syntax.
+
+* The :command:`unset` command learned a ``PARENT_SCOPE`` option
+  matching that of the :command:`set` command.
+
+* The :command:`include_external_msproject` command learned
+  to handle non-C++ projects like ``.vbproj`` or ``.csproj``.
+
+* The :command:`ctest_update` command learned to update work trees
+  managed by the Perforce (p4) version control tool.
+
+* The :command:`message` command learned a ``DEPRECATION`` mode. Such
+  messages are not issued by default, but may be issued as a warning if
+  :variable:`CMAKE_WARN_DEPRECATED` is enabled, or as an error if
+  :variable:`CMAKE_ERROR_DEPRECATED` is enabled.
+
+* The :command:`target_link_libraries` command now allows repeated use of
+  the ``LINK_PUBLIC`` and ``LINK_PRIVATE`` keywords.
+
+Variables
+---------
+
+* Variable :variable:`CMAKE_FIND_NO_INSTALL_PREFIX` has been
+  introduced to tell CMake not to add the value of
+  :variable:`CMAKE_INSTALL_PREFIX` to the
+  :variable:`CMAKE_SYSTEM_PREFIX_PATH` variable by default.
+  This is useful when building a project that installs some
+  of its own dependencies to avoid finding files it is about
+  to replace.
+
+* Variable :variable:`CMAKE_STAGING_PREFIX` was introduced for use
+  when cross-compiling to specify an installation prefix on the
+  host system that differs from a :variable:`CMAKE_INSTALL_PREFIX`
+  value meant for the target system.
+
+* Variable :variable:`CMAKE_SYSROOT` was introduced to specify the
+  toolchain SDK installation prefix, typically for cross-compiling.
+  This is used to pass a ``--sysroot`` option to the compiler and
+  as a prefix searched by ``find_*`` commands.
+
+* Variable :variable:`CMAKE_<LANG>_COMPILER_TARGET` was introduced
+  for use when cross-compiling to specify the target platform in the
+  :ref:`toolchain file <Cross Compiling Toolchain>` specified by the
+  :variable:`CMAKE_TOOLCHAIN_FILE` variable.
+  This is used to pass an option such as ``--target=<triple>`` to some
+  cross-compiling compiler drivers.
+
+* Variable :variable:`CMAKE_MAP_IMPORTED_CONFIG_<CONFIG>` has been
+  introduced to optionally initialize the
+  :prop_tgt:`MAP_IMPORTED_CONFIG_<CONFIG>` target property.
+
+Properties
+----------
+
+* The :prop_dir:`ADDITIONAL_MAKE_CLEAN_FILES` directory property
+  learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* A new directory property :prop_dir:`CMAKE_CONFIGURE_DEPENDS`
+  was introduced to allow projects to specify additional
+  files on which the configuration process depends.  CMake will
+  re-run at build time when one of these files is modified.
+  Previously this was only possible to achieve by specifying
+  such files as the input to a :command:`configure_file` command.
+
+* A new :ref:`Qt AUTORCC` feature replaces the need to
+  invoke ``qt4_add_resources()`` by allowing ``.qrc`` files to
+  be listed as target sources.
+
+* A new :ref:`Qt AUTOUIC` feature replaces the need to
+  invoke ``qt4_wrap_ui()``.
+
+* Test properties learned to support
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+  This is useful to specify per-configuration values for test
+  properties like :prop_test:`REQUIRED_FILES` and
+  :prop_test:`WORKING_DIRECTORY`.
+
+* A new :prop_test:`SKIP_RETURN_CODE` test property was introduced
+  to tell :manual:`ctest(1)` to treat a particular test return code as
+  if the test were not run.  This is useful for test drivers to report
+  that certain test requirements were not available.
+
+* New types of :ref:`Compatible Interface Properties` were introduced,
+  namely the :prop_tgt:`COMPATIBLE_INTERFACE_NUMBER_MAX` and
+  :prop_tgt:`COMPATIBLE_INTERFACE_NUMBER_MIN` for calculating numeric
+  maximum and minimum values respectively.
+
+Modules
+-------
+
+* The :module:`CheckTypeSize` module ``check_type_size()`` command and
+  the :module:`CheckStructHasMember` module ``check_struct_has_member()``
+  command learned a new ``LANGUAGE`` option to optionally check C++ types.
+
+* The :module:`ExternalData` module learned to work with no
+  URL templates if a local store is available.
+
+* The :module:`ExternalProject` function ``ExternalProject_Add``
+  learned a new ``GIT_SUBMODULES`` option to specify a subset
+  of available submodules to checkout.
+
+* A new :module:`FindBacktrace` module has been added to support
+  :command:`find_package(Backtrace)` calls.
+
+* A new :module:`FindLua` module has been added to support
+  :command:`find_package(Lua)` calls.
+
+* The :module:`FindBoost` module learned a new ``Boost_NAMESPACE``
+  option to change the ``boost`` prefix on library names.
+
+* The :module:`FindBoost` module learned to control search
+  for libraries with the ``g`` tag (for MS debug runtime) with
+  a new ``Boost_USE_DEBUG_RUNTIME`` option.  It is ``ON`` by
+  default to preserve existing behavior.
+
+* The :module:`FindJava` and :module:`FindJNI` modules learned
+  to use a ``JAVA_HOME`` CMake variable or environment variable,
+  and then try ``/usr/libexec/java_home`` on OS X.
+
+* The :module:`UseJava` module ``add_jar`` function learned a new
+  ``MANIFEST`` option to pass the ``-m`` option to ``jar``.
+
+* A new :module:`CMakeFindDependencyMacro` module was introduced with
+  a ``find_dependency`` macro to find transitive dependencies in
+  a :manual:`package configuration file <cmake-packages(7)>`.  Such
+  dependencies are omitted by the listing of the :module:`FeatureSummary`
+  module.
+
+* The :module:`FindQt4` module learned to create :ref:`Imported Targets`
+  for Qt executables.  This helps disambiguate when using multiple
+  :manual:`Qt versions <cmake-qt(7)>` in the same buildsystem.
+
+* The :module:`FindRuby` module learned to search for Ruby 2.0 and 2.1.
+
+Generator Expressions
+---------------------
+
+* New ``$<PLATFORM_ID>`` and ``$<PLATFORM_ID:...>``
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  have been added.
+
+* The ``$<CONFIG>``
+  :manual:`generator expression <cmake-generator-expressions(7)>` now has
+  a variant which takes no argument.  This is equivalent to the
+  ``$<CONFIGURATION>`` expression.
+
+* New ``$<UPPER_CASE:...>`` and ``$<LOWER_CASE:...>``
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  generator expressions have been added.
+
+* A new ``$<MAKE_C_IDENTIFIER:...>``
+  :manual:`generator expression <cmake-generator-expressions(7)>` has
+  been added.
+
+Other
+-----
+
+* The :manual:`cmake(1)` ``-E`` option learned a new ``sleep`` command.
+
+* The :manual:`ccmake(1)` dialog learned to honor the
+  :prop_cache:`STRINGS` cache entry property to cycle through
+  the enumerated list of possible values.
+
+* The :manual:`cmake-gui(1)` dialog learned to remember window
+  settings between sessions.
+
+* The :manual:`cmake-gui(1)` dialog learned to remember the type
+  of a cache entry for completion in the ``Add Entry`` dialog.
+
+New Diagnostics
+===============
+
+* Directories named in the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES`
+  target property of imported targets linked conditionally by a
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  were not checked for existence.  Now they are checked.
+  See policy :policy:`CMP0027`.
+
+* Build target names must now match a validity pattern and may no longer
+  conflict with CMake-defined targets.  See policy :policy:`CMP0037`.
+
+* Build targets that specify themselves as a link dependency were
+  silently accepted but are now diagnosed.  See :policy:`CMP0038`.
+
+* The :command:`target_link_libraries` command used to silently ignore
+  calls specifying as their first argument build targets created by
+  :command:`add_custom_target` but now diagnoses this mistake.
+  See policy :policy:`CMP0039`.
+
+* The :command:`add_custom_command` command used to silently ignore
+  calls specifying the ``TARGET`` option with a non-existent target
+  but now diagnoses this mistake.  See policy :policy:`CMP0040`.
+
+* Relative paths in the :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES`
+  target property used to be silently accepted if they contained a
+  :manual:`generator expression <cmake-generator-expressions(7)>`
+  but are now rejected.  See policy :policy:`CMP0041`.
+
+* The :command:`get_target_property` command learned to reject calls
+  specifying a non-existent target.  See policy :policy:`CMP0045`.
+
+* The :command:`add_dependencies` command learned to reject calls
+  specifying a dependency on a non-existent target.
+  See policy :policy:`CMP0046`.
+
+* Link dependency analysis learned to assume names containing ``::``
+  refer to :ref:`Alias Targets` or :ref:`Imported Targets`.  It will
+  now produce an error if such a linked target is missing.  Previously
+  in this case CMake generated a link line that failed at build time.
+  See policy :policy:`CMP0028`.
+
+* When the :command:`project` or :command:`enable_language` commands
+  initialize support for a language, it is now an error if the full
+  path to the compiler cannot be found and stored in the corresponding
+  :variable:`CMAKE_<LANG>_COMPILER` variable.  This produces nicer error
+  messages up front and stops processing when no working compiler
+  is known to be available.
+
+* Target sources specified with the :command:`add_library` or
+  :command:`add_executable` command learned to reject items which
+  require an undocumented extra layer of variable expansion.
+  See policy :policy:`CMP0049`.
+
+* Use of :command:`add_custom_command` undocumented ``SOURCE``
+  signatures now results in an error.  See policy :policy:`CMP0050`.
+
+Deprecated and Removed Features
+===============================
+
+* Compatibility options supporting code written for CMake versions
+  prior to 2.4 have been removed.
+
+* Several long-outdated commands that should no longer be called
+  have been disallowed in new code by policies:
+
+  - Policy :policy:`CMP0029` disallows :command:`subdir_depends`
+  - Policy :policy:`CMP0030` disallows :command:`use_mangled_mesa`
+  - Policy :policy:`CMP0031` disallows :command:`load_command`
+  - Policy :policy:`CMP0032` disallows :command:`output_required_files`
+  - Policy :policy:`CMP0033` disallows :command:`export_library_dependencies`
+  - Policy :policy:`CMP0034` disallows :command:`utility_source`
+  - Policy :policy:`CMP0035` disallows :command:`variable_requires`
+  - Policy :policy:`CMP0036` disallows :command:`build_name`
+
+* The :manual:`cmake(1)` ``-i`` wizard mode has been removed.
+  Instead use an interactive dialog such as :manual:`ccmake(1)`
+  or use the ``-D`` option to set cache values from the command line.
+
+* The builtin documentation formatters that supported command-line
+  options such as ``--help-man`` and ``--help-html`` have been removed
+  in favor of the above-mentioned new documentation system.  These and
+  other command-line options that used to generate man- and
+  html- formatted pages no longer work.  The :manual:`cmake(1)`
+  ``--help-custom-modules`` option now produces a warning at runtime
+  and generates a minimal document that reports the limitation.
+
+* The :prop_dir:`COMPILE_DEFINITIONS_<CONFIG>` directory properties and the
+  :prop_tgt:`COMPILE_DEFINITIONS_<CONFIG>` target properties have been
+  deprecated.  Instead set the corresponding :prop_dir:`COMPILE_DEFINITIONS`
+  directory property or :prop_tgt:`COMPILE_DEFINITIONS` target property and
+  use :manual:`generator expressions <cmake-generator-expressions(7)>` like
+  ``$<CONFIG:...>`` to specify per-configuration definitions.
+  See policy :policy:`CMP0043`.
+
+* The :prop_tgt:`LOCATION` target property should no longer be read from
+  non-IMPORTED targets.  It does not make sense in multi-configuration
+  generators since the build configuration is not known while configuring
+  the project.  It has been superseded by the ``$<TARGET_FILE>`` generator
+  expression.  See policy :policy:`CMP0026`.
+
+* The :prop_tgt:`COMPILE_FLAGS` target property is now documented
+  as deprecated, though no warning is issued.  Use the
+  :prop_tgt:`COMPILE_OPTIONS` target property or the
+  :command:`target_compile_options` command instead.
+
+* The :module:`GenerateExportHeader` module ``add_compiler_export_flags``
+  command is now deprecated.  It has been superseded by the
+  :prop_tgt:`<LANG>_VISIBILITY_PRESET` and
+  :prop_tgt:`VISIBILITY_INLINES_HIDDEN` target properties.
+
+Other Changes
+=============
+
+* The version scheme was changed to use only two components for
+  the feature level instead of three.  The third component will
+  now be used for bug-fix releases or the date of development versions.
+  See the :variable:`CMAKE_VERSION` variable documentation for details.
+
+* The default install locations of CMake itself on Windows and
+  OS X no longer contain the CMake version number.  This allows
+  for easy replacement without re-generating local build trees
+  manually.
+
+* Generators for Visual Studio 10 (2010) and later were renamed to
+  include the product year like generators for older VS versions:
+
+  - ``Visual Studio 10`` -> :generator:`Visual Studio 10 2010`
+  - ``Visual Studio 11`` -> :generator:`Visual Studio 11 2012`
+  - ``Visual Studio 12`` -> :generator:`Visual Studio 12 2013`
+
+  This clarifies which generator goes with each Visual Studio
+  version.  The old names are recognized for compatibility.
+
+* The :variable:`CMAKE_<LANG>_COMPILER_ID` value for Apple-provided
+  Clang is now ``AppleClang``.  It must be distinct from upstream
+  Clang because the version numbers differ.
+  See policy :policy:`CMP0025`.
+
+* The :variable:`CMAKE_<LANG>_COMPILER_ID` value for ``qcc`` on QNX
+  is now ``QCC``.  It must be distinct from ``GNU`` because the
+  command-line options differ.  See policy :policy:`CMP0047`.
+
+* On 64-bit OS X the :variable:`CMAKE_HOST_SYSTEM_PROCESSOR` value
+  is now correctly detected as ``x86_64`` instead of ``i386``.
+
+* On OS X, CMake learned to enable behavior specified by the
+  :prop_tgt:`MACOSX_RPATH` target property by default.  This activates
+  use of ``@rpath`` for runtime shared library searches.
+  See policy :policy:`CMP0042`.
+
+* The :command:`build_command` command now returns a :manual:`cmake(1)`
+  ``--build`` command line instead of a direct invocation of the native
+  build tool.  When using ``Visual Studio`` generators, CMake and CTest
+  no longer require :variable:`CMAKE_MAKE_PROGRAM` to be located up front.
+  Selection of the proper msbuild or devenv tool is now performed as
+  late as possible when the solution (``.sln``) file is available so
+  it can depend on project content.
+
+* The :manual:`cmake(1)` ``--build`` command now shares its own stdout
+  and stderr pipes with the native build tool by default.
+  The ``--use-stderr`` option that once activated this is now ignored.
+
+* The ``$<C_COMPILER_ID:...>`` and ``$<CXX_COMPILER_ID:...>``
+  :manual:`generator expressions <cmake-generator-expressions(7)>`
+  used to perform case-insensitive comparison but have now been
+  corrected to perform case-sensitive comparison.
+  See policy :policy:`CMP0044`.
+
+* The builtin ``edit_cache`` target will no longer select
+  :manual:`ccmake(1)` by default when no interactive terminal will
+  be available (e.g. with :generator:`Ninja` or an IDE generator).
+  Instead :manual:`cmake-gui(1)` will be preferred if available.
+
+* The :module:`ExternalProject` download step learned to
+  re-attempt download in certain cases to be more robust to
+  temporary network failure.
+
+* The :module:`FeatureSummary` no longer lists transitive
+  dependencies since they were not directly requested by the
+  current project.
+
+* The ``cmake-mode.el`` major Emacs editing mode has been cleaned
+  up and enhanced in several ways.
+
+* Include directories specified in the
+  :prop_tgt:`INTERFACE_INCLUDE_DIRECTORIES` of :ref:`Imported Targets`
+  are treated as ``SYSTEM`` includes by default when handled as
+  :ref:`usage requirements <Include Directories and Usage Requirements>`.

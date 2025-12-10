@@ -1,0 +1,442 @@
+CMake 3.19 Release Notes
+************************
+
+.. only:: html
+
+  .. contents::
+
+Changes made since CMake 3.18 include the following.
+
+New Features
+============
+
+Presets
+-------
+
+* :manual:`cmake(1)` and :manual:`cmake-gui(1)` now recognize
+  ``CMakePresets.json`` and ``CMakeUserPresets.json`` files (see
+  :manual:`cmake-presets(7)`).
+
+Generators
+----------
+
+* The :generator:`Xcode` generator now uses the Xcode "new build system"
+  when generating for Xcode 12.0 or higher.
+  See the :variable:`CMAKE_XCODE_BUILD_SYSTEM` variable.
+  One may use ``-T buildsystem=1`` to switch to the legacy build system.
+
+* The :generator:`Xcode` generator gained support for linking libraries and
+  frameworks via the *Link Binaries With Libraries* build phase instead of
+  always by embedding linker flags directly.  This behavior is controlled by
+  a new :prop_tgt:`XCODE_LINK_BUILD_PHASE_MODE` target property, which is
+  initialized by a new :variable:`CMAKE_XCODE_LINK_BUILD_PHASE_MODE`
+  variable.
+
+* The :ref:`Visual Studio Generators` for VS 2015 and above gained support
+  for the Visual Studio Tools for Android.  One may now set
+  :variable:`CMAKE_SYSTEM_NAME` to ``Android`` to generate ``.vcxproj`` files
+  for the Android tools.
+
+Languages
+---------
+
+* CMake learned to support ``ISPC`` as a first-class language that can be
+  enabled via the :command:`project` and :command:`enable_language` commands.
+  ``ISPC`` is currently supported by the :ref:`Makefile Generators`
+  and the :generator:`Ninja` generator on Linux, macOS, and Windows
+  using the Intel ISPC compiler.
+
+* ``CUDA`` language support for Clang now includes:
+
+  - separable compilation (:prop_tgt:`CUDA_SEPARABLE_COMPILATION`), and
+  - finding scattered toolkit installations when cross-compiling.
+
+* ``CUDA`` language support now works on QNX.
+
+Platforms
+---------
+
+* Apple Silicon is now supported (since CMake 3.19.2):
+
+  * The :variable:`CMAKE_HOST_SYSTEM_PROCESSOR` is selected using ``uname -m``.
+    Since this may vary based on CMake's own architecture and that of
+    the invoking process tree, the :variable:`CMAKE_APPLE_SILICON_PROCESSOR`
+    variable or :envvar:`CMAKE_APPLE_SILICON_PROCESSOR` environment
+    variable may be set to specify a host architecture explicitly.
+
+  * If :variable:`CMAKE_OSX_ARCHITECTURES` is not set, CMake adds explicit
+    flags to tell the compiler to build for the
+    :variable:`CMAKE_HOST_SYSTEM_PROCESSOR` so the toolchain does not
+    have to guess based on the process tree's architecture.
+
+File-Based API
+--------------
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 ``version`` field has
+  been updated to 2.2.
+
+* The :manual:`cmake-file-api(7)` "codemodel" version 2 "target" object
+  gained a new ``languageStandard`` field in the ``compileGroups`` objects.
+
+Command-Line
+------------
+
+* The :manual:`cmake(1)` command-line tool's ``--install`` mode gained a
+  ``--default-directory-permissions`` option.
+
+* :manual:`cmake(1)` gained a ``-E create_hardlink`` command-line tool
+  that can be used to create hardlinks between files.
+
+GUI
+---
+
+* The :manual:`CMake GUI <cmake-gui(1)>` now has an environment variable
+  editor.
+
+Commands
+--------
+
+* The :command:`add_test` command now (officially) supports whitespace and
+  other special characters in the name for the test it creates.
+  See policy :policy:`CMP0110`.
+
+* The :command:`cmake_language` command gained a ``DEFER`` mode to
+  schedule command calls to occur at the end of processing a directory.
+
+* The :command:`configure_file` command gained a ``NO_SOURCE_PERMISSIONS``
+  option to suppress copying the input file's permissions to the output file.
+
+* The :command:`execute_process` command gained a ``COMMAND_ERROR_IS_FATAL``
+  option to specify a fatal error.
+
+* The :command:`file(ARCHIVE_CREATE)` command gained a ``COMPRESSION_LEVEL``
+  option to specify the compression level.
+
+* The :command:`file(CHMOD)` and :command:`file(CHMOD_RECURSE)` subcommands
+  were added to set permissions of files and directories.
+
+* The :command:`file(DOWNLOAD)` command ``<file>`` argument is now
+  optional.  If it is not specified, the file is not saved.
+
+* The :command:`file(GENERATE)` command gained a new ``TARGET`` keyword to
+  support resolving target-dependent generator expressions.
+
+* The :command:`file` command gained a new ``REAL_PATH`` sub-command to
+  compute a path with symlinks resolved.
+
+* The :command:`find_package` command learned to handle a version range.
+
+* The :command:`separate_arguments` command gained a new ``PROGRAM`` option.
+  It allows the arguments to be treated as a program invocation and will
+  resolve the executable to a full path if it can be found.
+
+* The ``DIRECTORY`` option of the :command:`set_property`,
+  :command:`get_property`, and :command:`get_directory_property` commands
+  now accepts references to binary directory paths, such as the value of
+  :variable:`CMAKE_CURRENT_BINARY_DIR`.
+
+* The :command:`string` command gained a set of new ``JSON`` sub commands
+  that provide JSON parsing capabilities.
+
+Variables
+---------
+
+* The :variable:`CMAKE_CLANG_VFS_OVERLAY` variable was added to tell
+  Clang to use a VFS overlay to support the Windows SDK when
+  cross-compiling from hosts with case-sensitive filesystems.
+
+* The :variable:`CMAKE_MFC_FLAG` variable now supports generator expressions.
+
+* The :variable:`CMAKE_OPTIMIZE_DEPENDENCIES` variable was added to
+  initialize the new :prop_tgt:`OPTIMIZE_DEPENDENCIES` target property and
+  avoid unnecessarily building dependencies for a static library.
+
+* The :variable:`CMAKE_PCH_INSTANTIATE_TEMPLATES` variable was added to
+  initialize the new :prop_tgt:`PCH_INSTANTIATE_TEMPLATES` target property.
+
+* The :variable:`CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION_MAXIMUM` variable
+  was added to tell the :ref:`Visual Studio Generators` what maximum
+  version of the Windows SDK to choose.
+
+Properties
+----------
+
+* The :prop_tgt:`EXCLUDE_FROM_ALL` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+* The :prop_tgt:`OPTIMIZE_DEPENDENCIES` target property was added to
+  avoid unnecessarily building dependencies for a static library.
+
+* The :prop_tgt:`PCH_INSTANTIATE_TEMPLATES` target property was added to enable
+  template instantiation in the precompiled header. This is enabled by default
+  and may significantly improve compile times. Currently only supported for
+  Clang (version 11 or later).
+
+* The :prop_tgt:`WIN32_EXECUTABLE` target property now supports
+  :manual:`generator expressions <cmake-generator-expressions(7)>`.
+
+Modules
+-------
+
+* The :module:`CheckCompilerFlag` module has been added to
+  generalize :module:`CheckCCompilerFlag` and
+  :module:`CheckCXXCompilerFlag` to more languages.
+  It also supports the ``CUDA`` and ``ISPC`` languages.
+
+* The :module:`CheckLinkerFlag` module now supports the ``CUDA`` language.
+
+* The :module:`CheckSourceCompiles` module has been added to
+  generalize :module:`CheckCSourceCompiles` and
+  :module:`CheckCXXSourceCompiles` to more languages.
+  It also supports the ``CUDA`` and ``ISPC`` languages.
+
+* The :module:`CheckSourceRuns` module has been added to
+  generalize :module:`CheckCSourceRuns` and
+  :module:`CheckCXXSourceRuns` to more languages.
+  It also supports the ``CUDA`` language.
+
+* The :module:`CMakePackageConfigHelpers` module gained support for version
+  ranges.
+
+* The :module:`FindCUDAToolkit` module gained support for finding CUDA
+  toolkits that do not contain ``nvcc``, as well as for finding scattered
+  toolkit installations when cross-compiling.
+
+* The :module:`FindPackageHandleStandardArgs` module learned to handle
+  version ranges. It also gained the ``find_package_check_version()`` command
+  to check the validity of a version against version-related arguments of
+  :command:`find_package` command.
+
+* The :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  modules gained the ability to handle a version range.
+
+* The :module:`FindPython3`, :module:`FindPython2` and :module:`FindPython`
+  modules provide, respectively, the variable ``Python3_LINK_OPTIONS``,
+  ``Python2_LINK_OPTIONS`` and ``Python_LINK_OPTIONS`` for link options.
+
+* The :module:`FindSDL` module now provides:
+
+  * An imported target ``SDL::SDL``.
+
+  * Result variables ``SDL_LIBRARIES`` and ``SDL_INCLUDE_DIRS``.
+
+  * Version variables ``SDL_VERSION``, ``SDL_VERSION_MAJOR``,
+    ``SDL_VERSION_MINOR``, and ``SDL_VERSION_PATCH``.
+
+* The :module:`FindSWIG` module gained the ability to handle a version range.
+
+* The :module:`FindTIFF` module gained a ``CXX`` component to
+  find the ``tiffxx`` library containing C++ bindings.
+
+* The :module:`FindVulkan` module now provides a ``Vulkan::glslc`` imported
+  target and associated ``Vulkan_GLSLC_EXECUTABLE`` variable which contain
+  the path to the GLSL SPIR-V compiler.
+
+* The :module:`UseSWIG` module gained support for new source file properties
+  ``OUTPUT_DIR`` and ``OUTFILE_DIR`` to manage output directories on a
+  per-source basis.
+
+CTest
+-----
+
+* :manual:`ctest(1)` now supports the CUDA ``compute-sanitizer`` checker
+  (previously known as ``cuda-memcheck``) as the ``CTEST_MEMORYCHECK_COMMAND``.
+  The different tools (``memcheck``, ``racecheck``, ``synccheck`` and
+  ``initcheck``) supported by ``compute-sanitizer`` can be selected by
+  adding appropriate flags to the ``CTEST_MEMORYCHECK_COMMAND_OPTIONS``
+  variable.  The default flags are ``--tool memcheck --leak-check full``.
+
+CPack
+-----
+
+* CPack gained the :variable:`CPACK_PRE_BUILD_SCRIPTS`,
+  :variable:`CPACK_POST_BUILD_SCRIPTS`, and :variable:`CPACK_PACKAGE_FILES`
+  variables.
+
+* The :cpack_gen:`CPack External Generator` gained the
+  :variable:`CPACK_EXTERNAL_BUILT_PACKAGES` variable.
+
+* The :cpack_gen:`CPack WIX Generator` gained a
+  :variable:`CPACK_WIX_CUSTOM_XMLNS` option to specify custom XML namespaces.
+
+Other
+-----
+
+* :ref:`Interface Libraries` may now have source files added via
+  :command:`add_library` or :command:`target_sources`.  Those
+  with sources will be generated as part of the build system.
+
+Deprecated and Removed Features
+===============================
+
+* Compatibility with versions of CMake older than 2.8.12 is now deprecated
+  and will be removed from a future version.  Calls to
+  :command:`cmake_minimum_required` or :command:`cmake_policy` that set
+  the policy version to an older value now issue a deprecation diagnostic.
+
+* An explicit deprecation diagnostic was added for policy ``CMP0071``
+  (``CMP0071`` and below were already deprecated).
+  The :manual:`cmake-policies(7)` manual explains that the OLD behaviors
+  of all policies are deprecated and that projects should port to the
+  NEW behaviors.
+
+* macOS SDKs older than 10.5 are no longer supported.
+
+* :manual:`cmake-gui(1)` now requires Qt5.
+  Support for compiling with Qt4 has been removed.
+
+* The :manual:`cmake(1)` command-line option ``--warn-unused-vars`` has
+  been removed and is now silently ignored.  The option has not worked
+  correctly since CMake 3.3.
+
+Documentation
+=============
+
+The following guides have been added:
+
+* :guide:`IDE Integration Guide`
+* :guide:`Importing and Exporting Guide`
+
+Other Changes
+=============
+
+* Building for macOS will now use the latest SDK available on the system,
+  unless the user has explicitly chosen a SDK using
+  :variable:`CMAKE_OSX_SYSROOT`.  The deployment target or system macOS
+  version will not affect the choice of SDK.
+
+* The :variable:`CMAKE_<LANG>_COMPILER` variable may now be used to
+  store "mandatory" compiler flags like the :envvar:`CC` and other environment
+  variables.
+
+* The :variable:`CMAKE_<LANG>_FLAGS_INIT` variable will now be considered
+  during the compiler identification check if other sources like
+  :variable:`CMAKE_<LANG>_FLAGS` or :envvar:`CFLAGS` are not set.
+
+* The :command:`find_program` command now requires permission to execute
+  but not to read the file found.  See policy :policy:`CMP0109`.
+
+* An imported target missing its location property fails during generation
+  if the location is used.  See policy :policy:`CMP0111`.
+
+* The following target-based generator expressions that query for directory or
+  file name components no longer add a dependency on the evaluated target.
+  See policy :policy:`CMP0112`.
+
+  - ``TARGET_FILE_DIR``
+  - ``TARGET_LINKER_FILE_BASE_NAME``
+  - ``TARGET_LINKER_FILE_NAME``
+  - ``TARGET_LINKER_FILE_DIR``
+  - ``TARGET_SONAME_FILE_NAME``
+  - ``TARGET_SONAME_FILE_DIR``
+  - ``TARGET_PDB_FILE_NAME``
+  - ``TARGET_PDB_FILE_DIR``
+  - ``TARGET_BUNDLE_DIR``
+  - ``TARGET_BUNDLE_CONTENT_DIR``
+
+* :ref:`Makefile Generators` no longer repeat custom commands from target
+  dependencies.  See policy :policy:`CMP0113`.
+
+* The :module:`ExternalProject` module handling of step target dependencies
+  has been revised.  See policy :policy:`CMP0114`.
+
+* The :prop_tgt:`OSX_ARCHITECTURES` target property is now respected
+  for the ``ASM`` language.
+
+* If ``CUDA`` compiler detection fails with user-specified
+  :variable:`CMAKE_CUDA_ARCHITECTURES` or
+  :variable:`CMAKE_CUDA_HOST_COMPILER`, an error is raised.
+
+Updates
+=======
+
+Changes made since CMake 3.19.0 include the following.
+
+3.19.1
+------
+
+* CMake 3.19.0 compiles source files with the :prop_sf:`LANGUAGE`
+  property by passing an explicit language flag such as ``-x c``.
+  This is consistent with the property's documented meaning that
+  the source file is written in the specified language.  However,
+  it can break projects that were using the property only to
+  cause the specified language's compiler to be used.  This has
+  been reverted to restore behavior from CMake 3.18 and below.
+
+* CUDA 11.1 support for Clang.
+
+3.19.2
+------
+
+* The precompiled macOS binary provided on ``cmake.org`` is now a
+  universal binary with ``x86_64`` and ``arm64`` architectures.
+  It requires macOS 10.10 or newer.
+  The package file naming pattern has been changed from
+  ``cmake-$ver-Darwin-x86_64`` to ``cmake-$ver-macos-universal``.
+
+* Apple Silicon host architecture selection support was updated.
+  CMake 3.19.0 and 3.19.1 always chose ``arm64`` as the host architecture.
+  CMake 3.19.2 returns to using ``uname -m`` as CMake 3.18 and below did.
+  Since this may vary based on CMake's own architecture and that of
+  the invoking process tree, the :variable:`CMAKE_APPLE_SILICON_PROCESSOR`
+  variable or :envvar:`CMAKE_APPLE_SILICON_PROCESSOR` environment
+  variable may be set to specify a host architecture explicitly.
+
+* The :variable:`CMAKE_ISPC_HEADER_SUFFIX` variable and corresponding
+  :prop_tgt:`ISPC_HEADER_SUFFIX` target property were added to control
+  the header suffix used by ``ISPC`` compiler generated headers.
+
+3.19.3
+------
+
+* A precompiled Linux ``aarch64`` binary is now provided on ``cmake.org``.
+
+* Two precompiled macOS binaries are now provided on ``cmake.org``:
+
+  * The naming pattern ``cmake-$ver-macos-universal`` is a universal
+    binary with ``x86_64`` and ``arm64`` architectures.  It requires
+    macOS 10.13 or newer.
+
+  * The naming pattern ``cmake-$ver-macos10.10-universal`` is a universal
+    binary with ``x86_64`` and ``arm64`` architectures.  It requires
+    macOS 10.10 or newer.
+
+3.19.4
+------
+
+* The :variable:`CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION_MAXIMUM`
+  variable introduced in 3.19.0 previously worked only with the
+  :generator:`Visual Studio 14 2015` generator.  It has now been fixed to
+  work with :ref:`Visual Studio Generators` for later VS versions too.
+
+3.19.5
+------
+
+* When :prop_tgt:`IOS_INSTALL_COMBINED` is enabled and the :generator:`Xcode`
+  generator is used, it is now possible to initiate an install or package
+  creation by running ``cmake --install`` or ``cpack`` from the command line.
+  When using the Xcode new build system, these are the only supported methods
+  due to a limitation of Xcode.  Initiating these operations by building the
+  ``install`` or ``package`` targets in Xcode is only supported when using
+  the legacy build system.
+
+* The framework handling introduced in 3.19.0 as part of supporting Xcode's
+  *Link Binaries With Libraries* build phase broke the ability to switch
+  between device and simulator builds without reconfiguring.  That capability
+  has now been restored.
+
+3.19.6
+------
+
+* The :manual:`cmake-presets(7)` feature no longer allows comments in
+  ``CMakePresets.json`` or ``CMakeUserPresets.json`` files.
+  This was mistakenly allowed by the implementation in CMake 3.19.0 through
+  CMake 3.19.5, and was not documented.
+
+3.19.7
+------
+
+* With :ref:`Visual Studio Generators` for VS 2017 and higher, the
+  :variable:`CMAKE_GENERATOR_TOOLSET` field ``version=`` now accepts
+  three-component MSVC toolset versions such as ``14.28.29910``.
+  See the :variable:`CMAKE_VS_PLATFORM_TOOLSET_VERSION` variable.

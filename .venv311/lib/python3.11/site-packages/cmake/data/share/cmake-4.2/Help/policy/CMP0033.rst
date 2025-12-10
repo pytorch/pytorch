@@ -1,0 +1,17 @@
+CMP0033
+-------
+
+.. |REMOVED_IN_CMAKE_VERSION| replace:: 4.0
+.. include:: include/REMOVED_PROLOGUE.rst
+
+The :command:`export_library_dependencies` command should not be called.
+
+This command was added in January 2003 to export ``<tgt>_LIB_DEPENDS``
+internal CMake cache entries to a file for installation with a project.
+This was used at the time to allow transitive link dependencies to
+work for applications outside of the original build tree of a project.
+The functionality has been superseded by the :command:`export` and
+:command:`install(EXPORT)` commands.
+
+.. |disallowed_version| replace:: 3.0
+.. include:: include/REMOVED_COMMAND.rst
