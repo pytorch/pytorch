@@ -26,6 +26,24 @@ from torch._inductor.fx_passes.bucketing import bucket_key
 from ..pattern_matcher import stable_topological_sort
 
 
+def estimate_runtime_analytical(n: torch.fx.Node) -> float:
+    """Estimate runtime using analytical roofline model for mm operations."""
+    if n.target != torch.ops.aten.mm.default:
+        return 0.0
+    import torch.utils._pytree as pytree
+    from torch.distributed._tools import RuntimeEstimator
+
+    def _val(node: Any) -> Any:
+        if not isinstance(node, torch.fx.Node):
+            return node
+        return node.meta["val"]
+
+    args = pytree.tree_map(_val, n.args)
+    kwargs = pytree.tree_map(_val, n.kwargs)
+    _, ms = RuntimeEstimator._roofline_estimate(n.target, args, kwargs)
+    return ms
+
+
 @dataclass
 class WhyNoOverlap:
     """Track reasons why a collective cannot overlap with compute."""
@@ -498,49 +516,6 @@ class OverlapScheduler:
 
         return domination_index
 
-    def _log_collective_benchmarks(
-        self,
-        collective_nodes: list[fx.Node],
-        collective_keys: list[str],
-        benchmarked_medians: list[float],
-        world_size: int,
-    ) -> None:
-        """Log collective benchmarks with analytical comparisons for tlparse."""
-        collective_benchmarks = {}
-        for key, benchmarked_ms, coll_node in zip(
-            collective_keys, benchmarked_medians, collective_nodes
-        ):
-            # NCCL estimator (deterministic, no need to align)
-            nccl_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=True
-            )
-
-            # Inductor analytical (deterministic, no need to align)
-            inductor_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=False
-            )
-
-            collective_benchmarks[key] = {
-                "benchmarked_ms": benchmarked_ms,
-                "analytical_nccl_ms": nccl_ms,
-                "analytical_inductor_ms": inductor_ms,
-            }
-
-        # Emit tlparse artifact
-        from torch._logging import trace_structured
-
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "node_runtime_estimation",
-                "encoding": "json",
-            },
-            payload_fn=lambda: {
-                "world_size": world_size,
-                "collective_benchmarks": collective_benchmarks,
-            },
-        )
-
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
         self,
     ) -> None:
@@ -554,11 +529,30 @@ class OverlapScheduler:
         runtime_estimations: list[float] = []
         compute_key_count = 0
 
+        # Also collect analytical estimations for logging
+        runtime_estimations_analytical: list[float] = []
+
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+
+            # Analytical estimations
+            val_analytical = estimate_runtime_analytical(n)
+            runtime_estimations_analytical.append(val_analytical)
+
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
             compute_key_count += 1
+
+        # Log compute estimations
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+
+        _log_compute_estimations(
+            self.compute_nodes,
+            runtime_estimations,
+            runtime_estimations_analytical,
+        )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -585,7 +579,7 @@ class OverlapScheduler:
                     continue
 
                 # Benchmark actual size
-                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=2)
+                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)
@@ -641,7 +635,11 @@ class OverlapScheduler:
 
         # Log benchmarks with analytical comparisons
         if collective_keys:
-            self._log_collective_benchmarks(
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            _log_collective_benchmarks(
                 benchmarked_collective_nodes,
                 collective_keys,
                 collective_medians,
