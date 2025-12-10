@@ -3657,13 +3657,15 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
         torch.ops.aten.index_put_.default,
         torch.ops.aten._unsafe_index_put.default,
     ):
-        _, kwargs = normalize_function(
+        normalized = normalize_function(
             target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
-        )  # type: ignore[misc]
-        indices = kwargs["indices"]
-        for idx in indices:
-            if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
-                return True
+        )
+        if normalized is not None:
+            _, kwargs = normalized
+            indices = kwargs["indices"]
+            for idx in indices:
+                if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
+                    return True
 
     return False
 

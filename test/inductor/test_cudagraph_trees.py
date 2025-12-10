@@ -531,10 +531,11 @@ if HAS_CUDA_AND_TRITON:
 
                 self.assertEqual(fn(*args()), out)
 
-        def test_index_put_boolean_fallback_skips_cudagraphs(self):
+        def test_index_put_boolean_fallback_partitions_cudagraphs(self):
             """
             Test that index_put_ with boolean indices (which uses fallback path)
-            properly skips cudagraphs. This tests the fix for GitHub issue #169951.
+            properly partitions around the unsafe op. This tests the fix for
+            GitHub issue #169951.
             """
 
             def fn(x, mask, values):
@@ -546,21 +547,17 @@ if HAS_CUDA_AND_TRITON:
 
             with capture_stderr() as captured_output:
                 for _ in range(3):
-                    x = torch.randn(10, 64, device="cuda")
-                    mask = torch.tensor(
-                        [True, False, True, False, True, False, True, False, True, False],
-                        device="cuda",
-                    )
-                    values = torch.randn(5, 64, device="cuda")
+                    x = torch.randn(4, 8, device="cuda")
+                    mask = torch.tensor([True, False, True, False], device="cuda")
+                    values = torch.randn(2, 8, device="cuda")
                     out = fn_c(x, mask, values)
                     expected = fn(x, mask, values)
                     self.assertEqual(out, expected)
 
-            # Verify that cudagraphs were skipped with the expected message
-            FileCheck().check(
-                "skipping cudagraphs due to index_put_ fallback is not compatible with CUDA graphs"
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            # Verify that cudagraphs partition around the unsafe op
+            FileCheck().check("cudagraph partition").run(captured_output[0])
+            # Should not skip cudagraphs entirely
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._inductor.config.patch("implicit_fallbacks", True)
         @torch._inductor.config.patch("graph_partition", True)

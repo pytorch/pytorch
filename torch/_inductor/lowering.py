@@ -3913,17 +3913,19 @@ def index_put_fallback(self, indices, values, accumulate):
         isinstance(target, torch._ops.OpOverload)
         and not V.graph.disable_cudagraphs_reason
     ):
-        _, kwargs = normalize_function(
+        normalized = normalize_function(
             target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
-        )  # type: ignore[misc]
-        fx_indices = kwargs["indices"]
-        for idx in fx_indices:
-            if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
-                msg = "index_put_ fallback is not compatible with CUDA graphs"
-                if stack_trace := fx_node.meta.get("stack_trace", None):
-                    msg = f"{msg} Found from : \n {stack_trace}"
-                V.graph.disable_cudagraphs_reason = msg
-                break
+        )
+        if normalized is not None:
+            _, kwargs = normalized
+            fx_indices = kwargs["indices"]
+            for idx in fx_indices:
+                if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
+                    msg = "index_put_ fallback is not compatible with CUDA graphs"
+                    if stack_trace := fx_node.meta.get("stack_trace", None):
+                        msg = f"{msg} Found from : \n {stack_trace}"
+                    V.graph.disable_cudagraphs_reason = msg
+                    break
     return self
 
 
