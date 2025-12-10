@@ -877,33 +877,11 @@ class _TorchDynamoContext:
         )
 
         # NOTE [Top-level TorchInGraph functions]
-        # Some callables (e.g. torch.exp, math.exp, many torch.* ops) are
-        # registered in trace_rules as TorchInGraphFunctionVariable. When they
-        # are called from *inside* a traced Python frame, Dynamo does not trace
-        # into them; instead it emits a single FX node for the op.
-        # However, when such a function is passed directly to torch.compile,
-        # there is no user Python frame for us to attach the eval frame handler
-        # to, so we previously fell back to eager:
-        #
-        #     torch.compile(torch.exp)(x)  # no graph
-        #
-        # To make this consistent with:
-        #     torch.compile(lambda x: torch.exp(x))(x)
-        # we detect top-level TorchInGraph functions here and force them
-        # through the same wrap_inline path that we already use for
-        # builtins/skiplist functions, so Dynamo can build a 1-node FX graph.
-        top_level_in_graph = False
-        try:
-            rule = trace_rules.lookup(fn)
-        except Exception:
-            rule = None
-
-        if isinstance(rule, type):
-            torch_in_graph_cls = getattr(
-                trace_rules, "TorchInGraphFunctionVariable", None
-            )
-            if torch_in_graph_cls is not None and issubclass(rule, torch_in_graph_cls):
-                top_level_in_graph = True
+        # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
+        # when traced inside a frame. When such a function is passed directly to
+        # torch.compile, we detect it here so we can force it through wrap_inline.
+        from .variables import TorchInGraphFunctionVariable
+        top_level_in_graph = issubclass(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
 
         try:
             filename = inspect.getsourcefile(fn)
