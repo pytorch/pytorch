@@ -224,7 +224,9 @@ class TestDTensorDebugMode(TestCase):
         model = torch.compile(Foo(), backend="aot_eager", fullgraph=True)
 
         # test forward nodes
-        with DebugMode(record_stack_trace=True) as debug_mode:
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
             out = model(x)
 
         op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
@@ -234,7 +236,9 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = x.sum()" in op_calls[-1].stack_trace)
 
         # test backward nodes
-        with DebugMode(record_stack_trace=True) as debug_mode:
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
             out.backward()
 
         op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
