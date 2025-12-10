@@ -1364,7 +1364,8 @@ def compute_unbacked_bindings(
     pending = set(fresh_sym)
     ignorable = set(ign_sym)
     if not peek:
-        log.info("compute_unbacked_bindings %s", fresh_sym)
+        if pending:
+            log.info("compute_unbacked_bindings %s", fresh_sym)
         fresh_sym.clear()
         ign_sym.clear()
 
