@@ -118,10 +118,17 @@ class ConstantOperator(Operator):
 
             # For DTensor template, convert to DTensor
             if self.template == "dtensor":
+                # Use global placements variable
                 return (
                     f"{output_name}_local = {tensor_creation}.to('cuda')\n"
-                    f"    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+                    f"{output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
                 )
+            elif self.template == "dtensor_placements":
+                # For dtensor_placements, the constant is created outside the function
+                # Just reference it (the codegen handles creating it globally)
+                # This shouldn't actually be called since we handle constants specially
+                # in convert_graph_to_python_code, but provide fallback
+                return f"# {output_name} is created globally for DTensor placements"
             else:
                 return f"{output_name} = {tensor_creation}"
 
