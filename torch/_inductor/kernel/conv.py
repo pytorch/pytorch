@@ -751,11 +751,10 @@ def conv_bwd_input_layout(
     output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
-
     with V.graph.fake_mode:
         go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
-        x  = ir.ir_node_to_tensor(input,       guard_shape=True)
-        w  = ir.ir_node_to_tensor(weight,      guard_shape=True)
+        x = ir.ir_node_to_tensor(input, guard_shape=True)
+        w = ir.ir_node_to_tensor(weight, guard_shape=True)
 
         dx, _, _ = torch.ops.aten.convolution_backward(
             go,
@@ -794,8 +793,8 @@ def conv_bwd_weight_layout(
 ) -> ir.Layout:
     with V.graph.fake_mode:
         go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
-        x  = ir.ir_node_to_tensor(input,       guard_shape=True)
-        w  = ir.ir_node_to_tensor(weight,      guard_shape=True)
+        x = ir.ir_node_to_tensor(input, guard_shape=True)
+        w = ir.ir_node_to_tensor(weight, guard_shape=True)
 
         _, dw, _ = torch.ops.aten.convolution_backward(
             go,
@@ -906,6 +905,7 @@ def call_aten_dx(
 
 ext_kn_aten_dx = ExternKernelChoice(call_aten_dx, None)
 
+
 @SymbolicGridFn
 def conv2d_bwd_weight_grid(cout, cin, kh, kw, meta, *, cdiv):
     g = meta["GROUPS"]
@@ -914,6 +914,7 @@ def conv2d_bwd_weight_grid(cout, cin, kh, kw, meta, *, cdiv):
         cdiv(cout // g, meta["BLOCK_N"]),
         g,
     )
+
 
 LOOP_BODY_BWD_WEIGHT_2D = r"""
 
@@ -1010,7 +1011,8 @@ conv2d_bwd_weight_template = TritonTemplate(
     K_TOTAL = BATCH * OUT_H * OUT_W
     for k in range(0, K_TOTAL, BLOCK_K):
         """
-   + LOOP_BODY_BWD_WEIGHT_2D + r"""
+    + LOOP_BODY_BWD_WEIGHT_2D
+    + r"""
 
     m = m0 + tl.arange(0, BLOCK_M)
     ic = m // (KERNEL_H * KERNEL_W)
@@ -1028,6 +1030,7 @@ conv2d_bwd_weight_template = TritonTemplate(
 """,
 )
 
+
 @SymbolicGridFn
 def conv2d_bwd_input_grid(n, cin, h, w, meta, *, cdiv):
     g = meta["GROUPS"]
@@ -1036,6 +1039,7 @@ def conv2d_bwd_input_grid(n, cin, h, w, meta, *, cdiv):
         cdiv(cin // g, meta["BLOCK_N"]),
         g,
     )
+
 
 LOOP_BODY_BWD_INPUT_2D = r"""
         idx_k = k + tl.arange(0, BLOCK_K)
@@ -1138,7 +1142,8 @@ conv2d_bwd_input_template = TritonTemplate(
     K_TOTAL = GROUP_OUT_C * KERNEL_H * KERNEL_W
     for k in range(0, K_TOTAL, BLOCK_K):
         """
-    + LOOP_BODY_BWD_INPUT_2D + r"""
+    + LOOP_BODY_BWD_INPUT_2D
+    + r"""
 
     mask = (
         (n[:, None] < BATCH)
@@ -1154,6 +1159,7 @@ conv2d_bwd_input_template = TritonTemplate(
 """,
 )
 
+
 @register_lowering(aten.convolution_backward.default)
 def convolution_backward_lowering(
     grad_output: TensorBox,
@@ -1168,6 +1174,9 @@ def convolution_backward_lowering(
     groups: int,
     output_mask: Sequence[bool],
 ):
+    """
+    Lowering function for backward convolution operator.
+    """
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -1175,16 +1184,7 @@ def convolution_backward_lowering(
     if not isinstance(groups, int):
         groups = V.graph.sizevars.guard_int(groups)
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(
-        weight.get_size()
-    )
-
-    ndim = len(kernel_shape)
-
-    stride = pad_listlike(stride, ndim)
-    padding = pad_listlike(padding, ndim)
-    dilation = pad_listlike(dilation, ndim)
-    output_padding = pad_listlike(output_padding, ndim)
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
@@ -1202,6 +1202,12 @@ def convolution_backward_lowering(
         "groups": groups,
     }
 
+    ndim = len(kernel_shape)
+    stride = pad_listlike(stride, ndim)
+    padding = pad_listlike(padding, ndim)
+    dilation = pad_listlike(dilation, ndim)
+    output_padding = pad_listlike(output_padding, ndim)
+
     device_type = ir.get_device_type(input)
 
     conv_configs = V.choices.get_conv_configs(device_type)
@@ -1209,20 +1215,22 @@ def convolution_backward_lowering(
 
     dw = None
     if output_mask[1]:
-        choices_dw = []        
+        choices_dw = []
 
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
-            input = ir.ExternKernel.require_channels_last(input)
-            grad_output = ir.ExternKernel.require_channels_last(grad_output)
+            input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
+            grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
             layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
         else:
             layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dw.stride)
             )
-            input = ir.ExternKernel.require_stride_order(input, req_stride_order)
-            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+            input = ir.ExternKernel.require_stride_order(input, req_stride_order)  # type: ignore[assignment]
+            grad_output = ir.ExternKernel.require_stride_order(
+                grad_output, req_stride_order
+            )  # type: ignore[assignment]
 
         args_w = [input, grad_output]
 
@@ -1301,15 +1309,17 @@ def convolution_backward_lowering(
 
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
-            grad_output = ir.ExternKernel.require_channels_last(grad_output)
-            weight = ir.ExternKernel.require_channels_last(weight)
+            grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
+            weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
             layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
         else:
             layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dx.stride)
             )
-            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+            grad_output = ir.ExternKernel.require_stride_order(
+                grad_output, req_stride_order
+            )  # type: ignore[assignment]
 
         args_x = [grad_output, weight]
 
@@ -1377,7 +1387,9 @@ def convolution_backward_lowering(
 
         # TODO: use_ck_conv_template for bwd conv
 
-        dx = autotune_select_algorithm("convolution_bwd_input", choices_dx, args_x, layout_dx)
+        dx = autotune_select_algorithm(
+            "convolution_bwd_input", choices_dx, args_x, layout_dx
+        )
 
     db = None
     if output_mask[2] and bias_sizes is not None:
@@ -1385,11 +1397,13 @@ def convolution_backward_lowering(
 
     return (dx, dw, db)
 
+
 def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
     assert fx_node.target == torch.ops.aten.convolution_backward.default
     if V.graph.layout_opt:
         return args, kwargs
     else:
         return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
 
 add_layout_constraint(aten.convolution_backward, constrain_conv_bwd_to_fx_strides)
