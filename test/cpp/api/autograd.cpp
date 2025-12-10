@@ -278,7 +278,7 @@ TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
         Variable var1,
         Variable var2) {
       ctx->save_for_backward({var1, var2});
-      return var1 * var2, var1;
+      return var1 * var2;
     }
 
     static variable_list backward(
