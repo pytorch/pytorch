@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import collections
 import functools
 import inspect
-from collections.abc import Callable
-from typing import Any, final, Optional, Union
-from typing_extensions import Self
+from typing import Any, TYPE_CHECKING
 
 from ..utils import is_function_or_wrapper
-from .base import VariableTracker
-from .tensor import SymNodeVariable
+from .base import VariableTracker, VariableTrackerMeta
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing_extensions import Self
+
+    from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -18,8 +24,8 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
-        self.name_hint: Optional[str] = None
-        self.vt: Optional[VariableTracker] = None
+        self.name_hint: str | None = None
+        self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
         assert self.vt is None
@@ -31,7 +37,12 @@ class LazyCache:
         if isinstance(self.value, LazySymNodeFormatString):
             self.vt = builder.SourcelessBuilder.create(tx, self.value)
         else:
-            self.vt = builder.VariableBuilder(tx, self.source)(self.value)
+            # Pass allow_lazy_constant=False to prevent VariableBuilder from
+            # returning LazyConstantVariable, which would cause infinite recursion
+            # when LazyVariableTracker.realize() returns LazyConstantVariable.
+            self.vt = builder.VariableBuilder(
+                tx, self.source, allow_lazy_constant=False
+            )(self.value)
 
         if self.name_hint is not None:
             # pyrefly: ignore [missing-attribute]
@@ -42,8 +53,7 @@ class LazyCache:
         del self.name_hint
 
 
-@final
-class LazyVariableTracker(VariableTracker):
+class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     """
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
@@ -57,10 +67,14 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
+    # Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
+    _no_implicit_realize = True
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+    def create(value: Any, source: Any, **options: Any) -> VariableTracker:
+        if type(value) in LazyConstantVariable.supported_types:
+            return LazyConstantVariable.create(value, source, **options)
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
@@ -75,7 +89,11 @@ class LazyVariableTracker(VariableTracker):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def lazy_isinstance(self, cls: type) -> bool:
+        """Check isinstance after realizing, used by ImplicitRealizingVariableTrackerMeta"""
+        return type.__instancecheck__(cls, self.realize())
+
+    def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
             assert self._cache.vt is not None
@@ -125,7 +143,9 @@ class LazyVariableTracker(VariableTracker):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[dict[int, tuple[Any, Any]]] = None,
+        cache: dict[int, tuple[Any, Any]] | None = None,
+        *,
+        allow_lazy_constant: bool = False,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.
@@ -139,7 +159,14 @@ class LazyVariableTracker(VariableTracker):
 
         value_cls = type(value)
         if issubclass(value_cls, LazyVariableTracker):
-            result = cls.realize_all(value.realize(), cache)
+            # Allow LazyConstantVariable to stay lazy when returning from a frame
+            keep_lazy = allow_lazy_constant and isinstance(value, LazyConstantVariable)
+            if keep_lazy:
+                result = value
+            else:
+                result = cls.realize_all(
+                    value.realize(), cache, allow_lazy_constant=allow_lazy_constant
+                )
         elif issubclass(value_cls, VariableTracker):
             # update value in-place
             result = value
@@ -147,13 +174,24 @@ class LazyVariableTracker(VariableTracker):
             nonvars = value._nonvar_fields
             for key in value_dict:
                 if key not in nonvars:
-                    value_dict[key] = cls.realize_all(value_dict[key], cache)
+                    value_dict[key] = cls.realize_all(
+                        value_dict[key], cache, allow_lazy_constant=allow_lazy_constant
+                    )
         elif value_cls is list:
-            result = [cls.realize_all(v, cache) for v in value]
+            result = [
+                cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
+                for v in value
+            ]
         elif value_cls is tuple:
-            result = tuple(cls.realize_all(v, cache) for v in value)
+            result = tuple(
+                cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
+                for v in value
+            )
         elif value_cls in (dict, collections.OrderedDict):
-            result = {k: cls.realize_all(v, cache) for k, v in list(value.items())}
+            result = {
+                k: cls.realize_all(v, cache, allow_lazy_constant=allow_lazy_constant)
+                for k, v in list(value.items())
+            }
         else:
             result = value
 
@@ -188,6 +226,116 @@ class LazyVariableTracker(VariableTracker):
         # Returns the source without realizing the VT.
         assert not self.is_realized()
         return self._cache.source
+
+
+class LazyConstantVariable(LazyVariableTracker):
+    """
+    A lazy variable tracker for constants (int, float, bool, str) that defers
+    guarding until the value is actually used in a way that requires it.
+
+    This allows constants that are just passed through (e.g., returned without
+    being used in control flow or math) to avoid unnecessary recompilation when
+    their values change.
+
+    Guards are installed lazily:
+    - TYPE_MATCH guard is installed when type-based methods (python_type, is_tensor,
+      lazy_isinstance) are called
+    - CONSTANT_MATCH guard is installed on full realization (e.g., used in control
+      flow or math), which subsumes any TYPE_MATCH guard
+    """
+
+    supported_types = (int, float, bool, str)
+    _nonvar_fields = {"_type_guard_installed", *LazyVariableTracker._nonvar_fields}
+
+    @staticmethod
+    def create(  # pyrefly: ignore[bad-override]
+        value: Any,
+        source: Any,
+        **options: Any,
+    ) -> VariableTracker:
+        from ..source import is_constant_source
+        from .constant import ConstantVariable
+
+        assert type(value) in LazyConstantVariable.supported_types
+        assert source is not None
+
+        # If the source doesn't support guards (e.g., ConstantSource), fall back
+        # to creating a regular ConstantVariable directly
+        if is_constant_source(source):
+            return ConstantVariable.create(value, source=source, **options)
+
+        return LazyConstantVariable(LazyCache(value, source), source=source, **options)
+
+    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
+        super().__init__(_cache, **kwargs)
+        self._type_guard_installed = False
+
+    def _ensure_type_guard(self) -> None:
+        """Install TYPE_MATCH guard if not already installed and not realized."""
+        if self._type_guard_installed or self.is_realized():
+            return
+
+        from ..guards import GuardBuilder, install_guard
+
+        assert self.source is not None
+        install_guard(self.source.make_guard(GuardBuilder.TYPE_MATCH))
+        self._type_guard_installed = True
+
+    def realize(self) -> VariableTracker:
+        """Force construction of the real VariableTracker."""
+        if self.is_realized():
+            return super().realize()
+
+        from torch._guards import TracingContext
+
+        from ..guards import GuardBuilder, install_guard
+        from .constant import ConstantVariable
+
+        tracing_context = TracingContext.get()
+        assert self.source is not None
+
+        # Realize first to see what we get
+        result = super().realize()
+
+        # Only remove TYPE_MATCH if we're installing CONSTANT_MATCH
+        # (which subsumes it). For SymNodeVariable, keep TYPE_MATCH.
+        if isinstance(result, ConstantVariable):
+            if self._type_guard_installed:
+                tracing_context.guards_context.dynamo_guards.remove_guards_with_source(
+                    self.source
+                )
+            constant_guard = self.source.make_guard(GuardBuilder.CONSTANT_MATCH)
+            install_guard(constant_guard)
+
+        return result
+
+    def python_type(self) -> type:
+        """Return the Python type without triggering realization."""
+        if self.is_realized():
+            return super().python_type()
+        self._ensure_type_guard()
+        return self.peek_type()
+
+    def is_tensor(self) -> bool:
+        """Primitive constants are never tensors."""
+        self._ensure_type_guard()
+        return False
+
+    def is_constant_none(self) -> bool:
+        self._ensure_type_guard()
+        return False
+
+    def lazy_isinstance(self, cls: type) -> bool:
+        """Check isinstance without triggering realization when possible.
+
+        LazyConstantVariable only wraps primitive types (int, float, bool, str)
+        which always realize to ConstantVariable, so we can answer isinstance
+        checks by checking if the target class is ConstantVariable or a parent.
+        """
+        self._ensure_type_guard()
+        from .constant import ConstantVariable
+
+        return issubclass(cls, ConstantVariable)
 
 
 class LazySymNodeFormatString:

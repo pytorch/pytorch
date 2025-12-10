@@ -7498,8 +7498,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             torch._dynamo.set_recursion_limit(20000)
             self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
         finally:
-            if old_dynamo_recursion_limit > 0:
-                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
             sys.setrecursionlimit(old_recursion_limit)
 
     @unittest.skipIf(
@@ -7527,8 +7526,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
         finally:
-            if old_dynamo_recursion_limit > 0:
-                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
 
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
