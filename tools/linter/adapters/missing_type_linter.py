@@ -19,7 +19,7 @@ else:
     from _linter import FileLinter, LintResult, PythonFile
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
 
 DESCRIPTION = """`missing_type_linter` is a lintrunner linter which uses pyrefly to detect
