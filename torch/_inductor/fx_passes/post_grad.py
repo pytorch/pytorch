@@ -358,10 +358,11 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and device_type in ["cuda", "xpu"]
+        and getattr(config, f"{device_type}_backend") == "triton"
     )
 
 
@@ -843,13 +844,22 @@ def is_valid_mm_plus_mm(match: Match):
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    # Check if all required values exist
+    mat1_val = match.kwargs["mat1"].meta.get("val")
+    mat2_val = match.kwargs["mat2"].meta.get("val")
+    mat3_val = match.kwargs["mat3"].meta.get("val")
+    mat4_val = match.kwargs["mat4"].meta.get("val")
+
+    if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
+        return False
+
+    *_b1, m1, k1 = mat1_val.shape
+    *_b2, k2, n1 = mat2_val.shape
     if k1 != k2:
         return False
 
-    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = mat3_val.shape
+    *_b2, k4, n2 = mat4_val.shape
     if k3 != k4:
         return False
 
