@@ -27,11 +27,9 @@ from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
-    Optional as _Optional,
     overload as _overload,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
-    Union as _Union,
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
@@ -340,7 +338,7 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
     ]
     # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
-    if err is not None and [
+    if err is not None and not [
         lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
