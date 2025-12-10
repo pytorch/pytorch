@@ -362,8 +362,8 @@ def prepare_softmax_extra_check(match):
     device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and device_type in ("cuda", "xpu")
-        and "triton" == get_current_backend(device_type)
+        and device_type in ["cuda", "xpu"]
+        and getattr(config, f"{device_type}_backend") == "triton"
     )
 
 
