@@ -391,6 +391,13 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
+        # the optimizer.step method and we don't need to trace it
+        if (
+            self.get_name() == "patch_track_step_called"
+            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
+        ):
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
