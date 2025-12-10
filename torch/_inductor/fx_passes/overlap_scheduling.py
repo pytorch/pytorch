@@ -101,11 +101,6 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
-def is_reduce_scatter(n: fx.Node) -> bool:
-    """Check if node is a reduce_scatter collective."""
-    return "reduce_scatter" in str(n.target).lower()
-
-
 def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
@@ -335,7 +330,17 @@ class OverlapScheduler:
         self._identify_collectives()
         self.wasted_compute = 0.0
 
-        self.compute_index_domination = self._calculate_compute_node_domination_index()
+        # Calculate domination indices for both compute and reduce_scatter nodes
+        self.reduce_scatter_nodes = self.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.compute_index_domination = self._calculate_domination_index(
+            self.compute_nodes
+        )
+        self.reduce_scatter_domination = self._calculate_domination_index(
+            self.reduce_scatter_nodes
+        )
 
         # Scheduling state
         self.potentially_hidden_collectives = (
@@ -359,14 +364,25 @@ class OverlapScheduler:
 
         self.last_on_path_node_idx = -1
 
-        # Build fusion regions for overlap calculation
-        from typing import Any
-
+        # Build and collapse fusion regions for overlap calculation
+        # Collapsing replaces fusion region nodes with single call_module nodes,
+        # so scheduling sees fused ops as atomic units with accurate cost estimates
         self.region_of: dict[fx.Node, Any] = {}
+        self.fusion_replaced: dict[fx.Node, fx.Node] = {}
         if torch._inductor.config.test_configs.enable_fusion_regions:
-            from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
+            from torch._inductor.fx_passes.fusion_regions import (
+                build_fusion_regions,
+                collapse_fusion_regions,
+            )
 
             self.region_of = build_fusion_regions(self.gm)
+            if self.region_of:
+                self.region_of, self.fusion_replaced = collapse_fusion_regions(
+                    self.gm, self.region_of
+                )
+                # Re-collect nodes after collapsing
+                self.nodes = list(self.graph.nodes)
+                self.node_idx = {n: i for i, n in enumerate(self.nodes)}
 
     def _add_to_ready_queue(self, node: fx.Node) -> None:
         if self.off_compute_path(node):
@@ -472,6 +488,10 @@ class OverlapScheduler:
         """Check if a node is off the compute path (doesn't block any compute)."""
         return self.compute_index_domination[n] == sys.maxsize
 
+    def dominates_reduce_scatter(self, n: fx.Node) -> bool:
+        """Check if a node dominates (blocks) any reduce_scatter."""
+        return self.reduce_scatter_domination[n] != sys.maxsize
+
     def _identify_collectives(self) -> None:
         """Identify all collective operations and process groups."""
         self.all_pgs: OrderedSet[str] = OrderedSet()
@@ -495,24 +515,25 @@ class OverlapScheduler:
                 self.unscheduled_collectives.add(start)
                 self.all_pgs.add(get_group_name(start))
 
-    def _calculate_compute_node_domination_index(self) -> dict[fx.Node, int]:
+    def _calculate_domination_index(
+        self, target_nodes: list[fx.Node]
+    ) -> dict[fx.Node, int]:
         """
-        Compute the topological index of the earliest compute node each node dominates.
+        Calculate the topological index of the earliest target node each node dominates.
 
-        Compute nodes are assigned indices based on their topological order (0, 1, 2, ...).
-        For each node, returns the minimum index of compute nodes it blocks/dominates.
-        Returns sys.maxsize if the node doesn't block any compute nodes.
+        target_nodes are assigned indices based on their topological order (0, 1, 2, ...).
+        For each node, returns the minimum index of target nodes it blocks/dominates.
+        Returns sys.maxsize if the node doesn't block any target nodes.
         """
-        compute_node_index: dict[fx.Node, int] = {}
+        target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if is_compute_node(node):
-                compute_node_index[node] = len(compute_node_index)
+            if node in target_nodes:
+                target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
         for node in reversed(self.graph.nodes):
-            if node in compute_node_index:
-                # Compute nodes dominate themselves (return their own index)
-                domination_index[node] = compute_node_index[node]
+            if node in target_node_index:
+                domination_index[node] = target_node_index[node]
             else:
                 domination_index[node] = min(
                     (domination_index[succ] for succ in node.users), default=sys.maxsize
@@ -688,8 +709,8 @@ class OverlapScheduler:
                     > self.allowed_peak_memory_bytes
                 )
                 should_schedule = not info.is_exposed or over_budget
-            else:
-                # Schedule if we've passed its original position
+            elif self.dominates_reduce_scatter(node):
+                # Only schedule off-path nodes that dominate reduce_scatters after original position
                 should_schedule = self.node_idx[node] <= self.last_on_path_node_idx
 
             if should_schedule:
@@ -733,22 +754,67 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if self.collective_bucketing or self.insert_overlap_deps:
-            self._bucket_collectives()
+        # Step 3: Do bucketing if enabled (on collapsed graph)
+        bucketer = None
+        if self.collective_bucketing:
+            bucketer = self._bucket_collectives()
+
+        # Step 4: Expand fusion regions back to original nodes
+        replaced: dict[fx.Node, fx.Node] = {}
+        if self.region_of and self.fusion_replaced:
+            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
+
+            replaced = expand_fusion_regions(
+                self.gm, self.region_of, self.fusion_replaced
+            )
+            if bucketer is not None:
+                bucketer.aug_graph.transfer_erased_node_deps(replaced)
+
+        # Step 5: Topo sort and add effect tokens (on expanded graph)
+        if bucketer is not None:
+            bucketer.apply_deps_and_effect_tokens()
+        elif self.insert_overlap_deps:
+            # Build deps directly from hiding relationships when not bucketing
+            from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+                apply_overlap_deps,
+                build_hiding_interval_deps,
+            )
+
+            additional_deps = build_hiding_interval_deps(self.collective_info)
+            # Update deps for replaced nodes from fusion expansion
+            for old_node, new_node in replaced.items():
+                if old_node in additional_deps:
+                    additional_deps[new_node] = additional_deps.pop(old_node)
+                for node_deps in additional_deps.values():
+                    if old_node in node_deps:
+                        node_deps.discard(old_node)
+                        node_deps.add(new_node)
+
+            apply_overlap_deps(self.graph, additional_deps, insert_effect_tokens=True)
+            self.graph.lint()
 
         return self.gm
 
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
-
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
-        if self.custom_runtime_estimation is None:
-            return None
+        if self.custom_runtime_estimation is not None:
+            if (est := self.custom_runtime_estimation(node, None)) is not None:
+                return est
 
-        return self.custom_runtime_estimation(node, None)
+        # Estimate fusible nodes (pointwise, reduction, etc.) as memory-bound
+        from torch._inductor.fx_passes.fusion_regions import (
+            estimate_mem_bound_runtime_ms,
+            is_fusible_node,
+            is_view_node,
+        )
+
+        if is_fusible_node(node) and not is_view_node(node):
+            return estimate_mem_bound_runtime_ms(node)
+
+        return None
 
     def _reduce_exposed_time_of_in_flight_collectives(
         self,
@@ -851,8 +917,14 @@ class OverlapScheduler:
         )
 
     def _compute_off_path_score(self, node: fx.Node) -> object:
-        """Off-path: by original order. Exposed wait deferral handled in _get_next_node."""
-        return self.node_idx[node]
+        """
+        Off-path priority scoring.
+
+        Nodes that dominate reduce_scatters are prioritized (lower score = higher priority)
+        to ensure they get scheduled eagerly for potential overlap.
+        """
+        dominates_rs = 0 if self.dominates_reduce_scatter(node) else 1
+        return (dominates_rs, self.node_idx[node])
 
     @staticmethod
     def is_cheap_fn(node: fx.Node) -> bool:
@@ -1219,22 +1291,23 @@ class OverlapScheduler:
 
         self.reorder_graph()
 
-    def _bucket_collectives(self) -> None:
+    def _bucket_collectives(self) -> "OverlapPreservingBucketer":
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
 
         bucketer = OverlapPreservingBucketer(
-            gm=self.gm,
+            self.gm.graph,
             collective_info=self.collective_info,
             scheduled=self.scheduled,
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
             collective_bucketing=self.collective_bucketing,
-            region_of=self.region_of,
         )
-        bucketer.bucket_collectives()
+        # Don't apply deps yet - caller will do it after expanding fusion regions
+        bucketer.bucket_collectives(apply_deps=False)
+        return bucketer
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node]
