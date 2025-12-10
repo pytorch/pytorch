@@ -101,7 +101,7 @@ inline int64_t getDistAutogradContextId() {
 static thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state)
-      : prev_state_(tls_int_state_ptr_) {
+       {
     tls_int_state_ptr_ = state;
   }
 
@@ -110,7 +110,7 @@ struct TLSCurrentInterpreterGuard {
   }
 
  private:
-  InterpreterStateImpl* prev_state_;
+  InterpreterStateImpl* prev_state_{tls_int_state_ptr_};
 };
 
 bool in_torchscript_runtime() {
