@@ -1,6 +1,7 @@
 #include <torch/nn/modules/embedding.h>
 
 #include <torch/nn/init.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ostream>

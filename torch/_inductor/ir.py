@@ -50,6 +50,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -118,7 +119,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -7881,11 +7882,9 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        from torch._library.utils import is_impure
-
-        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
-        # The check is done on the op_overload itself
-        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
+            return False
+        return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
