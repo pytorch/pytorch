@@ -223,15 +223,16 @@ class GuardManager:
     ) -> GuardManager: ...
     # Leaf guards
     def add_lambda_guard(
-        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
+        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_id_match_guard(
-        self, id_val: int, verbose_code_parts: list[str]
+        self, id_val: int, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_equals_match_guard(
         self,
         equals_val: Any,
         verbose_code_parts: list[str],
+        user_stack:str
     ) -> None: ...
     def add_global_state_guard(
         self, initial_state: Any, verbose_code_parts: list[str]
@@ -243,31 +244,36 @@ class GuardManager:
         self, value: Any, verbose_code_parts: list[str]
     ) -> None: ...
     def add_dict_length_check_guard(
-        self, value: int, verbose_code_parts: list[str]
+        self, value: int, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_length_check_guard(
-        self, value: int, verbose_code_parts: list[str]
+        self, value: int, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_false_match_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_none_match_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_not_none_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_dispatch_key_set_guard(
         self,
         dispatch_key: Any,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_tensor_match_guard(
         self,
@@ -283,52 +289,62 @@ class GuardManager:
         self,
         value: set[Any],
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_no_hasattr_guard(
         self,
         attr_name: str,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_dict_contains_guard(
         self,
         contains: bool,
         key: Any,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_type_match_guard(
         self,
         value: int,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_dict_version_guard(
         self,
         value: Any,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_set_contains_guard(
         self,
         contains: bool,
         item: Any,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_dual_level_match_guard(
         self,
         level: int,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_tuple_iterator_length_guard(
         self,
         length: int,
         type_id: int,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_range_iterator_match_guard(
         self,
@@ -337,10 +353,12 @@ class GuardManager:
         step: int,
         type_id: int,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_default_device_guard(
         self,
         verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def mark_tag_safe(self) -> None: ...
     def mark_tag_safe_root(self) -> None: ...

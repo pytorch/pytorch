@@ -439,14 +439,16 @@ user_stack=None)
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
+        guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"], "")
         guard_manager.add_lambda_guard(
             functools.partial(ge_match, expected=5),
             ge_match_verbose_code_parts(expected=5),
+            "",
         )
         guard_manager.add_lambda_guard(
             functools.partial(less_match, expected=10),
             less_match_verbose_code_parts(expected=10),
+            "",
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 3)
         self.assertEqual(len(guard_manager.get_accessors()), 0)
@@ -462,14 +464,16 @@ user_stack=None)
 
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"], "")
         guard_manager.getattr_manager("x", "x", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
             equals_match_verbose_code_parts(foo.x),
+            "",
         )
         guard_manager.getattr_manager("y", "y", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
             equals_match_verbose_code_parts(foo.y),
+            "",
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
@@ -508,14 +512,16 @@ user_stack=None)
     def test_item_guard_manager(self):
         foo = [1, 2]
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"], "")
         guard_manager.getitem_manager(0, "", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[0]),
             equals_match_verbose_code_parts(foo[0]),
+            "",
         )
         guard_manager.getitem_manager(1, "", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[1]),
             equals_match_verbose_code_parts(foo[1]),
+            "",
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
@@ -555,13 +561,13 @@ user_stack=None)
         }
 
         guards_manager = RootGuardManager()
-        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"], "")
         guards_manager.framelocals_manager(
             ("a", 0), "", 1, default_mgr_enum
-        ).add_equals_match_guard(1, ["a == 1"])
+        ).add_equals_match_guard(1, ["a == 1"], "")
         guards_manager.framelocals_manager(
             ("b", 1), "", 2, default_mgr_enum
-        ).add_equals_match_guard(2, ["b == 2"])
+        ).add_equals_match_guard(2, ["b == 2"], "")
 
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
@@ -600,13 +606,13 @@ user_stack=None)
         }
 
         guards_manager = RootGuardManager()
-        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"], "")
         guards_manager.dict_getitem_manager(
             "a", "", 1, default_mgr_enum
-        ).add_equals_match_guard(1, ["a == 1"])
+        ).add_equals_match_guard(1, ["a == 1"], "")
         guards_manager.dict_getitem_manager(
             "b", "", 2, default_mgr_enum
-        ).add_equals_match_guard(2, ["b == 2"])
+        ).add_equals_match_guard(2, ["b == 2"], "")
 
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
@@ -623,6 +629,7 @@ user_stack=None)
             and isinstance(x.x, torch.Tensor)
             and isinstance(x.y, int),
             "global guard fail",
+            "",
         )
 
         self.assertTrue(guard_manager.check(global_pair))
@@ -655,6 +662,7 @@ user_stack=None)
         mro_manager.add_length_check_guard(
             3,
             "Expected len(type(foo).__mro__) == 3",
+            "",
         )
 
         # type(foo).__mro__[0].a = 4
@@ -673,6 +681,7 @@ user_stack=None)
         attr_manager.add_lambda_guard(
             lambda x: x == 4,
             "Expected value 4",
+            "",
         )
 
         self.assertTrue(guard_manager.check(f_locals))
@@ -685,11 +694,11 @@ user_stack=None)
         guard_manager = RootGuardManager()
         # Check a[3] which is tuple_iterator_getitem(foo, 2)
         guard_manager.add_tuple_iterator_length_guard(
-            5, id_type(iter(())), ["len == 5"]
+            5, id_type(iter(())), ["len == 5"], ""
         )
         guard_manager.tuple_iterator_getitem_manager(
             2, "", foo, default_mgr_enum
-        ).add_equals_match_guard(a[3], ["x==4"])
+        ).add_equals_match_guard(a[3], ["x==4"], "")
 
         # Check that type match works
         self.assertFalse(guard_manager.check(False))
@@ -713,6 +722,7 @@ user_stack=None)
         weakref_manager.add_lambda_guard(
             lambda x: isinstance(x, torch.Tensor),
             "global weakref fail",
+            "",
         )
 
         self.assertTrue(guard_manager.check(None))
@@ -732,6 +742,7 @@ user_stack=None)
         foo_mgr.add_lambda_guard(
             lambda x: x == 3,
             "Expected value 3",
+            "",
         )
         self.assertTrue(guard_manager.check(a))
 
@@ -789,7 +800,7 @@ user_stack=None)
 
         # Check that no one can add a leaf guard
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_id_match_guard(id_type(f_locals), "id match")
+            dict_mgr.add_id_match_guard(id_type(f_locals), "id match", "")
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):
@@ -806,17 +817,18 @@ user_stack=None)
         dict_mgr.get_key_manager(0, "", "a", default_mgr_enum).add_equals_match_guard(
             "a",
             ["dict.keys()[0] == a"],
+            "",
         )
         self.assertTrue(root.check(f_locals))
         dict_mgr.get_value_manager(0, "", 1, default_mgr_enum).add_equals_match_guard(
-            1, ["d[0] == 1"]
+            1, ["value == 1"], ""
         )
         self.assertTrue(root.check(f_locals))
 
         # Add key-value manager (nothing : {"z" : 3})
         self.assertTrue(root.check(f_locals))
         dict_mgr.get_key_manager(1, "", nothing, default_mgr_enum).add_lambda_guard(
-            lambda x: x is nothing, ["x is nothing"]
+            lambda key: key is nothing, ["key is nothing"], ""
         )
         self.assertTrue(root.check(f_locals))
         value_mgr = dict_mgr.get_value_manager(
