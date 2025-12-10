@@ -1,6 +1,6 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable
-from typing import Optional, TypeAlias, TypeVar, Union
+from typing import TypeAlias, TypeVar
 
 import torch
 from torch.distributed.tensor._api import DTensor
@@ -14,8 +14,8 @@ from torch.distributed.tensor._op_schema import (
 
 # convenient wrapper to register sharding propagation rules
 def register_prop_rule(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
 ) -> Callable[
     [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
 ]:
@@ -43,8 +43,8 @@ _ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
 
 def register_op_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
 ) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
