@@ -430,3 +430,248 @@ def my_string_op_string_ref(t, accessor, passthru) -> tuple[list[str], int]:
     return torch.ops.libtorch_agnostic_2_10.my_string_op_string_ref.default(
         t, accessor, passthru
     )
+
+
+def my_set_requires_grad(t, requires_grad) -> Tensor:
+    """
+    Sets the requires_grad attribute on a tensor.
+
+    Args:
+        t: Tensor - input tensor
+        requires_grad: bool - whether the tensor requires gradient
+
+    Returns: Tensor - the input tensor with requires_grad set
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_set_requires_grad.default(
+        t, requires_grad
+    )
+
+
+def my_to_device(t, device) -> Tensor:
+    """
+    Moves a tensor to the specified device.
+
+    Args:
+        t: Tensor - input tensor
+        device: Device - target device
+
+    Returns: Tensor - tensor on the new device
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_device.default(t, device)
+
+
+def my_to_dtype(t, dtype) -> Tensor:
+    """
+    Converts a tensor to the specified dtype.
+
+    Args:
+        t: Tensor - input tensor
+        dtype: ScalarType - target dtype (e.g., torch.float64)
+
+    Returns: Tensor - tensor with the new dtype
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype.default(t, dtype)
+
+
+def my_contiguous(t) -> Tensor:
+    """
+    Returns a contiguous tensor with the default memory format.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: Tensor - contiguous tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous.default(t)
+
+
+def my_contiguous_memory_format(t, memory_format) -> Tensor:
+    """
+    Returns a contiguous tensor with the specified memory format.
+
+    Args:
+        t: Tensor - input tensor
+        memory_format: MemoryFormat - memory format (e.g., torch.channels_last)
+
+    Returns: Tensor - contiguous tensor with specified memory format
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_contiguous_memory_format.default(
+        t, memory_format
+    )
+
+
+def my_to_dtype_layout(
+    t,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    non_blocking=False,
+    copy=False,
+    memory_format=None,
+) -> Tensor:
+    """
+    Converts a tensor to the specified dtype, layout, device, and/or memory format.
+
+    Args:
+        t: Tensor - input tensor
+        dtype: ScalarType or None - target dtype (e.g., torch.float64)
+        layout: Layout or None - target layout (e.g., torch.strided)
+        device: Device or None - target device
+        pin_memory: bool or None - whether to use pinned memory
+        non_blocking: bool - if True, try to perform the operation asynchronously
+        copy: bool - if True, always copy the tensor
+        memory_format: MemoryFormat or None - target memory format (e.g., torch.channels_last)
+
+    Returns: Tensor - converted tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_to_dtype_layout.default(
+        t, dtype, layout, device, pin_memory, non_blocking, copy, memory_format
+    )
+
+
+def my_new_empty(
+    self,
+    size,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+) -> Tensor:
+    """
+    Creates a new uninitialized tensor with the specified size and properties.
+
+    Args:
+        self: Tensor - input tensor (used to infer default properties)
+        size: list[int] - size of the new tensor
+        dtype: ScalarType or None - data type of the new tensor
+        layout: Layout or None - layout of the new tensor
+        device: Device or None - device for the new tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - new uninitialized tensor
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_new_empty.default(
+        self, size, dtype, layout, device, pin_memory
+    )
+
+
+def my_new_zeros(
+    self,
+    size,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+) -> Tensor:
+    """
+    Creates a new tensor filled with zeros with the specified size and properties.
+
+    Args:
+        self: Tensor - input tensor (used to infer default properties)
+        size: list[int] - size of the new tensor
+        dtype: ScalarType or None - data type of the new tensor
+        layout: Layout or None - layout of the new tensor
+        device: Device or None - device for the new tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - new tensor filled with zeros
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_new_zeros.default(
+        self, size, dtype, layout, device, pin_memory
+    )
+
+
+def my_sum(self, dim=None, keepdim=False, dtype=None) -> Tensor:
+    """
+    Returns the sum of the tensor along the specified dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the sum of the tensor along the specified dimensions
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum.default(self, dim, keepdim, dtype)
+
+
+def my_sum_out(out, self, dim=None, keepdim=False, dtype=None) -> Tensor:
+    """
+    Computes the sum of the tensor along the specified dimensions and writes
+    the result to the output tensor.
+
+    Args:
+        out: Tensor - output tensor (modified in-place)
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the output tensor (same as out parameter)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_out.default(
+        out, self, dim, keepdim, dtype
+    )
+
+
+def my_sum_all(self) -> Tensor:
+    """
+    Returns the sum of all elements in the tensor (reduces to a scalar).
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - scalar tensor containing the sum of all elements
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_all.default(self)
+
+
+def my_sum_dim1(self) -> Tensor:
+    """
+    Returns the sum of the tensor along dimension 1.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: Tensor - the sum of the tensor along dimension 1
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_dim1.default(self)
+
+
+def my_full(
+    size, fill_value, dtype=None, layout=None, device=None, pin_memory=None
+) -> Tensor:
+    """
+    Creates a tensor filled with a scalar value.
+
+    Args:
+        size: list[int] - size of the tensor to create
+        fill_value: float - value to fill the tensor with
+        dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
+        device: Device or None - device on which to create the tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - a tensor filled with fill_value
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_full.default(
+        size, fill_value, dtype, layout, device, pin_memory
+    )
+
+
+def my_subtract(self, other, alpha=1.0) -> Tensor:
+    """
+    Subtracts other from self, scaled by alpha.
+
+    Computes: self - alpha * other
+
+    Args:
+        self: Tensor - input tensor
+        other: Tensor - tensor to subtract
+        alpha: float - scaling factor for other (default: 1.0)
+
+    Returns: Tensor - result of subtraction
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_subtract.default(self, other, alpha)

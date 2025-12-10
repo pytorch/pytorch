@@ -1,11 +1,9 @@
 #include <torch/csrc/lazy/core/metrics.h>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/util.h>
 
 #include <algorithm>
 #include <chrono>
