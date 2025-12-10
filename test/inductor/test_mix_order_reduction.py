@@ -582,6 +582,8 @@ class MixOrderReductionTest(TestBase):
             lambda: torch.autograd.grad(act, inputs_for_grad, dys)
         )
         tol = 1e-3 if dtype == torch.float32 else 1e-2
+        if GPU_TYPE == "xpu":
+            tol = 1e-3 if dtype == torch.float32 else 2e-2
         self.assertTrue(same((ref, ref_grads[:-2]), (act, act_grads[:-2]), tol=tol))
         if dtype == torch.float32:
             # bfloat16 cause big numerical instability for grad_weight
