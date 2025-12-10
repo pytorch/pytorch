@@ -1040,9 +1040,9 @@ class MetalKernel(SIMDKernel):
 
         # Add error buffer index if error reporting is used
         # TODO(malfet) Figure out how to do it for aoti
-        if "error" in self.headers:
+        if "error" in self.headers and not V.graph.cpp_wrapper:
             args.append(
-                f"error_buf_idx={len([arg for arg in args if '=' not in arg])}"
+                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
             )
 
         wrapper.generate_kernel_call(
