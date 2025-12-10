@@ -219,7 +219,7 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t 
         : a));
 }
 
-// used to calulate complex values
+// used to calculate complex values
 // Note that z = a + bi with a = c1 + c2i and b = d1 + d2i,
 // z = (c1+c2i) + (d1+d2i)i = (c1-d2) + (c2+d1)i
 template <typename scalar_t>
