@@ -187,7 +187,7 @@ class BenchmarkRunner:
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 100
+        self.iters = 2000
         self.has_explicit_iteration_count = False
         self.multiplier = 2
         self.predefined_minimum_secs = 1
@@ -371,7 +371,7 @@ class BenchmarkRunner:
                 "cuda_sync": cuda_sync,
             },
         )
-        result = timer.adaptive_autorange(min_run_time=0.0001)
+        result = timer.adaptive_autorange(min_run_time=0.001)
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
