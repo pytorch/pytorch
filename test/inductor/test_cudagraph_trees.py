@@ -4725,29 +4725,17 @@ if HAS_CUDA_AND_TRITON:
     from torch.testing._internal.common_methods_invocations import op_db
 
     # Ops that involve indexing/scattering that we want to test with cudagraphs
-    # Using startswith matching to catch variants (e.g., scatter_reduce_amax)
-    # but avoiding unrelated ops like diagonal_scatter
-    INDEXING_OPS_PREFIXES = (
+    INDEXING_OPS = (
         "index_put",
         "index_add",
         "index_copy",
         "index_fill",
-        "scatter_add",
-        "scatter_reduce",
+        "scatter",
     )
 
-    # Exact matches only for ops where prefix matching would be too broad
-    INDEXING_OPS_EXACT = frozenset(["scatter"])
-
-    def _matches_indexing_op(op_name):
-        if op_name in INDEXING_OPS_EXACT:
-            return True
-        for prefix in INDEXING_OPS_PREFIXES:
-            if op_name.startswith(prefix):
-                return True
-        return False
-
-    indexing_op_db = [op for op in op_db if _matches_indexing_op(op.name)]
+    indexing_op_db = [
+        op for op in op_db if any(idx_op in op.name for idx_op in INDEXING_OPS)
+    ]
 
     class TestCudagraphIndexingOps(DeviceTypeTestBase):
         """
