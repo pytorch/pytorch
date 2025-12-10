@@ -3645,7 +3645,10 @@ def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool
             _, kwargs = normalized
             indices = kwargs["indices"]
             for idx in indices:
-                if idx is not None and idx.meta["val"].dtype in (torch.bool, torch.uint8):
+                if idx is not None and idx.meta["val"].dtype in (
+                    torch.bool,
+                    torch.uint8,
+                ):
                     return True
 
     return False
@@ -3659,6 +3662,7 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - Input-dependent unsafe ops (e.g., index_put with boolean indices)
+    - Ops with sparse tensor outputs
     """
     target = fx_node.target
 
@@ -3677,6 +3681,13 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     if _fx_node_is_input_dependent_cudagraph_unsafe(fx_node):
         return True
 
+    # Check for sparse tensor outputs
+    if (val := fx_node.meta.get("val")) is not None:
+        vals = [val] if not isinstance(val, (list, tuple)) else val
+        for v in vals:
+            if isinstance(v, torch.Tensor) and v.is_sparse:
+                return True
+
     return False
 
 
@@ -3688,6 +3699,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
     - Control flow nodes (Conditional, WhileLoop)
+    - Ops with sparse tensor outputs
     """
     from . import ir
 
