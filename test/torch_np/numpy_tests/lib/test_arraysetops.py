@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
-    from numpy import ediff1d, isin, intersect1d, setdiff1d, setxor1d, union1d, unique
+    from numpy import ediff1d, intersect1d, isin, setdiff1d, setxor1d, union1d, unique
     from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
 
 else:
@@ -279,8 +279,6 @@ class TestSetOps(TestCase):
             assert_isin_equal(ar, empty_array)
             assert_isin_equal(empty_array, empty_array)
 
-    @parametrize("kind", [None, "sort", "table"])
-    def test_isin(self, kind):
         # we use two different sizes for the b array here to test the
         # two different paths in isin().
         for mult in (1, 10):
