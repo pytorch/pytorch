@@ -4980,6 +4980,69 @@ class CommonTemplate:
                 torch.randn([320, 2048, 1, 1]).to(memory_format=torch.channels_last),
             ),
             check_lowp=False,
+            atol=6e-5,
+            rtol=0.001,
+        )
+
+    @config.patch(
+        {
+            "max_autotune_conv_bwd_weight_backends": "TRITON",
+            "max_autotune_conv_bwd_input_backends": "TRITON",
+        }
+    )
+    @parametrize("dilation", (1, 2))
+    @parametrize("stride", (1, 2))
+    @parametrize("padding", (0, 1))
+    @parametrize("kernel", (1, 3))
+    @parametrize("channels", ([3, 4], [4, 128], [128, 4], [61, 151], [128, 128]))
+    @parametrize("groups", (1, 4, 128))
+    def test_conv2d_backward(
+        self,
+        channels: list,
+        stride: int,
+        dilation: int,
+        padding: int,
+        kernel: int,
+        groups: int,
+    ):
+        if self.device == "cpu":
+            return
+
+        if channels[0] % groups != 0 or channels[1] % groups != 0:
+            return
+
+        def fn(grad_output, inp, weight):
+            conv_backward = torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [channels[1]],
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                False,
+                [0, 0],
+                groups,
+                [True, True, True],
+            )
+            return conv_backward
+
+        input_h = 16
+        input_w = 16
+        output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        self.common(
+            fn,
+            (
+                torch.randn([2, channels[1], output_h, output_w]),
+                torch.randn([2, channels[0], input_h, input_w]),
+                torch.randn([channels[1], channels[0] // groups, kernel, kernel]).to(
+                    memory_format=torch.channels_last
+                ),
+            ),
+            atol=6e-5,
+            rtol=0.001,
+            check_lowp=False,
         )
 
     @parametrize(
