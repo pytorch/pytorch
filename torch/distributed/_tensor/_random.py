@@ -126,6 +126,14 @@ class OffsetBasedRNGTracker(RNGStateTracker):
         """
         Initialize the offset-based RNG tracker.
         
+        When in FakeTensorMode (torch.compile tracing), defers RNG state
+        initialization to avoid creating real tensors during compilation.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        
+        """
+        Initialize the offset-based RNG tracker.
+        
         Args:
             device_mesh: The device mesh for distributed operations
             
@@ -150,6 +158,14 @@ class OffsetBasedRNGTracker(RNGStateTracker):
             self._device_rng_state: Optional[torch.Tensor] = None
         else:
             # Normal initialization - get actual RNG state
+            
+        # Check if we're in FakeTensorMode (during torch.compile)
+        fake_mode = FakeTensorMode.current_mode()
+        if fake_mode is not None:
+            # Defer RNG state initialization during tracing
+            self._device_rng_state: Optional[torch.Tensor] = None
+        else:
+            # Normal initialization
             self._device_rng_state = self._get_device_state()
     
     def get_seed(self, name: str) -> int:
@@ -248,6 +264,18 @@ class OffsetBasedRNGTracker(RNGStateTracker):
     
     @contextmanager
     def _distribute_region(self, spec):
+        """Context manager for distributed RNG, with FakeTensorMode support."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        
+        # Lazy initialization if needed
+        if self._device_rng_state is None and FakeTensorMode.current_mode() is None:
+            self._device_rng_state = self._device_handle.get_rng_state().to(self._device)
+        
+        # Skip RNG manipulation during tracing
+        if FakeTensorMode.current_mode() is not None:
+            yield
+            return
+        
         """
         Context manager for distributed random number generation.
         
