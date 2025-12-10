@@ -299,7 +299,14 @@ class IndexPropagation(DefaultHandler):
         return IndexPropVar.new_symbolic(new_expr)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        # DEBUG: Trace how operations flow through IndexPropagation
+        if name in ("load", "indirect_indexing", "index_expr"):
+            print(f"\n=== IndexProp._default: {name} ===")
+            print(f"  args types: {[type(a).__name__ for a in args]}")
+        
         if not hasattr(SymPyOps, name):
+            if name in ("load", "indirect_indexing", "index_expr"):
+                print(f"  -> FALLBACK: SymPyOps has no '{name}'")
             return self.fallback(name, args, kwargs)
 
         var_arguments = [
@@ -308,8 +315,14 @@ class IndexPropagation(DefaultHandler):
             if isinstance(a, IndexPropVar)
         ]
         if not all(v.is_symbolic for v in var_arguments):
+            if name in ("load", "indirect_indexing", "index_expr"):
+                print(f"  -> FALLBACK: not all var_arguments are symbolic")
+                for i, v in enumerate(var_arguments):
+                    print(f"     var_arguments[{i}].is_symbolic = {v.is_symbolic}")
             return self.fallback(name, args, kwargs)
 
+        if name in ("load", "indirect_indexing", "index_expr"):
+            print(f"  -> PROPAGATE_SYMPY")
         return self.propagate_sympy(name, args, kwargs)
 
     def statically_true(self, e):
@@ -342,6 +355,17 @@ class IndexPropagation(DefaultHandler):
         check: bool = True,
         wrap_neg=True,
     ) -> Any:
+        # DEBUG: Log indirect_indexing decision
+        print(f"\n=== INDIRECT_INDEXING DEBUG ===")
+        print(f"  index type: {type(index).__name__}")
+        print(f"  size: {size}")
+        if isinstance(index, IndexPropVar):
+            print(f"  index.is_symbolic: {index.is_symbolic}")
+            print(f"  index.value type: {type(index.value).__name__}")
+            print(f"  index.value: {index.value}")
+        else:
+            print(f"  index (raw): {index}")
+        
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
             # We still need to (perhaps) wrap the expression and add bound checks
@@ -349,6 +373,7 @@ class IndexPropagation(DefaultHandler):
             # kernels into indirect indexing
 
             expr = sympy.sympify(index.value.expr)
+            print(f"  -> SYMBOLIC PATH: expr={expr}")
 
             # TODO Perhaps move this logic to the simplify indexing pass
             def wrap_expr(expr):
@@ -365,6 +390,7 @@ class IndexPropagation(DefaultHandler):
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
+            print(f"  -> can_prove_lower={can_prove_lower}, can_prove_upper={can_prove_upper}")
             if wrap_neg:
                 expr = wrap_expr(expr)
             if generate_assert(check):
@@ -373,8 +399,10 @@ class IndexPropagation(DefaultHandler):
                     (expr, size),
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
+            print(f"  -> DECISION: INLINED as {expr}")
             return expr
 
+        print(f"  -> DECISION: FALLBACK (creating separate buffer)")
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check, wrap_neg), {}
         ).value
