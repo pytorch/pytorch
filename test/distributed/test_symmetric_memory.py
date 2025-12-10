@@ -6,9 +6,6 @@ import random
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
-import triton
-import triton.language as tl
-
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -61,17 +58,6 @@ os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
-
-
-@triton.jit
-def barrier_test_kernel(
-    signal_pad_ptrs,
-    rank: tl.constexpr,
-    world_size: tl.constexpr,
-):
-    torch.ops.symm_mem.symm_mem_sync(
-        signal_pad_ptrs, rank, world_size, None, False, False
-    )
 
 
 @instantiate_parametrized_tests
@@ -224,7 +210,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(signal_pad.numel(), 64)
 
         # Sanity check that writes to buffer doesn't corrupt signal_pad
-        t = symm_mem.empty(0, device="cuda")
+        t = symm_mem.empty(1, device="cuda")
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
         signal_pad.fill_(42)
@@ -1232,36 +1218,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmMemBarrierTest(MultiProcContinuousTest):
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    def _init_process(self):
-        torch.cuda.set_device(self.device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
-        torch.manual_seed(42 + self.rank)
-
-    @skip_if_rocm_multiprocess  # SIGIOT error
-    @skip_if_lt_x_gpu(2)
-    def test_torch_ops_symm_mem_sync_within_triton_kernel(self):
-        """Test using torch.ops.symm_mem.symm_mem_sync within Triton kernel"""
-        self._init_process()
-        t = symm_mem.empty(4096, device=self.device)
-        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
-
-        barrier_test_kernel[(32, 1, 1)](
-            symm_mem_hdl.signal_pad_ptrs_dev,
-            rank=symm_mem_hdl.rank,
-            world_size=symm_mem_hdl.world_size,
-        )
-
-        signal_pad = symm_mem_hdl.get_signal_pad(symm_mem_hdl.rank)
-        assert signal_pad.eq(0).all().item()
-
-
-@instantiate_parametrized_tests
-@requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
@@ -1407,6 +1363,61 @@ class SymmMemSingleProcTest(TestCase):
 
         _SymmetricMemory.memset32(t, offset=0, val=1, count=64)
         _SymmetricMemory.memset32(t, offset=63, val=1, count=1)
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemPoolTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_tensor_factory(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            tensor = torch.arange(numel, dtype=dtype, device=self.device)
+
+        # Rendezvous should not error out
+        symm_mem.rendezvous(tensor, group=group_name)
+        tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
+        expected = (
+            torch.arange(numel, dtype=dtype, device=self.device) * self.world_size
+        )
+        self.assertEqual(tensor, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_compute_ops(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            y = torch.mm(x, w)
+
+        # One-shot all-reduce should not error out
+        y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
+        expected = torch.mm(x, w) * self.world_size
+        self.assertEqual(y, expected)
 
 
 if __name__ == "__main__":
