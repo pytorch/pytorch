@@ -668,7 +668,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
-  
+
   addAttr(kIsAsynchronizedOp, kETIsAsynchronizedOp, "string");
 
 #endif // USE_DISTRIBUTED
