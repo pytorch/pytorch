@@ -535,7 +535,7 @@ def common_pointwise_strategy(
                 partial_supports_linearity = placement.is_partial(
                     "sum"
                 ) or placement.is_partial("avg")
-                if linearity > 0 and partial_supports_linearity:
+                if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
                 else:
