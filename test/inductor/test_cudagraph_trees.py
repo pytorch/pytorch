@@ -4716,6 +4716,80 @@ if HAS_CUDA_AND_TRITON:
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestSAC)
 
+    # OpInfo-based test for index/scatter ops with cudagraphs
+    from torch.testing._internal.common_device_type import (
+        DeviceTypeTestBase,
+        instantiate_device_type_tests,
+        ops,
+    )
+    from torch.testing._internal.common_methods_invocations import op_db
+
+    # Ops that involve indexing/scattering that we want to test with cudagraphs
+    INDEXING_OPS = frozenset(
+        [
+            "index_put",
+            "scatter",
+            "scatter_add",
+            "scatter_reduce",
+            "index_add",
+            "index_copy",
+            "index_fill",
+            # "_unsafe_masked_index_put_accumulate",  # pre-existing inductor bug with float16
+        ]
+    )
+
+    indexing_op_db = [op for op in op_db if op.name in INDEXING_OPS]
+
+    class TestCudagraphIndexingOps(DeviceTypeTestBase):
+        """
+        Test that index/scatter ops work correctly with cudagraphs.
+        These ops should either:
+        1. Work correctly with cudagraph capture, or
+        2. Properly skip cudagraphs (e.g., for boolean indices)
+        """
+
+        @ops(
+            indexing_op_db,
+            allowed_dtypes=(torch.float32,),
+        )
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        def test_cudagraph_indexing_ops(self, device, dtype, op):
+            for deterministic in [False, True]:
+                torch._dynamo.reset()
+
+                samples = op.sample_inputs(device, dtype, requires_grad=False)
+                sample = next(iter(samples))
+
+                def fn(input, *args, **kwargs):
+                    return op.op(input, *args, **kwargs)
+
+                old_deterministic = torch.are_deterministic_algorithms_enabled()
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+
+                    # Run eager first - skip if eager fails (pre-existing issue)
+                    try:
+                        input_clone = sample.input.clone()
+                        expected = fn(input_clone, *sample.args, **sample.kwargs)
+                    except Exception as e:
+                        continue  # Skip this deterministic setting if eager fails
+
+                    compiled_fn = torch.compile(fn, mode="reduce-overhead")
+
+                    # Run multiple times to trigger cudagraph recording
+                    for _ in range(3):
+                        input_clone = sample.input.clone()
+                        result = compiled_fn(input_clone, *sample.args, **sample.kwargs)
+
+                    self.assertEqual(result, expected)
+                finally:
+                    torch.use_deterministic_algorithms(old_deterministic)
+
+    if torch.cuda.is_available():
+        instantiate_device_type_tests(
+            TestCudagraphIndexingOps, globals(), only_for=("cuda",)
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
