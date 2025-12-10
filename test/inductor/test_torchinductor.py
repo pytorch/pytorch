@@ -135,10 +135,12 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
+    HAS_TPU,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
+    RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
 )
