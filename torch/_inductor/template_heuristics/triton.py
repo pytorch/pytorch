@@ -1744,6 +1744,19 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
             if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k), k):
                 yield kwargs
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        assert isinstance(kernel_inputs, MMKernelInputs)
+        m, n, k = kernel_inputs.mnk_symbolic()
+        # We do not want to allow tf32 for MM+MM, can cause
+        # accuracy issues
+        return {
+            "ALLOW_TF32": False,
+        }
+
 
 class TMAWorkspaceMixin(MMTemplateConfigMixin):
     """

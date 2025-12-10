@@ -1361,6 +1361,7 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
     )
+    @config.patch(max_autotune_gemm_backends="TRITON")
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
