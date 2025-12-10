@@ -14,12 +14,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-# Source ROCm environment variables if available (for theRock nightly builds)
-# shellcheck disable=SC1091
-if [[ -f /etc/rocm_env.sh ]]; then
-  source /etc/rocm_env.sh
-fi
-
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
