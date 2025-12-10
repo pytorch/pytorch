@@ -433,7 +433,7 @@ class TensorVariable(VariableTracker):
         # Today, var_getattr returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
-        if name in ("size", "stride", "__iter__"):
+        if name in all_tensor_attrs:
             return ConstantVariable(True)
 
         try:
