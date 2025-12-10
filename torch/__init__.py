@@ -308,9 +308,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
     """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     if platform.system() != "Linux":
-        raise AssertionError(
-            f"Should only be called on Linux, got {platform.system()}"
-        )
+        raise AssertionError(f"Should only be called on Linux, got {platform.system()}")
 
     lib_path = None
     for path in sys.path:
