@@ -565,6 +565,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(norm, 11)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        norm = norm - 1
+
+        self.assertEqual(norm, 9)
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
