@@ -1579,6 +1579,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def as_python_constant(self):
+        return self.get_function()
+
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
