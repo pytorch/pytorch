@@ -879,11 +879,11 @@ Tensor logsumexp_backward(
     Tensor grad,
     const Tensor& self,
     Tensor result,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim) {
   if (!keepdim && self.dim() != 0) {
-    grad = unsqueeze_multiple(grad, dim, self.dim());
-    result = unsqueeze_multiple(result, dim, self.dim());
+    grad = unsqueeze_multiple(grad, opt_dim, self.dim());
+    result = unsqueeze_multiple(result, opt_dim, self.dim());
   }
   return grad * (self - result).exp().conj();
 }
@@ -6984,8 +6984,10 @@ Tensor lu_factor_ex_jvp(
 Tensor logsumexp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim) {
+  auto dim = opt_dim.has_value() ? opt_dim.value() : IntArrayRef{};
+
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {

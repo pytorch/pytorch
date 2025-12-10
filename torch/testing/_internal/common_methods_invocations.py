@@ -1569,7 +1569,7 @@ def error_inputs_multi_margin_loss(op, device, **kwargs):
                      error_type=ValueError, error_regex='only p == 1 and p == 2 supported')
 
 
-def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
+def sample_inputs_logsumexp_with_dim(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((), (0,), True),
         ((S, S), (1,), True),
@@ -1587,8 +1587,39 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
                             requires_grad=requires_grad)
             yield SampleInput(t, dim, keepdim)
 
+def sample_inputs_logsumexp_no_dim(self, device, dtype, requires_grad, **kwargs):
+    # Test logsumexp(Tensor self) -> Tensor variant (no dim argument)
+    # This variant computes logsumexp over all dimensions
+    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64, torch.complex64, torch.complex128) else (None,)
+    for low in lows:
+        high = low * 2 if low is not None else None
+        for shape in ((), (S,), (S, S), (S, S, S)):
+            t = make_tensor(shape, dtype=dtype, device=device,
+                            low=low, high=high,
+                            requires_grad=requires_grad)
+            yield SampleInput(t)
+
+def reference_inputs_logsumexp_with_dim(op, device, dtype, requires_grad, **kwargs):
+    # Only include samples with dim for reduction_with_dim variant
+    yield from sample_inputs_logsumexp_with_dim(op, device, dtype, requires_grad, **kwargs)
+
+    # https://github.com/pytorch/pytorch/issues/91843
+    t = torch.tensor([20, 30, 100], dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
+    t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, 0, False)
+
+    # tests masking
+    # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073
+    t = torch.tensor(float("inf"))
+    yield SampleInput(t, 0, True)
+
 def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
-    yield from sample_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs)
+    # Include both with-dim and no-dim variants in reference inputs
+    # This is used by the reduction_no_dim variant which doesn't have special.logsumexp alias
+    yield from sample_inputs_logsumexp_with_dim(op, device, dtype, requires_grad, **kwargs)
+    yield from sample_inputs_logsumexp_no_dim(op, device, dtype, requires_grad, **kwargs)
 
     # https://github.com/pytorch/pytorch/issues/91843
     t = torch.tensor([20, 30, 100], dtype=dtype, device=device, requires_grad=requires_grad)
@@ -20242,13 +20273,23 @@ op_db: list[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('logsumexp',
+           variant_test_name='reduction_with_dim',
            aliases=('special.logsumexp',),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_fast_mode=False,
-           sample_inputs_func=sample_inputs_logsumexp,
+           sample_inputs_func=sample_inputs_logsumexp_with_dim,
+           reference_inputs_func=reference_inputs_logsumexp_with_dim),
+    OpInfo('logsumexp',
+           variant_test_name='reduction_no_dim',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           gradcheck_fast_mode=False,
+           sample_inputs_func=sample_inputs_logsumexp_no_dim,
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
@@ -22986,6 +23027,14 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
+        torch_opinfo_variant_name="reduction_with_dim",
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
+    ),
+    PythonRefInfo(
+        "_refs.logsumexp",
+        torch_opinfo_name="logsumexp",
+        torch_opinfo_variant_name="reduction_no_dim",
         # When keepdim=False logsumexp function uses squeeze operation
         # that is not yet exposed in nvFuser's Python API.
     ),
