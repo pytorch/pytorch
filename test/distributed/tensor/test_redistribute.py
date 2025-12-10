@@ -3,6 +3,7 @@
 
 import contextlib
 import itertools
+import random
 import unittest
 
 import torch
@@ -19,7 +20,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor._collective_utils import (
+    redistribute_cost,
+    shard_dim_alltoall,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
@@ -1046,6 +1050,84 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     )
                     self.assertEqual(make_full_tensor(sharded_dt), input_data)
                     prev_sharded_dt = sharded_dt
+
+    @with_comms
+    def test_graph_based_redistribute_cost(self):
+        """
+        This test verifies the correctness of
+            1. redistribute_cost, and
+            2. min-cost redistribution algorithm
+
+        Give src placements `SRC` and target placements `DST`, below formula
+        should always hold based on the min cost graph algorithm:
+        redistribute_cost(SRC, DST) <= redistribute_cost(SRC, INT) + redistribute_cost(INT, DST) for all INT
+        """
+        torch.manual_seed(21)
+
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                # uneven sharding with padding
+                (13, 2, 13),
+            ]
+
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            with maybe_disable_local_tensor_mode():
+                shard_orders = generate_shard_orders(mesh, tensor_rank)
+
+            shard_orders = list(shard_orders)
+            rng = random.Random(42)
+            rng.shuffle(shard_orders)
+            with use_min_cost_redistribution_plan(
+                enabled=True, reduce_memory_overhead=False
+            ):
+                # MUST set reduce_memory_overhead to False so that
+                # redistribute_cost and DTensorRedistributePlanner use the same
+                # cost function.
+                for i in range(
+                    0, len(shard_orders), 4
+                ):  # we can skip for 2. Skip for 4 to reduce the number of tests
+                    src_order, dst_order = shard_orders[i : i + 2]
+                    # prepare SRC DTensorSpec
+                    src_dtensor = _distribute_tensor(
+                        input_data.clone(),
+                        mesh,
+                        placements=None,
+                        shard_order=src_order,
+                    )
+                    # prepare DST DTensorSpec
+                    dst_dtensor = _distribute_tensor(
+                        input_data.clone(),
+                        mesh,
+                        placements=None,
+                        shard_order=dst_order,
+                    )
+                    src_to_dst_cost = redistribute_cost(
+                        src_dtensor._spec, dst_dtensor._spec
+                    )
+                    # chose every two to reduce the number of tests
+                    for intermediate_order in shard_orders[::2]:
+                        # prepare INT DTensorSpec
+                        intermediate_dtensor = _distribute_tensor(
+                            input_data.clone(),
+                            mesh,
+                            placements=None,
+                            shard_order=intermediate_order,
+                        )
+                        src_to_int_cost = redistribute_cost(
+                            src_dtensor._spec, intermediate_dtensor._spec
+                        )
+                        int_to_dst_cost = redistribute_cost(
+                            intermediate_dtensor._spec, dst_dtensor._spec
+                        )
+                        self.assertTrue(
+                            src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
+                            f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
+                        )
 
     @with_comms
     def test_ordered_redistribute_with_partial(self):
