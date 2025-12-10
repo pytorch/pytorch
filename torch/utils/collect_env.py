@@ -123,11 +123,15 @@ def run(command):
     if isinstance(command, str):
         is_posix = os.name == 'posix'
         command = shlex.split(command, posix=is_posix)
-    p = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
-    )
-    raw_output, raw_err = p.communicate()
-    rc = p.returncode
+    try:
+        p = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
+        )
+        raw_output, raw_err = p.communicate()
+        rc = p.returncode
+    except (FileNotFoundError, OSError) as e:
+        return 127, "", str(e)
+
     if get_platform() == "win32":
         enc = "oem"
     else:

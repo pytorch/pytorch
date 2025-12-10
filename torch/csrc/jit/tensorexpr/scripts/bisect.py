@@ -10,14 +10,18 @@ def test(cmd, limit):
     cur_env["PYTORCH_JIT_OPT_LIMIT"] = f"tensorexpr_fuser={limit}"
     is_posix = os.name == "posix"
     cmd = shlex.split(cmd, posix=is_posix)
-    p = subprocess.run(
-        cmd,
-        env=cur_env,
-        shell=False,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
+    try:
+        p = subprocess.run(
+            cmd,
+            env=cur_env,
+            shell=False,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except (FileNotFoundError, OSError) as e:
+        print(f"Error: {e}")
+        return 0
     print(p.stdout)
     f = "INTERNAL ASSERT FAILED"
     if f in p.stdout or f in p.stderr:
