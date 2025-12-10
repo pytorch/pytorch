@@ -531,6 +531,99 @@ if HAS_CUDA_AND_TRITON:
 
                 self.assertEqual(fn(*args()), out)
 
+        def test_index_put_boolean_fallback_partitions_cudagraphs(self):
+            """
+            Test that index_put_ with boolean indices (which uses fallback path)
+            properly partitions around the unsafe op. This tests the fix for
+            GitHub issue #169951.
+            """
+
+            def fn(x, mask, values):
+                result = x.clone()
+                result.index_put_([mask], values)
+                return result
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    x = torch.randn(4, 8, device="cuda")
+                    mask = torch.tensor([True, False, True, False], device="cuda")
+                    values = torch.randn(2, 8, device="cuda")
+                    out = fn_c(x, mask, values)
+                    expected = fn(x, mask, values)
+                    self.assertEqual(out, expected)
+
+            # Verify that cudagraphs partition around the unsafe op
+            FileCheck().check("cudagraph partition").run(captured_output[0])
+            # Should not skip cudagraphs entirely
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_index_put_deterministic(self):
+            """
+            Test that index_put_ with accumulate=True and integer indices works
+            correctly with deterministic algorithms enabled.
+
+            With integer indices, the fallback path is cudagraph-safe (only boolean
+            indices trigger .nonzero() which fails capture). So we expect cudagraphs
+            to be used successfully here.
+            """
+
+            def fn(x, y, z):
+                x = torch.zeros_like(x)
+                return x.index_put_([y], z, True)
+
+            # Save the original state
+            orig_deterministic = torch.are_deterministic_algorithms_enabled()
+
+            try:
+                # Enable deterministic algorithms (as done in --accuracy mode)
+                torch.use_deterministic_algorithms(True)
+
+                fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+                def args():
+                    x = torch.zeros((512, 512), dtype=torch.bool, device="cuda")
+                    y = torch.arange(512, dtype=torch.int64, device="cuda")
+                    z = torch.ones((512, 512), dtype=torch.bool, device="cuda")
+                    return x, y, z
+
+                # Run multiple iterations - should not segfault
+                # Integer indices are cudagraph-safe even in deterministic mode
+                for i in range(3):
+                    out = fn_c(*args())
+                    self.assertEqual(fn(*args()), out)
+
+                # Should use cudagraphs since integer indices are safe
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+            finally:
+                # Restore original state
+                torch.use_deterministic_algorithms(orig_deterministic)
+
+        def test_scatter_boolean_index_fails_eager(self):
+            """
+            Test that scatter_ with boolean indices fails in eager mode.
+
+            This documents that ScatterFallback is always cudagraph-safe because
+            boolean indices are impossible for scatter operations - they are
+            rejected at the PyTorch API level before reaching inductor.
+            """
+            x = torch.zeros(10, device="cuda")
+            mask = torch.tensor(
+                [True, False, True, False, True, False, True, False, True, False],
+                device="cuda",
+            )
+            src = torch.ones(5, device="cuda")
+
+            # scatter_ requires integer indices - boolean indices fail
+            with self.assertRaisesRegex(
+                RuntimeError, "scatter.*Expected dtype int32/int64 for index"
+            ):
+                x.scatter_(0, mask, src)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -4681,6 +4774,73 @@ if HAS_CUDA_AND_TRITON:
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestSAC)
+
+    # OpInfo-based test for index/scatter ops with cudagraphs
+    from torch.testing._internal.common_device_type import (
+        DeviceTypeTestBase,
+        instantiate_device_type_tests,
+        ops,
+    )
+    from torch.testing._internal.common_methods_invocations import op_db
+
+    # Ops that involve indexing/scattering that we want to test with cudagraphs
+    INDEXING_OPS = frozenset(
+        [
+            "index_put",
+            "scatter",
+            "scatter_add",
+            "scatter_reduce",
+            "index_add",
+            "index_copy",
+            "index_fill",
+            # "_unsafe_masked_index_put_accumulate",  # pre-existing inductor bug with float16
+        ]
+    )
+
+    indexing_op_db = [op for op in op_db if op.name in INDEXING_OPS]
+
+    class TestCudagraphIndexingOps(DeviceTypeTestBase):
+        """
+        Test that index/scatter ops work correctly with cudagraphs.
+        These ops should either:
+        1. Work correctly with cudagraph capture, or
+        2. Properly skip cudagraphs (e.g., for boolean indices)
+        """
+
+        @ops(
+            indexing_op_db,
+            allowed_dtypes=(torch.float32, torch.float64, torch.float16),
+        )
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        def test_cudagraph_indexing_ops(self, device, dtype, op):
+            torch._dynamo.reset()
+
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+            sample = next(iter(samples))
+
+            def fn(input, *args, **kwargs):
+                return op.op(input, *args, **kwargs)
+
+            # Run eager first - skip if eager fails (pre-existing issue)
+            try:
+                input_clone = sample.input.clone()
+                expected = fn(input_clone, *sample.args, **sample.kwargs)
+            except Exception as e:
+                self.skipTest(f"Eager failed: {e}")
+
+            compiled_fn = torch.compile(fn, mode="reduce-overhead")
+
+            # Run multiple times to trigger cudagraph recording
+            for _ in range(3):
+                input_clone = sample.input.clone()
+                result = compiled_fn(input_clone, *sample.args, **sample.kwargs)
+
+            self.assertEqual(result, expected)
+
+    if torch.cuda.is_available():
+        instantiate_device_type_tests(
+            TestCudagraphIndexingOps, globals(), only_for=("cuda",)
+        )
 
 
 if __name__ == "__main__":
