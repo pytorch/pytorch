@@ -1,9 +1,7 @@
 #include <ATen/record_function.h>
 
 #include <ATen/CPUFunctions.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <c10/util/Enumerate.h>
 #include <torch/nativert/kernels/PrimKernelRegistry.h>

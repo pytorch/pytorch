@@ -333,6 +333,16 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.remainder({a}, {b})"
 
     @staticmethod
+    def truncdiv(a: str, b: str) -> str:
+        # Truncated division (rounds toward zero)
+        # For integers: sign(a)*sign(b) * (abs(a) // abs(b))
+        return f"(jnp.sign({a}) * jnp.sign({b}) * (jnp.abs({a}) // jnp.abs({b}))).astype({a}.dtype)"
+
+    @staticmethod
+    def floordiv(a: str, b: str) -> str:
+        return f"({a} // {b})"
+
+    @staticmethod
     def clamp(x: str, min_val: str, max_val: str) -> str:
         return f"jnp.clip({x}, {min_val}, {max_val})"
 
@@ -1689,7 +1699,7 @@ class PallasKernel(SIMDKernel):
                         )
                     else:
                         code.writeline(
-                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name}.detach())"
                         )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
@@ -1699,7 +1709,9 @@ class PallasKernel(SIMDKernel):
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
                     else:
-                        code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach())"
+                        )
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
@@ -1709,7 +1721,7 @@ class PallasKernel(SIMDKernel):
                         )
                     else:
                         code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous())"
                         )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
