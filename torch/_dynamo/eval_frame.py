@@ -145,6 +145,8 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
+_in_compiled_region = False
+
 
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
@@ -201,6 +203,24 @@ def get_example_inputs(key: str) -> list[Any]:
         _EXAMPLE_INPUTS[key] = []
 
     return _EXAMPLE_INPUTS[key]
+
+
+@contextlib.contextmanager
+def _set_in_compiled_region():
+    global _in_compiled_region
+    _old_in_compiled_region = (
+        _in_compiled_region  # do we need this? can we just set it to False after
+    )
+    _in_compiled_region = True
+    try:
+        yield
+    finally:
+        _in_compiled_region = _old_in_compiled_region
+
+
+def _is_in_compiled_region() -> bool:
+    global _in_compiled_region
+    return _in_compiled_region
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
@@ -438,7 +458,8 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        with _set_in_compiled_region():
+            return super().__call__(*args, **kwargs)
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """
