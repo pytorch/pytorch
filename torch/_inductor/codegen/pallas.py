@@ -1329,18 +1329,30 @@ class PallasKernel(SIMDKernel):
                     #   e.g., index_put(a, [b], c) with a:(800,256,7,7), b:(601,), c:(601,256,7,7)
                     #   Here x0 with range 12544=256*7*7 covers dims 1,2,3 together
                     #
-                    # Heuristic: if # iter vars == # remaining dims, it's element-wise
+                    # Heuristic: if # iter vars in store == # remaining dims, it's element-wise
+                    # BUT: if there are more iter vars in the kernel than in the store index,
+                    # then some iter vars are embedded in the indirect var, requiring slice scatter
                     try:
                         buf = V.graph.get_buffer(name)
                         output_ndim = len(buf.get_size())
                     except Exception:
                         output_ndim = 0
 
-                    num_iter_vars = len(dims_before) + len(dims_after)
+                    num_iter_vars_in_store = len(dims_before) + len(dims_after)
+                    # Total iteration variables in the kernel
+                    total_kernel_iter_vars = len(self.range_tree_nodes)
                     # indirect takes 1 dim, iter vars should cover the rest
                     remaining_dims = output_ndim - 1  # dims other than indirect
 
-                    if num_iter_vars == remaining_dims:
+                    # Element-wise scatter requires:
+                    # 1. num iter vars in store == remaining dims
+                    # 2. All kernel iter vars appear in store (none embedded in indirect)
+                    is_element_wise = (
+                        num_iter_vars_in_store == remaining_dims
+                        and num_iter_vars_in_store == total_kernel_iter_vars
+                    )
+
+                    if is_element_wise:
                         # Element-wise scatter: use iteration variable names
                         # For 2D output with 1 iter var: no reshaping needed (both 1D)
                         # For 3D+ with multiple iter vars: reshape indirect var for broadcasting
