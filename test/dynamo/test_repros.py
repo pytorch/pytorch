@@ -7650,13 +7650,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             def fn(x, optimizer):
                 # Create an LR scheduler which internally calls patch_track_step_called
                 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
-                return x * 2
+                return x * 2, scheduler
 
             model = torch.nn.Linear(10, 10)
             optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
             x = torch.randn(10, 10)
 
-            result = fn(x, optimizer)
+            result, _ = fn(x, optimizer)
             expected = x * 2
             self.assertEqual(result, expected)
             self.assertEqual(cnt.frame_count, 1)
