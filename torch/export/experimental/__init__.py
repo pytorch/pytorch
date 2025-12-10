@@ -86,14 +86,10 @@ def _export_forward_backward(
 
 def _sticky_export(
     forward_func: typing.Callable[_InputT, _RetT],
-    dynamic_shapes_callback: typing.Optional[
-        typing.Callable[
-            _InputT,
-            typing.Union[
-                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
-            ],
-        ]
-    ] = None,
+    dynamic_shapes_callback: typing.Callable[
+        _InputT, list[typing.Any] | dict[str, typing.Any] | tuple[typing.Any, ...]
+    ]
+    | None = None,
 ) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
@@ -399,7 +395,7 @@ class _ExportPackage:
         ):
             zip_ref.extractall(base_directory)
 
-        example_inputs_map: typing.Optional[dict[str, int]] = (
+        example_inputs_map: dict[str, int] | None = (
             {} if package_example_inputs else None
         )
         use_cuda = False
