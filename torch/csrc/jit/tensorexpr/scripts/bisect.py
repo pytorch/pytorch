@@ -1,13 +1,18 @@
 # mypy: ignore-errors
-
+import os
+import shlex
 import subprocess
 
 
 def test(cmd, limit):
     print(f"Testing PYTORCH_JIT_OPT_LIMIT=tensorexpr_fuser={limit} {cmd}")
+    cur_env = os.environ.copy()
+    cur_env["PYTORCH_JIT_OPT_LIMIT"] = f"tensorexpr_fuser={limit}"
+    cmd_args = shlex.split(cmd)
     p = subprocess.run(
-        f"PYTORCH_JIT_OPT_LIMIT=tensorexpr_fuser={limit} {cmd}",
-        shell=True,
+        cmd_args,
+        env=cur_env,
+        shell=False,
         capture_output=True,
         encoding="utf-8",
         check=False,
