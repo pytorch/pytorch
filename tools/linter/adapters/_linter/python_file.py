@@ -29,12 +29,13 @@ class PythonFile:
         path: Path | None = None,
     ) -> None:
         self.linter_name = linter_name
-        if contents is not None:
-            self.contents = contents
+        self._contents = contents
         self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
 
     @cached_property
     def contents(self) -> str:
+        if self._contents is not None:
+            return self._contents
         return self.path.read_text() if self.path else ""
 
     @cached_property
