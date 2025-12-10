@@ -59,24 +59,6 @@
 // forward declare
 class cublasCommonArgs;
 
-#ifndef _WIN32
-namespace fbgemm_gpu {
-
-// NOTE(slayton58): FBGemm_GPU kernels come from <fbgemm_gpu/torch_ops.h> within the FBGemm repo.
-//                  To update supported ops means a submodule bump, which is.. painful. Instead, we
-//                  can simply forward-declare the methods we want to use.. Works at least as a short-term
-//                  thing, but should still be fixed somewhere/somehow.
-at::Tensor f4f4bf16(
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    std::optional<at::Tensor>,
-    bool use_mx);
-
-} // namespace fbgemm_gpu
-#endif
-
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
@@ -1184,22 +1166,14 @@ _scaled_mxfp4_mxfp4(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #else
   // NVIDIA
-  // NOTE(slayton58): fbgemm_gpu::f4f4bf16 does *not* allow passing an output tensor,
-  //                  but we have one we need to use. Two clear options are to copy into
-  //                  our output (slow), or use a move-assignment-operator (faster).
-  //                  However, the compiler can complain about the explicit move preventing
-  //                  copy elision because the return from f4f4bf16 is a temporary object.
-  //                  So we don't explicitly move, and trust the compiler here...
-  //                  In the longer term this should be fixed on the FBGemm side.
-  out = fbgemm_gpu::f4f4bf16(
+  fbgemm_gpu::f4f4bf16(
       mat_a,
       mat_b.transpose(-2, -1),
       scale_a,
       scale_b,
-      std::nullopt, /* global_scale */
-      true          /* use_mx */
+      out,
+      std::nullopt /* global_scale */
   );
-
   return out;
 #endif
 #endif
