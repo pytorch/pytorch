@@ -170,6 +170,9 @@ def is_opaque_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
 
+    if cls.__hash__ is None:
+        return False
+
     if cls not in _OPAQUE_TYPES:
         return False
 
@@ -187,6 +190,9 @@ def is_opaque_value_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
+    if cls.__hash__ is None:
+        return False
+
     return _OPAQUE_TYPES[cls].opaque_typ == "value"
 
 
@@ -200,6 +206,9 @@ def is_opaque_reference_type(cls: Any) -> bool:
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
+
+    if cls.__hash__ is None:
+        return False
 
     return _OPAQUE_TYPES[cls].opaque_typ == "reference"
 
