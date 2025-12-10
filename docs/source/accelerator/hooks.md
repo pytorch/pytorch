@@ -2,31 +2,31 @@
 
 ## Background
 
-Accelerator hooks are the mechanism for integrating custom accelerator devices into PyTorch’s runtime.
+OpenReg hooks provide a mechanism for integrating custom accelerator devices into PyTorch's runtime system. OpenReg (Open Registration) is PyTorch's extensibility framework that allows accelerator vendors to register custom device backends without modifying PyTorch core code.
 
 ## Design
 
-The tables below list the hooks accelerator vendors should implement when integrating a new device backend. These hooks are categorized into two priority levels:
+The following tables list all hooks that accelerator vendors need to implement when integrating a new device backend. These hooks are categorized into two priority levels:
 
-- **High‑priority hooks**: Core APIs that the PyTorch runtime directly depends on. Vendors should implement all high‑priority hooks to ensure core compatibility and basic device functionality.
+- **High Priority Hooks**: Core APIs that PyTorch runtime directly depends on. Accelerator vendors are recommended to implement all high priority hooks to ensure full PyTorch compatibility and enable basic device functionality.
 
-- **Low‑priority hooks**: Device‑management and utility APIs that PyTorch does not directly depend on. These hooks enhance user experience and multi‑device support and are optional. Vendors can implement them based on specific requirements and use cases.
+- **Low Priority Hooks**: Device management and utility APIs that PyTorch does not directly depend on. These hooks enhance user experience and multi-device support but are *optional*. Accelerator vendors can choose to implement them based on their specific requirements and use cases.
 
-### High‑priority hooks
+### High Priority Hooks
 
-| Hook method                        | Description                                               | Application scenarios                                                            |
+| Hook Method                        | Description                                               | Application Scenario                                                             |
 | ---------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `init()`                           | Initializes the accelerator runtime and device contexts   | Set up necessary state when PyTorch first accesses the device                    |
 | `hasPrimaryContext(DeviceIndex)`   | Checks if a primary context exists for the device         | Determine whether device initialization has occurred                             |
-| `getDefaultGenerator(DeviceIndex)` | Returns the default random number generator for a device  | Access the device’s primary RNG for reproducible random operations               |
+| `getDefaultGenerator(DeviceIndex)` | Returns the default random number generator for a device  | Access the device's primary RNG for reproducible random operations               |
 | `getNewGenerator(DeviceIndex)`     | Creates a new independent random number generator         | Create isolated RNG instances for parallel operations                            |
 | `getDeviceFromPtr(void*)`          | Determines which device a memory pointer belongs to       | Identify the accelerator device associated with a memory allocation              |
 | `getPinnedMemoryAllocator()`       | Returns an allocator for pinned (page-locked) host memory | Allocate host memory that can be efficiently transferred to/from the accelerator |
 | `isPinnedPtr(void*)`               | Checks if a pointer points to pinned memory               | Validate memory types before performing operations                               |
 
-### Low‑priority hooks
+### Low Priority Hooks
 
-| Hook method                        | Description                                                                  | Application scenarios                                                |
+| Hook Method                        | Description                                                                  | Application Scenario                                                 |
 | ---------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `isBuilt()`                        | Returns whether the accelerator backend is built/compiled into the extension | Check whether the accelerator library is available at compile time   |
 | `isAvailable()`                    | Returns whether the accelerator hardware is available at runtime             | Verify whether accelerator devices can be detected and initialized   |
@@ -38,9 +38,7 @@ The tables below list the hooks accelerator vendors should implement when integr
 
 ## Implementation
 
-For illustration, OpenReg (Open Registration) is a PyTorch integration example that fills the gap for out‑of‑tree accelerator backend integration. It demonstrates how vendors can register custom device backends—without modifying PyTorch core—by implementing the hooks interface (see [`at::PrivateUse1HooksInterface`][PrivateUse1HooksInterface.h]).
-
-We use `getDefaultGenerator` as an example:
+We can just take `getDefaultGenerator` as an implementation example:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegHooks.h
@@ -52,13 +50,13 @@ We use `getDefaultGenerator` as an example:
 
 In this implementation:
 
-1. **Override the base interface**: The `getDefaultGenerator` method overrides the virtual method from [`at::PrivateUse1HooksInterface`][PrivateUse1HooksInterface.h].
+1. **Override the base interface**: The `getDefaultGenerator` method overrides the virtual method from `at::PrivateUse1HooksInterface`.
 
-2. **Delegate to the device‑specific implementation**: Call `getDefaultOpenRegGenerator(device_index)`, which manages a per‑device generator instance.
+2. **Delegate to device-specific implementation**: It calls `getDefaultOpenRegGenerator(device_index)`, which manages a per-device generator instance.
 
-3. **Return a device‑specific generator**: The returned `at::Generator` wraps an `OpenRegGeneratorImpl` that implements device‑specific random number generation.
+3. **Return device-specific generator**: The returned `at::Generator` wraps an `OpenRegGeneratorImpl` that implements device-specific random number generation.
 
-This pattern applies to all hooks: override the interface method, validate inputs, delegate to your device‑specific API, and return results in PyTorch’s expected format.
+This pattern applies to all hooks: override the interface method, validate inputs, delegate to your device-specific API, and return results in PyTorch's expected format.
 
 ## Integration Example
 
@@ -66,7 +64,7 @@ The following sections demonstrate how PyTorch integrates with accelerator hooks
 
 ### Layer 1: User Code
 
-User code sets a deterministic seed by calling `manual_seed`:
+User code initiates the operation by calling `manual_seed` to set the random seed for reproducible results:
 
 ```python
 import torch
@@ -75,7 +73,7 @@ torch.openreg.manual_seed(42)
 
 ### Layer 2: Extension Python API
 
-The Python API layer manages device selection and calls into the C++ extension (defined in [`torch_openreg/openreg/random.py`][random.py]):
+The Python API layer handles device management and calls into the C++ extension (defined in [`torch_openreg/openreg/random.py`][random.py]):
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py
@@ -85,11 +83,11 @@ The Python API layer manages device selection and calls into the C++ extension (
     :linenos:
 ```
 
-The `manual_seed` function obtains the current device index, calls `torch_openreg._C._get_default_generator(idx)` to get the device‑specific generator, and sets its seed.
+The `manual_seed` function gets the current device index and calls `torch_openreg._C._get_default_generator(idx)` to obtain the device-specific generator, then sets the seed on it.
 
 ### Layer 3: Python/C++ Bridge
 
-The C++ extension exposes `_getDefaultGenerator` to Python, which bridges into PyTorch core:
+The C++ extension exposes `_getDefaultGenerator` to Python, which bridges to PyTorch's core runtime:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/csrc/Module.cpp
@@ -109,11 +107,11 @@ The C++ extension exposes `_getDefaultGenerator` to Python, which bridges into P
     :emphasize-lines: 3
 ```
 
-This function unpacks the device index from Python, creates a `PrivateUse1` device object, and calls `at::globalContext().defaultGenerator()`. PyTorch’s context then dispatches to the registered hooks.
+This function unpacks the device index from Python, creates a `PrivateUse1` device object, and calls `at::globalContext().defaultGenerator()`. PyTorch's context then dispatches to the registered hooks.
 
 ### Layer 4: PyTorch Core Context
 
-PyTorch’s `Context` class dispatches to the appropriate accelerator hooks ([`aten/src/ATen/Context.h`][Context.h]):
+PyTorch's Context class dispatches to the appropriate accelerator hooks ([`aten/src/ATen/Context.h`][Context.h]):
 
 ```{eval-rst}
 .. literalinclude:: ../../../aten/src/ATen/Context.h
@@ -123,7 +121,7 @@ PyTorch’s `Context` class dispatches to the appropriate accelerator hooks ([`a
     :emphasize-lines: 8-9, 24-25
 ```
 
-This layered architecture keeps PyTorch device‑agnostic while delegating hardware‑specific operations to accelerator implementations. Hooks are registered once at module load time:
+This layered architecture enables PyTorch to remain device-agnostic while delegating hardware-specific operations to accelerator implementations. The hooks are registered once at module load time:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegHooks.cpp
@@ -136,7 +134,7 @@ This layered architecture keeps PyTorch device‑agnostic while delegating hardw
 
 ### Layer 5: Accelerator Hooks
 
-The hooks interface provides the abstraction PyTorch uses to delegate to device‑specific implementations:
+The hooks interface provides the abstraction that PyTorch uses to delegate to device-specific implementations:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegHooks.h
@@ -150,7 +148,7 @@ The `getDefaultGenerator` hook method overrides the base interface and delegates
 
 ### Layer 6: Device-Specific Implementation
 
-The device‑specific implementation manages per‑device generator instances:
+The device-specific implementation manages per-device generator instances:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGenerator.cpp
@@ -164,4 +162,3 @@ This function maintains a static vector of generators (one per device), initiali
 
 [random.py]: https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/random.py#L48-L53 "random.py"
 [Context.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/Context.h#L61-L102 "Context.h"
-[PrivateUse1HooksInterface.h]: https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/detail/PrivateUse1HooksInterface.h#L15-L72 "PrivateUse1HooksInterface.h"

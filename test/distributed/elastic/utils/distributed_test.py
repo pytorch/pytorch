@@ -22,9 +22,8 @@ from torch.distributed.elastic.utils.distributed import (
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
-    MI200_ARCH,
     run_tests,
-    skipIfRocmArch,
+    skipIfRocm,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -175,7 +174,7 @@ class DistributedUtilTest(TestCase):
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
 
-    @skipIfRocmArch(MI200_ARCH)
+    @skipIfRocm
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
         with closing(sock):
