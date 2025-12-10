@@ -35,7 +35,7 @@ through `register_opaque_type(MyClass, typ="value")`.
 """
 
 from dataclasses import dataclass
-from typing import Any, NewType
+from typing import Any, Literal, NewType
 from weakref import WeakKeyDictionary
 
 import torch
@@ -64,7 +64,7 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 @dataclass
 class _OpaqueTypeInfo:
     class_name: str
-    opaque_typ: str  # either "reference" or "value"
+    opaque_typ: Literal["reference", "value"]
 
 
 # Mapping of type -> (string name, reference/value type)
