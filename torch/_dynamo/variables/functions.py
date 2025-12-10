@@ -32,7 +32,7 @@ import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -98,6 +98,8 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
+        InliningGeneratorInstructionTranslator,
+        InliningInstructionTranslator,
         InstructionTranslator,
         InstructionTranslatorBase,
     )
@@ -389,6 +391,13 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
+        # the optimizer.step method and we don't need to trace it
+        if (
+            self.get_name() == "patch_track_step_called"
+            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
+        ):
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
@@ -899,7 +908,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: Optional["InstructionTranslator"],
+        inline_tracer: "InliningGeneratorInstructionTranslator",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -944,7 +953,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if not tracer.generator_exhausted:
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
@@ -963,17 +972,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def _get_inline_tracer(self, tx: "InstructionTranslator") -> Any:
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
-
-        if self.inline_tracer is None:
-            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(  # type: ignore[assignment]
-                tx, self, [], {}
-            )
-        return self.inline_tracer
-
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        tracer = self._get_inline_tracer(tx)
+        tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
             raise_observed_exception(StopIteration, tx)
@@ -1030,7 +1030,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        tracer = self._get_inline_tracer(tx)
+        tracer = self.inline_tracer
         try:
             tracer._raise_exception_variable(exc)
         except ObservedException as e:
@@ -1063,12 +1063,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(
-                    isinstance(arg, ConstantVariable) and arg.value is None
-                    for arg in args
-                ):
+                if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             tracer.push_many(args)
             return self.next_variable(tx)
         elif name == "close":
@@ -1085,7 +1082,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
@@ -1145,7 +1142,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # or raises a different exception, then that exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             try:
                 # In Python 3.9, the exception is represented as a triple (typ, val, tb)
                 # In such cases, we re-raise the exception object given to avoid
@@ -1278,7 +1275,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningInstructionTranslator":
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
         return InliningInstructionTranslator.build_inline_tracer(
@@ -1340,7 +1337,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningGeneratorInstructionTranslator":
         # NOTE: This only exists to not break support for context manager when
         # config.enable_faithful_generator_behavior = False and
         # config.enable_trace_contextlib = True. In case the former is false,
@@ -1530,8 +1527,8 @@ def invoke_and_store_as_constant(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     def convert(x: VariableTracker) -> Any:
-        if isinstance(x, variables.TensorVariable):
-            return x.get_real_value()
+        if x.is_tensor():
+            return cast("TensorVariable", x).get_real_value()
         return x.as_python_constant()
 
     args = [convert(x) for x in args]
@@ -2480,7 +2477,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
             and all(
-                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
                 or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
                 for x in args[0].items
             )
@@ -2496,8 +2493,8 @@ class PolyfilledFunctionVariable(VariableTracker):
                 sym_num=torch.sym_sum(
                     [
                         (
-                            x.value
-                            if isinstance(x, variables.ConstantVariable)
+                            x.as_python_constant()
+                            if x.is_python_constant()
                             else x.sym_num  # type: ignore[attr-defined]
                         )
                         for x in args[0].items
@@ -2702,7 +2699,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
         combined_args_raw: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
-        from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
@@ -2736,17 +2732,17 @@ class DynamoTritonHOPifier(TritonHOPifier):
         constant_args = {
             k: v.as_python_constant()
             for k, v in combined_args_raw.items()
-            if isinstance(v, ConstantVariable)
+            if isinstance(v, VariableTracker) and v.is_python_constant()
         }
         non_constant_args = {
             k: v
             for k, v in combined_args.items()
-            if not isinstance(v, ConstantVariable)
+            if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
 
         for v in non_constant_args.values():
             v = v.realize()
-            if not isinstance(v, (variables.TensorVariable, variables.SymNodeVariable)):
+            if not (v.is_tensor() or v.is_symnode_like()):
                 self.raise_unsupported(
                     f"Unexpected argument type for a Triton kernel: {repr(v)}."
                 )
@@ -2868,7 +2864,7 @@ class TMADescriptorStableVariable(VariableTracker):
         block_shape: "ListVariable",
         **kwargs: Any,
     ) -> None:
-        assert isinstance(tensor, variables.TensorVariable)
+        assert tensor.is_tensor()
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
@@ -3042,9 +3038,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         if len(args) == 2:
             is_leaf = args[1]
 
-        if not (
-            isinstance(is_leaf, variables.ConstantVariable) and is_leaf.value is None
-        ):
+        if not is_leaf.is_constant_none():
             return super().call_function(tx, args, kwargs)
 
         # Optimize the case where is_leaf is None
