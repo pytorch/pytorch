@@ -53,8 +53,8 @@ def move_cutlass_compiled_cache() -> None:
         filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
         shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
-    except OSError as e:
-        log.warning("Failed to move CUTLASS compiled cache file: %s", e)
+    except OSError:
+        log.warning("Failed to move CUTLASS compiled cache file", exc_info=True)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -79,7 +79,7 @@ def try_import_cutlass() -> bool:
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
-            log.warning(
+            log.warning(  # noqa: G200
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -98,7 +98,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -164,7 +164,7 @@ def try_import_cutlass() -> bool:
 
             return True
         except ImportError as e:
-            log.debug(
+            log.debug(  # noqa: G200
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -252,7 +252,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
-    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         cuda_version=version,
@@ -470,6 +470,7 @@ class CUDACompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
+        # pyrefly: ignore [bad-assignment]
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )

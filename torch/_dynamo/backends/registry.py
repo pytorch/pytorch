@@ -60,9 +60,9 @@ optimized_model = torch.compile(model, backend="my_compiler")
 
 import functools
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from importlib.metadata import EntryPoint
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Optional, Protocol, Union
 
 import torch
 from torch import fx
@@ -146,7 +146,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:  # type:
 
     backends = [
         name
-        for name in _BACKENDS.keys()
+        for name in _BACKENDS
         if name not in _COMPILER_FNS
         or not exclude_tags_set.intersection(_COMPILER_FNS[name]._tags)  # type: ignore[attr-defined]
     ]

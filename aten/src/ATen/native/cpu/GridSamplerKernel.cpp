@@ -293,7 +293,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
+    return (in + Vec(static_cast<scalar_t>(1))) * Vec(scaling_factor) - Vec(static_cast<scalar_t>(0.5));
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
@@ -831,7 +831,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
   // constant used in cubic convolution
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
-  const Vec A = Vec(-0.75);
+  const Vec A = Vec(static_cast<scalar_t>(-0.75));
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))

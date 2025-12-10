@@ -15,7 +15,7 @@ test_classes = {}
 
 def mocked_strict_export_v2(*args, **kwargs):
     # If user already specified strict, don't make it strict
-    with config.patch(use_new_tracer_experimental=True):
+    with config.patch(use_legacy_dynamo_graph_capture=False):
         if "strict" in kwargs:
             return export(*args, **kwargs)
         return export(*args, **kwargs, strict=True)

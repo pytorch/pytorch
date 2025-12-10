@@ -1,9 +1,12 @@
+#pragma once
+
 // This is directly synchronized with caffe2/proto/caffe2.proto, but
 // doesn't require me to figure out how to get Protobuf headers into
 // ATen/core (which would require a lot more build system hacking.)
 // If you modify me, keep me synchronized with that file.
 
 #include <torch/headeronly/macros/Export.h>
+#include <torch/headeronly/macros/Macros.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -102,7 +105,7 @@ struct hash<c10::DeviceType> {
 };
 } // namespace std
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::COMPILE_TIME_MAX_DEVICE_TYPES;
 using c10::DeviceType;
 using c10::kCPU;
@@ -122,4 +125,4 @@ using c10::kVE;
 using c10::kVulkan;
 using c10::kXLA;
 using c10::kXPU;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)

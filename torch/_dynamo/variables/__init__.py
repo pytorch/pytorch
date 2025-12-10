@@ -37,8 +37,6 @@ from .ctx_manager import (
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
-    StreamContextVariable,
-    StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
@@ -66,6 +64,8 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
@@ -115,7 +115,6 @@ from .misc import (
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -131,6 +130,7 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -198,7 +198,6 @@ __all__ = [
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",

@@ -3,7 +3,7 @@ import collections.abc
 import copy
 import itertools
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d, rpc
@@ -56,7 +56,7 @@ def _validate_output_tensor_for_gather(
     my_rank: int,
     dst_rank: int,
     size: torch.Size,
-    dst_tensor: Optional[torch.Tensor],
+    dst_tensor: torch.Tensor | None,
 ) -> None:
     if dst_rank == my_rank:
         if dst_tensor is None:
@@ -79,6 +79,7 @@ def _flatten_tensor_size(size) -> torch.Size:
     Checks if tensor size is valid, then flatten/return a torch.Size object.
     """
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
+        # pyrefly: ignore [not-iterable]
         dims = list(*size)
     else:
         dims = list(size)
@@ -202,13 +203,13 @@ def build_metadata_from_local_shards(
 
 
 def build_global_metadata(
-    gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]],
+    gathered_metadatas: Sequence[ShardedTensorMetadata | None],
     recalc_metadata: bool = False,
 ):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for rank, rank_metadata in enumerate(gathered_metadatas):
         if rank_metadata is None:
             continue

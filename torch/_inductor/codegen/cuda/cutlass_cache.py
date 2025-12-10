@@ -75,7 +75,7 @@ def maybe_fetch_ops() -> Optional[list[Any]]:
     # get_cuda_version might return "12.4.0" or "12.4"
     # but we want to use "12.4"
     version: str = ".".join(get_cuda_version().split(".")[:2])
-    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    instantiation_level: str = config.cutlass.cutlass_instantiation_level
 
     # filename and filepath
     request_key: str = get_config_request_key(arch, version, instantiation_level)
@@ -94,11 +94,11 @@ def maybe_fetch_ops() -> Optional[list[Any]]:
             assert isinstance(serialized_ops, list), (
                 f"Expected serialized ops is a list, got {type(serialized_ops)}"
             )
-        except Exception as e:
+        except Exception:
             log.warning(
-                "Failed to load CUTLASS config %s from local cache: %s",
+                "Failed to load CUTLASS config %s from local cache",
                 filename,
-                e,
+                exc_info=True,
             )
             serialized_ops = None
     elif config.is_fbcode():

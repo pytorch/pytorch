@@ -1,6 +1,6 @@
 .. meta::
    :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
-   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+   :keywords: memory management, PYTORCH_ALLOC_CONF, optimize PyTorch, CUDA
 
 .. _cuda-semantics:
 
@@ -254,7 +254,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 
 .. _fp16accumulation:
 
-Full FP16 Accmumulation in FP16 GEMMs
+Full FP16 Accumulation in FP16 GEMMs
 -------------------------------------
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
@@ -488,7 +488,7 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+Optimizing memory usage  with ``PYTORCH_ALLOC_CONF``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
@@ -496,8 +496,9 @@ Use of a caching allocator can interfere with memory checking tools such as
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 The behavior of the caching allocator can be controlled via the environment variable
-``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
+``PYTORCH_ALLOC_CONF``. ``PYTORCH_CUDA_ALLOC_CONF`` is its alias and is provided only
+for backward compatibility.
+The format is ``PYTORCH_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``backend`` allows selecting the underlying allocator implementation.
@@ -619,6 +620,10 @@ Available options:
   and reallocate buffers across multiple streams, especially when the capture DAG frequently
   reaches joined frontiers.
 
+* ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
 .. note::
 
     Some stats reported by the
@@ -695,7 +700,7 @@ Mixing different CUDA system allocators in the same program
 -----------------------------------------------------------
 Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
-``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
+``PYTORCH_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
 have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
 you can selectively mark a region of PyTorch code to use a custom allocator using
 :class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
@@ -1719,6 +1724,16 @@ and can be used to share memory across graphs as shown::
     static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
+
+It's also safe to share a memory pool across separate graphs that do not depend
+on each other's outputs, provided they never run concurrently.
+Be aware that replaying one graph can clobber another graph's outputs when
+they share a pool, unless :meth:`~torch.Tensor.clone` is called on the outputs
+beforehand.
+This pattern is frequently used in inference servers that accept variable batch
+sizes at runtime.
+vLLM is a notable example; see `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/platforms/interface.py#L508-L515>`__
+and `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/compilation/cuda_graph.py#L86-L89>`__.
 
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)

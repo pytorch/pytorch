@@ -952,7 +952,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    msg = f"{speedup:.3f}x"
+    msg = f"{median[0] * 1000} ms, {median[1] * 1000} ms, {speedup:.3f}x"
     if args.baseline:
         headers.extend(
             [
@@ -1010,7 +1010,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     # Hypothetically you can use this from other places, but it's currently
     # inaccessible, and when this assert fails you need to update the
     # event_name here to account for the other cases you are using this
-    assert args.quantization is not None
+    assert any([args.quantization, args.optimus])
     output_signpost(
         dict(zip(headers, row)),
         args,
@@ -1060,6 +1060,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_nativert(model, example_inputs)
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
+        elif args.aot_precompile:
+            frozen_model_iter_fn = aot_precompile(model, example_inputs)
         else:
             if kwargs["hf_llm"]:
                 # If it's an llm, we want to optimize model.forward, and use
@@ -1495,6 +1497,37 @@ def export(model, example_inputs):
     return opt_export
 
 
+def aot_precompile(model, example_inputs):
+    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+
+    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
+        save_path = f.name
+
+    with fresh_cache(), torch._dynamo.config.patch("enable_aot_compile", True):
+        compiled_fn = torch.compile(
+            model,
+            fullgraph=True,
+            options={"guard_filter_fn": lambda guards: [False for _ in guards]},
+        ).forward.aot_compile((example_args, example_kwargs))
+
+        compiled_fn.save_compiled_function(save_path)
+
+        torch._dynamo.reset()
+        with open(save_path, "rb") as f:
+            load_start_time = time.perf_counter()
+            loaded_fn = torch.compiler.load_compiled_function(f)
+            load_end_time = time.perf_counter()
+            print(
+                f"AOT Precompile loading time: {load_end_time - load_start_time} seconds"
+            )
+
+            def opt_aot_precompile(_, example_inputs, collect_outputs=False):
+                example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+                return loaded_fn(model, *example_args, **example_kwargs)
+
+            return opt_aot_precompile
+
+
 def export_nativert(model, example_inputs):
     optimized = NativeRTCache.load(model, example_inputs)
 
@@ -1718,8 +1751,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception as e:
-                log.error("Failed to save memory snapshot, %s", e)
+            except Exception:
+                log.exception("Failed to save memory snapshot")
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -1763,7 +1796,10 @@ class BenchmarkRunner:
             self.autocast = functools.partial(
                 torch.amp.autocast, device_type=devices[0]
             )
-            if self.args.amp_dtype:
+            if self.args.amp_dtype is None:
+                if self.args.only in self.amp_dtype_bfloat16:
+                    self.autocast_arg["dtype"] = torch.bfloat16
+            else:
                 amp_dtype = (
                     torch.float16
                     if self.args.amp_dtype == "float16"
@@ -1805,6 +1841,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_xpu(self):
+        return set()
+
+    @property
     def skip_models_for_cpu(self):
         return set()
 
@@ -1842,6 +1882,10 @@ class BenchmarkRunner:
 
     @property
     def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
+    def amp_dtype_bfloat16(self):
         return set()
 
     @property
@@ -2274,6 +2318,7 @@ class BenchmarkRunner:
                     or self.args.export_aot_inductor
                     or self.args.export_nativert
                     or self.args.torchscript_jit_trace
+                    or self.args.aot_precompile
                 ):
                     # apply export on module directly
                     # no need for n iterations
@@ -2341,7 +2386,9 @@ class BenchmarkRunner:
                     print(
                         f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
                     )
-                    saved_result = torch.load(self.args.compare_model_outputs_with)
+                    saved_result = torch.load(
+                        self.args.compare_model_outputs_with, weights_only=False
+                    )
                     is_bitwise_same = bitwise_same(saved_result, new_result)
                     if not is_bitwise_same:
                         print(
@@ -2432,7 +2479,7 @@ class BenchmarkRunner:
                     for refi, resi in zip(ref, res):
                         dump_max_mean_values(tol, refi, resi)
                 elif isinstance(ref, dict):
-                    for k in ref.keys():
+                    for k in ref:
                         dump_max_mean_values(tol, ref[k], res[k])
                 elif isinstance(ref, torch.Tensor):
                     res = res.to(base_device)
@@ -2544,6 +2591,9 @@ class BenchmarkRunner:
                 mark="expected",
                 **experiment_kwargs,
             )
+
+            # reset dynamo
+            torch._dynamo.reset()
 
             if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
@@ -2729,6 +2779,7 @@ class BenchmarkRunner:
                 self.args.export_aot_inductor
                 or self.args.export_nativert
                 or self.args.torchscript_jit_trace
+                or self.args.aot_precompile
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
@@ -2907,7 +2958,7 @@ class BenchmarkRunner:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
         elif self.args.performance:
-            if self.args.backend == "torchao":
+            if self.args.backend in ["torchao", "optimus"]:
                 status = self.run_performance_test_non_alternate(
                     name, model, example_inputs, optimize_ctx, experiment, tag
                 )
@@ -3484,6 +3535,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--optimus",
+        choices=["vertical_opt", "horizontal_opt", "all"],
+        default=None,
+        help="Measure speedup of Optimus with TorchInductor baseline",
+    )
+    group.add_argument(
         "--quantization",
         choices=[
             "int8dynamic",
@@ -3504,6 +3561,11 @@ def parse_args(args=None):
         "--export-aot-inductor",
         action="store_true",
         help="Measure pass rate with Export+AOTInductor",
+    )
+    group.add_argument(
+        "--aot-precompile",
+        action="store_true",
+        help="Measure pass rate with AOT Precompile",
     )
     group.add_argument(
         "--export-nativert",
@@ -3715,7 +3777,8 @@ def setup_determinism_for_accuracy_test(args):
     }:
         # some of the models do not support use_deterministic_algorithms
         torch.use_deterministic_algorithms(True)
-    if args.devices == ["xpu"]:
+
+    if args.devices == ["rocm"] or args.devices == ["xpu"]:
         torch.use_deterministic_algorithms(True, warn_only=True)
 
     torch.backends.cudnn.deterministic = True
@@ -3735,6 +3798,9 @@ def run(runner, args, original_dir=None):
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
+    if args.optimus:
+        assert args.backend is None
+        args.backend = "optimus"
     if args.quantization:
         assert args.backend is None
         args.backend = "torchao"
@@ -3819,6 +3885,7 @@ def run(runner, args, original_dir=None):
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
                     "llama",
                     "cm3leon_generate",
+                    "modded_nanogpt",
                 }
             )
 
@@ -3883,6 +3950,8 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+    elif args.devices == ["xpu"]:
+        runner.skip_models.update(runner.skip_models_for_xpu)
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
@@ -3935,6 +4004,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
+    elif args.aot_precompile:
+        optimize_ctx = aot_precompile
+        experiment = speedup_experiment
+        output_filename = "aot_precompile.csv"
     elif args.export_nativert:
         optimize_ctx = export_nativert
         experiment = speedup_experiment
@@ -4013,10 +4086,22 @@ def run(runner, args, original_dir=None):
 
             runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
+        elif args.backend == "optimus":
+            from .optimus import get_baseline_ctx, get_optimus_optimize_ctx
+
+            baseline_ctx = get_baseline_ctx(
+                nopython=args.nopython, inductor_compile_mode=args.inductor_compile_mode
+            )
+            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            optimize_ctx = get_optimus_optimize_ctx(
+                args.optimus, args.nopython, args.inductor_compile_mode
+            )
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if not args.backend == "torchao" else latency_experiment
+            speedup_experiment
+            if args.backend not in ["torchao", "optimus"]
+            else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -4037,7 +4122,12 @@ def run(runner, args, original_dir=None):
     if args.only in runner.disable_cudagraph_models:
         args.disable_cudagraphs = True
 
-    if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
+    if (
+        args.inductor
+        or args.backend == "inductor"
+        or args.export_aot_inductor
+        or args.backend == "optimus"
+    ):
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
