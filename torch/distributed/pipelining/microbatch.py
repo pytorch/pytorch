@@ -131,6 +131,10 @@ def _split_block_mask(
         chunk_block_masks: List of chunked block masks
     """
 
+    # BlockMask will broadcast if B is 1.
+    if block_mask.kv_num_blocks.size(0) == 1:
+        return [block_mask] * num_chunks
+
     if not block_mask.kv_num_blocks.size(0) >= num_chunks:
         raise AssertionError(
             "Block mask has fewer batch size than the number of chunks. "
@@ -272,7 +276,11 @@ def _shard_dict_of_args(
                 raise AssertionError(f"Expected TensorChunkSpec, got {type(spec)}")
             if not spec.split_dim == 0:
                 raise AssertionError("BlockMask only supports split_dim=0")
-            split_sizes.append(v.kv_num_blocks.size(0))
+            # BlockMask will broadcast if B is 1.
+            if v.kv_num_blocks.size(0) == 1:
+                split_sizes.append(num_chunks)
+            else:
+                split_sizes.append(v.kv_num_blocks.size(0))
         else:
             raise ValueError(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
@@ -514,7 +522,10 @@ def merge_chunks(
                     raise AssertionError(
                         f"Expected len(partial_values) == len(meta_chunks), got {len(partial_values)} != {len(meta_chunks)}"
                     )
-                for partial_value, meta_chunk in zip(partial_values, meta_chunks):
+
+                for partial_value, meta_chunk in zip(
+                    partial_values, meta_chunks, strict=True
+                ):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
                     slice_indices = [slice(None, None, None)] * partial_value.ndim
