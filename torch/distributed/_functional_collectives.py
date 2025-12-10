@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -94,7 +94,7 @@ RANK_TYPES = Union[
     dist.ProcessGroup,
     DeviceMesh,
     tuple["dist.tensor.DeviceMesh", int],
-    str,
+    c10d.GroupName,
 ]
 
 
@@ -453,8 +453,8 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    output_split_sizes: Optional[list[int]],
-    input_split_sizes: Optional[list[int]],
+    output_split_sizes: list[int] | None,
+    input_split_sizes: list[int] | None,
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -506,8 +506,8 @@ def all_to_all_single(
 
 def all_to_all_single_autograd(
     self: torch.Tensor,
-    output_split_sizes: Optional[list[int]],
-    input_split_sizes: Optional[list[int]],
+    output_split_sizes: list[int] | None,
+    input_split_sizes: list[int] | None,
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -625,7 +625,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[type] = None
+        self, expected_metadata: Any, expected_type: type | None = None
     ):
         if expected_type is not torch.Tensor:
             return None
@@ -778,7 +778,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
-def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
@@ -787,7 +787,11 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
-        return group
+        # In some cases Dynamo doesn't like tracing through NewType constructors
+        # - so use a cast instead (the actual newtype representation is
+        # literally the underlying type so this is fine). I haven't been able to
+        # reproduce it in isolation (see T247631668).
+        return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(

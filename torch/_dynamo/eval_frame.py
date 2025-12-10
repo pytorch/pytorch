@@ -766,21 +766,24 @@ class _TorchDynamoContext:
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
-                result = DynamoCache.load(fn)
+                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
                     try:
                         self._package.initialize(
-                            fn, result.dynamo, ignore_inlined_sources=False
+                            fn_key, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
 
         fn = innermost_fn(fn)
 
@@ -1713,13 +1716,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 

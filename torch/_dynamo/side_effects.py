@@ -213,22 +213,18 @@ class SideEffects:
     def __getitem__(self, item: Any) -> VariableTracker:
         return self.id_to_variable[id(item)]
 
-    def should_allow_side_effects_under_checkpoint(self) -> bool:
-        output_graph = self.output_graph_weakref()
-        return bool(
-            output_graph
-            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
-            and (
-                output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
-                or torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
-            )
-        )
-
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
         output_graph = self.output_graph_weakref()
         return bool(
             output_graph
             and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+        )
+
+    def should_allow_side_effects_in_hop(self) -> bool:
+        output_graph = self.output_graph_weakref()
+        return bool(
+            output_graph
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_in_hop
         )
 
     def is_reconstructing_generator(self) -> bool:
@@ -248,7 +244,7 @@ class SideEffects:
             return True
         if self.should_allow_externally_visible_side_effects_in_subtracer():
             return True
-        if self.should_allow_side_effects_under_checkpoint():
+        if self.should_allow_side_effects_in_hop():
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
@@ -708,7 +704,7 @@ class SideEffects:
                 elif var.source is None:
                     # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
-            elif isinstance(var, variables.TensorVariable):
+            elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
                 # to newly constructed tensor object, so we keep it that way.
                 # They are always loaded from output of the fx graph, so one can
@@ -785,7 +781,7 @@ class SideEffects:
         handle: "variables.RemovableHandleVariable",
         name: str,
     ) -> None:
-        assert isinstance(tensor, variables.TensorVariable)
+        assert tensor.is_tensor()
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
@@ -885,10 +881,7 @@ class SideEffects:
             elif isinstance(var, variables.lists.DequeVariable):
                 # For limited maxlen, the order of operations matter for side
                 # effect, but we currently don't track the order, so no support.
-                if not (
-                    isinstance(var.maxlen, variables.ConstantVariable)
-                    and var.maxlen.value is None
-                ):
+                if not var.maxlen.is_constant_none():
                     unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
@@ -1200,16 +1193,20 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def allow_side_effects_under_checkpoint(
+def allow_side_effects_in_hop(
     tx: "InstructionTranslatorBase",
 ) -> Generator[None, None, None]:
-    assert tx.output.current_tracer.under_activation_checkpoint
-    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+    """Context manager to temporarily allow side effects with extra outputs.
+
+    This is used for special cases (like FSDP functions) that need to perform
+    side effects even when the general policy is to disallow them.
+    """
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 @contextlib.contextmanager
@@ -1219,6 +1216,7 @@ def allow_externally_visible_side_effects_in_subtracer(
     orig_val = tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
     try:
         tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = True
+        tx.output.current_tracer.traced_with_externally_visible_side_effects = True
         yield
     finally:
         tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = orig_val
