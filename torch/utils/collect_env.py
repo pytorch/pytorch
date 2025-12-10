@@ -8,6 +8,7 @@ import json
 import locale
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections import namedtuple
@@ -119,9 +120,11 @@ PIP_PATTERNS = [
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
-    shell = type(command) is str
+    if isinstance(command, str):
+        is_posix = os.name == 'posix'
+        command = shlex.split(command, posix=is_posix)
     p = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=False
     )
     raw_output, raw_err = p.communicate()
     rc = p.returncode

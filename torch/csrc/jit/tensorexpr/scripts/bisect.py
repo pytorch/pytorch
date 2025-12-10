@@ -8,9 +8,10 @@ def test(cmd, limit):
     print(f"Testing PYTORCH_JIT_OPT_LIMIT=tensorexpr_fuser={limit} {cmd}")
     cur_env = os.environ.copy()
     cur_env["PYTORCH_JIT_OPT_LIMIT"] = f"tensorexpr_fuser={limit}"
-    cmd_args = shlex.split(cmd)
+    is_posix = os.name == "posix"
+    cmd = shlex.split(cmd, posix=is_posix)
     p = subprocess.run(
-        cmd_args,
+        cmd,
         env=cur_env,
         shell=False,
         capture_output=True,
