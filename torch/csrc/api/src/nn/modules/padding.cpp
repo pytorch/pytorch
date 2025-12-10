@@ -1,5 +1,7 @@
 #include <torch/nn/modules/padding.h>
 
+#include <torch/expanding_array.h>
+
 namespace F = torch::nn::functional;
 
 namespace torch::nn {

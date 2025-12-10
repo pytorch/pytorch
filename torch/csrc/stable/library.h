@@ -131,11 +131,6 @@ struct UnboxType<torch::headeronly::HeaderOnlyArrayRef<T>> {
   using type = std::vector<T>;
 };
 
-template <typename T>
-struct UnboxType<std::optional<torch::headeronly::HeaderOnlyArrayRef<T>>> {
-  using type = std::optional<std::vector<T>>;
-};
-
 template <>
 struct UnboxType<std::string_view> {
   using type = std::string;

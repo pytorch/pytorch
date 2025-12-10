@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
+#include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/unique.h>
 
 #include <fstream>

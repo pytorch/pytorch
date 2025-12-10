@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 
 #include <torch/csrc/profiler/stubs/base.h>
+#include <torch/csrc/profiler/util.h>
 
 namespace torch::profiler::impl {
 
