@@ -104,6 +104,11 @@ class Tensor {
 
   template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
+
+  const Tensor& set_requires_grad(bool requires_grad) const {
+    TORCH_ERROR_CODE_CHECK(torch_set_requires_grad(ath_.get(), requires_grad));
+    return *this;
+  }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
   int64_t dim() const {
@@ -210,6 +215,19 @@ class Tensor {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  int64_t storage_offset() const {
+    int64_t storage_offset;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(ath_.get(), &storage_offset));
+    return storage_offset;
+  }
+
+  size_t element_size() const {
+    int32_t dtype;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    return aoti_torch_dtype_element_size(dtype);
   }
 
   // defined in tensor-inl.h to avoid circular dependencies

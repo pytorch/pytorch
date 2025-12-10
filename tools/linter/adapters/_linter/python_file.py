@@ -24,25 +24,18 @@ class PythonFile:
     def __init__(
         self,
         linter_name: str,
-        path: Path | None = None,
+        *,
         contents: str | None = None,
+        path: Path | None = None,
     ) -> None:
         self.linter_name = linter_name
+        if contents is not None:
+            self.contents = contents
         self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
-        self._contents = contents
 
     @cached_property
     def contents(self) -> str:
-        if self._contents is not None:
-            return self._contents
-        elif self.path is not None:
-            return self.path.read_text()
-        else:
-            return ""
-
-    @cached_property
-    def filename(self) -> str:
-        return str(self.path)
+        return self.path.read_text() if self.path else ""
 
     @cached_property
     def lines(self) -> list[str]:
@@ -52,10 +45,11 @@ class PythonFile:
     def make(cls, linter_name: str, pc: Path | str | None = None) -> Self:
         if isinstance(pc, Path):
             return cls(linter_name, path=pc)
-        return cls(linter_name, contents=pc)
+        else:
+            return cls(linter_name, contents=pc)
 
     def with_contents(self, contents: str) -> Self:
-        return self.__class__(self.linter_name, self.path, contents)
+        return self.__class__(self.linter_name, contents=contents, path=self.path)
 
     @cached_property
     def omitted(self) -> OmittedLines:
@@ -64,7 +58,7 @@ class PythonFile:
 
     @cached_property
     def tokens(self) -> list[TokenInfo]:
-        # Raises IndentationError on incorrectly indented code
+        """This file, tokenized. Raises IndentationError on badly indented code."""
         return list(generate_tokens(iter(self.lines).__next__))
 
     @cached_property

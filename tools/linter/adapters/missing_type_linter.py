@@ -112,7 +112,7 @@ class MissingTypeLinter(FileLinter):
         percent("return_annotations")
         percent("self_parameters")
 
-        percent("parameter_annotations", "public_parameters")
+        percent("parameter_annotations", "public_functions_public_parameters")
 
         s = dict(sorted(s.items()))
         print(json.dumps(s, indent=4), file=sys.stderr)
@@ -150,13 +150,13 @@ class MissingTypeLinter(FileLinter):
             has_annotations = [annotated]
 
             for p in f["parameters"]:
-                count("all_parameters")
+                count("public_functions_all_parameters")
                 if p["name"] == "self":
                     count("self_parameters")
                     continue
                 if not _is_public(p["name"]):
                     continue
-                count("public_parameters")
+                count("public_functions_public_parameters")
 
                 if annotated := bool(p["annotation"]):
                     count("parameter_annotations")
