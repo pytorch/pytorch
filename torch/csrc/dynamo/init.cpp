@@ -11,8 +11,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
-#include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 
 static struct PyModuleDef _module =

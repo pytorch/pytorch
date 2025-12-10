@@ -131,13 +131,21 @@ struct UnboxType<torch::headeronly::HeaderOnlyArrayRef<T>> {
   using type = std::vector<T>;
 };
 
+template <typename T>
+struct UnboxType<std::optional<torch::headeronly::HeaderOnlyArrayRef<T>>> {
+  using type = std::optional<std::vector<T>>;
+};
+
 template <>
 struct UnboxType<std::string_view> {
   using type = std::string;
 };
 
+// const and reference are stripped before UnboxType is applied
+// in order to avoid ambiguous template matches
 template <typename T>
-using unbox_type_t = typename UnboxType<T>::type;
+using unbox_type_t =
+    typename UnboxType<std::remove_cv_t<std::remove_reference_t<T>>>::type;
 
 template <class... T, std::size_t... I>
 std::tuple<T...> unbox_to_tuple_impl(
