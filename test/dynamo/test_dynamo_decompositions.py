@@ -337,20 +337,23 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
+    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", \
+L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_weight_ = L_weight_
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
 
-        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_]);  l_end_tensors_0_ = l_end_tensors_1_ = None
+        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, \
+l_tensors_1_]);  l_end_tensors_0_ = l_end_tensors_1_ = None
         getitem: "f32[4]" = _foreach_sub[0]
         getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
         _foreach_mul = torch._foreach_mul((getitem, getitem_1), l_weight_);  getitem = getitem_1 = l_weight_ = None
         getitem_2: "f32[4]" = _foreach_mul[0]
         getitem_3: "f32[4]" = _foreach_mul[1];  _foreach_mul = None
-        _foreach_add_ = torch._foreach_add_([l_tensors_0_, l_tensors_1_], (getitem_2, getitem_3));  l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
+        _foreach_add_ = torch._foreach_add_([l_tensors_0_, l_tensors_1_], (getitem_2, getitem_3));  \
+l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
         return ()
 """,
         )
@@ -379,13 +382,15 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", \
+L_end_tensors_1_: "f32[4]"):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
 
-        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, \
+l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -414,13 +419,16 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]"):
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: \
+"f32[4]", L_end_tensors_1_: "f32[4]"):
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
 
-        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], \
+[l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = \
+l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )
@@ -449,7 +457,8 @@ class GraphModule(torch.nn.Module):
         l_exps_0_ = L_exps_0_
         l_exps_1_ = L_exps_1_
 
-        _foreach_pow = torch._foreach_pow([l_scalar_, l_scalar_], [l_exps_0_, l_exps_1_]);  l_scalar_ = l_exps_0_ = l_exps_1_ = None
+        _foreach_pow = torch._foreach_pow([l_scalar_, l_scalar_], [l_exps_0_, l_exps_1_]);  \
+l_scalar_ = l_exps_0_ = l_exps_1_ = None
         getitem: "f32[4]" = _foreach_pow[0]
         getitem_1: "f32[4]" = _foreach_pow[1];  _foreach_pow = None
         return (getitem, getitem_1)
