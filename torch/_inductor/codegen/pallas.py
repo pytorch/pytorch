@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import typing_extensions
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
@@ -1031,7 +1032,8 @@ class PallasKernel(SIMDKernel):
             self.tensor_masks[buf_name] = mask_var
         return self.tensor_masks[buf_name]
 
-    def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
+    @typing_extensions.override
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
@@ -1064,7 +1066,9 @@ class PallasKernel(SIMDKernel):
 
                 has_non_unit_stride = False
                 for var in used_vars:
-                    var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
+                    var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
+                        index, var
+                    )
                     stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
                     if stride is not None and stride != 1:
                         has_non_unit_stride = True
@@ -1077,7 +1081,11 @@ class PallasKernel(SIMDKernel):
                     if var in self.range_tree_nodes:
                         entry = self.range_tree_nodes[var]
                         try:
-                            length_val = int(entry.length) if hasattr(entry.length, "__int__") else None
+                            length_val = (
+                                int(entry.length)
+                                if hasattr(entry.length, "__int__")
+                                else None
+                            )
                         except (TypeError, ValueError):
                             length_val = None
                         if length_val is not None:
@@ -1091,7 +1099,11 @@ class PallasKernel(SIMDKernel):
                 # Use strided indexing if:
                 # 1. Index has non-unit strides AND
                 # 2. Buffer size differs from expected output size
-                if has_non_unit_stride and output_numel > 0 and buf_numel != output_numel:
+                if (
+                    has_non_unit_stride
+                    and output_numel > 0
+                    and buf_numel != output_numel
+                ):
                     index_str = self._generate_strided_index(index)
                     needs_flatten = True
             except (TypeError, ValueError, AttributeError):
@@ -1654,7 +1666,9 @@ class PallasKernel(SIMDKernel):
                 for idx, (var_sym, entry) in enumerate(var_items):
                     try:
                         length_val = (
-                            int(entry.length) if hasattr(entry.length, "__int__") else None
+                            int(entry.length)
+                            if hasattr(entry.length, "__int__")
+                            else None
                         )
                     except (TypeError, ValueError):
                         length_val = None
@@ -1691,7 +1705,9 @@ class PallasKernel(SIMDKernel):
                     elif num_broadcast_dims > 1 and idx != total_var_idx:
                         # Find position of this var among broadcast vars
                         broadcast_idx = next(
-                            i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
+                            i
+                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
+                            if vidx == idx
                         )
                         # Reshape for broadcasting with other iteration vars
                         # Order: outermost to innermost should match the output shape
