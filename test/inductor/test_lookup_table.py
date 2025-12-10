@@ -926,7 +926,9 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             operation, tensors, {"triton.enable_persistent_tma_matmul": True}
         )
 
+    # Enable decompose_k for this test (disabled by default on ROCm)
     @fresh_cache()
+    @inductor_config.patch({"triton.enable_decompose_k": True})
     def test_decompose_k_lookup_table_entry(self):
         """Test decompose_k template entry"""
         tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
@@ -941,9 +943,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             )
         )
         
-        # Enable decompose_k for this test (disabled by default on ROCm)
-        with inductor_config.patch({"triton.enable_decompose_k": True}):
-            self.run_model("mm", tensors)
+        self.run_model("mm", tensors)
 
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self):
