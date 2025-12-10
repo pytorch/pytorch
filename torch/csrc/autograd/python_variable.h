@@ -17,7 +17,7 @@ namespace py = pybind11;
 struct THPVariable {
   PyObject_HEAD
   // Payload
-  c10::MaybeOwned<at::Tensor> cdata;
+  at::Tensor cdata;
   // Hooks to be run on backwards pass (corresponds to Python attr
   // '_backwards_hooks', set by 'register_hook')
   PyObject* backward_hooks = nullptr;
@@ -37,7 +37,11 @@ TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
 
 bool THPVariable_initModule(PyObject* module);
+TORCH_PYTHON_API PyObject* THPVariable_Wrap(at::TensorBase&& var);
 TORCH_PYTHON_API PyObject* THPVariable_Wrap(const at::TensorBase& var);
+TORCH_PYTHON_API PyObject* THPVariable_Wrap(
+    const at::TensorBase& var,
+    PyTypeObject* type);
 
 inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
@@ -69,7 +73,7 @@ inline bool THPVariable_Check(PyObject* obj) {
 }
 
 inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
-  return *var->cdata;
+  return var->cdata;
 }
 
 inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {

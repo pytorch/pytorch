@@ -794,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
@@ -925,7 +926,10 @@ class OutputGraph(OutputGraphCommon):
 
     @contextlib.contextmanager
     def subtracer(
-        self, source_target: Optional[Target], prior_tracer: "SubgraphTracer"
+        self,
+        source_target: Optional[Target],
+        prior_tracer: "SubgraphTracer",
+        description: Optional[str] = None,
     ) -> Generator[fx.Tracer, None, None]:
         new_scope_ctx = enter_new_scope()
         try:
@@ -941,6 +945,7 @@ class OutputGraph(OutputGraphCommon):
                     parent=self.current_tracer,
                     source_target=source_target,
                     is_export=self.current_tracer.is_export,
+                    description=description,
                 )
             )
             self.tracers.append(tracer)
@@ -1182,6 +1187,7 @@ class OutputGraph(OutputGraphCommon):
                 # sourceless, so let's return a unspecializedNNModule variable
                 # tracker.
                 def wrap_name(module_key: str) -> VariableTracker:
+                    # pyrefly: ignore[bad-argument-type]
                     return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
@@ -1229,7 +1235,7 @@ class OutputGraph(OutputGraphCommon):
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
                     self.dynamo_flat_name_to_original_fqn[
-                        OutputGraph.module_key_name(new_source.name())
+                        OutputGraph.module_key_name(new_source.name)
                     ] = leaf_name
 
             # annoying, but there are cases when we do not have parameters
@@ -1526,37 +1532,6 @@ class OutputGraph(OutputGraphCommon):
         root = FakeRootModule(nn_modules_proxies)
 
         from .decorators import disable
-
-        if has_user_objects():
-            # NB: This is where we store possible user objects before running the graph
-            # index_to_user_object_weakref is the function used in the graph to translate
-            # the dynamo-generated index into the actual object passed to the compiled function.
-            # We generate bytecode to store all user objects at the proper index in the below
-            # call.
-            codegen = PyCodegen(
-                self.root_tx, root, overridden_sources=overridden_sources
-            )
-            codegen.add_push_null(
-                lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
-                    "store_user_object_weakrefs",
-                )
-            )
-            tmp_vars = []
-            for constructor in index_to_bytecode_constructor.values():
-                constructor(codegen)
-                var_name = (
-                    self.new_var()
-                )  # keep alive any temp objects for the rest of the frame
-                codegen.store(var_name)
-                tmp_vars.append(var_name)
-
-            for var_name in tmp_vars:
-                codegen.append_output(codegen.create_load(var_name))
-
-            codegen.call_function(len(index_to_bytecode_constructor), False)
-            codegen.pop_top()
-            self.add_output_instructions(codegen.get_instructions())
 
         # to handle random calls
         if len(self.random_calls) > 0:
@@ -2172,6 +2147,10 @@ class OutputGraph(OutputGraphCommon):
 
             gm = _make_graph_module(root, self.graph)
 
+            from .dce_extra_outputs import dce_hop_extra_outputs
+
+            dce_hop_extra_outputs(gm)
+
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.
@@ -2341,6 +2320,35 @@ class OutputGraph(OutputGraphCommon):
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
+
+            if has_user_objects():
+                # NB: This is where we store possible user objects before running the graph
+                # index_to_user_object_weakref is the function used in the graph to translate
+                # the dynamo-generated index into the actual object passed to the compiled function.
+                # We generate bytecode to store all user objects at the proper index in the below
+                # call.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        torch._dynamo.graph_bytecode_inputs.__name__,
+                        "store_user_object_weakrefs",
+                    )
+                )
+
+                tmp_vars = []
+                for constructor in index_to_bytecode_constructor.values():
+                    constructor(cg)
+                    var_name = (
+                        self.new_var()
+                    )  # keep alive any user objects for the rest of the frame
+                    # TODO: we could omit this for objects we create but shouldn't be too much overhead for now
+                    cg.store(var_name)
+                    tmp_vars.append(var_name)
+
+                for var_name in tmp_vars:
+                    cg.append_output(cg.create_load(var_name))
+
+                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
@@ -2558,7 +2566,7 @@ class OutputGraph(OutputGraphCommon):
             return None
 
         def remove_unused(node: fx.Node) -> None:
-            log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
+            log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name)
             # I'm not really sure why you need to delete these from the
             # node since the node is going to get removed
             del node.meta["grapharg"]
@@ -2740,7 +2748,7 @@ class OutputGraph(OutputGraphCommon):
     def add_fqn_info_for_inlined_modules(
         self, inlined_module: torch.nn.Module, source: Source
     ) -> None:
-        name = OutputGraph.module_key_name(source.name())
+        name = OutputGraph.module_key_name(source.name)
         name = get_unique_name_wrt(
             name, self.used_inlined_inbuilt_modules_names, self.global_scope
         )
@@ -2753,7 +2761,7 @@ class OutputGraph(OutputGraphCommon):
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):
                 self.dynamo_flat_name_to_original_fqn[
-                    OutputGraph.module_key_name(new_source.name())
+                    OutputGraph.module_key_name(new_source.name)
                 ] = leaf_name
 
         # annoying, but there are cases when we do not have parameters
@@ -2781,6 +2789,7 @@ class DynamoTracerOutput:
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
@@ -2788,6 +2797,7 @@ class DynamoTracerOutput:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
+        self.f_globals = tracer.f_globals
         if error:
             self.output_graph = None
         else:
@@ -2918,6 +2928,7 @@ class SubgraphTracer(fx.Tracer):
         parent: Optional["SubgraphTracer"] = None,
         is_export: bool = False,
         source_target: Optional[Target] = None,
+        description: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
@@ -2935,6 +2946,7 @@ class SubgraphTracer(fx.Tracer):
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
         self.source_target = source_target
+        self.description = description
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
@@ -2962,19 +2974,16 @@ class SubgraphTracer(fx.Tracer):
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
         self.prev_inst = None
-        # True if this tracer is currently tracing into torch.utils.checkpoint
-        # as part of speculate_subgraph.
-        self.under_activation_checkpoint = False
-        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
-        # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
-        # Only safe if we know for sure that *NOT* replaying these side-effects during
-        # backward recomputation of the checkpoint region doesn't affect its correctness.
-        self.allow_side_effects_under_checkpoint = False
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
         # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
         self.unsafe_allow_externally_visible_side_effects = False
+        self.traced_with_externally_visible_side_effects = False
+        # True if we want to allow side effects by returning them as extra outputs from the subgraph.
+        # This is set when enable_side_effects_in_hop=True for HOPs like invoke_subgraph
+        # and checkpoint (when skip_fwd_side_effects_in_bwd_under_checkpoint config is True).
+        self.allow_side_effects_in_hop = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
@@ -3008,7 +3017,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt):
+    def record_tensor_or_symint_vt(self, vt: VariableTracker):
         self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
@@ -3303,7 +3312,7 @@ class SubgraphTracer(fx.Tracer):
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
-            source.name() if source is not None else "(none)",
+            source.name if source is not None else "(none)",
             example_value,
             self.debug_level,
             before,
@@ -3649,7 +3658,7 @@ class SubgraphTracer(fx.Tracer):
                     log.debug(
                         "_lift_symbols_in_symint %s from %s at debug_level %s",
                         s0,
-                        source.name() if source is not None else "subgraph inputs",
+                        source.name if source is not None else "subgraph inputs",
                         self.debug_level,
                     )
                     self.lifted_freevars[parent_proxy] = ph  # type: ignore[index]
@@ -3675,7 +3684,7 @@ class SubgraphTracer(fx.Tracer):
                 log.debug(
                     "_lift_symbols_in_symint %s from %s at debug_level %s",
                     s,
-                    source.name() if source is not None else "subgraph inputs",
+                    source.name if source is not None else "subgraph inputs",
                     self.debug_level,
                 )
                 ph.node.meta["grapharg"] = GraphArg(

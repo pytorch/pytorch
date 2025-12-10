@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
@@ -279,7 +280,7 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name] = constraint.name  # type: ignore[assignment]
 
     return symbolic_context
 
@@ -422,6 +423,14 @@ def make_fake_inputs(
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
+        elif (
+            sys.version_info >= (3, 14)
+            and (fwd := getattr(nn_module.forward, "__func__", None))
+            and isinstance(fwd, functools.partial)
+        ):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            code = fwd.func.__code__
         else:
             code = nn_module.forward.__code__
         co_fields = {
@@ -578,7 +587,12 @@ def produce_guards_and_solve_constraints(
     )
 
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:

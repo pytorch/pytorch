@@ -35,6 +35,7 @@ from torch._higher_order_ops.while_loop import (
 )
 from torch._higher_order_ops.wrap import (
     dynamo_bypassing_wrapper,
+    inductor_compiled_code,
     tag_activation_checkpoint,
     wrap_activation_checkpoint,
     wrap_with_autocast,
@@ -77,4 +78,5 @@ __all__ = [
     "while_loop_stack_output",
     "local_map_hop",
     "print",
+    "inductor_compiled_code",
 ]

@@ -35,11 +35,12 @@ Usage::
 import contextlib
 import functools
 import inspect
+import logging
 import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING  # noqa: F401
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -59,6 +60,8 @@ if TYPE_CHECKING:
     from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
@@ -157,21 +160,23 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
     return str(arg)
 
 
-def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
+def norm_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | float:
     """
     from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
-    with torch._C._DisablePythonDispatcher(), torch._C._DisableTorchDispatch():
+    with torch._C._DisablePythonDispatcher():
         if not (t.is_floating_point() or t.is_complex()):
             t = t.float()
         t = t.contiguous()
-        # Clean the tensor to handle NaN/inf values, then compute norm
-        t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
 
-        dtype = torch.complex128 if t.is_complex() else torch.float64
-        out = t_clean.norm(p=1, dtype=dtype)
+        if t.is_complex():
+            t_float = t.to(dtype=torch.complex128)
+        else:
+            t_float = t.to(dtype=torch.float64)
+
+        out = t_float.norm(p=1)
         if use_scalar:
             return out.item()
         return out
@@ -182,6 +187,30 @@ def _compute_rel_diff(hash1, hash2):
     numerator = abs(hash1 - hash2)
     denominator = max(abs(hash1), abs(hash2), 1e-10)
     return numerator / denominator
+
+
+def hash_tensor_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | int:
+    """
+    wrapper over torch.hash_tensor
+    """
+    if isinstance(t, torch.distributed.tensor.DTensor):
+        t = t.to_local()
+
+    if t.is_floating_point():
+        t_clean = t.to(dtype=torch.float64)
+    elif t.is_complex():
+        t_clean = t.to(dtype=torch.complex128).view(torch.float64)
+    else:
+        t_clean = t.to(dtype=torch.int64)
+
+    if t.numel() > 0:
+        out = torch.hash_tensor(t_clean)
+    else:
+        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
+
+    if use_scalar:
+        return out.item()  # type: ignore[attribute]
+    return out
 
 
 def _get_stack_trace() -> str:
@@ -222,6 +251,34 @@ def _get_op_name(op) -> str:
     else:
         op_name = str(op)
     return op_name
+
+
+_annotate_decorated = False
+
+
+def _ensure_annotate_decorated():
+    """
+    Lazily apply dont_skip_tracing decorator to DebugMode._annotate, to avoid circular import/initialization issues.
+    """
+    global _annotate_decorated
+    if not _annotate_decorated:
+        DebugMode._annotate = torch._dynamo.dont_skip_tracing(DebugMode._annotate)  # type: ignore[has-type]
+
+        # Mark annotate as side-effectful so aot_eager doesn't DCE it.
+        from torch.fx.node import _side_effectful_functions
+
+        _side_effectful_functions.add(torch.ops.debug_mode_ops.annotate.default)
+
+        # Register no-op lowering for inductor backend
+        from torch._inductor.lowering import register_lowering
+        from torch._logging import warning_once
+
+        @register_lowering(torch.ops.debug_mode_ops.annotate)
+        def _annotate_lowering(tag: str) -> None:
+            warning_once(log, 'DebugMode._annotate() is a no-op for backend="inductor"')
+            return None
+
+        _annotate_decorated = True
 
 
 class _DebugCall:
@@ -517,6 +574,25 @@ class _TritonKernelCall(_DebugCall):
         yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
 
 
+class _AnnotateCall(_DebugCall):
+    """Custom annotation call"""
+
+    def __init__(self, tag: Any, call_depth: int, stack: bool = False) -> None:
+        super().__init__(call_depth, stack=stack)
+        self.tag = tag
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[annotate] {self.tag}"
+
+    def __iter__(self):
+        yield from [
+            f"[nn.Mod] {self.tag}",
+            (),
+            {},
+            self.call_depth,
+        ]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -558,6 +634,17 @@ def _get_call_name(call: _DebugCall) -> str:
         return str(call)
 
 
+@torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
+def _annotate(tag: str) -> None:
+    # This is special-cased in DebugMode.__torch_dispatch__
+    return None
+
+
+@_annotate.register_fake
+def _annotate_fake(tag: str) -> None:
+    return None
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -569,12 +656,13 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
+        record_output=True,
         record_ids=False,
     ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        _ensure_annotate_decorated()
         self.supports_higher_order_operators = True
 
         # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
@@ -679,6 +767,11 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if func is torch.ops.debug_mode_ops.annotate.default:
+            assert len(args) == 1
+            self._handle_annotate(args[0])
+            return
+
         # Record the operation with its call depth
         call = None
         if torch.distributed.tensor.DTensor in types:
@@ -753,7 +846,7 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
+            self.operators.append(_NNModuleCall(fqn, self.call_depth))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
@@ -794,12 +887,17 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self, show_stack_trace: bool = False) -> str:
+    def debug_string(self, show_stack_trace: bool | None = None) -> str:
         """
-        show_stack_trace: If True, display one-line stack trace summaries above groups
+        show_stack_trace: option to display one-line stack trace summaries above groups
                         of operations (similar to gm.print_readable() style).
                         Requires record_stack_trace=True.
+                        if None, uses self.record_stack_trace, otherwise overrides it.
         """
+        show_stack_trace = (
+            self.record_stack_trace if show_stack_trace is None else show_stack_trace
+        )
+
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
@@ -897,20 +995,43 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     @contextlib.contextmanager
-    def log_tensor_hashes(hash_fn: Callable | None = None, hash_inputs: bool = False):
+    def log_tensor_hashes(
+        hash_fn: Callable | str | list[str] = "norm", hash_inputs: bool = False
+    ):
         """
         Installs hook for tensor hash logging.
 
-        hash_fn: optional function for custom hashing
+        hash_fn: One of:
+            - Custom-defined hash function
+            - String: one of ("norm", "hash_tensor")
+                - "norm": uses norm_hash_fn; basically tensor's L1 norm
+                - "hash_tensor": uses torch.hash_tensor (XOR sum reduction)
+            - List of strings: returns tuple of hashes from above options
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
-        if hash_fn is None:
-            hash_fn = functools.partial(default_hash_fn, use_scalar=True)
+
+        def hash_fn_option(hash_type):
+            assert isinstance(hash_type, str) and hash_type in ["norm", "hash_tensor"]
+            return functools.partial(
+                norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
+            )
+
+        if callable(hash_fn):
+            fn = hash_fn
+        elif isinstance(hash_fn, str):
+            fn = hash_fn_option(hash_fn)
+        elif isinstance(hash_fn, list):
+            fns = [hash_fn_option(fn) for fn in hash_fn]
+            fn = lambda x: tuple(fn(x) for fn in fns)  # noqa: E731
+        else:
+            raise NotImplementedError(
+                f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
+            )
 
         def _tree_hash(obj):
             return tree_map(
-                lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
+                lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
             )
 
         def _dispatch_hash_hook(func, types, args, kwargs, result):
@@ -930,9 +1051,9 @@ class DebugMode(TorchDispatchMode):
         try:
             if hash_inputs:
                 _old_input_hfn = _TRITON_INPUT_HASH_FN
-                _TRITON_INPUT_HASH_FN = hash_fn
+                _TRITON_INPUT_HASH_FN = fn
             _old_output_hfn = _TRITON_OUTPUT_HASH_FN
-            _TRITON_OUTPUT_HASH_FN = hash_fn
+            _TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
                 yield
         finally:
@@ -957,6 +1078,19 @@ class DebugMode(TorchDispatchMode):
     @property
     def logs(self):
         return list(self.operators)
+
+    def _handle_annotate(self, tag):
+        """Handles DebugMode._annotate()"""
+        call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
+        self.operators.append(call)
+
+    @staticmethod
+    def _annotate(tag: Any) -> None:
+        """
+        If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
+        Implemented with a custom op.
+        """
+        torch.ops.debug_mode_ops.annotate(tag)
 
     @staticmethod
     def check_hash_mismatches(
@@ -1052,7 +1186,7 @@ class DebugMode(TorchDispatchMode):
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
                     assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
-                    for key in hashes1.keys():
+                    for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
                                 {
