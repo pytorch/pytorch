@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
