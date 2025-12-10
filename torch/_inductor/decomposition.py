@@ -240,15 +240,10 @@ def empty_permuted(
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
-    is_identity = list(physical_layout) == list(range(len(physical_layout)))
-
-    if is_identity:
-        return torch.empty(size, **kwargs)
-    else:
-        perm = [0] * len(size)
-        for p, l in enumerate(physical_layout):
-            perm[l] = p
-        return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])

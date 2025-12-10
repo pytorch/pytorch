@@ -5781,7 +5781,6 @@ class CommonTemplate:
             {
                 "triton.prefer_nd_tiling": tile_reduction,
                 "triton.tile_reductions": tile_reduction,
-                "combo_kernels": True,
             }
         ):
             self.common(
@@ -6771,7 +6770,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         post_grad_graph = get_post_grad_graph(f, (x,))
         expected_graph = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
-        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = empty = None
+        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = None
+        permute: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.permute.default(empty, [0, 1, 2]);  empty = permute = None
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
         return (add_13,)"""  # noqa: B950
@@ -13729,7 +13729,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
-    @skipIfXpu(msg="_fused_rms_norm is not implemented on XPU yet")
     def test_lite_mode_not_decompose(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -14752,61 +14751,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
-
-    @config.patch(implicit_fallbacks=True)
-    def test_custom_op_dce(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            # CASE 1: The op should get wrapped with auto_functionalized, and
-            # FX's DCE should not remove it because this op is registered as
-            # effectful
-
-            log1 = []
-
-            @torch.library.custom_op(
-                "mylib::my_logger1",
-                mutates_args="unknown",
-            )
-            def my_logger1(s: str, t: torch.Tensor) -> torch.Tensor:
-                log1.append(s)
-                return torch.zeros(1)
-
-            @my_logger1.register_fake
-            def my_logger1(s, t) -> torch.Tensor:
-                return torch.zeros(1)
-
-            def foo(x):
-                b = torch.scalar_tensor(x.shape[0])
-                torch.ops.mylib.my_logger1("moo", b)
-                return x + x
-
-            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger1.default)
-            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
-            self.assertTrue(len(log1), 1)
-
-            # CASE 2: The op should not get DCEd by TorchInductor
-
-            log2 = []
-
-            @torch.library.custom_op(
-                "mylib::my_logger2",
-                mutates_args=(),
-            )
-            def my_logger2(s: str, t: torch.Tensor) -> torch.Tensor:
-                log2.append(s)
-                return torch.zeros(1)
-
-            @my_logger2.register_fake
-            def my_logger2(s, t) -> torch.Tensor:
-                return torch.zeros(1)
-
-            def foo(x):
-                b = torch.scalar_tensor(x.shape[0])
-                torch.ops.mylib.my_logger2("moo", b)
-                return x + x
-
-            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger2.default)
-            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
-            self.assertTrue(len(log2), 1)
 
     @skipIfMPS  # Accuracy issue on MPS
     def test_weight_norm_conv2d(self):

@@ -18,8 +18,7 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom,
-    bool no_split)
+    bool use_on_oom)
     : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -30,9 +29,6 @@ MemPool::MemPool(
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
     CUDACachingAllocator::setUseOnOOM(device_, id_);
-  }
-  if (no_split) {
-    CUDACachingAllocator::setNoSplit(device_, id_);
   }
 }
 
