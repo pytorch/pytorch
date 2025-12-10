@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/util.h>
 

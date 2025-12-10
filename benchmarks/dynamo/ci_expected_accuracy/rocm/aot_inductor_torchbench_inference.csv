@@ -98,11 +98,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,0
+doctr_det_predictor,fail_to_run,0
 
 
 
-doctr_reco_predictor,pass,0
+doctr_reco_predictor,fail_to_run,0
 
 
 
@@ -262,7 +262,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,0
+tts_angular,fail_to_run,0
 
 
 
