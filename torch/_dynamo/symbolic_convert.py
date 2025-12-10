@@ -239,6 +239,7 @@ class SpeculationEntry:
     instruction_pointer: int
     inst: Instruction  # for debugging only
     _failed: bool = False
+    # TX error_on_graph_break setting at the time of failure
     error_on_graph_break: Optional[bool] = None
     reason: Optional[GraphCompileReason] = None
 
@@ -1143,8 +1144,12 @@ class InstructionTranslatorBase(
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
-    is_leaf_tracer: bool
+    # Does this function make no inlined function calls?
+    is_leaf_function: bool
     parent: Optional[InstructionTranslatorBase]
+    # Does this tx currently have a child tx tracing?
+    # Used to correctly implement should_compile_partial_graph
+    is_child_tracer_active: bool
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
     latest_bytecode_queue: deque[str]
@@ -1255,7 +1260,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        self.is_leaf_tracer = False
+        self.is_leaf_function = False
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
             return self.inline_generator_function(fn, args, kwargs)
         else:
@@ -3195,7 +3200,8 @@ class InstructionTranslatorBase(
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and not self.error_on_graph_break
+            # Only the leaf tracer's error_on_graph_break should be used
+            and (self.is_child_tracer_active or not self.error_on_graph_break)
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             # Do not allow nested graph breaks in HOPs
@@ -3432,7 +3438,7 @@ class InstructionTranslatorBase(
         push=False, msg_prefix="Encountered intentional debugging graph break"
     )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
-        if self.is_leaf_tracer:
+        if self.is_leaf_function:
             unimplemented(
                 gb_type="Forced graph break on leaf function",
                 context="",
@@ -4377,8 +4383,9 @@ class InstructionTranslatorBase(
 
         self.strict_checks_fn = None
 
-        self.is_leaf_tracer = True
+        self.is_leaf_function = True
         self.parent = None
+        self.is_child_tracer_active = False
         self.debug_locals = []
 
         self.package = package
@@ -4925,6 +4932,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
+        parent.is_child_tracer_active = True
         code = self.f_code
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -4946,7 +4954,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
+            # Pass inlined tx's error_on_graph_break to parent.
+            # Deals with the case where the parent's error_on_graph_break is True
+            # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
+            parent.is_child_tracer_active = False
 
         if self.output.should_exit:
             # graph break
