@@ -2519,6 +2519,10 @@ def inductor_random(
     return result
 
 
+make_fallback(inductor_prims.rand_eager_offset)
+make_fallback(inductor_prims.rand_eager_offsets)
+
+
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
 def inductor_randint(
     low: int, high: int, size: list[int], seed: TensorBox, *, offset: int = 0
