@@ -1129,6 +1129,16 @@
       ]
     }
   ],
+  "GB4778": [
+    {
+      "Gb_type": "nested function with closure in output",
+      "Context": "as_python_constant for out_spec",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",

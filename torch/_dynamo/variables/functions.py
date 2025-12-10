@@ -926,7 +926,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self) -> Never:
-        raise NotImplementedError
+        raise NotImplementedError("get_function")
 
     def has_self(self) -> bool:
         return False
@@ -1590,12 +1590,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            unimplemented(
-                gb_type="Attempted to reconstruct a nested function with closure which is not supported",
-                context=str(self.fn_name),
-                explanation=f"Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
-                hints=["Define the function at module level"],
-            )
+            raise NotImplementedError("get_function")
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
