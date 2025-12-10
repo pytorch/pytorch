@@ -1,5 +1,0 @@
-ERROR
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/array_methods.py", line 477, in _compute_newshape
-    raise TypeError(f"cannot reshape array of shape {arr.shape} (size {arr.size}) "
-TypeError: cannot reshape array of shape (2, 4, 16, 16) (size 2048) into shape (2, 4, 7, 7) (size 392)
