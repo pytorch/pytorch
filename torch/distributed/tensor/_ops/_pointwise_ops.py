@@ -535,7 +535,8 @@ def common_pointwise_strategy(
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 redistribute_partial_ops = [aten.add.Tensor, aten.add_.Tensor]
-                scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
+
+                scalar_arg = isinstance(args_schema[1], _Number)
 
                 safe_avoid_redistribution = False
 
