@@ -3454,7 +3454,7 @@ def persistent_reduction(
             # if rnumel is large
             MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
-            
+
             if rnumel_hint <= 1024:
                 c.num_warps //= 2
                 c.num_warps = max(c.num_warps, 1)
