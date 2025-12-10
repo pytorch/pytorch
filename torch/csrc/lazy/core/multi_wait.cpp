@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <exception>
+#include <stdexcept>
 
 namespace torch::lazy {
 

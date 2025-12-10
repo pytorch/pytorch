@@ -1,5 +1,7 @@
 #include <torch/nativert/kernels/KernelRegistry.h>
 
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 
 namespace torch::nativert {

@@ -143,13 +143,9 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     return equal_strategy
 
 
-register_op_strategy(
-    aten.empty_like.default, schema_info=RuntimeSchemaInfo(1, ["dtype"])
-)(propagate_single_input_strategy)
-
-
 @register_op_strategy(
     [
+        aten.empty_like.default,
         aten.ones_like.default,
         aten.rand_like.default,
         aten.randn_like.default,

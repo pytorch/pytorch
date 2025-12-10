@@ -2,6 +2,9 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 
+#include <torch/types.h>
+#include <torch/utils.h>
+
 #include <cmath>
 #include <cstdint>
 
