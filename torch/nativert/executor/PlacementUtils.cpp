@@ -1,5 +1,7 @@
 #include <torch/nativert/executor/Placement.h>
 
+#include <fmt/ostream.h>
+
 namespace torch::nativert {
 
 bool isSameDevice(const c10::Device& a, const c10::Device& b) {
