@@ -212,13 +212,8 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
-
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
-
-        return ops.where(new_mask, result, other)
+        with V.kernel.mask_loads(mask, other):
+            return body()
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -498,6 +493,8 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
+        if self._load_mask and self._load_other:
+            line = f"{self._load_mask} ? {line} : {value_to_metal(self._load_other)}"
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
@@ -1073,6 +1070,9 @@ class MetalKernel(SIMDKernel):
             condition = f"{expr_str} < 0"
         else:
             condition = f"{expr_str} >= {size_str}"
+
+        if self._load_mask:
+            condition = f"{condition} && {self._load_mask}"
 
         # Generate error reporting code
         self.compute.splice(f"""if ({condition}) {{
