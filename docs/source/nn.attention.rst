@@ -18,7 +18,6 @@ Utils
     activate_flash_attention_impl
     list_flash_attention_impls
     current_flash_attention_impl
-    previous_flash_attention_impl
     restore_flash_attention_impl
 
 Submodules
