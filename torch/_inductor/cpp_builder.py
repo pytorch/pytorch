@@ -1301,7 +1301,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
 
 
-def preload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
+def preload_gcc_libgomp_linux(ldflags, libs):
     torch_root = Path(torch.__file__).resolve().parent
     for d in [torch_root / "lib", torch_root.parent / "torch.libs"]:
         torch_libgomp = glob.glob(str(d / "libgomp-*.so*"))
@@ -1428,8 +1428,8 @@ def _get_openmp_args(
             else:
                 # GCC on Linux
                 # Explicitly control OpenMP linkage and prefer torch libgomp if available
-                preload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths)
-                cflags += ["fopenmp"]
+                preload_gcc_libgomp_linux(ldflags, libs)
+                cflags.append("fopenmp")
 
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
