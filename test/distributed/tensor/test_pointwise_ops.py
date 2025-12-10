@@ -438,7 +438,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # Inplace ops that require placement changes (Partial -> Replicate) should error
         with self.assertRaisesRegex(
             RuntimeError,
-            "in-place operations that require placement changes are not supported",
+            "in-place operations that require placement changes are not supporte",
         ):
             partial_dt.clamp_(max=10)
 
