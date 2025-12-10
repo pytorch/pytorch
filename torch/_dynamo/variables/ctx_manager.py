@@ -125,12 +125,10 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         assert isinstance(
             args[0],
-            (
-                NestedUserFunctionVariable,
-                SkipFunctionVariable,
-                UserMethodVariable,
-                UserFunctionVariable,
-            ),
+            NestedUserFunctionVariable
+            | SkipFunctionVariable
+            | UserMethodVariable
+            | UserFunctionVariable,
         )
 
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -1500,9 +1498,7 @@ class WithExitFunctionVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(
-            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-        )
+        assert isinstance(ctx, ContextWrappingVariable | GenericContextWrappingVariable)
         self.ctx = ctx
         self.target = target
 
