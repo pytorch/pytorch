@@ -482,6 +482,13 @@ class Shard(torch._C._distributed.Shard):
         """
         return f"Shard(dim={self.dim})"
 
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return f"torch.distributed.tensor.placement_types.Shard(dim={self.dim})", {}
+
     def __str__(self) -> str:
         """human readable representation of the Shard placement"""
         return f"S({self.dim})"
@@ -775,6 +782,13 @@ class Replicate(torch._C._distributed.Replicate):
         """
         return "Replicate()"
 
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for Replicate placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return "torch.distributed.tensor.placement_types.Replicate()", {}
+
     def __str__(self) -> str:
         """
         human readable representation of the Replicate placement
@@ -882,6 +896,16 @@ class Partial(torch._C._distributed.Partial):
         machine readable representation of the Partial placement
         """
         return f"Partial({self.reduce_op})"
+
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.Partial({self.reduce_op!r})",
+            {},
+        )
 
     def __str__(self) -> str:
         """

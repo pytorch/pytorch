@@ -523,7 +523,7 @@ else:
             # pop this mesh from mesh env
             _mesh_resources.mesh_stack.pop()
 
-        def __str__(self) -> str:
+        def __repr__(self) -> str:
             device_mesh_repr = (
                 f"({', '.join(f'{k}={v}' for k, v in zip(self._mesh_dim_names, self._layout.top_level_sizes))})"
                 if self._mesh_dim_names
@@ -535,16 +535,18 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
-        def __repr__(self) -> str:
-            device_mesh_repr = (
-                f"DeviceMesh('{self.device_type}', {self._concrete_mesh!r}"
-            )
+        def __fx_eval__(self):
+            """
+            Returns FX-evaluable repr and required globals for DeviceMesh.
+            Needed for passing this type as an opaque object input to a custom op.
+            """
+            device_mesh_repr = f"torch.distributed.device_mesh.DeviceMesh('{self.device_type}', {self._concrete_mesh!r}"
 
             if self._mesh_dim_names:
                 device_mesh_repr += f", mesh_dim_names={self._mesh_dim_names!r}"
 
             device_mesh_repr += ")"
-            return device_mesh_repr
+            return device_mesh_repr, {}
 
         def __hash__(self):
             # lazily compute hash

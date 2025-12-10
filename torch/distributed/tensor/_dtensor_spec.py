@@ -40,6 +40,16 @@ class ShardOrderEntry(NamedTuple):
     tensor_dim: int
     mesh_dims: tuple[int, ...]  # guaranteed to be non-empty
 
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for ShardOrderEntry.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor._dtensor_spec.ShardOrderEntry(tensor_dim={self.tensor_dim}, mesh_dims={self.mesh_dims})",
+            {},
+        )
+
 
 # Type alias for the complete shard order specification
 # A tuple of ShardOrderEntry, one per sharded tensor dimension
@@ -62,6 +72,19 @@ class TensorMeta(NamedTuple):
     shape: torch.Size
     stride: tuple[int, ...]
     dtype: torch.dtype
+
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for TensorMeta.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor._dtensor_spec.TensorMeta("
+            f"shape=torch.Size({list(self.shape)}), "
+            f"stride={self.stride}, "
+            f"dtype={self.dtype!r})",
+            {},
+        )
 
 
 # used internally to propagate the placements
@@ -409,6 +432,38 @@ class DTensorSpec:
 
     def __eq__(self, other: object, /) -> bool:
         return self._check_equals(other)
+
+    def __fx_eval__(self):
+        """
+        Returns FX-evaluable repr and required globals for DTensorSpec.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        mesh_repr, mesh_globals = self.mesh.__fx_eval__()
+
+        placement_reprs = []
+        for p in self.placements:
+            p_repr, p_globals = p.__fx_eval__()  # pyrefly: ignore[missing-attribute]
+            placement_reprs.append(p_repr)
+
+        placements_repr = f"({', '.join(placement_reprs)},)"
+
+        repr_parts = [f"mesh={mesh_repr}", f"placements={placements_repr}"]
+
+        if self.tensor_meta is not None:
+            tm_repr, tm_globals = self.tensor_meta.__fx_eval__()
+            repr_parts.append(f"tensor_meta={tm_repr}")
+
+        if self.shard_order:
+            shard_order_reprs = []
+            for entry in self.shard_order:
+                entry_repr, entry_globals = entry.__fx_eval__()
+                shard_order_reprs.append(entry_repr)
+            shard_order_repr = f"({', '.join(shard_order_reprs)},)"
+            repr_parts.append(f"shard_order={shard_order_repr}")
+
+        dtensor_spec_repr = f"torch.distributed.tensor._dtensor_spec.DTensorSpec({', '.join(repr_parts)})"
+
+        return dtensor_spec_repr, {}
 
     def __str__(self) -> str:
         """

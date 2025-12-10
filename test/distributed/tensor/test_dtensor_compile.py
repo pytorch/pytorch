@@ -261,7 +261,7 @@ def forward(self, b_buffer, x):
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0
     dtensor_const_func_spec0 = self.dtensor_const_func_spec0
-    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, DTensorSpec(mesh=DeviceMesh('{self.device_type}', [0, 1]), placements=(Shard(dim=0),), tensor_meta=TensorMeta(shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float64), shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0,)),)), False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, torch.distributed.tensor._dtensor_spec.DTensorSpec(mesh=torch.distributed.device_mesh.DeviceMesh('{self.device_type}', [0, 1]), placements=(torch.distributed.tensor.placement_types.Shard(dim=0),), tensor_meta=torch.distributed.tensor._dtensor_spec.TensorMeta(shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float64), shard_order=(torch.distributed.tensor._dtensor_spec.ShardOrderEntry(tensor_dim=0, mesh_dims=(0,)),)), False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
     add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
     access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
     view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
