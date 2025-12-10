@@ -36,7 +36,7 @@ from .common import (
 from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
-from .triton_utils import config_of, signature_to_meta
+from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
 log = logging.getLogger(__name__)
@@ -450,9 +450,10 @@ class ComboKernel(Kernel):
                         "Dynamic shape on reduction dimension is not supported"
                     )
                 val = next_power_of_2(val)
-                code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("R0_BLOCK")
+                code.writeline(
+                    f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
+                )
+                uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
@@ -610,6 +611,10 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
+
+        for arg_num in equal_1_arg_indices(signature):
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+
         # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
         mutated_args = self.get_mutated_args_sub_kernels()
