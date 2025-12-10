@@ -3448,8 +3448,13 @@ def persistent_reduction(
             c.kwargs["XBLOCK"] = x_block
 
             num_iters = rsplit_size // x_block
-            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), 3)
 
+            # With large rnumel, we have higher chance of out-of-shared memory
+            # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
+            # if rnumel is large
+            MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
+            
             if rnumel_hint <= 1024:
                 c.num_warps //= 2
                 c.num_warps = max(c.num_warps, 1)
