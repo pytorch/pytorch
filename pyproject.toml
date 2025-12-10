@@ -348,11 +348,9 @@ keep-runtime-typing = true
     "S101"
 ]
 "torch/_decomp/**" = ["S101"]
-"torch/_dispatch/python.py" = ["S101"]
 "torch/_dynamo/**" = ["S101"]
 "torch/_export/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
-"torch/_guards.py" = ["S101"]
 "torch/_higher_order_ops/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/_jit_internal.py" = ["S101"]
