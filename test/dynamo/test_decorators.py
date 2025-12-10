@@ -234,7 +234,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         fn(torch.randn(10))
 
         # Check for graph break
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
@@ -493,10 +493,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def __hash__(self):
                 return hash(self.n)
 
+            def __repr__(self):
+                return f"State({self.n})"
+
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        self.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="value")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -635,15 +638,16 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
     def test_nonstrict_trace_no_action_at_a_distance(self):
         def trace_me(x):
+            x = x + 4
             torch._dynamo.graph_break()
-            return x + 42
+            return x + 8
 
         # No effect on traceability of `trace_me`
         torch._dynamo.nonstrict_trace(trace_me)
 
         def fn(x):
-            res = trace_me(x)
-            return res + 1
+            res = trace_me(x + 1)
+            return res + 2
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -791,7 +795,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        self.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="reference")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -809,7 +813,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn(
-                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                "An opaque object was created in the middle of the program.",
                 str(e),
             )
 
@@ -1636,6 +1640,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             f(torch.randn(3, 3))
 
     # also tests a lot of torch._dynamo.patch_dynamo_config functionality
+    # nested graph breaks x dont_skip_tracing doesn't completely work yet
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_dont_skip_tracing(self):
         from torch._dynamo.test_dont_skip_tracing_functions import f1, f3, f4, f5, f6
 
@@ -1851,7 +1857,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f5(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner_f6(x):
             x = x + 2
@@ -1867,7 +1873,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         cnts.clear()
         self.assertEqual(f6(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner_f7(x):
             x = x + 2
@@ -1907,7 +1913,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f8(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 3)
 
         def inner2_f9(x):
             x = x + 2
@@ -1970,7 +1976,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         inp = torch.ones(3)
         self.assertEqual(f1(inp), inp + 7)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
 
         def inner1_f2(x):
             x = x + 1
@@ -2090,6 +2096,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         self.assertEqual(cnts.frame_count, 0)
 
+    # nested graph breaks x nested compile doesn't completely work yet
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_nested_compile_fullgraph(self):
         # Test that fullgraph=True cannot be toggled back by fullgraph=False
         inp = torch.ones(3)

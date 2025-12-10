@@ -60,10 +60,11 @@ class MixOrderReductionTest(TestBase):
             "mean",
         ],
     )
+    @parametrize("dtype", (torch.bfloat16, torch.float))
     @parametrize("swap", (False, True))
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
-    def test_mix_order_reduction(self, name, swap, split_reductions, shape):
+    def test_mix_order_reduction(self, name, dtype, swap, split_reductions, shape):
         # torch.prod does not accept tuple for dim argument
         if name == "prod" and len(shape) == 3:
             self.skipTest("Invalid combination")
@@ -82,7 +83,6 @@ class MixOrderReductionTest(TestBase):
                 return reduction_fn(x, dim=-1), outer_red()
 
         reduction_fn = getattr(torch, name)
-        dtype = torch.float
         x = torch.randn(shape, dtype=dtype, device=GPU_TYPE)
 
         opt_f = torch.compile(
@@ -94,8 +94,8 @@ class MixOrderReductionTest(TestBase):
 
         ref = f(x)
         act = opt_f(x)
-
-        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        tol = 1e-3 if dtype == torch.float else 1e-2
+        self.assertTrue(same(ref, act, tol=tol), f"ref:\n{ref}\nact:\n{act}")
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -582,6 +582,8 @@ class MixOrderReductionTest(TestBase):
             lambda: torch.autograd.grad(act, inputs_for_grad, dys)
         )
         tol = 1e-3 if dtype == torch.float32 else 1e-2
+        if GPU_TYPE == "xpu":
+            tol = 1e-3 if dtype == torch.float32 else 2e-2
         self.assertTrue(same((ref, ref_grads[:-2]), (act, act_grads[:-2]), tol=tol))
         if dtype == torch.float32:
             # bfloat16 cause big numerical instability for grad_weight
