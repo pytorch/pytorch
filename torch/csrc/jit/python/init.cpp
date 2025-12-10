@@ -1614,9 +1614,11 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            TORCH_INTERNAL_ASSERT(size == numel * elementSize(scalar_type));
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),

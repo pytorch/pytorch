@@ -465,9 +465,19 @@ class Unpickler:
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
+                if type(self.stack[-1]) not in [dict, OrderedDict, Counter]:
+                    raise UnpicklingError(
+                        "Can only SETITEM for dict, collections.OrderedDict, "
+                        f"collections.Counter, but got {type(object)}"
+                    )
                 self.stack[-1][k] = v
             elif key[0] == SETITEMS[0]:
                 items = self.pop_mark()
+                if type(self.stack[-1]) not in [dict, OrderedDict, Counter]:
+                    raise UnpicklingError(
+                        "Can only SETITEMS for dict, collections.OrderedDict, "
+                        f"collections.Counter, but got {type(object)}"
+                    )
                 for i in range(0, len(items), 2):
                     self.stack[-1][items[i]] = items[i + 1]
             elif key[0] == MARK[0]:
@@ -531,7 +541,7 @@ class Unpickler:
                     and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
                 ):
                     raise UnpicklingError(
-                        f"Only persistent_load of storage is allowed, but got {pid[0]}"
+                        f"Only persistent_load of storage is allowed, but got {type(pid[0])}"
                     )
                 self.append(self.persistent_load(pid))
             elif key[0] in [BINGET[0], LONG_BINGET[0]]:
