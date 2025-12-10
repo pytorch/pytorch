@@ -540,7 +540,7 @@ class TestSetOps(TestCase):
         ar2 = np.array([(1,), (2, 1), 1], dtype=object)
         ar2 = ar2[:-1]
         expected = np.array([True, True])
-        result = np.isin(ar1, sin).ravel()
+        result = np.isin(ar1, ar2).ravel()
         assert_array_equal(result, expected)
         result = np.isin(ar1, ar2, invert=True).ravel()
         assert_array_equal(result, np.invert(expected))
