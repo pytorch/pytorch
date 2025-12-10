@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -182,15 +178,11 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,7
+
+
+
+torchrec_dlrm,pass,6
 
 
 
