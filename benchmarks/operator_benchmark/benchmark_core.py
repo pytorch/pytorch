@@ -204,7 +204,7 @@ class BenchmarkRunner:
         self.operator_range = benchmark_utils.get_operator_range(args.operator_range)
         # 100 is the default warmup iterations
         if self.args.warmup_iterations == -1:
-            self.args.warmup_iterations = 100
+            self.args.warmup_iterations = 1000
         if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
