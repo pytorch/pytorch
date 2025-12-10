@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
+import atexit
 import collections.abc
 import contextlib
 import copy
 import ctypes
 import hashlib
+import importlib.util
 import io
 import itertools
 import logging
@@ -54,6 +56,7 @@ from torch.utils._typing_utils import not_none
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+from . import config as dist_config
 
 
 __all__ = [
@@ -140,6 +143,16 @@ _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
+
+_TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
+if _TORCHCOMM_AVAILABLE:
+    # pyrefly: ignore [import-error, missing-import]
+    from torchcomms._comms import _BackendWrapper, new_comm
+
+
+def _use_torchcomms_enabled() -> bool:
+    """Check if torchcomms is enabled via config."""
+    return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -595,6 +608,10 @@ _tags_to_pg: dict[str, list[ProcessGroup]] = {}
 _pg_to_tag: dict[ProcessGroup, str] = {}
 _backend: str | None = None
 
+# Global list to store torchcomm comm objects for finalization
+_comms: list[Any] = []
+_comms_atexit_registered: bool = False
+
 
 class _World:
     """
@@ -698,6 +715,20 @@ class _World:
         return self._pg_coalesce_state
 
     @property
+    def comms(self) -> list[Any]:
+        """List of torchcomm comm objects for finalization."""
+        global _comms
+        return _comms
+
+    def add_comm(self, comm: Any) -> None:
+        """Add a comm object to the global list."""
+        global _comms, _comms_atexit_registered
+        if not _comms_atexit_registered:
+            atexit.register(_finalize_comms)
+            _comms_atexit_registered = True
+        _comms.append(comm)
+
+    @property
     def pg_config_info(self) -> list[dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
@@ -752,6 +783,14 @@ class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
     NON_GROUP_MEMBER = -100
+
+
+def _finalize_comms() -> None:
+    """Finalize all torchcomm comm objects in the global list."""
+    global _comms
+    for comm in _comms:
+        comm.finalize()
+    _comms.clear()
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -2036,6 +2075,25 @@ def _new_process_group_helper(
                     backend_class.size(),
                 )
                 pg._set_default_backend(backend_type)
+        elif _use_torchcomms_enabled() and backend_str not in ["fake"]:
+            torch_device = torch.device(device)
+            logger.warning(
+                "Using TorchComms backend (enabled via %s) for device %s with backend %s",
+                "TORCH_DISTRIBUTED_USE_TORCHCOMMS env var"
+                if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
+                else "dist_config.use_torchcomms",
+                torch_device,
+                backend_str,
+            )
+            # TODO: figure out pg option conversion for torchComms.
+            comm = new_comm(backend_str, torch_device, name=group_name, store=backend_prefix_store)
+            # We need to keep a reference to the python object otherwise after this function the object gets delete.
+            # This also help us perform bookkeeping of comms so that we can do finalize when the program finishes.
+            _world.add_comm(comm)
+            group_name = GroupName(group_name)
+            # pyrefly: ignore [bad-assignment]
+            backend_class = _BackendWrapper(comm)
+            backend_type = ProcessGroup.BackendType.CUSTOM
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
@@ -2135,13 +2193,13 @@ def _new_process_group_helper(
                 backend_class = creator_fn(dist_backend_opts, backend_options)
 
         # Set sequence numbers for gloo and nccl backends.
-        if backend_str == Backend.GLOO:
+        if backend_str == Backend.GLOO and not _use_torchcomms_enabled():
             if not isinstance(backend_class, ProcessGroupGloo):
                 raise AssertionError(
                     f"Expected ProcessGroupGloo, got {type(backend_class)}"
                 )
             backend_class._set_sequence_number_for_group()
-        elif backend_str == Backend.NCCL:
+        elif backend_str == Backend.NCCL and not _use_torchcomms_enabled():
             if not isinstance(backend_class, ProcessGroupNCCL):
                 raise AssertionError(
                     f"Expected ProcessGroupNCCL, got {type(backend_class)}"
@@ -2159,7 +2217,7 @@ def _new_process_group_helper(
         if (
             backend_str in [Backend.GLOO, Backend.NCCL, Backend.XCCL, Backend.UCC]
             or backend_str.upper() in Backend._plugins
-        ):
+        ) and not _use_torchcomms_enabled():
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -5180,7 +5238,7 @@ def split_group(
     global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
-    if not device_id:
+    if not device_id and not _use_torchcomms_enabled():
         raise RuntimeError(
             "No device associated with the default pg, not safe to split any process groups"
         )
@@ -5208,7 +5266,9 @@ def split_group(
 
     # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
-    if not parent_backend or not parent_backend.supports_splitting:
+    if (
+        not parent_backend or not parent_backend.supports_splitting
+    ) and not _use_torchcomms_enabled():
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
@@ -5222,7 +5282,8 @@ def split_group(
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
 
-    if pg_options is None:
+    # TODO: figure out pg option for torchComms
+    if pg_options is None and not _use_torchcomms_enabled():
         # default pg_options same as the parent process group
         # A deep copy is needed because if the option will be modified inside split
         # and if we split parent pg multiple times, we will run into device out of bound error.
@@ -5271,7 +5332,8 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
     split_backend_class = split_pg._get_backend(torch.device("cuda"))
-    split_backend_class._set_sequence_number_for_group()
+    if not _use_torchcomms_enabled():
+        split_backend_class._set_sequence_number_for_group()
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
@@ -5292,6 +5354,9 @@ def split_group(
         for group_rank, global_rank in enumerate(global_ranks_in_my_group)
     }
 
+    if _use_torchcomms_enabled():
+        # pyrefly: ignore [missing-attribute]
+        _world.add_comm(split_backend_class.get_comm())
     return split_pg
 
 
