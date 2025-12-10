@@ -8757,6 +8757,17 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """
+    IR node representing torch.cond
+
+    Attributes:
+        predicate: A boolean scalar tensor determining which branch to execute.
+        operands: Input tensors passed to both true and false subgraphs.
+        true_subgraph: Subgraph executed when predicate is True.
+        false_subgraph: Subgraph executed when predicate is False.
+        outputs: MultiOutput nodes representing the conditional's outputs.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
