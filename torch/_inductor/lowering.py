@@ -7278,7 +7278,7 @@ def cond(pred, true_fn, false_fn, operands):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result: list[Union[Tensorbox, ShapeAsConstantBuffer]] = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    result: list[ir.MultiBox] = ir.Conditional.create(pred, true_fn, false_fn, operands)
     return list(map(TensorBox.create, result))
 
 
