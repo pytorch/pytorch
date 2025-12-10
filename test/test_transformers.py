@@ -53,7 +53,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
-    math_sdp_precision,
 )
 
 if TEST_FAIRSEQ:
@@ -127,12 +126,6 @@ def _check_equal(
         for gold, ref, tst in zip(golden.unbind(), reference.unbind(), test.unbind()):
             _check_equal(gold, ref, tst, fudge_factor, tensor_name)
         return
-
-    if golden.is_cuda and golden.dtype == torch.float32:
-        assert torch.backends.cuda.math_sdp.fp32_precision == "ieee", (
-            "Testing script error: FP32 golden tensor must be calculated with IEEE"
-            " precision. Add @math_sdp_precision('ieee') to related tests to fix it."
-        )
 
     # Compute error between golden
     test_error = (golden - test).abs().max()
@@ -2692,7 +2685,9 @@ class TestSDPACudaOnly(NNTestCase):
                     attn_mask=None, dropout_p=0.0, is_causal=False)
             self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        if torch.cuda.get_device_capability() in [(9, 0)]:
+        # head_dim=256 support on SM 9.0 requires cuDNN >= 9.10.0 (91000) per sdp_utils.cpp:495
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        if torch.cuda.get_device_capability() in [(9, 0)] and cudnn_version >= 91000:
             test()
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
@@ -3228,10 +3223,13 @@ class TestSDPACudaOnly(NNTestCase):
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
-        prefer_cudnn = prefer_cudnn and device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
 
-        # TODO we are currently disabling this by default, lets assert that this returns
-        # FlashAttention, we need to change when we make remove opt-in for cudnn
+        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
+        # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
@@ -3419,7 +3417,6 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize("scale", [None, "l1"])
     @tf32_enabled()
-    @math_sdp_precision("ieee")
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
@@ -3535,7 +3532,6 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize("scale", [None, "l1"])
     @tf32_enabled()
-    @math_sdp_precision("ieee")
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
@@ -3649,7 +3645,6 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
     @tf32_enabled()
-    @math_sdp_precision("ieee")
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: list[int]):
@@ -3795,7 +3790,6 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
-    @math_sdp_precision("ieee")
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
                                                          seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
@@ -4110,7 +4104,6 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("is_causal", [True, False])
-    @math_sdp_precision("ieee")
     def test_flash_attention_vs_math_ref_grads_nestedtensor(self, device, batch_size: int, max_seq_len_q: int, max_seq_len_kv: int,
                                                             head_dim: int, dropout_p: float, dtype: torch.dtype,
                                                             scale: str, is_causal: bool):

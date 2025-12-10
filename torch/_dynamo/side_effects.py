@@ -261,8 +261,10 @@ class SideEffects:
                 context=f"Attempted to mutate {item}",
                 explanation="Mutating a variable from outside the scope of this HOP is not supported.",
                 hints=[
-                    "If the HOP is activation checkpointing, try setting "
-                    "`torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
+                    "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a "
+                    "side effect in forward method. Eager activation checkpointing replays that side-effect while "
+                    "recomputing the forward in the backward. If you are ok with side-effect not replayed in the "
+                    "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
                 ],
             )
         return False
