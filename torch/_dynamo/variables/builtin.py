@@ -26,6 +26,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -1502,10 +1503,17 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
             if isinstance(args[0], ConstantVariable):
                 try:
-                    fn = getattr(float, name)
+                    fn = getattr(self.fn, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:
@@ -2474,8 +2482,31 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        *seqs: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
+        strict = ConstantVariable.create(False)
+        if kwargs:
+            if sys.version_info >= (3, 14):
+                if not (len(kwargs) == 1 and "strict" in kwargs):
+                    raise_args_mismatch(
+                        tx,
+                        "map",
+                        "1 kwargs (`strict`)",
+                        f"{len(kwargs)} kwargs",
+                    )
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "map",
+                    "0 kwargs",
+                    f"{len(kwargs)} kwargs",
+                )
+
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2483,6 +2514,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
