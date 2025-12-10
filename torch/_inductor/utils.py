@@ -1171,7 +1171,7 @@ def get_forbidden_cudagraph_ops() -> OrderedSet[str]:
     that are not permitted while a stream is capturing (e.g., CPU synchronization,
     dynamic memory allocation, etc.).
     """
-    forbidden = OrderedSet(
+    return OrderedSet(
         [
             "aten._fused_moving_avg_obs_fq_helper.default",
             "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -1187,24 +1187,6 @@ def get_forbidden_cudagraph_ops() -> OrderedSet[str]:
             "aten._assert_scalar",
         ]
     )
-    if torch.are_deterministic_algorithms_enabled():
-        forbidden.update(
-            (
-                "aten._unsafe_index_put.default",
-                "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
-                "aten.scatter.src",
-                "aten.scatter.reduce",
-                "aten.scatter.value_reduce",
-                "aten.scatter_add_",
-                "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
-                "aten.scatter_reduce_.two",
-                "aten.scatter_reduce.two_out",
-            )
-        )
-    return forbidden
 
 
 def get_first_incompatible_cudagraph_node(
