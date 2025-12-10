@@ -6,12 +6,6 @@ set -ex -o pipefail
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# Source ROCm environment for theRock nightly builds (needed for docker exec)
-if [[ -f /etc/rocm_env.sh ]]; then
-  # shellcheck disable=SC1091
-  source /etc/rocm_env.sh
-fi
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -364,18 +358,13 @@ else
       sudo rm -f /opt/cache/bin/c++
       sudo rm -f /opt/cache/bin/gcc
       sudo rm -f /opt/cache/bin/g++
-      # Restore original clang compilers that were backed up during sccache wrapping.
-      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-      if [[ -d /opt/rocm/llvm/bin ]]; then
-        pushd /opt/rocm/llvm/bin
-        if [[ -d original ]]; then
-          sudo mv original/clang .
-          sudo mv original/clang++ .
-        fi
-        sudo rm -rf original
-        popd
+      pushd /opt/rocm/llvm/bin
+      if [[ -d original ]]; then
+        sudo mv original/clang .
+        sudo mv original/clang++ .
       fi
+      sudo rm -rf original
+      popd
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
