@@ -161,18 +161,20 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask(self):
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
 
-        register_pytree_node(
-            BlockMask,
-            BlockMask._flatten,
-            BlockMask._unflatten,
-            flatten_with_keys_fn=BlockMask._flatten_with_keys,
-            serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-        )
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
 
         def make_mask_closure():
             def fn(b, h, q, k):

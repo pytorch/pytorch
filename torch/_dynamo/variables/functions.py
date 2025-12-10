@@ -1590,7 +1590,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            raise NotImplementedError
+            unimplemented(
+                gb_type="Attempted to reconstruct a nested function with closure which is not supported",
+                context=str(self.fn_name),
+                explanation=f"Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
+                hints=["Define the function at module level"],
+            )
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,

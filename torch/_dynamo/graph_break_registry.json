@@ -1236,6 +1236,16 @@
       "Hints": []
     }
   ],
+  "GB9528": [
+    {
+      "Gb_type": "Attempted to reconstruct a nested function with closure which is not supported",
+      "Context": "str(self.fn_name)",
+      "Explanation": "Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
+      "Hints": [
+        "Define the function at module level"
+      ]
+    }
+  ],
   "GB0127": [
     {
       "Gb_type": "Unsupported Tensor.resize_as_() call",

@@ -65,7 +65,7 @@ FakeTensor(..., size=(s77,))
 range(1, 3, 1)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
-defaultdict(NestedUserFunctionVariable(), {})
+defaultdict(<function ComptimeTests.test_print_single.<locals>.f.<locals>.<lambda> at 0x7f8439e45620>, {})
 set()
 {'a','b'}
 s77""",
