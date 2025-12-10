@@ -65,12 +65,12 @@ const bool use_magma_ = false;
 
 #endif
 
-namespace at::native {
+
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
 // so if library is lazy loaded it must not export anything, otherwise
 // it can result in symbol clashes
-namespace lazy_linalg {
+namespace at::native::lazy_linalg {
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -2799,8 +2799,8 @@ struct DispatchInitializer {
   };
 } initializer;
 
-}  // namespace lazy_linalg
+} // namespace at::native::lazy_linalg
 #endif
-}  // namespace at::native
+
 
 #undef ALLOCATE_ARRAY

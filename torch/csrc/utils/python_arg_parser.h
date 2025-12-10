@@ -621,7 +621,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
           } else if (is_dynint(py::handle(obj))) {
-            res.push_back(py::handle(obj).cast<int>());
+            res.emplace_back(py::handle(obj).cast<int>());
           } else {
             res.emplace_back(THPUtils_unpackIndex(obj));
           }
