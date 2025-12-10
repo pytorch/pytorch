@@ -11,6 +11,7 @@ __all__ = ["PassResult", "PassBase"]
 
 
 @compatibility(is_backward_compatible=False)
+# pyrefly: ignore [invalid-inheritance]
 class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
     """
     Result of a pass:

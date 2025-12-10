@@ -3,28 +3,30 @@
 import contextlib
 import os
 import unittest
+from unittest import skipUnless
 
 import numpy as np
 import sympy
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
+from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import run_and_get_code, sympy_index_symbol
+from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -230,7 +232,7 @@ class LoopOrderingTest(TestCase):
                     return x.to(torch.float32)
                 return x
 
-            # Wordaround the issue that call allclose on fp8 tensor triggers error
+            # Workaround the issue that call allclose on fp8 tensor triggers error
             #   RuntimeError: "mul_cuda" not implemented for 'Float8_e4m3fn'
             expect = tree_map(_cast, expect)
             actual = tree_map(_cast, actual)
@@ -413,7 +415,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
@@ -436,7 +437,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_pattern_2(self):
         """
@@ -476,6 +476,47 @@ class LoopOrderingTest(TestCase):
         expected_numbytes += tensor_fp8.nbytes + tensor_fp8_t.nbytes  # output
         self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
 
+    def test_outer_dimension_softmax(self):
+        """
+        This test repros the not able to fuse problem for outer dimension
+        softmax reported here: https://github.com/pytorch/pytorch/issues/93718
+
+        Perf data on h100:
+        - without loop ordering after fusion 0.564 ms
+        - with loop ordering after fusion 0.302 ms
+        This is 1.87x speedup.
+
+        """
+        x = torch.randn(32, 2**21, device=GPU_TYPE)
+
+        def f(x):
+            return F.softmax(x, dim=0)
+
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_outer_dimension_sum_fuse_with_pw(self):
+        """
+        Test the fusion of an outer dimension sum with a followed pointwise.
+        Perf data on h100:
+        - without loop ordering after fusion 0.436 ms
+        - with loop ordering after fusion 0.260 ms
+        This is 1.68x speedup.
+        """
+        x = torch.randn(32, 2**21, device=GPU_TYPE)
+
+        def f(x):
+            return x.sum(dim=0, keepdim=True) + x
+
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            optf = torch.compile(f)
+            print(f"ms={do_bench(lambda: optf(x))}")
+
     # Disable split reduction to make it easier to calculate the expected
     # number of bytes accessed. In this case, split reduction does not
     # help perf much.
@@ -507,7 +548,7 @@ class LoopOrderingTest(TestCase):
 
         # A small amount of extra memory access for:
         # - store output for the first reduction
-        # - load input for the second redution
+        # - load input for the second reduction
         # - store output for the second reduction
         expected_numbytes += (M * 2 + 1) * x.itemsize
 
@@ -519,6 +560,108 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
+    def test_interaction_with_triton_template(self):
+        """
+        Make sure the dependency prefix for TritonTempalate and its
+        prologue match.
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.randn([1, 1], device=GPU_TYPE)
+        y = torch.randn([64, 128], device=GPU_TYPE)
+
+        out, code = run_and_get_code(f, x, y)
+
+        # well when benchmark_kernel flag is on, we have one more .run
+        # call in the benchmarking code.
+        FileCheck().check("def call(").check_count(
+            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
+        ).run(code[0])
+
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
+    def test_interaction_with_multi_template(self):
+        """
+        Skip MultiTemplateBuffer during loop reordering
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x @ y), x + 1
+
+        N = 2
+        x = torch.randn([N, N], device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn([N, N], device=GPU_TYPE, dtype=torch.bfloat16)
+
+        out, code = run_and_get_code(f, x, y)
+        # didn't fuse due to small savings
+        FileCheck().check_count("@triton.jit", 2, exactly=True).run(code[0])
+
+    def test_fuse_with_scalar_shared_memory(self):
+        """
+        Make sure if we can fuse two nodes sharing a scalar before,
+        we can still do it with LOAF applied.
+
+        This is not really a big deal. But some tests rely on this and
+        less number of kernels has some small benefits.
+        """
+
+        @torch.compile
+        def f(x):
+            return torch.mean(x)
+
+        x = torch.randn([5, 5], device=GPU_TYPE)
+        out, code = run_and_get_code(f, x)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
+
+    def test_3dred_pw_2d_outer_red(self):
+        """
+        Test a pattern as follows. We have a 3d contiguous tensor [m, n, k] as input.
+        1. do reduction on the k dimension and get a [m, n] tensor
+        2. do a pointwise operation on this [m, n] tensor (and realize the computation)
+        3. do a outer reduction on the output of step 2 on the m dimension.
+
+        Each of these step generate a kernel before fusion.
+        Without any loop reorder, kernel 1 and kernel 2 will get fused. And kernel 3 will be separeate.
+
+        But if we reorder the loop for kernel 2, then kernel 2 will get fused with kernel 3.
+        And the fused kernel-2-3 can not be fused with kernel 1.
+
+        The older version of LOAF algorithm will do reorder in this case. But there is no real
+        benefits. There are even some slight downsides
+        1. the original fusion without loop reordering is more natural
+        2. fusion kernel 1 with kernel 2 may help precision when the output of kernel 1 is in low precision.
+           By fusion kernel 1 and kernel 2, the pointwise operation will operate on fp32 precision thanks
+           to fusion.
+        """
+        M, N, K = 64, 64, 64
+
+        def f(x):
+            x = x.sum(dim=-1)
+            x = x + 1  # can be more complex like sigmoid or other ops
+            return x, x.sum(dim=0)
+
+        x = torch.randn(M, N, K, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+        self.assertEqual(0, metrics.num_loop_reordering)
 
 
 @inductor_config.patch(
@@ -669,7 +812,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             n0, n1 = list(fused_norm_read_writes.var_ranges.keys())
 
             # translation of above is n0 + 6 * n1
-            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads.keys())
+            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads)
 
             return nodes
 
@@ -1044,6 +1187,129 @@ class TestTiling(TestCase):
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
             torch.compile(f)(x)
+
+    def test_find_broadcast_var(self):
+        """Test broadcast variable detection for tiling improvements."""
+        from torch._inductor import tiling_utils
+
+        i, j, k = sympy.symbols("i j k", integer=True)
+
+        # Test broadcast pattern detection: FloorDiv creates broadcast
+        result = tiling_utils.find_broadcast_var(
+            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
+        )
+        self.assertEqual(result, i)
+
+        # Test non-broadcast: linear access pattern
+        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
+        self.assertEqual(result, None)
+
+
+class TestIndexInversion(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        gm = torch.fx.symbolic_trace(lambda: 0)
+        graph = GraphLowering(gm)
+        graph.scheduler = MockScheduler
+        cls._exit_stack = contextlib.ExitStack()
+        cls._exit_stack.enter_context(V.set_graph_handler(graph))
+
+    def _check_expr(self, expr, reconstruction, val_range):
+        import numpy as np
+        from sympy import lambdify
+
+        assert len(expr.free_symbols) == 1
+        p0 = next(iter(expr.free_symbols))
+
+        def floordiv_replacement(a, b):
+            """Replace FloorDiv(a, b) with a // b"""
+            return a // b
+
+        def modularindexing_replacement(x, base, divisor):
+            """Replace ModularIndexing(x, base, divisor) with (x // base) % divisor"""
+            return (x // base) % divisor
+
+        # Replace custom functions with sympy equivalents
+        expr_numpy_ready = expr.replace(FloorDiv, floordiv_replacement).replace(
+            ModularIndexing, modularindexing_replacement
+        )
+        reconstruction_numpy_ready = reconstruction.replace(
+            FloorDiv, floordiv_replacement
+        ).replace(ModularIndexing, modularindexing_replacement)
+
+        # Now lambdify with standard numpy
+        forward_func = lambdify(p0, expr_numpy_ready, modules="numpy")
+        inverse_func = lambdify(p0, reconstruction_numpy_ready, modules="numpy")
+
+        test_values = np.arange(0, val_range, dtype=np.int64)
+        forward_values = forward_func(test_values).astype(np.int64)
+        recovered_values = inverse_func(forward_values).astype(np.int64)
+        torch.testing.assert_close(test_values, recovered_values)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._exit_stack.close()
+
+    def test_original_complex_expression(self):
+        """Test the original motivating complex expression."""
+        p0 = sympy.Symbol("p0")
+        expr = (
+            32768 * FloorDiv(p0, 32768)
+            + 8192 * FloorDiv(ModularIndexing(p0, 1, 16), 4)
+            + ModularIndexing(p0, 1, 4)
+            + 256 * ModularIndexing(p0, 16, 32)
+            + 4 * ModularIndexing(p0, 512, 64)
+        )
+
+        reconstruction = generate_inverse_formula(expr, p0)
+        self.assertIsNotNone(reconstruction)
+        self._check_expr(expr, reconstruction, 2097152)
+
+    def test_inversion_cases(self):
+        """Test various expressions for correct inversion behavior."""
+        p = sympy.Symbol("p")
+
+        cases = [
+            # (expression, should_be_invertible, test_range)
+            # Simple 2-term base-10 style: 10 = 1 × 10 ✓
+            (10 * ModularIndexing(p, 10, 10) + ModularIndexing(p, 1, 10), True, 100),
+            # Simple 2-term base-2 style: 2 = 1 × 2 ✓
+            (2 * ModularIndexing(p, 2, 2) + ModularIndexing(p, 1, 2), True, 4),
+            # 3-term decimal: 100 = 10×10, 10 = 1×10 ✓
+            (
+                100 * FloorDiv(p, 100)
+                + 10 * FloorDiv(ModularIndexing(p, 1, 100), 10)
+                + ModularIndexing(p, 1, 10),
+                True,
+                1000,
+            ),
+            (4 * p, False, 64),  # expr and inverse not bijections
+            # when sorted, invertible
+            (ModularIndexing(p, 1, 10) + 10 * ModularIndexing(p, 10, 10), True, None),
+            # Wrong coefficient ratios: 4 ≠ 1×2
+            (4 * ModularIndexing(p, 1, 8) + ModularIndexing(p, 8, 2), False, None),
+            (
+                100 * FloorDiv(p, 100) + 7 * ModularIndexing(p, 1, 100),
+                False,
+                None,
+            ),  # Wrong ratios
+            (FloorDiv(p, 100) + FloorDiv(p, 10) + p, False, None),  # Overlapping ranges
+            (p**2 + 10 * p + 1, False, None),  # Quadratic
+            (sympy.sin(p) + sympy.cos(p), False, None),  # Trigonometric
+        ]
+
+        for expr, should_invert, test_range in cases:
+            reconstruction = generate_inverse_formula(expr, p)
+
+            if should_invert:
+                self.assertIsNotNone(reconstruction, f"Expected invertible: {expr}")
+                # Test correctness on sample values
+                self._check_expr(expr, reconstruction, test_range)
+            else:
+                self.assertIsNone(reconstruction, f"Expected non-invertible: {expr}")
 
 
 if __name__ == "__main__":

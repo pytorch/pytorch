@@ -15,6 +15,8 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
+set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+
 if(APPLE)
   set(CMAKE_INSTALL_RPATH "@loader_path/lib;@loader_path")
 elseif(UNIX)
@@ -34,6 +36,7 @@ else()
   message(FATAL_ERROR "Cannot find Python directory")
 endif()
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include(${PROJECT_SOURCE_DIR}/cmake/TorchPythonTargets.cmake)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/openreg)

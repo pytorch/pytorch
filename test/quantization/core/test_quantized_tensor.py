@@ -97,10 +97,10 @@ def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
             # found a local optima
             solutions.append((cur_min, cur_max, cur_loss))
         if loss1 < loss2:
-            cur_min, cur_max, cur_loss = cur_min + stepsize, cur_max, loss1
+            cur_min, cur_loss = cur_min + stepsize, loss1
         else:
-            cur_min, cur_max, cur_loss = cur_min, cur_max - stepsize, loss2
-    if len(solutions):
+            cur_max, cur_loss = cur_max - stepsize, loss2
+    if solutions:
         best = solutions[0]
         for solution in solutions:
             if solution[-1] < best[-1]:
@@ -586,7 +586,7 @@ class TestQuantizedTensor(TestCase):
         ]
         axis = 1
         device = torch.device('cuda')
-        for i in range(20):
+        for _ in range(20):
             for dtype, zero_type in dtype_and_zero_types:
                 r = torch.rand(2, 2) * 10
                 r[0, 0] = 2.5
@@ -765,7 +765,7 @@ class TestQuantizedTensor(TestCase):
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
                 qr = qr.transpose(0, 1)
                 rqr = qr.dequantize()
-                # compare transpose + dequantized result with orignal transposed result
+                # compare transpose + dequantized result with original transposed result
                 self.assertTrue(np.allclose(r.cpu().numpy().transpose([1, 0, 2, 3]), rqr.cpu().numpy(), atol=2 / scale))
 
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
@@ -1062,8 +1062,8 @@ class TestQuantizedTensor(TestCase):
         mask = torch.randint(0, 2, (numel, ), device=device)
         mask = mask.bool()
         x = torch.rand(numel, device=device)
-        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
         for qtype, fill_with in itertools.product(types, fills):
+            qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
             q_masked_fill = qx.clone()
             q_masked_fill.masked_fill_(mask, fill_with)
             ref = qx.clone()
@@ -1113,7 +1113,7 @@ class TestQuantizedTensor(TestCase):
             zero_point = 10
             types = [torch.qint8, torch.quint8, torch.qint32]
             for qtype in types:
-                for i in range(3):
+                for _ in range(3):
                     m = random.randint(10, 20)
                     elems = random.randint(20000, 30000)
                     values = torch.rand(elems, device=device)
@@ -1210,7 +1210,7 @@ class TestQuantizedTensor(TestCase):
             if device == 'cpu':
                 self.assertFalse(torch.equal(b, c))
 
-            # a case can't view non-contiguos Tensor
+            # a case can't view non-contiguous Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
             a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
@@ -1408,6 +1408,9 @@ class TestQuantizedTensor(TestCase):
             ref = param_search_greedy(x.numpy(), bit_rate=bit_width)
             self.assertEqual(y[0].numpy(), ref[0])
             self.assertEqual(y[1].numpy(), ref[1])
+
+        with self.assertRaisesRegex(ValueError, "input tensor is empty and has no data"):
+            torch.choose_qparams_optimized(torch.tensor([]), numel=0, n_bins=200, ratio=0.16, bit_width=8)
 
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:

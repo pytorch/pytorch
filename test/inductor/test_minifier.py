@@ -7,12 +7,7 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor.codegen.common import get_wrapper_codegen_for_device
 from torch.export import load as export_load
-from torch.testing._internal.common_utils import (
-    IS_JETSON,
-    IS_MACOS,
-    skipIfXpu,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
     backend_for_device,
     GPU_TYPE,
@@ -206,7 +201,7 @@ inner(torch.randn(20, 20))
         # trigger one minification step, no more (dedicated minifier tests
         # should exercise minifier only)
         if get_wrapper_codegen_for_device(device, cpp_wrapper=True) is None:
-            raise unittest.SkipTest(f"Device {device} does not support c++ wrapper")
+            raise unittest.SkipTest(f"Device {device} does not support C++ wrapper")
         run_code = f"""\
 class Model(torch.nn.Module):
     def __init__(self):
@@ -240,7 +235,7 @@ with torch.no_grad():
         # trigger one minification step, no more (dedicated minifier tests
         # should exercise minifier only)
         if get_wrapper_codegen_for_device(device, cpp_wrapper=True) is None:
-            raise unittest.SkipTest(f"Device {device} does not support c++ wrapper")
+            raise unittest.SkipTest(f"Device {device} does not support C++ wrapper")
 
         # It tests that the minifier can handle unflattened inputs and kwargs
         run_code = f"""\
@@ -279,7 +274,7 @@ with torch.no_grad():
         assert res is not None
         ep_file_path = res.get_exported_program_path()
         assert ep_file_path is not None
-        gm = export_load(ep_file_path).module()
+        gm = export_load(ep_file_path).module(check_guards=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -319,7 +314,6 @@ def forward(self, linear):
     @unittest.skipIf(
         backend_for_device(GPU_TYPE) != "triton", "Specifically testing Triton codegen"
     )
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @try_patch_inductor_backend_config(
         GPU_TYPE,
         "inject_relu_bug_TESTING_ONLY",
@@ -333,7 +327,6 @@ def forward(self, linear):
     @unittest.skipIf(
         backend_for_device(GPU_TYPE) != "triton", "Specifically testing Triton codegen"
     )
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @try_patch_inductor_backend_config(
         GPU_TYPE,
         "inject_relu_bug_TESTING_ONLY",
@@ -352,7 +345,6 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @requires_gpu
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @try_patch_inductor_backend_config(
         GPU_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
     )

@@ -50,6 +50,16 @@ def _contains_multi_kernel_code(wrapper_code: str):
     )
 
 
+def _contains_size_hint_multi_kernel_code(wrapper_code: str):
+    return (
+        re.search(
+            r"multi_kernel_[^ ]* = async_compile.size_hint_multi_kernel[(]",
+            wrapper_code,
+        )
+        is not None
+    )
+
+
 def make_cpp_wrapper_test(orig_test, **extra_args):
     """
     Wrap an existing test into a new test with cpp-wrapper enabled.
@@ -60,7 +70,6 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     """
 
     @config.patch("cpp_wrapper", True)
-    @skipIfXpu(msg="cpp wrapper doesn't currently work on the XPU stack")
     def fn(self):
         # The same kernel may have been compiled by previous tests with
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
@@ -102,6 +111,7 @@ class MultiKernelTest(TestCase):
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2295")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -115,6 +125,7 @@ class MultiKernelTest(TestCase):
         )
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 
@@ -123,8 +134,9 @@ class MultiKernelTest(TestCase):
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
         self.assertEqual(ref, act)
-        self.assertTrue(_contains_multi_kernel_code(wrapper_code))
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2295")
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
@@ -142,6 +154,7 @@ class MultiKernelTest(TestCase):
         )
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 
@@ -150,7 +163,7 @@ class MultiKernelTest(TestCase):
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
         self.assertEqual(ref, act)
-        self.assertTrue(_contains_multi_kernel_code(wrapper_code))
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(

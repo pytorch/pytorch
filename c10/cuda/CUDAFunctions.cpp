@@ -78,6 +78,18 @@ int device_count_impl(bool fail_if_no_driver) {
           "would like to use GPUs, turn off ASAN.");
       break;
 #endif // C10_ASAN_ENABLED
+#if defined(_WIN32) && CUDA_VERSION >= 13000
+    // Workaround for CUDA-13.0 error handling on Windows, see
+    // https://github.com/pytorch/pytorch/issues/162333#issuecomment-3267929585
+    case cudaErrorNotSupported:
+      if (!fail_if_no_driver) {
+        TORCH_WARN(
+            "cudaGetDeviceCount() returned cudaErrorNotSupported, "
+            "likely using older driver or on CPU machine");
+        count = 0;
+        break;
+      }
+#endif
     default:
       TORCH_CHECK(
           false,
@@ -230,7 +242,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
 }
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
+  TORCH_CHECK(
+      device >= 0, "device id must be non-negative!", static_cast<int>(device));
   targetDeviceIndex = -1;
   if (force) {
     return cudaSetDevice(device);
@@ -311,7 +324,8 @@ cudaError_t GetDevice(DeviceIndex* device) {
 }
 
 cudaError_t SetDevice(DeviceIndex device, const bool force) {
-  TORCH_CHECK(device >= 0, "device id must be non-negative!", device);
+  TORCH_CHECK(
+      device >= 0, "device id must be non-negative!", static_cast<int>(device));
   if (force) {
     return cudaSetDevice(device);
   }

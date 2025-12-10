@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -59,6 +60,8 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
+        elif is_opaque_type(type(val)):
+            return True
         return False
 
     def _no_returns(op):
@@ -216,6 +219,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_not,
                 torch.sym_sqrt,
                 torch.sym_sum,
+                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch,
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
@@ -280,6 +284,13 @@ class Verifier(metaclass=_VerifierMeta):
                             return isinstance(getattr(attr, name, None), ty)
 
                         if type(attr).__name__ == "LoweredBackendModule":
+                            if (
+                                _is_type("backend_id", str)
+                                and hasattr(attr, "original_module")
+                                and hasattr(attr, "module_name")
+                                and getattr(attr, "backend_id", None) == "aoti"
+                            ):
+                                continue
                             if (
                                 _is_type("backend_id", str)
                                 and _is_type("processed_bytes", bytes)

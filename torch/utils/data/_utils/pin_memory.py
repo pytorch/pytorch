@@ -15,7 +15,7 @@ from torch._utils import ExceptionWrapper
 from . import MP_STATUS_CHECK_INTERVAL
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
+def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None:
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
@@ -23,7 +23,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     torch.multiprocessing._set_thread_name("pt_data_pin")
     torch.accelerator.set_device_index(device_id)
 
-    def do_one_step():
+    def do_one_step() -> None:
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
@@ -70,18 +70,17 @@ def pin_memory(data, device=None):
                 return clone
             else:
                 return type(data)(
+                    # pyrefly: ignore [bad-argument-count]
                     {k: pin_memory(sample, device) for k, sample in data.items()}
                 )  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
             return {k: pin_memory(sample, device) for k, sample in data.items()}
-    elif isinstance(data, tuple) and hasattr(data, "_fields"):  # namedtuple
-        return type(data)(*(pin_memory(sample, device) for sample in data))
     elif isinstance(data, tuple):
-        return [
-            pin_memory(sample, device) for sample in data
-        ]  # Backwards compatibility.
+        if hasattr(data, "_fields"):  # namedtuple
+            return type(data)(*(pin_memory(sample, device) for sample in data))
+        return type(data)(pin_memory(sample, device) for sample in data)
     elif isinstance(data, collections.abc.Sequence):
         try:
             if isinstance(data, collections.abc.MutableSequence):

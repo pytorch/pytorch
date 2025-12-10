@@ -1,7 +1,5 @@
 #include <torch/nativert/executor/Placement.h>
 
-#include <fmt/ostream.h>
-
 namespace torch::nativert {
 
 bool isSameDevice(const c10::Device& a, const c10::Device& b) {
@@ -16,6 +14,9 @@ bool isSameDevice(const c10::Device& a, const c10::Device& b) {
     } else {
       return false;
     }
+  }
+  if (a.is_meta()) {
+    return b.is_meta();
   }
   TORCH_CHECK(false, "Unsupported device type", a, " and ", b);
   return false;

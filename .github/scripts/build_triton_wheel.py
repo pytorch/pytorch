@@ -71,12 +71,12 @@ def build_triton(
 
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
-            triton_pkg_name = "pytorch-triton-rocm"
+            triton_pkg_name = "triton-rocm"
         elif device == "xpu":
-            triton_pkg_name = "pytorch-triton-xpu"
+            triton_pkg_name = "triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
         else:
-            triton_pkg_name = "pytorch-triton"
+            triton_pkg_name = "triton"
         check_call(["git", "clone", triton_repo, "triton"], cwd=tmpdir)
         if release:
             ver, rev, patch = version.split(".")
@@ -84,6 +84,7 @@ def build_triton(
                 ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
             )
         else:
+            check_call(["git", "fetch", "origin", commit_hash], cwd=triton_basedir)
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         # change built wheel name and version

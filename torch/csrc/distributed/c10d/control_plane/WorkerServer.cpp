@@ -1,10 +1,9 @@
-#include <filesystem>
 #include <sstream>
 #include <unordered_map>
 
-#include <ATen/core/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
-#include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
@@ -87,17 +86,17 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
-        body << "[";
+        body << '[';
         bool first = true;
         for (const auto& name : getHandlerNames()) {
           if (!first) {
-            body << ",";
+            body << ',';
           }
           first = false;
 
-          body << "\"" << jsonStrEscape(name) << "\"";
+          body << '"' << jsonStrEscape(name) << '"';
         }
-        body << "]";
+        body << ']';
 
         res.set_content(body.str(), "application/json");
       });
@@ -144,30 +143,32 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   if (port == -1) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
-
-    if (std::filesystem::exists(hostOrFile)) {
-      throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
-    }
+    TORCH_CHECK(
+        !c10::filesystem::exists(hostOrFile),
+        fmt::format("{} already exists", hostOrFile));
 
     C10D_WARNING("Server listening to UNIX {}", hostOrFile);
-    if (!server_.bind_to_port(hostOrFile, 80)) {
-      throw std::runtime_error(fmt::format("Error binding to {}", hostOrFile));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, 80),
+        fmt::format("Error binding to {}", hostOrFile));
+  } else if (port == 0) {
+    C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
+    port_ = server_.bind_to_any_port(hostOrFile);
+    TORCH_CHECK(
+        port_ >= 0, fmt::format("Error binding to {}:{}", hostOrFile, port));
   } else {
     C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
-    if (!server_.bind_to_port(hostOrFile, port)) {
-      throw std::runtime_error(
-          fmt::format("Error binding to {}:{}", hostOrFile, port));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, port),
+        fmt::format("Error binding to {}:{}", hostOrFile, port));
+    port_ = port;
   }
 
   serverThread_ = std::thread([this]() {
     c10::setThreadName("pt_workerserver");
 
     try {
-      if (!server_.listen_after_bind()) {
-        throw std::runtime_error("failed to listen");
-      }
+      TORCH_CHECK(server_.listen_after_bind(), "failed to listen");
     } catch (std::exception& e) {
       C10D_ERROR("Error while running server: {}", e.what());
       throw;

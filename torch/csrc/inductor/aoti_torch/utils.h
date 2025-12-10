@@ -222,4 +222,14 @@ inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
       : std::nullopt;
 }
 
+template <typename T>
+static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+  c10::List<T> scalars_list;
+  scalars_list.reserve(len);
+  for (int64_t i = 0; i < len; i++) {
+    scalars_list.emplace_back(scalars[i]);
+  }
+  return scalars_list;
+}
+
 } // namespace torch::aot_inductor

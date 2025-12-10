@@ -13,6 +13,9 @@ load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libt
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cuda_sources")
 load("//:tools/bazel.bzl", "rules")
 
+# Export files for use by torch/headeronly (where version.h generation now lives)
+exports_files(["version.txt"])
+
 define_targets(rules = rules)
 
 COMMON_COPTS = [
@@ -91,6 +94,8 @@ generated_cpu_cpp = [
     "aten/src/ATen/NativeMetaFunctions.h",
     "aten/src/ATen/RegistrationDeclarations.h",
     "aten/src/ATen/VmapGeneratedPlumbing.h",
+    "aten/src/ATen/ViewMetaClasses.h",
+    "aten/src/ATen/ViewMetaClasses.cpp",
     "aten/src/ATen/core/aten_interned_strings.h",
     "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
@@ -688,7 +693,9 @@ cc_library(
             "torch/csrc/*/generated/*.h",
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
         ] + torch_cuda_headers,
-    ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
+    ) + GENERATED_AUTOGRAD_CPP + [
+        "//torch/headeronly:version_h",
+    ],
     includes = [
         "third_party/kineto/libkineto/include",
         "torch/csrc",
@@ -833,36 +840,6 @@ pybind_extension(
     ],
 )
 
-cc_library(
-    name = "functorch",
-    hdrs = glob([
-        "functorch/csrc/dim/*.h",
-    ]),
-    srcs = glob([
-        "functorch/csrc/dim/*.cpp",
-    ]),
-    deps = [
-        ":aten_nvrtc",
-        ":torch_python",
-        "@pybind11",
-    ],
-)
-
-pybind_extension(
-    name = "functorch/_C",
-    copts=[
-        "-DTORCH_EXTENSION_NAME=_C"
-    ],
-    srcs = [
-        "functorch/csrc/init_dim_only.cpp",
-    ],
-    deps = [
-        ":functorch",
-        ":torch_python",
-        ":aten_nvrtc",
-    ],
-)
-
 cc_binary(
     name = "torch/bin/torch_shm_manager",
     srcs = [
@@ -903,7 +880,6 @@ py_library(
     ],
     data = [
         ":torch/_C.so",
-        ":functorch/_C.so",
         ":torch/bin/torch_shm_manager",
     ],
 )
@@ -1106,6 +1082,7 @@ test_suite(
         "aten/src/ATen/templates/LazyNonNativeIr.h",
         "aten/src/ATen/templates/RegisterDispatchKey.cpp",
         "aten/src/ATen/templates/RegisterDispatchDefinitions.ini",
+        "aten/src/ATen/templates/ViewMetaClassesPythonBinding.cpp",
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
         "aten/src/ATen/native/ts_native_functions.yaml",

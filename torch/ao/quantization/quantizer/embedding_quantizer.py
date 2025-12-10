@@ -41,9 +41,6 @@ def get_embedding_operators_config() -> OperatorConfig:
 
 
 class EmbeddingQuantizer(Quantizer):
-    def __init__(self) -> None:
-        super().__init__()
-
     @classmethod
     def get_supported_quantization_configs(cls) -> list[QuantizationConfig]:
         op_configs: set[QuantizationConfig] = {
@@ -77,7 +74,7 @@ class EmbeddingQuantizer(Quantizer):
             # just as an example of alternate ways of annotating
             if (
                 node.op == "call_function"
-                and node.target == torch.ops.aten.embedding.default
+                and node.target is torch.ops.aten.embedding.default
             ):
                 if embedding_config.config.weight is None:
                     raise ValueError(

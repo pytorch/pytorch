@@ -220,7 +220,7 @@ def validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info):
                     f"hold a list of gradients but got object of type "
                     f"{type(grad)}."
                 )
-            if not len(grad) == len(arg_info):
+            if len(grad) != len(arg_info):
                 error(
                     f"for input '{name}' expected the grad_input dict to "
                     f"hold a list of {len(arg_info)} gradients but got "

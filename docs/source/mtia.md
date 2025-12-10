@@ -1,6 +1,6 @@
 # torch.mtia
 
-The MTIA backend is implemented out of the tree, only interfaces are be defined here.
+The MTIA backend is implemented out of the tree, only interfaces are defined here.
 
 ```{eval-rst}
 .. automodule:: torch.mtia
@@ -22,6 +22,7 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     device_count
     init
     is_available
+    is_bf16_supported
     is_initialized
     memory_stats
     get_device_capability

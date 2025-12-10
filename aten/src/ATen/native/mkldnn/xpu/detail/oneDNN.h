@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -73,6 +74,7 @@ TORCH_API sycl::event deconvolution_backward_data(
     const at::Tensor& weight,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     bool bias_defined,
@@ -85,6 +87,7 @@ TORCH_API sycl::event deconvolution_backward_weights(
     const at::Tensor& src,
     IntArrayRef stride,
     IntArrayRef padding,
+    IntArrayRef dst_padding,
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
@@ -164,7 +167,7 @@ void quantized_matmul(
     std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
-void gpu_float_sdpa(
+void sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_kv,
@@ -178,5 +181,40 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    const Tensor& output);
+    const Tensor& attention,
+    bool compute_logsumexp,
+    const Tensor& logsumexp);
+
+void sdpa_backward(
+    int batch_size,
+    int num_head_q,
+    int num_head_kv,
+    int seq_len_q,
+    int seq_len_kv,
+    int head_dim_qk,
+    int head_dim_v,
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    std::optional<at::Tensor> attn_mask,
+    bool is_causal,
+    double scale,
+    Tensor& grad_query,
+    Tensor& grad_key,
+    Tensor& grad_value);
+
+sycl::event scaled_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    at::blas::ScalingType scaling_choice_a,
+    at::blas::ScalingType scaling_choice_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    bool use_fast_accum);
 } // namespace at::native::onednn
