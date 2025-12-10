@@ -106,6 +106,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -2260,9 +2261,11 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
-            f"Unexpected type {type(val)}"
-        )
+        assert (
+            isinstance(val, ok_types)
+            or pytree.is_constant_class(type(val))
+            or is_opaque_value_type(type(val))
+        ), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -2439,6 +2442,11 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        if is_from_skip_guard_source(
+            guard.originating_source
+        ) or is_from_skip_guard_source(source_b):
+            return
+
         if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
