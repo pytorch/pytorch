@@ -1,4 +1,5 @@
 import operator
+from abc import ABC, abstractmethod
 from functools import reduce
 from typing import cast, Optional
 
@@ -8,6 +9,7 @@ import torch.distributed.tensor._api as dtensor
 from torch.distributed.tensor._op_schema import OutputSharding
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -15,12 +17,14 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-class NonLinearReductionsBase:
+class NonLinearReductionsBase(ABC):
     def __init__(self):
         self._dim: Optional[int] = None
         self._keepdim: bool = False
         self._shard_mesh_dims: list[int] = []
+        self._op_call_repr: str = ""
 
+    @abstractmethod
     def __call__(
         self,
         op_call: torch._ops.OpOverload,
@@ -29,6 +33,7 @@ class NonLinearReductionsBase:
     ):
         raise NotImplementedError
 
+    @abstractmethod
     def _compute_local_reduction(
         self, op_call: torch._ops.OpOverload, local_tensor: torch.Tensor
     ):
@@ -41,6 +46,21 @@ class NonLinearReductionsBase:
         local_redux: torch.Tensor,
         device_mesh: torch.distributed.device_mesh.DeviceMesh,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        This method gather the min or max of the tensors and their corresponding indices.
+
+        :param self:
+        :param gather_dim: The dim to stack the collected min/max tensors.
+        :type gather_dim: int
+        :param gathered_idxs: The local tensor holding the corresponding indices that will eventually be filled.
+        :type gathered_idxs: torch.Tensor
+        :param local_redux: The local tensor holding the operator's value i.e. min/max
+        :type local_redux: torch.Tensor
+        :param device_mesh: Device mesh of the DTensor.
+        :type device_mesh: torch.distributed.device_mesh.DeviceMesh
+        :return: All gathered tensors, gathered_redux and gathered_idxs, of the reducing operator
+        :rtype: tuple[Tensor, Tensor]
+        """
         gathered_redux = local_redux
         for mesh_dim in self._shard_mesh_dims:
             gathered_redux = funcol.all_gather_tensor(
@@ -58,25 +78,22 @@ class NonLinearReductionsBase:
     def _convert_to_global_idxs(
         self,
         local_idx: torch.Tensor,
-        local_tensor: torch.Tensor,
         global_shape: torch.Size,
         device_mesh: torch.distributed.device_mesh.DeviceMesh,
         placements: tuple[Placement, ...],
     ) -> tuple[int, torch.Tensor]:
-        _, global_offset = compute_local_shape_and_global_offset(
+        local_shape, global_offset = compute_local_shape_and_global_offset(
             global_shape, device_mesh, placements
         )
 
         if self._dim is None:
-            local_coord = torch.unravel_index(local_idx, local_tensor.shape)
+            local_coord = torch.unravel_index(local_idx, local_shape)
             global_coord = torch.stack(local_coord)
             gather_dim = 0
             for i, offset in enumerate(global_offset):
                 global_coord[i] += offset
             # compute with proper striding
-            gathered_idxs = torch.tensor(
-                0, device=local_tensor.device, dtype=torch.long
-            )
+            gathered_idxs = torch.tensor(0, device=local_idx.device, dtype=torch.long)
             for i, coord in enumerate(global_coord):
                 gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1 :], 1)
         else:
@@ -85,12 +102,16 @@ class NonLinearReductionsBase:
         return gather_dim, gathered_idxs
 
     def _prep_arguments(
-        self, args: tuple[object, ...], kwargs: dict[str, object] | None
+        self,
+        op_call_repr: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object] | None,
     ):
         input_dtensor = cast(dtensor.DTensor, args[0])
         self._dim = None
         self._keepdim = False
         self._shard_mesh_dims = []
+        self._op_call_repr = op_call_repr
         if not isinstance(input_dtensor, dtensor.DTensor):
             raise NotImplementedError
         if len(args) > 1:
@@ -145,6 +166,10 @@ class NonLinearReductionsBase:
                     self._dim if self._dim >= 0 else local_tensor.ndim + self._dim
                 ):
                     self._shard_mesh_dims.append(mesh_dim)
+            elif isinstance(p, _StridedShard):
+                raise NotImplementedError(
+                    f"{self._op_call_repr} does not support _StridedShard!"
+                )
         return
 
     @staticmethod
@@ -178,7 +203,7 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
             raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
         local_tensor, global_shape, device_mesh, placements = self._prep_arguments(
-            args, kwargs
+            str(op_call), args, kwargs
         )
         output_sharding = self._get_output_sharding(op_call, args, kwargs)
 
@@ -192,7 +217,7 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
             )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(
-            local_idx, local_tensor, global_shape, device_mesh, placements
+            local_idx, global_shape, device_mesh, placements
         )
         gathered_redux, gather_idxs = self._gather_tensors(
             gather_dim, gathered_idxs, local_redux, device_mesh
@@ -227,7 +252,7 @@ class MinMaxDimHandler(NonLinearReductionsBase):
         kwargs: dict[str, object],
     ):
         local_tensor, global_shape, device_mesh, placements = self._prep_arguments(
-            args, kwargs
+            str(op_call), args, kwargs
         )
         output_sharding = self._get_output_sharding(op_call, args, kwargs)
 
@@ -245,7 +270,7 @@ class MinMaxDimHandler(NonLinearReductionsBase):
             )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(
-            local_idx, local_tensor, global_shape, device_mesh, placements
+            local_idx, global_shape, device_mesh, placements
         )
 
         gathered_redux, gather_idxs = self._gather_tensors(
