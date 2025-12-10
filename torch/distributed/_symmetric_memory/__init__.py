@@ -17,6 +17,8 @@ import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
+from . import symm_mem_sync
+
 
 _group_name_to_store: dict[str, c10d.Store] = {}
 
