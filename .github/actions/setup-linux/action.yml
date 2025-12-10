@@ -41,10 +41,12 @@ runs:
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
-        if systemctl is-active --quiet docker; then
-            echo "Docker daemon is running...";
-        else
-            echo "Starting docker daemon..." && sudo systemctl start docker;
+        if ! docker version >/dev/null 2>/dev/null; then
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker daemon..." && sudo systemctl start docker;
+          fi
         fi
 
     - name: Log in to ECR
