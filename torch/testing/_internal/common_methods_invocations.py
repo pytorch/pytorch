@@ -514,8 +514,12 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        # However, we allow zero-channel cases (num_features == 0) which have numel == 0
+        # but are valid inputs. Zero-channel cases have len(shape) >= 2 and shape[1] == 0
         if sample.input.numel() == 0:
-            continue
+            # Skip if it's not a valid zero-channel case (1D tensor with 0 elements)
+            if len(sample.input.shape) < 2 or sample.input.shape[1] != 0:
+                continue
         args = sample.args
         training = sample.kwargs.get('training', True)
         momentum = sample.kwargs.get('momentum', 0.5)
