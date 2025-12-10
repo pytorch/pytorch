@@ -22,7 +22,7 @@ def _create_fake_pg(common_opts, backend_opts):
     for every collective. It should be used as a convenient tool when playing
     with distributed but don't care about the actual data.
     """
-    return FakeProcessGroup(
+    return FakeProcessGroup._create_internal(
         common_opts.group_rank, common_opts.group_size, backend_opts
     )
 

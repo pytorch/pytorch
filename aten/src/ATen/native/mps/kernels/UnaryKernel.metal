@@ -5,6 +5,21 @@
 using namespace metal;
 using namespace c10::metal;
 
+struct angle_functor {
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(atan2(x.y, x.x), 0);
+  }
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return x < 0 ? M_PI_F : 0.0;
+  }
+};
+
 // Implement exp wrapper for both real and complex types
 template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
 inline T exp_(const T x) {
@@ -372,7 +387,7 @@ struct log1p_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // TODO: Implement proper log1p algoirthm
+    // TODO: Implement proper log1p algorithm
     auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
@@ -545,6 +560,7 @@ REGISTER_UNARY_OP(abs, float, float);
 REGISTER_UNARY_OP(abs, half, half);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
+  REGISTER_UNARY_OP(angle, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(erf, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(erfc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
@@ -583,6 +599,7 @@ INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
+  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \

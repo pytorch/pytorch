@@ -90,6 +90,10 @@ public:
     allocator_->setMemoryFraction(fraction, device);
   }
 
+  std::vector<HIPCachingAllocator::StreamSegmentSize> getExpandableSegmentSizes(c10::DeviceIndex device) override {
+    return allocator_->getExpandableSegmentSizes(device);
+  }
+
   void enable(bool value) override {
     allocator_->enable(value);
   }
@@ -144,6 +148,10 @@ public:
 
   void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     allocator_->setUseOnOOM(device, mempool_id);
+  }
+
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    allocator_->setNoSplit(device, mempool_id);
   }
 
   bool checkPoolLiveAllocations(

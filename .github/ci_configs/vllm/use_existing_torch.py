@@ -1,9 +1,14 @@
 import glob
+import os
 
 
 requires_files = glob.glob("requirements/*.txt")
 requires_files += ["pyproject.toml"]
+
 for file in requires_files:
+    if not os.path.exists(file):
+        print(f"!!! skipping missing {file}")
+        continue
     print(f">>> cleaning {file}")
     with open(file) as f:
         lines = f.readlines()

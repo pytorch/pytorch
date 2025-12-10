@@ -75,6 +75,7 @@ class TestScheduler(TestCase):
 
 class TestCubicScheduler(TestCase):
     def setUp(self):
+        super().setUp()
         self.model_sparse_config = [
             {"tensor_fqn": "0.weight", "sparsity_level": 0.8},
             {"tensor_fqn": "2.weight", "sparsity_level": 0.4},
