@@ -2368,8 +2368,20 @@ def _policy_save_mm(ctx, op, *args, **kwargs):
     return CheckpointPolicy.MUST_RECOMPUTE
 
 
+_policy_save_mm.cache_hash = "policy_save_mm_v1"
+
+
 def _policy_save_add(ctx, op, *args, **kwargs):
     if op == torch.ops.aten.add.Tensor:
+        return CheckpointPolicy.MUST_SAVE
+    return CheckpointPolicy.MUST_RECOMPUTE
+
+
+_policy_save_add.cache_hash = "policy_save_add_v1"
+
+
+def _policy_no_hash(ctx, op, *args, **kwargs):
+    if op == torch.ops.aten.mm.default:
         return CheckpointPolicy.MUST_SAVE
     return CheckpointPolicy.MUST_RECOMPUTE
 
@@ -2494,6 +2506,76 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
             # Same function with RNG HOPs: miss stays at 1, hit increments to 1
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_sac_without_cache_hash_bypasses_cache(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn = functools.partial(
+            create_selective_checkpoint_contexts, _policy_no_hash
+        )
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_changing_cache_hash_invalidates_cache(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn_mm = functools.partial(
+            create_selective_checkpoint_contexts, _policy_save_mm
+        )
+
+        ctx_fn_add = functools.partial(
+            create_selective_checkpoint_contexts, _policy_save_add
+        )
+
+        @torch.compile(backend="inductor")
+        def fn_mm(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn_mm)
+
+        @torch.compile(backend="inductor")
+        def fn_add(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn_add)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_mm(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            fn_add(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
 
 
 if __name__ == "__main__":
