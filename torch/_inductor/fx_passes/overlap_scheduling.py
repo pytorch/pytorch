@@ -289,6 +289,7 @@ class OverlapScheduler:
         collective_estimator: Literal["analytical", "benchmark"],
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
+        log_final_collectives_estimations: bool = False,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -300,6 +301,7 @@ class OverlapScheduler:
         self.insert_overlap_deps = insert_overlap_deps
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
+        self.log_final_collectives_estimations = log_final_collectives_estimations
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -644,6 +646,7 @@ class OverlapScheduler:
                 collective_keys,
                 collective_medians,
                 world_size,
+                "fx_collectives_node_runtime_estimation",
             )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
@@ -682,6 +685,15 @@ class OverlapScheduler:
         elif self.insert_overlap_deps:
             # If not bucketing, add effect tokens to preserve hiding dependencies
             self._add_effect_tokens_for_overlap()
+
+        if self.log_final_collectives_estimations:
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_graph_collective_benchmarks,
+            )
+
+            _log_graph_collective_benchmarks(
+                self.gm, "fx_collectives_estimations_after_overlap_bucketing"
+            )
 
         return self.gm
 
@@ -1253,6 +1265,7 @@ def schedule_overlap_bucketing(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
+    log_final_collectives_estimations: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1288,6 +1301,7 @@ def schedule_overlap_bucketing(
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
+        log_final_collectives_estimations=log_final_collectives_estimations,
     ).run()
 
 
@@ -1316,6 +1330,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "compute_overlap_multipler",
         "max_in_flight_gb",
         "max_coll_distance",
+        "log_final_collectives_estimations",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
