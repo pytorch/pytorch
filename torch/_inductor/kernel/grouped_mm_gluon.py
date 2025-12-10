@@ -107,7 +107,7 @@ def compute_stages(
     return variants[0] if variants else (1, 1)
 
 
-def get_grouped_mm_kernel():
+def get_grouped_mm_kernel(use_update_tensor_descriptor=False):
     import importlib.util
     import os
     import sys
@@ -127,16 +127,19 @@ def get_grouped_mm_kernel():
         make_tensor_descriptor,
     )
 
-    # Check for features to be used in the kernel
-    USE_UPDATE_TENSOR_DESCRIPTOR = False
+    # Check if update_tensor_descriptor is available
+    has_update_tensor_descriptor = False
     try:
         from triton.experimental.gluon.language.nvidia.blackwell.tma import (
             update_tensor_descriptor,
         )
-
-        USE_UPDATE_TENSOR_DESCRIPTOR = True
+        has_update_tensor_descriptor = True
     except ImportError:
         pass
+
+    # Use the specified mode if feature is available, otherwise fall
+    # back to ragged
+    USE_UPDATE_TENSOR_DESCRIPTOR = use_update_tensor_descriptor and has_update_tensor_descriptor
 
     # Load the template from the same directory as this script
     template_dir = Path(__file__).parent
@@ -163,7 +166,8 @@ def get_grouped_mm_kernel():
     return mod.grouped_mm_kernel
 
 
-grouped_mm_kernel = get_grouped_mm_kernel()
+grouped_mm_kernel_ragged = get_grouped_mm_kernel(use_update_tensor_descriptor=False)
+grouped_mm_kernel_update = get_grouped_mm_kernel(use_update_tensor_descriptor=True)
 
 
 def grouped_mm(
@@ -182,10 +186,15 @@ def grouped_mm(
     num_load_thread_registers=24,
     num_compute_thread_registers=24,
     maxnreg=128,
+    kernel=None,
 ):
     assert (
         num_load_thread_registers < maxnreg and num_compute_thread_registers < maxnreg
     )
+
+    # Use the specified kernel or default to ragged
+    if kernel is None:
+        kernel = grouped_mm_kernel_ragged
 
     if num_load_buffers is None or num_acc_buffers is None:
         computed_load, computed_acc = compute_stages(
@@ -232,7 +241,7 @@ def grouped_mm(
     num_sms = get_num_sms()
     NUM_BLOCKS = num_sms
 
-    grouped_mm_kernel[[NUM_BLOCKS]](
+    kernel[[NUM_BLOCKS]](
         A,
         B,
         offs,
@@ -379,6 +388,101 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
     return configs
 
 
+def autotune_grouped_mm(A, B, C, offs, configs, flops, kernel):
+    best_ms = float("inf")
+    best_config = None
+    best_fn = None
+
+    for config in configs:
+        (
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_K,
+            num_load_buffers,
+            num_acc_buffers,
+            num_load_warps,
+            num_compute_warps,
+            num_store_warps,
+            num_load_thread_registers,
+            num_compute_thread_registers,
+            maxnreg,
+            occupancy,
+        ) = config
+
+        try:
+            def make_fn(
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                num_load_buffers,
+                num_acc_buffers,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                num_load_thread_registers,
+                num_compute_thread_registers,
+                maxnreg,
+            ):
+                return lambda: grouped_mm(
+                    A,
+                    B,
+                    C,
+                    offs,
+                    BLOCK_M,
+                    BLOCK_N,
+                    BLOCK_K,
+                    num_load_buffers,
+                    num_acc_buffers,
+                    num_load_warps,
+                    num_compute_warps,
+                    num_store_warps,
+                    num_load_thread_registers,
+                    num_compute_thread_registers,
+                    maxnreg,
+                    kernel,
+                )
+
+            fn = make_fn(
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                num_load_buffers,
+                num_acc_buffers,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                num_load_thread_registers,
+                num_compute_thread_registers,
+                maxnreg,
+            )
+            ms_curr = triton.testing.do_bench(fn, warmup=2, rep=20)
+
+            if ms_curr < best_ms:
+                best_ms = ms_curr
+                best_config = config
+                best_fn = fn
+        except Exception as e:
+            import traceback
+
+            print("=" * 60)
+            print(
+                f"Error with config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}"
+            )
+            print(
+                f"  num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}"
+            )
+            print(
+                f"  num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}"
+            )
+            tmem_calc = BLOCK_N * num_acc_buffers
+            print(f"  Calculated TMEM usage: {tmem_calc} columns (limit: 512)")
+            traceback.print_exc()
+            print("=" * 60)
+            continue
+
+    return best_ms, best_config, best_fn
+
+
 def config_helper(description: str):
     # Configure command line arguments for profiling options
     parser = argparse.ArgumentParser(description=description)
@@ -480,7 +584,7 @@ if __name__ == "__main__":
         [65536, 32, 6144, 2048],  ##
         [65536, 48, 6144, 2048],
         [65536, 64, 6144, 2048],
-        [131072, 24, 6144, 2048],  # fixme: crash
+        [131072, 24, 6144, 2048],
         [131072, 32, 6144, 2048],
         [131072, 48, 6144, 2048],
         [131072, 64, 6144, 2048],
@@ -559,11 +663,23 @@ if __name__ == "__main__":
             us_cute = None
             pass
 
-        # Autotune and benchmark Gluon grouped MM
-        best_ms = float("inf")
-        best_config = None
-        best_fn = None
-        for config in configs:
+        # fixme: remove this!
+        us_cute = None
+
+        print("Autotuning Gluon grouped_mm (ragged TMA)...")
+        best_ms_ragged, best_config_ragged, best_fn_ragged = autotune_grouped_mm(
+            A, B, C, offs, configs, flops, grouped_mm_kernel_ragged
+        )
+
+        print("Autotuning Gluon grouped_mm (update_tensor_descriptor)...")
+        best_ms_update, best_config_update, best_fn_update = autotune_grouped_mm(
+            A, B, C, offs, configs, flops, grouped_mm_kernel_update
+        )
+
+        us_gluon_ragged = float("inf")
+        us_gluon_update = float("inf")
+
+        if best_config_ragged is not None:
             (
                 BLOCK_M,
                 BLOCK_N,
@@ -577,76 +693,12 @@ if __name__ == "__main__":
                 num_compute_thread_registers,
                 maxnreg,
                 occupancy,
-            ) = config
+            ) = best_config_ragged
 
-            try:
-                # Benchmark
-                fn = lambda: grouped_mm(
-                    A,
-                    B,
-                    C,
-                    offs,
-                    BLOCK_M,
-                    BLOCK_N,
-                    BLOCK_K,
-                    num_load_buffers,
-                    num_acc_buffers,
-                    num_load_warps,
-                    num_compute_warps,
-                    num_store_warps,
-                    num_load_thread_registers,
-                    num_compute_thread_registers,
-                    maxnreg,
-                )
-                ms_curr = triton.testing.do_bench(fn, warmup=2, rep=20)
-
-                if ms_curr < best_ms:
-                    best_ms = ms_curr
-                    best_config = config
-                    best_fn = fn
-            except Exception as e:
-                import traceback
-
-                print("=" * 60)
-                print(
-                    f"Error with config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}"
-                )
-                print(
-                    f"  num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}"
-                )
-                print(
-                    f"  num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}"
-                )
-                tmem_calc = BLOCK_N * num_acc_buffers
-                print(f"  Calculated TMEM usage: {tmem_calc} columns (limit: 512)")
-                traceback.print_exc()
-                print("=" * 60)
-                continue
-
-                # Config failed (e.g., resource constraints), skip it
-                continue
-
-        us_gluon = float("inf")
-        if best_config is not None:
-            (
-                BLOCK_M,
-                BLOCK_N,
-                BLOCK_K,
-                num_load_buffers,
-                num_acc_buffers,
-                num_load_warps,
-                num_compute_warps,
-                num_store_warps,
-                num_load_thread_registers,
-                num_compute_thread_registers,
-                maxnreg,
-                occupancy,
-            ) = best_config
-
-            us_gluon = best_ms * 1e3
-            tflops_per_sec = flops * 1e-12 / (us_gluon * 1e-6)
+            us_gluon_ragged = best_ms_ragged * 1e3
+            tflops_per_sec = flops * 1e-12 / (us_gluon_ragged * 1e-6)
             print(
-                f"{"Gluon grouped_mm":<36} {us_gluon:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
+                f"{"Gluon grouped_mm (ragged)":<36} {us_gluon_ragged:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
             )
 
             # Print config
@@ -658,7 +710,7 @@ if __name__ == "__main__":
             # Verify correctness with best config
             try:
                 C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
-                best_fn()
+                best_fn_ragged()
                 torch.testing.assert_close(C, C_ref, rtol=1e-2, atol=1e-2)
                 print("  ✓ Correctness check passed")
             except AssertionError:
@@ -666,56 +718,52 @@ if __name__ == "__main__":
             finally:
                 if "C_ref" in locals():
                     del C_ref
-
-            description = "Gluon grouped MM with Proton Intra-Kernel Profiling"
-            profile, op_measure, mode = config_helper(description)
-            if profile:
-                pl.enable_semantic("gluon")
-                if op_measure:
-                    # Operation measurement mode generates scope-level metrics.
-                    # View results: proton-viewer -m normalized_cycles grouped_mm.hatchet
-                    # Note: cycles are averaged across all warps/CTAs -
-                    # adjust for warp specialization
-                    sid = proton.start(
-                        "grouped_mm",
-                        backend="instrumentation",
-                        mode=mode,
-                    )
-                else:
-                    # Timeline trace mode generates Chrome trace format
-                    # for visualization.
-                    # Output file: grouped_mm.chrome_trace
-                    sid = proton.start(
-                        "grouped_mm",
-                        data="trace",
-                        backend="instrumentation",
-                        mode=mode,
-                    )
-                # sid = proton.start(
-                #    name="grouped_mm", data="tree", context="shadow", backend="cupti"
-                # )
-                with proton.scope("Gluon grouped_mm"):
-                    grouped_mm(
-                        A,
-                        B,
-                        C,
-                        offs,
-                        BLOCK_M,
-                        BLOCK_N,
-                        BLOCK_K,
-                        num_load_buffers,
-                        num_acc_buffers,
-                        num_load_warps,
-                        num_compute_warps,
-                        num_store_warps,
-                        num_load_thread_registers,
-                        num_compute_thread_registers,
-                        maxnreg,
-                    )
-                proton.finalize(sid)
         else:
-            us_gluon = None
-            print(f"{"Gluon grouped_mm":<36} No valid config found")
+            us_gluon_ragged = None
+            print(f"{"Gluon grouped_mm (ragged)":<36} No valid config found")
+
+        if best_config_update is not None:
+            (
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                num_load_buffers,
+                num_acc_buffers,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                num_load_thread_registers,
+                num_compute_thread_registers,
+                maxnreg,
+                occupancy,
+            ) = best_config_update
+
+            us_gluon_update = best_ms_update * 1e3
+            tflops_per_sec = flops * 1e-12 / (us_gluon_update * 1e-6)
+            print(
+                f"{"Gluon grouped_mm (update_desc)":<36} {us_gluon_update:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
+            )
+
+            # Print config
+            print(
+                f"  Best config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}, "
+                f"num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}, num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}, num_load_thread_registers={num_load_thread_registers}, num_compute_thread_registers={num_compute_thread_registers}, maxnreg={maxnreg}, occupancy={occupancy}"
+            )
+
+            # Verify correctness with best config
+            try:
+                C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
+                best_fn_update()
+                torch.testing.assert_close(C, C_ref, rtol=1e-2, atol=1e-2)
+                print("  ✓ Correctness check passed")
+            except AssertionError:
+                print("  ✗ Correctness check FAILED")
+            finally:
+                if "C_ref" in locals():
+                    del C_ref
+        else:
+            us_gluon_update = None
+            print(f"{"Gluon grouped_mm (update_desc)":<36} No valid config found")
 
         print()
 
@@ -735,14 +783,18 @@ if __name__ == "__main__":
             result["CuTe latency (us)"] = us_cute
         if us_triton is not None:
             result["Triton latency (us)"] = us_triton
-        if us_gluon is not None:
-            result["Gluon latency (us)"] = us_gluon
+        if us_gluon_ragged is not None:
+            result["Gluon (ragged) latency (us)"] = us_gluon_ragged
+        if us_gluon_update is not None:
+            result["Gluon (update) latency (us)"] = us_gluon_update
         if us_cute is not None:
             result["CuTe speedup"] = us_cutlass / us_cute
         if us_triton is not None:
             result["Triton speedup"] = us_cutlass / us_triton
-        if us_gluon is not None:
-            result["Gluon speedup"] = us_cutlass / us_gluon
+        if us_gluon_ragged is not None:
+            result["Gluon (ragged) speedup"] = us_cutlass / us_gluon_ragged
+        if us_gluon_update is not None:
+            result["Gluon (update) speedup"] = us_cutlass / us_gluon_update
         results.append(result)
 
     df = pd.DataFrame(results)

@@ -20,7 +20,16 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
 import triton.profiler.language as pl
 
 
-# Helper class for passing arguments around partitions.
+{%- if not USE_UPDATE_TENSOR_DESCRIPTOR %}
+@gluon.jit
+def to_ragged_indices(slice_off, slice_size, row):
+    billion = 0x40000000  # == 2**30
+    x = billion - slice_size + row
+    y = slice_off + slice_size
+    return billion, y, x
+{%- endif %}
+
+
 @aggregate
 class PartitionArgs:
     a_desc: tma.tensor_descriptor
@@ -323,8 +332,9 @@ def store_partition(pargs: PartitionArgs):
         instr_variant="32x32b",
     )
 
+    # Shared memory is always allocated with 2D shape [BLOCK_M, BLOCK_N]
     c_smem = gl.allocate_shared_memory(
-        pargs.c_desc.dtype, pargs.c_desc.block_type.shape, pargs.c_desc.layout
+        pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_desc.layout
     )
 
     iterated_tiles = 0
@@ -382,7 +392,6 @@ def store_partition(pargs: PartitionArgs):
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
             acc_state = acc_state.next()
 
-{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
             with pl.scope("store_convert"):
                 c = acc.to(c_desc.dtype)
 
@@ -399,55 +408,12 @@ def store_partition(pargs: PartitionArgs):
 
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
+{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
                 tma.async_copy_shared_to_global(c_desc, [m_offset, n_offset], c_smem)
 {%- else %}
-            if m_tile_offset + BLOCK_M <= m_size:
-                with pl.scope("store_convert"):
-                    c = acc.to(c_desc.dtype)
-
-                with pl.scope("store_tma_wait"):
-                    tma.store_wait(pendings=0)
-
-                with pl.scope("store_smem_write"):
-                    c_smem.store(c)
-
-                # After usage of acc, we're sure that smem/tmem buffer
-                # is free for reuse
-                with pl.scope("store_barrier_arrive"):
-                    mbarrier.arrive(acc_buf_empty_bar, count=1)
-
-                with pl.scope("store_fence_and_tma"):
-                    fence_async_shared()
-                    tma.async_copy_shared_to_global(
-                        c_desc, [m_offset, n_offset], c_smem
-                    )
-            else:
-                with pl.scope("store_else"):
-                    acc_blocked = gl.convert_layout(acc, pargs.store_layout)
-
-                    # After usage of acc, we're sure that smem/tmem
-                    # buffer is free for reuse
-                    mbarrier.arrive(acc_buf_empty_bar, count=1)
-
-                    m_range = gl.arange(
-                        0,
-                        BLOCK_M,
-                        layout=gl.SliceLayout(dim=1, parent=pargs.store_layout),
-                    )[:, None]
-                    n_range = gl.arange(
-                        0,
-                        BLOCK_N,
-                        layout=gl.SliceLayout(dim=0, parent=pargs.store_layout),
-                    )[None, :]
-                    c_ptrs = (
-                        pargs.c_ptr
-                        + (m_offset + m_range) * c_desc.strides[0]
-                        + (n_offset + n_range) * c_desc.strides[1]
-                    )
-                    mask = (m_tile_offset + m_range < m_size) & (
-                        n_tile_offset + n_range < n_size
-                    )
-                    gl.store(c_ptrs, acc_blocked.to(c_desc.dtype), mask=mask)
+                c0, c1, c2 = to_ragged_indices(m_start_offset, m_size, m_tile_offset)
+                c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
+                tma.async_copy_shared_to_global(c_desc, [c0, c1, c2, n_offset], c_smem_4d)
 {%- endif %}
 
             tidx += pargs.NUM_BLOCKS
@@ -512,6 +478,7 @@ def grouped_mm_kernel(
         layout=b_layout,
     )
 
+{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
         shape=[M, N],
@@ -519,6 +486,19 @@ def grouped_mm_kernel(
         block_shape=[BLOCK_M, BLOCK_N],
         layout=c_layout,
     )
+{%- else %}
+    billion: gl.constexpr = 0x40000000  # == 2**30
+    max_int: gl.constexpr = 0x7fff0000
+
+    # C tensor ragged descriptor: prepend 2 transformation dimensions
+    c_desc = tma.make_tensor_descriptor(
+        c_ptr,
+        shape=[max_int, max_int, billion, N],
+        strides=[2**34 - c_stride_0, c_stride_0, c_stride_0, c_stride_1],
+        block_shape=[1, 1, BLOCK_M, BLOCK_N],
+        layout=c_layout,
+    )
+{%- endif %}
 
     a_smem_bufs = gl.allocate_shared_memory(
         dtype, [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K], a_layout

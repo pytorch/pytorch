@@ -187,6 +187,18 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual MempoolId_t graphPoolHandle() const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
+
+  virtual const Generator& getDefaultGenerator(DeviceIndex) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    static Generator dummy_generator;
+    return dummy_generator;
+  }
+
+  virtual Generator getNewGenerator(DeviceIndex) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    static Generator dummy_generator;
+    return dummy_generator;
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
