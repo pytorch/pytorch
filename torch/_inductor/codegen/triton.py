@@ -4938,7 +4938,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.symbolic_hint(numel)
+            numel_hint = V.graph.sizevars.symbolic_hint(numel, use_user_provided_hint_override=True)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since

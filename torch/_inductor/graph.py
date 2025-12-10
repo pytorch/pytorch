@@ -617,8 +617,7 @@ class GraphLowering(torch.fx.Interpreter):
         if dep not in self.dep_size_hint_cache:
             res = 0
             try:
-                if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
+                res = dep.numbytes_hint()
             except KeyError:
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
@@ -1989,6 +1988,7 @@ class GraphLowering(torch.fx.Interpreter):
     def create_deferred_runtime_asserts(
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
+        # return 
         # [NOTE] Codegen runtime asserts in Inductor
         #
         # We need to generate runtime asserts directly in Inductor instead
