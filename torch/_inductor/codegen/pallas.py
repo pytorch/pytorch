@@ -1420,7 +1420,23 @@ class PallasKernel(SIMDKernel):
                     )
                 else:
                     # Direct indexed assignment
-                    store_expr = f"{out}[{index_str}] = {value}"
+                    # Check if we need special handling for constant indices on multi-dim outputs
+                    # e.g., storing a scalar to a (1,1,1) output with index 0
+                    try:
+                        buf = V.graph.get_buffer(name)
+                        buf_size = buf.get_size()
+                        if len(buf_size) > 1 and not self._has_iteration_vars(index):
+                            # Multi-dim output with constant index - use [...] for full assignment
+                            # This handles cases like out_ptr0[0] where output is (1,1,1)
+                            store_expr = (
+                                f"{out}[...] = (jnp.full({out}.shape, {value}) "
+                                f"if jnp.asarray({value}).ndim == 0 "
+                                f"else jnp.asarray({value}).reshape({out}.shape))"
+                            )
+                        else:
+                            store_expr = f"{out}[{index_str}] = {value}"
+                    except Exception:
+                        store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
         # Track which output param this store uses for filtering in codegen_kernel
