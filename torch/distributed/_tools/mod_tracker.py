@@ -214,6 +214,9 @@ class ModTracker:
         return fn
 
     def _fw_pre_hook(self, mod, input):
+        if torch._dynamo.eval_frame._is_in_compiled_region():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         self._get_append_fn(w_mod, name, False)()
@@ -230,6 +233,9 @@ class ModTracker:
                 )
 
     def _fw_post_hook(self, mod, input, output):
+        if torch._dynamo.eval_frame._is_in_compiled_region():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         if self._user_post_fw_hook is not None:
