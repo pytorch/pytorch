@@ -767,6 +767,8 @@ class PallasKernel(SIMDKernel):
         self.store_with_output: list[tuple[str, str]] = []
         # Track load index expressions for argmax/argmin axis detection
         self.load_index_exprs: dict[str, sympy.Expr] = {}
+        # Track outputs that need to be readable (for scatter operations)
+        self.outputs_need_read: OrderedSet[str] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1240,11 +1242,13 @@ class PallasKernel(SIMDKernel):
 
         return index_str
 
+    @typing_extensions.override
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: Any = None
-    ) -> None:  # type: ignore[override]
-        if mode is not None:
-            raise Unsupported("pallas store mode not supported")
+    ) -> None:
+        # mode can be None (set), "atomic_add" (accumulate), etc.
+        if mode is not None and mode != "atomic_add":
+            raise Unsupported(f"pallas store mode '{mode}' not supported")
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
@@ -1266,38 +1270,184 @@ class PallasKernel(SIMDKernel):
             # For scalar outputs, use [...] to assign the entire scalar
             store_expr = f"{out}[...] = {value}"
         else:
-            index_str, needs_flatten = self._get_index_expr(index)
+            # Check for scatter pattern (indirect indexing for stores)
+            scatter_info = self._detect_scatter_pattern(index)
 
-            # Build store expression using string concatenation
-            use_masked = (
-                index_str == "..." and not needs_flatten and self.use_masked_ops
-            )
+            if scatter_info is not None:
+                # Use JAX scatter semantics for multi-dimensional scatter
+                indirect_var = scatter_info["indirect_var"]
+                dims_before = scatter_info["dims_before"]
+                dims_after = scatter_info["dims_after"]
 
-            if use_masked:
-                # GPU masked store: flatten tensor and apply per-tensor mask
-                mask_var = self._get_or_create_mask(name)
-                store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            elif index_str == "...":
-                # When storing the full array, we need to match the output shape.
-                # This handles:
-                # - Mixed indexing producing flat results needing reshape
-                # - Squeeze operations where value has more dims than output
-                # - Scalar values that need to be broadcast to the output shape
-                # - If shapes already match, operations are no-ops.
-                # Use jnp.full for scalars (fills output with value),
-                # otherwise reshape for arrays with matching element count.
-                store_expr = (
-                    f"{out}[...] = (jnp.full({out}.shape, {value}) "
-                    f"if jnp.asarray({value}).ndim == 0 "
-                    f"else jnp.asarray({value}).reshape({out}.shape))"
-                )
+                # Mark this output parameter as needing to be readable (for aliasing)
+                self.outputs_need_read.add(out)
+                alias_param = f"{out}_alias"
+
+                # Build index tuple: [:, :, ..., indirect_var, :, :, ...]
+                # Use slice(None) for full dimensions, indirect_var for scatter dim
+                index_parts = []
+                for var_name, size in dims_before:
+                    index_parts.append(":")
+                index_parts.append(indirect_var)
+                for var_name, size in dims_after:
+                    index_parts.append(":")
+
+                index_tuple = ", ".join(index_parts)
+
+                # Use .add() for atomic_add mode (accumulate=True), .set() otherwise
+                scatter_op = "add" if mode == "atomic_add" else "set"
+                # Use .at[index].set/add() syntax - must use .at[] on the full array
+                store_expr = f"{out}[...] = {alias_param}[...].at[{index_tuple}].{scatter_op}({value})"
             else:
-                # Direct indexed assignment
-                store_expr = f"{out}[{index_str}] = {value}"
+                index_str, needs_flatten = self._get_index_expr(index)
+
+                # Build store expression using string concatenation
+                use_masked = (
+                    index_str == "..." and not needs_flatten and self.use_masked_ops
+                )
+
+                if use_masked:
+                    # GPU masked store: flatten tensor and apply per-tensor mask
+                    mask_var = self._get_or_create_mask(name)
+                    store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+                elif index_str == "...":
+                    # When storing the full array, we need to match the output shape.
+                    # This handles:
+                    # - Mixed indexing producing flat results needing reshape
+                    # - Squeeze operations where value has more dims than output
+                    # - Scalar values that need to be broadcast to the output shape
+                    # - If shapes already match, operations are no-ops.
+                    # Use jnp.full for scalars (fills output with value),
+                    # otherwise reshape for arrays with matching element count.
+                    store_expr = (
+                        f"{out}[...] = (jnp.full({out}.shape, {value}) "
+                        f"if jnp.asarray({value}).ndim == 0 "
+                        f"else jnp.asarray({value}).reshape({out}.shape))"
+                    )
+                else:
+                    # Direct indexed assignment
+                    store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
         # Track which output param this store uses for filtering in codegen_kernel
         self.store_with_output.append((out, store_expr))
+
+    def _detect_scatter_pattern(self, index: sympy.Expr) -> Optional[dict]:
+        """
+        Detect if the index expression represents a scatter operation.
+
+        Scatter patterns occur when:
+        1. There's an indirect variable (tmp*) in the index
+        2. Iteration variables cover other dimensions
+
+        Returns:
+            dict with keys:
+                - 'indirect_var': name of indirect variable
+                - 'indirect_dim': which dimension it indexes (0-based from output shape)
+                - 'dims_before': list of (var_name, size) for dims before indirect
+                - 'dims_after': list of (var_name, size) for dims after indirect
+            or None if not a scatter pattern
+        """
+        has_indirect = self._has_indirect_vars(index)
+        has_iter_vars = self._has_iteration_vars(index)
+
+        # Require both indirect and iteration variables for now
+        # Single-element scatter (no iter vars) is a different pattern
+        if not has_indirect or not has_iter_vars:
+            return None
+
+        # Get iteration and indirect variables
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+        free_symbols = index.free_symbols
+        used_iter_vars = free_symbols & iter_vars
+        indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
+
+        if len(indirect_var_syms) != 1:
+            # Only handle single indirect variable for now
+            return None
+
+        indirect_sym = indirect_var_syms[0]
+        indirect_var = str(indirect_sym)
+
+        # Get coefficient of each variable
+        def get_coefficient(var):
+            coeff = index.coeff(var)
+            if coeff == 0:
+                coeff = sympy.diff(index, var)
+            try:
+                return int(coeff)
+            except (TypeError, ValueError):
+                return 0
+
+        indirect_coeff = get_coefficient(indirect_sym)
+        if indirect_coeff == 0:
+            return None
+
+        # Collect all variables with their coefficients
+        all_vars = []
+        for var in used_iter_vars:
+            coeff = get_coefficient(var)
+            if coeff > 0 and var in self.range_tree_nodes:
+                try:
+                    length = int(self.range_tree_nodes[var].length)
+                    all_vars.append((str(var), coeff, length))
+                except (TypeError, ValueError):
+                    return None
+
+        # Add indirect variable
+        all_vars.append((indirect_var, indirect_coeff, -1))  # -1 marks as indirect
+
+        # Sort by coefficient descending (larger coeff = earlier dimension)
+        all_vars.sort(key=lambda x: x[1], reverse=True)
+
+        # Find position of indirect variable
+        indirect_pos = None
+        for i, (name, coeff, length) in enumerate(all_vars):
+            if name == indirect_var:
+                indirect_pos = i
+                break
+
+        if indirect_pos is None:
+            return None
+
+        # Split into before and after
+        dims_before = [
+            (name, length) for name, coeff, length in all_vars[:indirect_pos]
+        ]
+        dims_after = [
+            (name, length) for name, coeff, length in all_vars[indirect_pos + 1 :]
+        ]
+
+        # Verify coefficient structure for iteration variables only
+        # The indirect variable's coefficient should equal product of all following iter var sizes
+        # Each iter var's coefficient should equal product of all following iter var sizes
+        iter_vars_after = [
+            (name, coeff, length)
+            for name, coeff, length in all_vars[indirect_pos + 1 :]
+        ]
+
+        expected_coeff = 1
+        for name, coeff, length in reversed(iter_vars_after):
+            if coeff != expected_coeff:
+                return None
+            expected_coeff *= length
+
+        # Indirect var coeff should equal expected_coeff (product of all following iter var sizes)
+        if indirect_coeff != expected_coeff:
+            return None
+
+        # For vars before indirect, continue the coefficient check
+        # accounting for the indirect dimension's size in the output buffer
+        # We need to get the output buffer's size for the indirect dimension
+        # For now, we just verify the relative ordering is correct
+        # by checking each var's coeff is larger than the next
+
+        return {
+            "indirect_var": indirect_var,
+            "indirect_dim": indirect_pos,
+            "dims_before": dims_before,
+            "dims_after": dims_after,
+        }
 
     def reduction(
         self,
@@ -1583,7 +1733,14 @@ class PallasKernel(SIMDKernel):
             is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
                 buffer_name
             )
-            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
+            # Enable aliasing if:
+            # 1. Not on CPU and buffer is contiguous (normal case), OR
+            # 2. Output needs to be readable (for scatter operations)
+            # outputs_need_read contains output parameter names (e.g., out_ptr0)
+            needs_read = param in self.outputs_need_read
+            aliasable_flags[param] = (
+                (not interpret_is_cpu) and is_contiguous
+            ) or needs_read
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -1595,9 +1752,19 @@ class PallasKernel(SIMDKernel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        copy_output_indices = [
-            idx for idx, name in enumerate(output_params) if name in non_alias_out_set
-        ]
+        # On CPU (interpret=True), we need to copy back even aliased outputs
+        # because pallas_call returns a new array (doesn't mutate in-place)
+        # For outputs that need read access (scatter), we enable aliasing to read
+        # current values, but still need to copy back the result
+        if interpret_is_cpu:
+            # Copy back all outputs on CPU
+            copy_output_indices = list(range(len(output_params)))
+        else:
+            copy_output_indices = [
+                idx
+                for idx, name in enumerate(output_params)
+                if name in non_alias_out_set
+            ]
         self.aliasable_out_ptrs = aliasable_flags
 
         # For GPU with masked ops, add block_size as keyword-only parameter
