@@ -594,12 +594,7 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
                     placements = self._generate_random_placement(spec.size)
 
-                    if spec.dtype in [
-                        torch.int32,
-                        torch.int64,
-                        torch.int8,
-                        torch.int16,
-                    ]:
+                    if spec.dtype in [torch.int32, torch.int64, torch.int8, torch.int16]:
                         code_lines.append(
                             f"arg_{i} = dist_tensor.ones({size_str}, device_mesh=mesh, placements={placements}, dtype={dtype_str}) * 5"
                         )
@@ -626,7 +621,6 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
 
         code_lines.append("")
         return code_lines
-
 
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
