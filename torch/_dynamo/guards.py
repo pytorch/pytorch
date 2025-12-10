@@ -997,6 +997,8 @@ class GuardBuilder(GuardBuilderBase):
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
         runtime_global_scope: Optional[dict[str, object]] = None,
+        guard_filter_fn: Optional[Callable[[Guard], bool]] = None,
+        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.f_code = f_code
@@ -1009,6 +1011,7 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.runtime_global_scope = runtime_global_scope or global_scope
         self.source_get_cache = source_get_cache or {}
+        self.tensor_values = tensor_values or {}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -1039,6 +1042,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.guard_tree_values: dict[int, Any] = {}
         self.save_guards = save_guards
+        self.guard_filter_fn = guard_filter_fn
 
         # Collect the ids of dicts which need key order guarding. source_name is
         # not sufficient because for nn modules, we can have different sources
@@ -2836,10 +2840,20 @@ class GuardBuilder(GuardBuilderBase):
         if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
-            if isinstance(value, TensorWeakRef):
-                value = value()
+            if (
+                value is None
+                and self.tensor_values
+                and guard.name in self.tensor_values
+            ):
+                value = self.tensor_values[guard.name]
+            else:
+                if isinstance(value, TensorWeakRef):
+                    value = value()
 
-            value = value if value is not None else self.get(guard)
+                value = value if value is not None else self.get(guard)
+
+            if self.save_guards:
+                self.tensor_values[guard.name] = value
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
@@ -3208,6 +3222,7 @@ class GuardsState:
     output_graph: OutputGraphGuardsState
     shape_code_parts: Optional[ShapeCodeParts]
     source_get_cache: Optional[dict[str, Any]] = None
+    tensor_values: Optional[dict[str, Any]] = None
 
 
 class _Missing:
@@ -3543,7 +3558,9 @@ class GuardsStatePickler(pickle.Pickler):
         return NotImplemented
 
 
-def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -> bytes:
+def pickle_guards_state(
+    state: GuardsState, guard_tree_values: dict[int, Any], guard_filter_fn
+) -> bytes:
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
@@ -3563,6 +3580,15 @@ def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+
+    if guard_filter_fn is torch._dynamo.aot_compile.default_guard_filter_fn:
+        # Prune more values in AOT precompile when complex pickling structure is not needed.
+        state.output_graph.global_scope.clear()
+        # state.output_graph.local_scope.clear()
+        if state.source_get_cache:
+            state.source_get_cache.clear()
+        state.output_graph.guard_on_key_order.clear()
+
     try:
         pickler.dump(state)
     except AttributeError as e:
@@ -3589,6 +3615,7 @@ class CheckFunctionManager:
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
         strict_error: bool = False,
+        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ):
         guards = output_graph.guards if output_graph else None
@@ -3659,6 +3686,7 @@ class CheckFunctionManager:
                 f_code,
                 output_graph,
                 False,
+                tensor_values=tensor_values,
                 source_get_cache=source_get_cache,
             )
 
@@ -3708,6 +3736,8 @@ class CheckFunctionManager:
             f_code,
             output_graph,
             save_guards,
+            guard_filter_fn=guard_filter_fn,
+            tensor_values=tensor_values,
             source_get_cache=source_get_cache,
         )
 
@@ -3938,7 +3968,9 @@ class CheckFunctionManager:
             source_get_cache=builder.source_get_cache,
         )
 
-        return pickle_guards_state(guards_state, builder.guard_tree_values)
+        return pickle_guards_state(
+            guards_state, builder.guard_tree_values, builder.guard_filter_fn
+        )
 
     def build_guards(
         self,
@@ -3947,6 +3979,10 @@ class CheckFunctionManager:
         f_code: types.CodeType,
         output_graph: OutputGraphGuardsState,
         save_guards: bool,
+        guard_filter_fn: Optional[
+            Callable[[list[GuardFilterEntry]], list[bool]]
+        ] = None,
+        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
@@ -3975,6 +4011,8 @@ class CheckFunctionManager:
             self,
             save_guards,
             runtime_global_scope=self.runtime_global_scope,
+            guard_filter_fn=guard_filter_fn,
+            tensor_values=tensor_values,
             source_get_cache=source_get_cache,
         )
 
