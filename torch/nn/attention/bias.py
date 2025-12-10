@@ -2,7 +2,6 @@
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
-from typing import Optional
 from warnings import warn
 
 import torch
@@ -117,7 +116,7 @@ class CausalBias(torch.Tensor):
     .. warning:: This class is a prototype and subject to change.
     """
 
-    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
+    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int) -> None:
         """
         Initializes the CausalBias instance with a specified variant and sequence lengths.
 
@@ -129,12 +128,14 @@ class CausalBias(torch.Tensor):
         Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
         assert isinstance(variant, CausalVariant)
+        super().__init__()
         self.variant = variant
         self.seq_len_q = seq_len_q
         self.seq_len_kv = seq_len_kv
         if seq_len_q > seq_len_kv and variant == CausalVariant.LOWER_RIGHT:
             warn(
-                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!"
+                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!",
+                stacklevel=2,
             )
 
     def _upper_left(self, device: torch.device) -> torch.Tensor:
@@ -153,7 +154,8 @@ class CausalBias(torch.Tensor):
             diagonal=diagonal_offset,
         )
 
-    def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
+    # pyrefly: ignore [bad-return]
+    def _materialize(self, device: torch.device | None = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.
 
@@ -181,7 +183,7 @@ class CausalBias(torch.Tensor):
         attn_mask: "CausalBias",
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None,
+        scale: float | None = None,
         enable_gqa: bool = False,
     ) -> torch.Tensor:
         r"""
@@ -231,13 +233,15 @@ class CausalBias(torch.Tensor):
                 query, key, value, None, dropout_p, is_causal, enable_gqa
             )
             if can_use_flash_attention(sdpa_params):
-                needs_padding = query.size(-1) % 8 != 0
+                alignment = 64 if query.device.type == "xpu" else 8
                 og_head_size = query.size(-1)
                 og_scale = _calculate_scale(og_head_size, scale)
+                needs_padding = og_head_size % alignment != 0
                 if needs_padding:
-                    query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
-                    key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
-                    value = torch.nn.functional.pad(value, (0, 8 - value.size(-1) % 8))
+                    pad_len = alignment - (og_head_size % alignment)
+                    query = torch.nn.functional.pad(query, (0, pad_len))
+                    key = torch.nn.functional.pad(key, (0, pad_len))
+                    value = torch.nn.functional.pad(value, (0, pad_len))
                 out = torch.ops.aten._scaled_dot_product_flash_attention(
                     query,
                     key,
@@ -294,7 +298,7 @@ class CausalBias(torch.Tensor):
             return cls._dispatch(*args, **kwargs)
         return super().__torch_function__(func, types, args, kwargs)
 
-    def __repr__(self):  # type:ignore[override]
+    def __repr__(self) -> str:  # type:ignore[override]
         return self._materialize().__repr__()
 
 

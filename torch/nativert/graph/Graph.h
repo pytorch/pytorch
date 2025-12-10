@@ -71,7 +71,7 @@ class Type {
 // These are all the constant types that are allowed as attributes on Nodes.
 struct None {};
 // None always equals itself
-inline bool operator==(const None&, const None&) {
+inline bool operator==(const None& /*unused*/, const None& /*unused*/) {
   return true;
 }
 
@@ -97,6 +97,7 @@ using Constant = std::variant<
     bool,
     std::vector<bool>,
     std::vector<std::string>,
+    std::vector<std::vector<int64_t>>,
     std::unique_ptr<Graph>>;
 
 c10::IValue constantToIValue(const Constant& constant);

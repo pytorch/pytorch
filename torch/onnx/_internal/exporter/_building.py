@@ -246,7 +246,13 @@ def _allowed_types_are_sequence_types(allowed_types: Iterable[ir.TypeProtocol]) 
 def _get_or_create_constant(
     constant_farm: dict[
         tuple[
-            bool | int | float | str | tuple[int] | tuple[float],
+            bool
+            | int
+            | float
+            | str
+            | tuple[int, ...]
+            | tuple[float, ...]
+            | tuple[bool, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -255,9 +261,9 @@ def _get_or_create_constant(
     | int
     | float
     | str
-    | tuple[int]
-    | tuple[float]
-    | tuple[bool]
+    | tuple[int, ...]
+    | tuple[float, ...]
+    | tuple[bool, ...]
     | list[int]
     | list[float]
     | list[bool],
@@ -267,18 +273,19 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
+        # pyrefly: ignore [bad-assignment]
         arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):
         # Make the arg hashable
-        arg = tuple(arg)  # type: ignore[assignment]
+        arg = tuple(arg)
 
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
-        constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
+        constant_tensor = ir.tensor(value=arg, dtype=dtype)
         constant_value = opset.Constant(value=constant_tensor)
         constant_farm[(arg, dtype)] = constant_value  # type: ignore[arg-type,index]
-    return constant_value
+    return constant_value  # type: ignore[return-value]
 
 
 def _process_python_constants(
@@ -287,7 +294,7 @@ def _process_python_constants(
     type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
-            bool | int | float | str | tuple[int] | tuple[float],
+            bool | int | float | str | tuple[int, ...] | tuple[float, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -369,7 +376,14 @@ def _process_python_sequences(
     type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
-            bool | int | float | str | ir.TensorProtocol | tuple[int] | tuple[float],
+            bool
+            | int
+            | float
+            | str
+            | ir.TensorProtocol
+            | tuple[bool, ...]
+            | tuple[int, ...]
+            | tuple[float, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -429,6 +443,7 @@ def _process_python_sequences(
             # when the expected input type is INT64
             # We assume this only happens for 0D cases
             if all(isinstance(val, ir.Value) for val in arg):
+                # pyrefly: ignore
                 expanded_args = [_reshape_to_1d_tensor(opset, val) for val in arg]
                 named_inputs[name] = opset.Concat(*expanded_args, axis=0)
                 continue
@@ -535,7 +550,7 @@ class OpRecorder(evaluator.Evaluator):
 
     def __init__(
         self, opset: onnxscript.values.Opset, constant_farm: dict[Any, ir.Value]
-    ):
+    ) -> None:
         self.nodes: list[ir.Node] = []
         self.opset = opset
         self.functions: dict[
@@ -645,45 +660,6 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
-            # TODO(justinchuby): Remove this once IsScalar and Rank are removed
-            # Special cases for handling IsScalar and Rank
-            if function.name == "IsScalar":
-                if len(args) != 1:
-                    raise TypeError(
-                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
-                    )
-                if isinstance(args[0], _tensors.SymbolicTensor):
-                    if args[0].rank is not None:
-                        return args[0].rank == 0
-                    else:
-                        # Fall to call add_function_call
-                        pass
-                elif isinstance(args[0], Sequence):
-                    return False
-                else:
-                    # Python constants are scalars
-                    return True
-            if function.name == "Rank":
-                if len(args) != 1:
-                    raise TypeError(
-                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
-                    )
-                if isinstance(args[0], _tensors.SymbolicTensor):
-                    if args[0].rank is not None:
-                        return args[0].rank
-                    else:
-                        # Fall to call add_function_call
-                        pass
-                elif isinstance(args[0], Sequence):
-                    if all(isinstance(arg, (int, float)) for arg in args[0]):
-                        return 1
-                    else:
-                        # Fall to call add_function_call
-                        pass
-                else:
-                    # Python constants are scalars
-                    return 0
-
             # NOTE: signature should be written to function in the registration process
             if hasattr(function, "_pt_onnx_signature"):
                 op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]

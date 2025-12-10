@@ -539,6 +539,7 @@ static PyObject* THPFunction_new(
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
+  self->pure_view = false;
   self->materialize_non_diff_grads = true;
   return obj;
 }
@@ -716,7 +717,8 @@ static void _wrap_outputs(
       cdata_if_executable,
       jvp_user_function,
       to_save_if_setup_context,
-      view_as_self_fn);
+      view_as_self_fn,
+      self->pure_view);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -812,17 +814,31 @@ static void _get_tensors_to_save(
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
-    THPFunction* self) {
-  if (tensors_to_save.size() == 0)
+    THPFunction* self,
+    PyObject* outputs,
+    int64_t num_outputs) {
+  if (tensors_to_save.empty())
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
+
+  std::unordered_set<at::TensorImpl*> output_impls{};
+  output_impls.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* obj = PyTuple_GET_ITEM(outputs, i);
+    if (THPVariable_Check(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      output_impls.insert(tensor.unsafeGetTensorImpl());
+    }
+  }
+
   for (const auto& opt_tensor : tensors_to_save) {
     if (!opt_tensor.has_value()) {
       self->saved_variables.emplace_back();
     } else {
-      bool is_output = opt_tensor.value().grad_fn().get() == cdata_ptr.get();
+      bool is_output =
+          output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
@@ -1137,7 +1153,8 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(tensors_to_save, cdata, grad_fn);
+    _save_variables(
+        tensors_to_save, cdata, grad_fn, outputs.get(), num_outputs);
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
@@ -1441,6 +1458,20 @@ int THPFunction_set_materialize_grads(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+int THPFunction_set_pure_view(
+    THPFunction* self,
+    PyObject* value,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(value)) {
+    THPUtils_invalidArguments(value, nullptr, "set_pure_view", 1, "(bool)");
+    return -1;
+  }
+  self->pure_view = (value == Py_True);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 PyObject* THPFunction_get_materialize_non_diff_grads(
     THPFunction* self,
     void* _unused) {
@@ -1713,6 +1744,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,
+     nullptr,
+     nullptr},
+    {"_is_pure_view",
+     nullptr,
+     (setter)THPFunction_set_pure_view,
      nullptr,
      nullptr},
     {"_materialize_non_diff_grads",

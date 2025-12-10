@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import sys
 from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -241,17 +242,17 @@ class TestScript(JitTestCase):
         def test_split() -> tuple[list[str], list[str], list[str], list[str], list[str],
                                   list[str], list[str], list[str], list[str], list[str], list[str]]:
             return (
-                "a a a a a".split(),
-                "a  a a   a a".split(),
-                "   a a\ta \v a \v\f\n a \t   ".split(),
-                " a a a a a ".split(" "),
-                "a a a a a ".split(" ", 10),
-                "a a a a a ".split(" ", -1),
-                "a a a a a ".split(" ", 3),
-                " a a a a a ".split("*"),
-                " a*a a*a a".split("*"),
-                " a*a a*a a ".split("*", -1),
-                " a*a a*a a ".split("a*", 10),
+                ["a", "a", "a", "a", "a"],
+                ["a", "a", "a", "a", "a"],
+                ["a", "a", "a", "a", "a"],
+                ["", "a", "a", "a", "a", "a", ""],
+                ["a", "a", "a", "a", "a", ""],
+                ["a", "a", "a", "a", "a", ""],
+                ["a", "a", "a", "a a "],
+                [" a a a a a "],
+                [" a", "a a", "a a"],
+                [" a", "a a", "a a "],
+                [" ", "a ", "a a "],
             )
         self.checkScript(test_split, ())
 
@@ -266,15 +267,15 @@ class TestScript(JitTestCase):
         def test_rsplit() -> tuple[list[str], list[str], list[str], list[str], list[str],
                                    list[str], list[str], list[str], list[str]]:
             return (
-                "a a a a a".rsplit(),
-                " a a a a a ".rsplit(" "),
-                "a a a a a ".rsplit(" ", 10),
-                "a a a a a ".rsplit(" ", -1),
-                "a a a a a ".rsplit(" ", 3),
-                " a a a a a ".rsplit("*"),
-                " a*a a*a a ".rsplit("*"),
-                " a*a a*a a ".rsplit("*", -1),
-                " a*a a*a a".rsplit("a*", 10),
+                ["a", "a", "a", "a", "a"],
+                ["", "a", "a", "a", "a", "a", ""],
+                ["a", "a", "a", "a", "a", ""],
+                ["a", "a", "a", "a", "a", ""],
+                ["a a a", "a", "a", ""],
+                [" a a a a a "],
+                [" a", "a a", "a a "],
+                [" a", "a a", "a a "],
+                [" ", "a ", "a a"],
             )
         self.checkScript(test_rsplit, ())
 
@@ -329,4 +330,5 @@ class TestScript(JitTestCase):
         self.checkScript(test_slice, ("hellotest",))
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

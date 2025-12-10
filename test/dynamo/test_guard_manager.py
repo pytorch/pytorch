@@ -928,8 +928,8 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             foo_source = LocalSource("foo")
             foo_x_source = AttrSource(foo_source, "x")
 
-            self.assertTrue(builder.get(foo_source.name()) is foo)
-            self.assertTrue(builder.get(foo_x_source.name()) is foo.x)
+            self.assertTrue(builder.get(foo_source) is foo)
+            self.assertTrue(builder.get(foo_x_source) is foo.x)
 
             # Check types of foo.x
             foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
@@ -956,6 +956,42 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(
                 issubclass(mod_mgr.get_type_of_guarded_value(), torch.nn.Module)
             )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
+
+class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
+    def test_duplicate_guard(self):
+        class Foo:
+            def __init__(self):
+                self.x = 4
+                self.bar = 4
+
+        foo = Foo()
+
+        def fn(x):
+            if hasattr(foo, "y"):
+                x = torch.sin(x)
+            if hasattr(foo, "y"):
+                x = torch.sin(x)
+
+            if hasattr(foo, "bar"):
+                x = torch.cos(x)
+            if hasattr(foo, "bar"):
+                x = torch.cos(x)
+            return x + foo.x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            # One for tensor and one for y
+            self.assertEqual(guard_str.count("NO_HASATTR"), 2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):

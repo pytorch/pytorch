@@ -17,7 +17,7 @@ namespace c10 {
 using MemoryDeleter = void (*)(void*);
 
 // A helper function that is basically doing nothing.
-C10_API void NoDelete(void*);
+C10_API void NoDelete(void* /*unused*/);
 
 // A simple struct that is used to report C10's memory allocation,
 // deallocation status and out-of-memory events to the profiler

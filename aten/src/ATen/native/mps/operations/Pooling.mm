@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
@@ -368,7 +369,8 @@ static PoolSizes process_pool_sizes(const Tensor& input,
       out_size += stride_expanded[dim] - 1;
     }
 
-    out_size = out_size / stride_expanded[dim] + 1;
+    // Use div_rtn for proper floor division (matching CPU behavior)
+    out_size = div_rtn<int64_t>(out_size, static_cast<int64_t>(stride_expanded[dim])) + 1;
 
     if (ceil_mode) {
       if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
@@ -384,6 +386,48 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   }
   for (const auto dim : c10::irange(pooling_dims)) {
     output_size[leading_dims + dim] = output_pooling_size[dim];
+  }
+
+  // Validate output sizes using the same shape check functions as CPU/CUDA
+  if (pooling_dims == 2) {
+    const auto memory_format = input.suggest_memory_format();
+    pool2d_shape_check(input,
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       input.size(leading_dims - 1),
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       memory_format);
+  } else if (pooling_dims == 3) {
+    pool3d_shape_check(input,
+                       input.size(leading_dims - 1),
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       kernel_size_expanded[2],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       stride_expanded[2],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       padding_expanded[2],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       dilation_expanded[2],
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       input.size(leading_dims + 2),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       output_pooling_size[2],
+                       op_name.c_str());
   }
 
   return PoolSizes(dims,
@@ -526,6 +570,13 @@ static void max_unpool_out_mps_template(const Tensor& input,
               " elements but got ",
               output_size_.size());
 
+  // Check that input and indices have the same shape
+  TORCH_CHECK(input.sizes() == indices.sizes(),
+              "Expected shape of indices to be same as that of the input tensor (",
+              input.sizes(),
+              ") but got indices tensor with shape: ",
+              indices.sizes());
+
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
 
@@ -544,8 +595,9 @@ static void max_unpool_out_mps_template(const Tensor& input,
   if (indices.defined() && indices.numel() > 0) {
     auto output_image_size = c10::multiply_integers(output_size_);
 
-    int64_t min_idx = indices.min().item<int64_t>();
-    int64_t max_idx = indices.max().item<int64_t>();
+    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
+    int64_t min_idx = min_idx_tensor.item<int64_t>();
+    int64_t max_idx = max_idx_tensor.item<int64_t>();
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
@@ -595,6 +647,7 @@ static void avg_pool2d_template(const Tensor& input,
                                 bool count_include_pad,
                                 const std::optional<int64_t> divisor_override,
                                 const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
@@ -890,7 +943,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
   mps::pool2d_template(input,
                        grad_input,
                        std::nullopt,
-                       grad_output,
+                       grad_output.contiguous(input.suggest_memory_format()),
                        kernel_size,
                        stride,
                        padding,
@@ -913,6 +966,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
  bool ceil_mode,
  const Tensor& output,
  const Tensor& indices) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
   if (use_graph) {
     auto indices_memory_format = indices.suggest_memory_format();
@@ -965,6 +1020,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
  bool ceil_mode,
  const Tensor& indices,
  const Tensor& grad_input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor

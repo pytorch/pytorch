@@ -411,7 +411,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    def test_torchbind_register_attr_at_runtime_error(self):
+    def test_torchbind_register_attr_at_runtime_get_restored(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -419,10 +419,8 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        with self.assertRaisesRegex(
-            ValueError, "following attrs were created in the model"
-        ):
-            torch.export.export(F3(), (torch.ones(2, 3), foo))
+        torch.export.export(F3(), (torch.ones(2, 3), foo), strict=False)
+        self.assertFalse(hasattr(foo, "foo"))
 
     @parametrize("pre_dispatch", [True, False])
     def test_torchbind_input_and_alias(self, pre_dispatch):
@@ -463,9 +461,9 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
+    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default);  attr = takes_foo_default = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default_1);  x = takes_foo_default_1 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -1089,10 +1087,12 @@ def forward(self, token, tq, x):
             str(ep.graph_module.graph).strip(),
             """\
 graph():
+    %token : [num_users=1] = placeholder[target=token]
     %tq : [num_users=2] = placeholder[target=tq]
     %x : [num_users=1] = placeholder[target=x]
-    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
-    return (tq,)""",  # noqa: B950
+    %with_effects : [num_users=1] = call_function[target=torch.ops.higher_order.with_effects](args = (%token, _TorchScriptTesting.queue_push.default, %tq, %x), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%with_effects, 0), kwargs = {})
+    return (getitem, tq)""",  # noqa: B950
         )
 
     def test_deepcopy(self):

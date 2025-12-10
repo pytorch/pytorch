@@ -180,6 +180,47 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         del model
         del optim
 
+    def _test_tracker_multihandler_hook(self):
+        """Should run without KeyError."""
+
+        class TestModule(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.norm1 = nn.RMSNorm(dim)
+                self.output1 = nn.Linear(dim, dim)
+                self.norm2 = nn.RMSNorm(dim)
+                self.output2 = nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.norm1(x)
+                x = self.output1(x)
+                x = self.norm2(x)
+                x = self.output2(x)
+                return x
+
+        gc.collect()
+        torch.manual_seed(42)
+        dev = torch.device(torch.accelerator.current_device_index())
+
+        with torch.device(dev):
+            model = TestModule(128)
+
+        mesh = init_device_mesh(dev.type, (self.world_size,))
+        fully_shard([model.norm1, model.output1], mesh=mesh)
+        fully_shard([model.norm2, model.output2], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+
+        fmt = FSDPMemTracker(model)
+
+        with fmt:
+            inp = torch.randn(16, 128, device=dev)
+            y = model(inp)
+            loss = y.sum()
+            loss.backward()
+
+        del inp
+        del model
+
 
 class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
     @property
