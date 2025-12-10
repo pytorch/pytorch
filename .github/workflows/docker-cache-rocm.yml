@@ -86,7 +86,7 @@ jobs:
             echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.10
         with:
           docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
 
