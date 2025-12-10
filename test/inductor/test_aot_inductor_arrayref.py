@@ -77,8 +77,6 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
-    # crashes on python 3.14.2
-    "test_misc_1_max_autotune_True": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
