@@ -6,7 +6,7 @@ inputs:
     diskspace-cutoff:
         description: The absolute amount of docker diskspace required on the runner.
         required: true
-        default: 240 #120 GiB is required for inductor-benchmarks
+        default: 200
 
 runs:
   using: composite
