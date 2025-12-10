@@ -353,8 +353,12 @@ def redistribute_cost(
     # No redistribution needed when placements are already identical.
     # This also prevents potential failures in _gen_transform_infos for certain configurations
     # (e.g., sub-meshes) where finding a transform path between identical states may error out.
-    # TODO(zpcore): test placements with _StridedShard.
-    if current_spec.placements == target_spec.placements:
+    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
+    # with _StridedShard.
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
         return cost
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
