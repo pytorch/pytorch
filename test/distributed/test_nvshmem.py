@@ -3,6 +3,7 @@
 # To run:
 # python test/distributed/test_nvshmem.py
 
+import os
 
 import torch
 import torch.distributed as dist
@@ -27,6 +28,15 @@ def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
         not symm_mem.is_nvshmem_available(),
         "test_nvshmem requires NVSHMEM, skipping tests",
+    )
+
+
+def requires_nvls():
+    """Skip test if NVLS (NVLink Switch) is not available."""
+    nvls_disabled = os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1"
+    return skip_but_pass_in_sandcastle_if(
+        nvls_disabled,
+        "Test requires NVLS which is disabled via NVSHMEM_DISABLE_NVLS=1",
     )
 
 
@@ -755,6 +765,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     @skipIfRocm
+    @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
     def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
@@ -789,6 +800,7 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         torch.testing.assert_close(full_out, expected)
 
     @skipIfRocm
+    @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize(
         "root_ratio", [1, 2]
