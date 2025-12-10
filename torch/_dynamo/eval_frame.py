@@ -881,7 +881,12 @@ class _TorchDynamoContext:
         # when traced inside a frame. When such a function is passed directly to
         # torch.compile, we detect it here so we can force it through wrap_inline.
         from .variables import TorchInGraphFunctionVariable
-        top_level_in_graph = issubclass(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+        top_level_in_graph = isinstance(rule, type) and issubclass(rule, TorchInGraphFunctionVariable)
+
+        rule = trace_rules.lookup(fn)
+        top_level_in_graph = isinstance(rule, type) and issubclass(
+            rule, TorchInGraphFunctionVariable
+        )
 
         try:
             filename = inspect.getsourcefile(fn)
