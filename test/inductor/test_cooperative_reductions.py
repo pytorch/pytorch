@@ -17,7 +17,6 @@ from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    slowTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -199,7 +198,6 @@ class CooperativeReductionTests(TestCase):
         self.assertEqual(before.count("if rsplit_id == ("), 0)
         self.assertEqual(after.count("if rsplit_id == ("), 6)
 
-    @slowTest
     @parametrize("bs", [1, 2, 5, 15])
     @parametrize("count", [1024**2 + 1, 1024**2 - 1, 1024])
     def test_non_power_of_2(self, bs, count):
@@ -222,8 +220,7 @@ class CooperativeReductionTests(TestCase):
 
         # With online softmax, the computation of max and sum are done
         # jointly and they share a single barrier call.
-        # XPU doesn't support online softmax yet.
-        expected_num_barrier = 8 if config.online_softmax and GPU_TYPE != "xpu" else 16
+        expected_num_barrier = 8 if config.online_softmax else 16
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )

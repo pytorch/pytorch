@@ -6876,7 +6876,7 @@ def scaled_mm(
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
@@ -6961,7 +6961,7 @@ def scaled_grouped_mm(
     bias: Optional[Tensor] = None,
     offs: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
