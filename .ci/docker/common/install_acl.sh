@@ -11,6 +11,23 @@ ACL_CHECKOUT_DIR="ComputeLibrary"
 ACL_INSTALL_DIR="/acl"
 ACL_REPO_URL="https://github.com/ARM-software/ComputeLibrary.git"
 
+# Optional ccache support
+USE_CCACHE=${USE_CCACHE:-0}
+
+if [ "${USE_CCACHE}" != "0" ]; then
+  echo "Using ccache for ACL build"
+
+  # Set default compilers if not set
+  CC="${CC:-gcc}"
+  CXX="${CXX:-g++}"
+
+  # Only prepend if not already wrapped
+  [[ "$CC" == ccache* ]] || CC="ccache ${CC}"
+  [[ "$CXX" == ccache* ]] || CXX="ccache ${CXX}"
+
+  export CC CXX
+fi
+
 # Clone ACL
 mkdir -p "$ACL_CHECKOUT_DIR"
 (

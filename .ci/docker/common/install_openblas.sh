@@ -10,6 +10,16 @@ MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 OPENBLAS_REPO_URL="https://github.com/OpenMathLib/OpenBLAS.git"
 
+# Optional ccache support
+USE_CCACHE=${USE_CCACHE:-0}
+
+if [ "${USE_CCACHE}" != "0" ]; then
+  echo "Using ccache for OpenBLAS build"
+  CC_FOR_OPENBLAS="ccache gcc"
+else
+  CC_FOR_OPENBLAS="gcc"
+fi
+
 # Clone OpenBLAS
 mkdir -p "$OPENBLAS_CHECKOUT_DIR"
 (
