@@ -44,7 +44,6 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
-    skipIfRocm,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,

@@ -87,7 +87,6 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_MKL,
     TestCase,
     xfail_inherited_tests,
@@ -3913,7 +3912,11 @@ def forward(self, tangents_1):
         )
 
         def bn(x):
-            fn = torch.ops.aten.cudnn_batch_norm if torch.version.hip is None else torch.ops.aten.miopen_batch_norm
+            fn = (
+                torch.ops.aten.cudnn_batch_norm
+                if torch.version.hip is None
+                else torch.ops.aten.miopen_batch_norm
+            )
             return fn(
                 x,
                 weight,
