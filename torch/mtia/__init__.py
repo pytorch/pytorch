@@ -268,13 +268,32 @@ def set_device(device: _device_t) -> None:
         torch._C._accelerator_hooks_set_current_device(device)
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
-    r"""Return a dictionary of MTIA device properties
+def get_device_name(device: "Device" = None) -> str:
+    r"""Get the name of a device.
 
     Args:
-        device (torch.device or int, optional) selected device. Returns
-            statistics for the current device, given by current_device(),
-            if device is None (default).
+        device (torch.device or int or str, optional): device for which to return the
+            name. This function is a no-op if this argument is a negative
+            integer. It uses the current device, given by :func:`~torch.mtia.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Returns:
+        str: the name of the device
+    """
+    return get_device_properties(device).name
+
+
+def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+    r"""Get the properties of a device.
+
+    Args:
+        device (torch.device or int or str, optional): device for which to return the
+            properties of the device.  It uses the current device, given by
+            :func:`~torch.mtia.current_device`, if :attr:`device` is ``None``
+            (default).
+
+    Returns:
+        _MtiaDeviceProperties: the properties of the device
     """
     return torch._C._mtia_getDeviceProperties(_get_device_index(device, optional=True))
 
