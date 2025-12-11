@@ -956,6 +956,8 @@ class aten_distributed_optimizations:
     # Maximum compute node prefetch distance for overlap scheduling
     max_compute_pre_fetch: Optional[int] = None
 
+    compute_overlap_multipler: Optional[float] = None
+
     # Custom runtime estimation function for ops
     # For user-defined estimation function, pass in the function handle
     # None means use default estimations
@@ -973,6 +975,13 @@ class aten_distributed_optimizations:
     # Uses minimum of absolute cap and ratio of baseline
     max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
     max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
+
+    # Maximum GB of concurrent collective data in flight. Too much in flight memory
+    # can cause memory fragmentation within the CUDA Caching Allocator.
+    max_in_flight_gb: Optional[float] = None
+
+    # Maximum prefetch or bucketing candidates. Mainly intended for compile time.
+    max_coll_distance: Optional[int] = None
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1032,7 +1041,7 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
-    default=False,
+    default=True,
 )
 
 # Time in seconds to wait before quiescing
@@ -1593,7 +1602,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 32 if torch.version.hip else 16
+    spill_threshold: int = 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
