@@ -3142,6 +3142,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         description,
         *,
         subgraph_name="wrap_body",
+        set_subgraph_inputs="automatic",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
         (
@@ -3162,6 +3163,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            set_subgraph_inputs=set_subgraph_inputs,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -4787,7 +4789,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
             body_graph_output_vts,
         ) = self.create_wrapped_node(
-            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+            tx,
+            user_func,
+            user_args,
+            kwargs,
+            self.value._name,
+            subgraph_name="subgraph",
+            set_subgraph_inputs="flatten_automatic",
         )
 
         # Step 4: Validate traced graph signature still matches placement information
