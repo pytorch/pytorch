@@ -2097,9 +2097,9 @@ def _aot_stage2c_make_autograd_function(
         flat_requires_grad: list[Optional[bool]] = [
             a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
         ]
-        compiled_fn = DebugAssertWrapper(
-            flat_requires_grad=flat_requires_grad
-        ).post_compile(compiled_fn, aot_config, runtime_metadata=fw_metadata)
+        compiled_fn = DebugAssertWrapper().post_compile(
+            compiled_fn, aot_config, runtime_metadata=fw_metadata
+        )
 
     compiled_fn = post_compile(
         wrappers,

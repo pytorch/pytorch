@@ -2493,12 +2493,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         return compiled_function
 
 
-@dataclass
 class DebugAssertWrapper(CompilerWrapper):
-    flat_requires_grad: list[Optional[bool]] = field(default_factory=list)
-
+    @staticmethod
     def post_compile(
-        self,
         compiled_fn,
         aot_config: AOTConfig,
         *,
@@ -2516,10 +2513,8 @@ class DebugAssertWrapper(CompilerWrapper):
             # (vice versa is OK; we compute a gradient and then throw
             # it away when it hits the input.)
             for i, a in enumerate(args):
-                can_require_grad = self.flat_requires_grad[i]
-                if can_require_grad is None:
-                    assert not isinstance(a, Tensor)
-                elif not can_require_grad:
+                can_require_grad = runtime_metadata.input_info[i].requires_grad
+                if isinstance(a, Tensor) and not can_require_grad:
                     assert not a.requires_grad, format_guard_bug_msg(
                         aot_config,
                         f"{describe_input(i, aot_config)} would not require grad",
