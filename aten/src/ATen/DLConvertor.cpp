@@ -1,5 +1,4 @@
 #include <ATen/DLConvertor.h>
-#include <ATen/Functions.h>
 
 using namespace std;
 namespace at {
