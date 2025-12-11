@@ -25,7 +25,7 @@ from torch._utils import _get_device_index
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
     for s in size:
-        nelem *= int(s)
+        nelem *= s
     # Normalize device
     if device is None:
         device = torch.device("cpu")
@@ -202,7 +202,7 @@ def replace_random(
     device = get_device(device)
     replacement_fn = replacement
 
-    if mode == "rand" and config.align_random_eager and device.type == "cuda" and all(isinstance(s, int) for s in size):
+    if mode == "rand" and config.align_random_eager and device.type == "cuda":
         # Only enable align_random_eager for fully static shapes.
         # If `size` contains SymInt (dynamic dims), forcing it through _shape_to_offset
         # would specialize those symbolic dimensions to concrete values and violate

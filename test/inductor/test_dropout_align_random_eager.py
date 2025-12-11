@@ -243,10 +243,6 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="Exact eager vs compiled dropout parity is not guaranteed for dynamic shapes: align_random_eager is disabled when SymInt is present",
-        strict=False,
-    )
     def test_dropout_parity_dynamic_shapes(self):
         device = torch.device(GPU_TYPE)
 

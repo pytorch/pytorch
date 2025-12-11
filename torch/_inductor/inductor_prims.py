@@ -116,14 +116,14 @@ def _reserve_rng_state(device: torch.device, used_offset: int) -> tuple[int, int
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    seed = int(gen.initial_seed())
-    old_off = int(gen.get_offset())
+    seed = gen.initial_seed()
+    old_off = gen.get_offset()
     gen.set_offset(old_off + used_offset)
     base = old_off // 4  # convert raw offset to Philox-4x32 counter units
     return seed, base
 
 
-def _rand_eager_offset_impl(offset: int, device: torch.device) -> Tensor:
+def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
     """
     Reserve `offset` 32-bit Philox samples and return a 1-element int64 tensor
     with packed (seed, base) in the lower 64 bits:
