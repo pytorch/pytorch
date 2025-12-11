@@ -3505,16 +3505,21 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
     op_requires_libdevice_fp64.add(name)
 
 
-def get_current_backend() -> str:
-    """Get the codegen backend for the current graph, or throw."""
+def get_current_backend(device_type: str | None = None) -> str:
+    """Get the codegen backend for the given device type (or that of the current
+    graph if not specified), else throw."""
     from torch._inductor.virtualized import V
 
-    device: torch.device = V.graph.get_current_device_or_throw()
-    device_interface: type[DeviceInterface] = get_interface_for_device(device.type)
+    if device_type is None:
+        device_type = V.graph.get_current_device_or_throw().type
 
+    device_interface: type[DeviceInterface] = get_interface_for_device(device_type)
     device_inductor_backend: Optional[str] = device_interface.inductor_backend()
+
     if device_inductor_backend is None:
-        raise ValueError(f"Couldn't get an Inductor backend for device {device.type}")
+        raise ValueError(
+            f"Couldn't get an Inductor backend for device type {device_type}"
+        )
     return device_inductor_backend
 
 
