@@ -1001,7 +1001,7 @@ def register_custom_op_autotuning(
         register_custom_op_autotuning(
             my_op,
             configs=[CustomOpConfig(impl1), CustomOpConfig(impl2), CustomOpConfig(impl3)],
-            dispatch_on={"tensor": "x", "dim": 1},  # Dispatch based on x.shape[1]
+            dispatch_on={"tensor_name": "x", "dim": 1},  # Dispatch based on x.shape[1]
             split_points=[512, 2048],  # Creates ranges: [1,512], [513,2048], [2049,inf]
         )
     """
@@ -1057,25 +1057,25 @@ def register_custom_op_autotuning(
             )
         if not isinstance(dispatch_on, dict):
             raise ValueError(
-                "dispatch_on must be a dict with 'tensor' and 'dim' keys, "
-                f"e.g., {{'tensor': 'x', 'dim': 1}}. Got: {type(dispatch_on)}"
+                "dispatch_on must be a dict with 'tensor_name' and 'dim' keys, "
+                f"e.g., {{'tensor_name': 'x', 'dim': 1}}. Got: {type(dispatch_on)}"
             )
-        if "tensor" not in dispatch_on or "dim" not in dispatch_on:
+        if "tensor_name" not in dispatch_on or "dim" not in dispatch_on:
             raise ValueError(
-                "dispatch_on must contain 'tensor' and 'dim' keys, "
-                f"e.g., {{'tensor': 'x', 'dim': 1}}. Got keys: {list(dispatch_on.keys())}"
+                "dispatch_on must contain 'tensor_name' and 'dim' keys, "
+                f"e.g., {{'tensor_name': 'x', 'dim': 1}}. Got keys: {list(dispatch_on.keys())}"
             )
-        if not isinstance(dispatch_on["tensor"], str):
+        if not isinstance(dispatch_on["tensor_name"], str):
             raise ValueError(
-                f"dispatch_on['tensor'] must be a string (tensor parameter name), "
-                f"got {type(dispatch_on['tensor'])}"
+                f"dispatch_on['tensor_name'] must be a string (tensor parameter name), "
+                f"got {type(dispatch_on['tensor_name'])}"
             )
         if not isinstance(dispatch_on["dim"], int):
             raise ValueError(
                 f"dispatch_on['dim'] must be an integer (dimension index), "
                 f"got {type(dispatch_on['dim'])}"
             )
-        dispatch_on_tuple = (dispatch_on["tensor"], dispatch_on["dim"])
+        dispatch_on_tuple = (dispatch_on["tensor_name"], dispatch_on["dim"])
         if not isinstance(split_points, list) or len(split_points) == 0:
             raise ValueError("split_points must be a non-empty list of integers")
         if sorted(split_points) != split_points:

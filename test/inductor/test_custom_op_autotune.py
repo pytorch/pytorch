@@ -496,7 +496,7 @@ class TestCustomOpAutoTune(TestCase):
                 CustomOpConfig(impl_medium),
                 CustomOpConfig(impl_large),
             ],
-            dispatch_on={"tensor": "x", "dim": 1},  # Dispatch based on x.shape[1]
+            dispatch_on={"tensor_name": "x", "dim": 1},  # Dispatch based on x.shape[1]
             split_points=[64, 128, 256, 512],
             input_gen_fns={
                 "x": lambda fake: torch.randn_like(fake, device=self.device),
