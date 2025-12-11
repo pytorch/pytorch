@@ -866,7 +866,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertRaisesRegex(
             torch._dynamo.exc.TorchRuntimeError,
-            "element 0 of tensors does not require grad",
+            "tensor does not require grad and does not have a grad_fn",
             fn,
             w,
         )

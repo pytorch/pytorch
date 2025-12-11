@@ -1029,7 +1029,7 @@ class TensorVariable(VariableTracker):
         # Match eager error for tensors that don't require grad
         if not self.requires_grad and not self.has_grad_fn:
             raise TorchRuntimeError(
-                "element 0 of tensors does not require grad and does not have a grad_fn"
+                "tensor does not require grad and does not have a grad_fn"
             )
 
         from ..symbolic_convert import InstructionTranslator
