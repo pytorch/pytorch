@@ -1,10 +1,4 @@
-#ifdef USE_C10D_NCCL
-#include <nccl.h>
-#include <torch/csrc/cuda/nccl.h>
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 9)
-#define NCCL_HAS_SYMMEM_SUPPORT
-#endif
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 #include <nccl_device.h>
@@ -326,19 +320,27 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         " on ncclComm_ ",
         comm));
 
-    // Create device communicator
+    // Check if we already have a cached device communicator for this comm
     ncclDevComm devComm;
-    ncclDevCommRequirements reqs;
-    // See example in https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
-    memset(&reqs, 0, sizeof(ncclDevCommRequirements));
-    // TODO: we need to figure out how to set the number of CTA and requirements.
-    // See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/device.html#nccldevcommrequirements
-    int nCTAs = 16;
-    reqs.lsaBarrierCount = nCTAs;
-    C10D_NCCL_CHECK(ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
+    auto comm_dev = comm_to_dev_comm_.find(comm);
+    if (comm_dev != comm_to_dev_comm_.end()) {
+      devComm = comm_dev->second;
+    } else {
+      // Create device communicator
+      ncclDevCommRequirements reqs;
+      // See example in https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
+      memset(&reqs, 0, sizeof(ncclDevCommRequirements));
+      // TODO: we need to figure out how to set the number of CTA and requirements.
+      // See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/device.html#nccldevcommrequirements
+      int nCTAs = 16;
+      reqs.lsaBarrierCount = nCTAs;
+      C10D_NCCL_CHECK(ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
+      // Cache the device communicator for future reuse
+      comm_to_dev_comm_[comm] = devComm;
+    }
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), std::move(devComm));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), devComm);
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
@@ -364,6 +366,8 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
+  // Cache for ncclDevComm to avoid recreating them for the same ncclComm_t
+  std::unordered_map<ncclComm_t, ncclDevComm> comm_to_dev_comm_;
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {
@@ -387,4 +391,3 @@ static RegisterNCCLSymmetricMemoryAllocator register_allocator_;
 } // namespace symmetric_memory
 } // namespace c10d
 #endif // NCCL_HAS_SYMMEM_SUPPORT
-#endif // USE_C10D_NCCL
