@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
@@ -351,9 +350,9 @@ std::ostream& operator<<(
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
-        (dtype_strs),
+        dtype_strs,
         ", TensorDeviceTypes=",
-        (device_type_strs),
+        device_type_strs,
         ")");
   } else {
     collectiveInfo = c10::str(
