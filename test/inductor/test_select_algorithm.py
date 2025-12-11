@@ -39,6 +39,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
     requires_triton,
+    MI200_ARCH,
 )
 
 
@@ -538,6 +539,7 @@ class TestExternKernelCaller(TestCase):
         # Only autotune once, cache hit
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
