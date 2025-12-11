@@ -112,7 +112,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
 
-  std::map<const void*, ID> objectId{};
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
