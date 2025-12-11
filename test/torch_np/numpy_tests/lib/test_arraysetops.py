@@ -400,6 +400,24 @@ class TestSetOps(TestCase):
                     np.invert(isin(a, b, kind=kind)), isin(a, b, invert=True, kind=kind)
                 )
 
+    @skipIf(
+        numpy.lib.NumpyVersion(numpy.__version__) >= "2.4.0",
+        reason="NP_VER: in1d was deprecated in numpy 2.4"
+    )
+    @parametrize("kind", [None, "sort", "table"])
+    def test_in1d_ravel(self, kind):
+        # Test that in1d ravels its input arrays. This is not documented
+        # behavior however. The test is to ensure consistentency.
+        a = np.arange(6).reshape(2, 3)
+        b = np.arange(3, 9).reshape(3, 2)
+        long_b = np.arange(3, 63).reshape(30, 2)
+        ec = np.array([False, False, False, True, True, True])
+
+        assert_array_equal(in1d(a, b, assume_unique=True, kind=kind), ec)
+        assert_array_equal(in1d(a, b, assume_unique=False, kind=kind), ec)
+        assert_array_equal(in1d(a, long_b, assume_unique=True, kind=kind), ec)
+        assert_array_equal(in1d(a, long_b, assume_unique=False, kind=kind), ec)
+
     def test_isin_hit_alternate_algorithm(self):
         """Hit the standard isin code with integers"""
         # Need extreme range to hit standard code
