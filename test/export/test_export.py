@@ -13408,7 +13408,7 @@ graph():
 
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
-    def test_register_constant(self):
+    def test_opaque_obj(self):
         @dataclass(frozen=True)
         class MyInput:
             int_1: int
@@ -13421,7 +13421,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        register_constant(MyInput)
+        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -16594,7 +16594,7 @@ class GraphModule(torch.nn.Module):
 
         # Expect builtin round in the export graph
         round_nodes = [
-            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target is round
         ]
         self.assertEqual(len(round_nodes), 1)
 
