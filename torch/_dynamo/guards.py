@@ -3968,7 +3968,6 @@ class CheckFunctionManager:
         guard_filter_fn: Optional[
             Callable[[list[GuardFilterEntry]], list[bool]]
         ] = None,
-        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
