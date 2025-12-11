@@ -1430,6 +1430,12 @@ class onlyOn:
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1455,6 +1461,12 @@ class deviceCountAtLeast:
         def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = f"fewer than {self.num_required_devices} devices detected"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
@@ -2026,7 +2038,11 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
-if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+if (
+    torch.version.hip
+    and torch.cuda.device_count() > 0
+    and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+):
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
