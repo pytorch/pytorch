@@ -707,21 +707,18 @@ static inline void split_batch_dim_to_32bit_out(
     }
     return;
   }
-  // If control flow reaches here, this means even splitting N is not enough,
-  // then things starts to become complicated: For example, for conv2d, there
-  // following questions needs to be considered.
-  // - Is the memory layout NCHW or NHWC ?
-  // - If the conv is NCHW -> NC'H'W', then should we
-  //   - split only NC?
-  //   - split only N'C'?
-  //   - split both?
-  // - If the conv is NHWC, then we need to split across H, we need to be very
-  // careful about the boundary condition
-  //   to make sure that the boundary is handled correctly.
-  // - If we decide to make these splits, is the memory contiguous? Do we need
-  // to copy the memory? Considering the complexity of this issue, it is better
-  // not to use cuDNN for this case
-  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
+  // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API.
+  func_32bit(
+      output,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      depthwise);
 }
 
 // ---------------------------------------------------------------------
