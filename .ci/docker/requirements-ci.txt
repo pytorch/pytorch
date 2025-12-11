@@ -345,7 +345,7 @@ onnx==1.20.0 ; python_version < "3.14"
 #Pinned versions:
 #test that import:
 
-onnxscript==0.5.4
+onnxscript==0.5.6
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
