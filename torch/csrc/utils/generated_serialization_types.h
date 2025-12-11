@@ -45,8 +45,8 @@ struct adl_serializer<std::optional<T>> {
 };
 NLOHMANN_JSON_NAMESPACE_END
 
-namespace torch {
-namespace _export {
+
+namespace torch::_export {
 
 template <typename T>
 class ForwardRef {
@@ -1944,8 +1944,8 @@ class Graph {
   std::unordered_map<std::string, SymInt> sym_int_values;
   std::unordered_map<std::string, SymBool> sym_bool_values;
   bool is_single_tensor_return = false;
-  std::unordered_map<std::string, CustomObjArgument> custom_obj_values = {};
-  std::unordered_map<std::string, SymFloat> sym_float_values = {};
+  std::unordered_map<std::string, CustomObjArgument> custom_obj_values;
+  std::unordered_map<std::string, SymFloat> sym_float_values;
 
  public:
 
@@ -3066,8 +3066,8 @@ class GraphModule {
   Graph graph;
   GraphSignature signature;
   std::vector<ModuleCallEntry> module_call_graph;
-  std::unordered_map<std::string, std::string> metadata = {};
-  std::unordered_map<std::string, NamedTupleDef> treespec_namedtuple_fields = {};
+  std::unordered_map<std::string, std::string> metadata;
+  std::unordered_map<std::string, NamedTupleDef> treespec_namedtuple_fields;
 
  public:
 
@@ -3148,9 +3148,9 @@ class ExportedProgram {
   std::unordered_map<std::string, int64_t> opset_version;
   std::unordered_map<std::string, RangeConstraint> range_constraints;
   SchemaVersion schema_version;
-  std::vector<std::string> verifiers = {};
+  std::vector<std::string> verifiers;
   std::string torch_version = "<=2.4";
-  std::vector<std::string> guards_code = {};
+  std::vector<std::string> guards_code;
 
  public:
 
@@ -3866,7 +3866,6 @@ inline void from_json(const nlohmann::json& nlohmann_json_j, UserOutputSpec& nlo
 template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
 template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
 template <typename T> ForwardRef<T>::~ForwardRef() = default;
-} // namespace _export
-} // namespace torch
+} // namespace torch::_export
 
 // clang-format on

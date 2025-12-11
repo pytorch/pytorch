@@ -32,6 +32,52 @@ class AddModule(torch.nn.Module):
         return z
 
 
+class TwoBranchModule(torch.nn.Module):
+    def forward(self, x):
+        # Branch 1: two supported ops
+        y = torch.add(x, 1)
+        y = torch.add(y, 1)
+        # Branch 2: two supported ops
+        z = torch.mul(x, 2)
+        z = torch.mul(z, 2)
+        return y, z
+
+
+class CallFunctionOnlySupport(OperatorSupport):
+    """Only supports call_function nodes, not placeholders/outputs."""
+
+    def is_node_supported(
+        self, submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node
+    ) -> bool:
+        return node.op == "call_function"
+
+
+class TestHorizontalFusion(TestCase):
+    def test_skip_horizontal_fusion(self):
+        m = TwoBranchModule()
+        traced_m = torch.fx.symbolic_trace(m)
+
+        # With horizontal fusion (default): should get 1 partition
+        # (add and mul get merged through unsupported x)
+        partitioner = CapabilityBasedPartitioner(
+            traced_m, CallFunctionOnlySupport(), allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+
+        # Without horizontal fusion: should get 2 partitions
+        # (add and mul stay separate since they don't share a supported edge)
+        traced_m = torch.fx.symbolic_trace(m)
+        partitioner = CapabilityBasedPartitioner(
+            traced_m,
+            CallFunctionOnlySupport(),
+            allows_single_node_partition=True,
+            skip_horizontal_fusion=True,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 2)
+
+
 class TestPartitionerOrder(TestCase):
     # partitioner test to check graph node order remains the same with the original graph after partitioning
     def test_partitioner_graph_node_order(self):
@@ -59,7 +105,6 @@ class TestPartitionerOrder(TestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    from torch.testing._internal.common_utils import run_tests
+
+    run_tests()

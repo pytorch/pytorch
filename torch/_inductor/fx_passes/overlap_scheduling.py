@@ -26,6 +26,24 @@ from torch._inductor.fx_passes.bucketing import bucket_key
 from ..pattern_matcher import stable_topological_sort
 
 
+def estimate_runtime_analytical(n: torch.fx.Node) -> float:
+    """Estimate runtime using analytical roofline model for mm operations."""
+    if n.target != torch.ops.aten.mm.default:
+        return 0.0
+    import torch.utils._pytree as pytree
+    from torch.distributed._tools import RuntimeEstimator
+
+    def _val(node: Any) -> Any:
+        if not isinstance(node, torch.fx.Node):
+            return node
+        return node.meta["val"]
+
+    args = pytree.tree_map(_val, n.args)
+    kwargs = pytree.tree_map(_val, n.kwargs)
+    _, ms = RuntimeEstimator._roofline_estimate(n.target, args, kwargs)
+    return ms
+
+
 @dataclass
 class WhyNoOverlap:
     """Track reasons why a collective cannot overlap with compute."""
@@ -99,6 +117,35 @@ def is_compute_node(n: fx.Node) -> bool:
         getattr(n.target, "overloadpacket", None)
         in torch.utils.flop_counter.flop_registry
     )
+
+
+def estimate_mem_bound_runtime_ms(node: fx.Node) -> float:
+    """Estimate runtime for a memory-bound node based on input/output bytes.
+
+    Returns 0 for view nodes (no memory cost).
+    """
+    from torch._inductor.fx_passes.fusion_regions import is_view_node
+    from torch._inductor.utils import get_gpu_dram_gbps
+    from torch.utils._runtime_estimation import get_num_bytes
+
+    if is_view_node(node):
+        return 0.0
+
+    def get_node_bytes(n: fx.Node) -> int:
+        val = n.meta.get("val")
+        return get_num_bytes(val) if isinstance(val, torch.Tensor) else 0
+
+    total_bytes = 0
+    for inp in node.all_input_nodes:
+        total_bytes += get_node_bytes(inp)
+    total_bytes += get_node_bytes(node)
+
+    if total_bytes == 0:
+        return 0.0
+
+    bw_gbps = get_gpu_dram_gbps()
+    bw_bytes_per_s = bw_gbps * 1e9
+    return (total_bytes / bw_bytes_per_s) * 1000
 
 
 def get_hint(x: int | torch.SymInt) -> int | None:
@@ -278,6 +325,22 @@ class OverlapScheduler:
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
 
+        # Build and collapse fusion regions FIRST so all subsequent operations
+        # work on the collapsed graph where fused ops are atomic units
+        self.region_of: dict[fx.Node, Any] = {}
+        self.fusion_replaced: dict[fx.Node, fx.Node] = {}
+        if torch._inductor.config.test_configs.enable_fusion_regions:
+            from torch._inductor.fx_passes.fusion_regions import (
+                build_fusion_regions,
+                collapse_fusion_regions,
+            )
+
+            self.region_of = build_fusion_regions(self.gm)
+            if self.region_of:
+                self.region_of, self.fusion_replaced = collapse_fusion_regions(
+                    self.gm, self.region_of
+                )
+
         # Build structures
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
@@ -363,26 +426,6 @@ class OverlapScheduler:
         self.max_compute_pre_fetch = max_compute_pre_fetch
 
         self.last_on_path_node_idx = -1
-
-        # Build and collapse fusion regions for overlap calculation
-        # Collapsing replaces fusion region nodes with single call_module nodes,
-        # so scheduling sees fused ops as atomic units with accurate cost estimates
-        self.region_of: dict[fx.Node, Any] = {}
-        self.fusion_replaced: dict[fx.Node, fx.Node] = {}
-        if torch._inductor.config.test_configs.enable_fusion_regions:
-            from torch._inductor.fx_passes.fusion_regions import (
-                build_fusion_regions,
-                collapse_fusion_regions,
-            )
-
-            self.region_of = build_fusion_regions(self.gm)
-            if self.region_of:
-                self.region_of, self.fusion_replaced = collapse_fusion_regions(
-                    self.gm, self.region_of
-                )
-                # Re-collect nodes after collapsing
-                self.nodes = list(self.graph.nodes)
-                self.node_idx = {n: i for i, n in enumerate(self.nodes)}
 
     def _add_to_ready_queue(self, node: fx.Node) -> None:
         if self.off_compute_path(node):
@@ -541,49 +584,6 @@ class OverlapScheduler:
 
         return domination_index
 
-    def _log_collective_benchmarks(
-        self,
-        collective_nodes: list[fx.Node],
-        collective_keys: list[str],
-        benchmarked_medians: list[float],
-        world_size: int,
-    ) -> None:
-        """Log collective benchmarks with analytical comparisons for tlparse."""
-        collective_benchmarks = {}
-        for key, benchmarked_ms, coll_node in zip(
-            collective_keys, benchmarked_medians, collective_nodes
-        ):
-            # NCCL estimator (deterministic, no need to align)
-            nccl_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=True
-            )
-
-            # Inductor analytical (deterministic, no need to align)
-            inductor_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=False
-            )
-
-            collective_benchmarks[key] = {
-                "benchmarked_ms": benchmarked_ms,
-                "analytical_nccl_ms": nccl_ms,
-                "analytical_inductor_ms": inductor_ms,
-            }
-
-        # Emit tlparse artifact
-        from torch._logging import trace_structured
-
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "node_runtime_estimation",
-                "encoding": "json",
-            },
-            payload_fn=lambda: {
-                "world_size": world_size,
-                "collective_benchmarks": collective_benchmarks,
-            },
-        )
-
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
         self,
     ) -> None:
@@ -597,11 +597,30 @@ class OverlapScheduler:
         runtime_estimations: list[float] = []
         compute_key_count = 0
 
+        # Also collect analytical estimations for logging
+        runtime_estimations_analytical: list[float] = []
+
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+
+            # Analytical estimations
+            val_analytical = estimate_runtime_analytical(n)
+            runtime_estimations_analytical.append(val_analytical)
+
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
             compute_key_count += 1
+
+        # Log compute estimations
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+
+        _log_compute_estimations(
+            self.compute_nodes,
+            runtime_estimations,
+            runtime_estimations_analytical,
+        )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -628,7 +647,7 @@ class OverlapScheduler:
                     continue
 
                 # Benchmark actual size
-                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=2)
+                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)
@@ -684,7 +703,11 @@ class OverlapScheduler:
 
         # Log benchmarks with analytical comparisons
         if collective_keys:
-            self._log_collective_benchmarks(
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            _log_collective_benchmarks(
                 benchmarked_collective_nodes,
                 collective_keys,
                 collective_medians,
@@ -754,44 +777,23 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        # Step 3: Do bucketing if enabled (on collapsed graph)
-        bucketer = None
-        if self.collective_bucketing:
-            bucketer = self._bucket_collectives()
+        # Step 3: Bucketing, fusion region expansion, and deps
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
 
-        # Step 4: Expand fusion regions back to original nodes
-        replaced: dict[fx.Node, fx.Node] = {}
-        if self.region_of and self.fusion_replaced:
-            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
-
-            replaced = expand_fusion_regions(
-                self.gm, self.region_of, self.fusion_replaced
-            )
-            if bucketer is not None:
-                bucketer.aug_graph.transfer_erased_node_deps(replaced)
-
-        # Step 5: Topo sort and add effect tokens (on expanded graph)
-        if bucketer is not None:
-            bucketer.apply_deps_and_effect_tokens()
-        elif self.insert_overlap_deps:
-            # Build deps directly from hiding relationships when not bucketing
-            from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-                apply_overlap_deps,
-                build_hiding_interval_deps,
-            )
-
-            additional_deps = build_hiding_interval_deps(self.collective_info)
-            # Update deps for replaced nodes from fusion expansion
-            for old_node, new_node in replaced.items():
-                if old_node in additional_deps:
-                    additional_deps[new_node] = additional_deps.pop(old_node)
-                for node_deps in additional_deps.values():
-                    if old_node in node_deps:
-                        node_deps.discard(old_node)
-                        node_deps.add(new_node)
-
-            apply_overlap_deps(self.graph, additional_deps, insert_effect_tokens=True)
-            self.graph.lint()
+        bucketer = OverlapPreservingBucketer(
+            gm=self.gm,
+            collective_info=self.collective_info,
+            scheduled=self.scheduled,
+            max_bucket_memory_gb=2.0,
+            max_coll_distance=self.max_node_distance,
+            insert_overlap_deps=self.insert_overlap_deps,
+            collective_bucketing=self.collective_bucketing,
+            region_of=self.region_of,
+            fusion_replaced=self.fusion_replaced,
+        )
+        bucketer.run()
 
         return self.gm
 
@@ -803,15 +805,17 @@ class OverlapScheduler:
         if self.custom_runtime_estimation is not None:
             if (est := self.custom_runtime_estimation(node, None)) is not None:
                 return est
+            # Custom estimation provided but returned None - don't fall through to fusible estimation
+            return None
+
+        # Use precomputed cost for fusion region call_module nodes
+        if node in self.region_of:
+            return self.region_of[node].cost_ms
 
         # Estimate fusible nodes (pointwise, reduction, etc.) as memory-bound
-        from torch._inductor.fx_passes.fusion_regions import (
-            estimate_mem_bound_runtime_ms,
-            is_fusible_node,
-            is_view_node,
-        )
+        from torch._inductor.fx_passes.fusion_regions import is_fusible_node
 
-        if is_fusible_node(node) and not is_view_node(node):
+        if is_fusible_node(node):
             return estimate_mem_bound_runtime_ms(node)
 
         return None
@@ -1297,23 +1301,20 @@ class OverlapScheduler:
 
         self.reorder_graph()
 
-    def _bucket_collectives(self) -> "OverlapPreservingBucketer":
+    def _bucket_collectives(self) -> None:
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
 
         bucketer = OverlapPreservingBucketer(
-            self.gm.graph,
+            graph=self.graph,
             collective_info=self.collective_info,
             scheduled=self.scheduled,
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
-            collective_bucketing=self.collective_bucketing,
         )
-        # Don't apply deps yet - caller will do it after expanding fusion regions
-        bucketer.bucket_collectives(apply_deps=False)
-        return bucketer
+        bucketer.bucket_collectives()
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node]
@@ -1402,3 +1403,36 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
     ).run()
+
+
+def schedule_overlap_bucketing_from_inductor_configs(
+    gm: torch.fx.GraphModule,
+) -> torch.fx.GraphModule:
+    """Schedule nodes to maximize compute-collective overlap using inductor configs.
+
+    Reads configuration from torch._inductor.config.aten_distributed_optimizations
+    and calls schedule_overlap_bucketing with those settings.
+    """
+    from torch._inductor import config
+
+    dist_opts = config.aten_distributed_optimizations
+
+    kwargs: dict[str, object] = {}
+
+    config_keys = (
+        "collective_bucketing",
+        "max_compute_pre_fetch",
+        "custom_runtime_estimation",
+        "insert_overlap_deps",
+        "collective_estimator",
+        "max_memory_increase_gb",
+        "max_memory_increase_ratio",
+        "compute_overlap_multipler",
+        "max_in_flight_gb",
+        "max_coll_distance",
+    )
+    for key in config_keys:
+        if (val := getattr(dist_opts, key, None)) is not None:
+            kwargs[key] = val
+
+    return schedule_overlap_bucketing(gm, **kwargs)  # type: ignore[arg-type]

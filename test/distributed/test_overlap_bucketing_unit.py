@@ -179,11 +179,11 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         # Verify: should have 1 bucketed collective (all_gather_into_tensor_out)
         graph_str = str(traced.graph)
@@ -265,11 +265,11 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         # Verify: nested hiding intervals should prevent bucketing
         # Should have 2 separate all_gathers, not 1 bucketed one
@@ -366,12 +366,11 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         graph_str = str(traced.graph)
 
@@ -448,18 +447,19 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         # Verify: should have 1 bucketed all_reduce
         # After bucketing, there should be only one all_reduce node (the bucketed one)
+        # Check for cat (bucketing input) and split_with_sizes (bucketing output)
         graph_str = str(traced.graph)
-        FileCheck().check_count("%all_reduce", 1, exactly=True).check_count(
-            "%mm", 2
-        ).run(graph_str)
+        FileCheck().check("cat.default").check(
+            "all_reduce.default"
+        ).check("split_with_sizes").check_count("%mm", 2).run(graph_str)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -531,12 +531,12 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
             bucket_mode="custom_ops_multidtype",
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         # Verify: should have 1 bucketed collective (all_gather_into_tensor_out)
         # even though dtypes are different
@@ -622,11 +622,11 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         FileCheck().check_count(
             "all_gather_into_tensor_out", 1, exactly=False
@@ -706,19 +706,20 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
 
         bucketer = OverlapPreservingBucketer(
-            traced.graph,
+            traced,
             collective_info,
             scheduled,
         )
-        bucketer.bucket_collectives()
+        bucketer.run()
 
         graph_str = str(traced.graph)
 
+        # Expect: ag1 (separate, hidden by convert1) -> wait -> ag2+ag3 bucketed (hidden by mm)
+        # Check for pre_bucket (for ag2+ag3) and all_gather_into_tensor_out (bucketed)
         f = FileCheck()
-        f.check_count("%all_gather_into_tensor", 1, exactly=True)
-        f.check("pre_bucket_all_gather").check("wait_tensor").check(
-            "%all_gather_into_tensor_out"
-        ).run(graph_str)
+        f.check("all_gather_into_tensor.default").check("wait_tensor")
+        f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
+        f.run(graph_str)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -907,16 +908,20 @@ class TestFusionRegionEstimation(InductorTestCase):
     def test_estimate_mem_bound_runtime_pointwise(self):
         """Test that pointwise ops get memory-bound runtime estimates."""
         from torch._inductor.fx_passes.fusion_regions import (
-            estimate_mem_bound_runtime_ms,
             is_fusible_node,
             is_view_node,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_mem_bound_runtime_ms,
         )
 
         with FakeTensorMode():
             a = torch.ones(1024, 1024, device=self.device)
             traced = make_fx(lambda a: a + 1)(a)
 
-        (add_node,) = traced.graph.find_nodes(op="call_function", target=aten.add.Tensor)
+        (add_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.add.Tensor
+        )
         self.assertTrue(is_fusible_node(add_node))
         self.assertFalse(is_view_node(add_node))
         self.assertGreater(estimate_mem_bound_runtime_ms(add_node), 0)
@@ -943,9 +948,15 @@ class TestFusionRegionEstimation(InductorTestCase):
             traced = make_fx(lambda a: (a + 1) * 2 - 3)(a)
 
         region_of = build_fusion_regions(traced)
-        (add_node,) = traced.graph.find_nodes(op="call_function", target=aten.add.Tensor)
-        (mul_node,) = traced.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
-        (sub_node,) = traced.graph.find_nodes(op="call_function", target=aten.sub.Tensor)
+        (add_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.add.Tensor
+        )
+        (mul_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.mul.Tensor
+        )
+        (sub_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.sub.Tensor
+        )
 
         # All pointwise ops should be in the same region
         self.assertIs(region_of[add_node], region_of[mul_node])
@@ -1025,7 +1036,9 @@ class TestFusibleNodeOverlap(InductorTestCase):
             target=torch.ops._c10d_functional.all_gather_into_tensor.default,
         )
         info = scheduler.collective_info[ag_start]
-        self.assertGreater(len(info.hiding_nodes), 0, "Fusible nodes should hide the collective")
+        self.assertGreater(
+            len(info.hiding_nodes), 0, "Fusible nodes should hide the collective"
+        )
 
 
 if __name__ == "__main__":

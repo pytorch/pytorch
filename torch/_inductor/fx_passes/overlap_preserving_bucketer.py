@@ -79,7 +79,9 @@ def apply_overlap_deps(
     for n, deps in additional_deps.items():
         torch._check(not n._erased, lambda: f"Erased node deps not transferred: {n}")
         for d in deps:
-            torch._check(not d._erased, lambda: f"Erased node deps not transferred: {d}")
+            torch._check(
+                not d._erased, lambda: f"Erased node deps not transferred: {d}"
+            )
 
     _stable_topological_sort(graph, additional_deps)
 
@@ -188,7 +190,7 @@ class OverlapPreservingBucketer:
 
     def __init__(
         self,
-        graph: fx.Graph,
+        gm: fx.GraphModule,
         collective_info: dict[fx.Node, CollectiveInfo],
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
@@ -196,8 +198,11 @@ class OverlapPreservingBucketer:
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
         collective_bucketing: bool = True,
+        region_of: dict[fx.Node, Any] | None = None,
+        fusion_replaced: dict[fx.Node, fx.Node] | None = None,
     ):
-        self.graph = graph
+        self.gm = gm
+        self.graph = gm.graph
         self.collective_info = collective_info
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
@@ -206,6 +211,8 @@ class OverlapPreservingBucketer:
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.collective_bucketing = collective_bucketing
+        self.region_of: dict[fx.Node, Any] = region_of or {}
+        self.fusion_replaced: dict[fx.Node, fx.Node] = fusion_replaced or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -280,6 +287,9 @@ class OverlapPreservingBucketer:
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
+                # Wait for a different PG but hiding a collective on this PG
+                elif node in hiding_nodes:
+                    node_type = "compute"
             elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
@@ -364,25 +374,29 @@ class OverlapPreservingBucketer:
         additional_deps = self.aug_graph.get_all_extra_deps()
         apply_overlap_deps(self.graph, additional_deps, self.insert_overlap_deps)
 
-    def bucket_collectives(self, apply_deps: bool = True) -> None:
-        """
-        Apply bucketing transformations to collectives.
+    def run(self) -> None:
+        """Run the full bucketing and dep application flow.
 
-        Args:
-            apply_deps: If True (default), also apply topo sort and effect tokens.
-                       Set to False when caller will handle deps separately
-                       (e.g., after expanding fusion regions).
+        1. Apply bucketing transformations (if enabled)
+        2. Inline (expand) fusion regions
+        3. Apply deps with transfers from erased nodes
         """
+        # Step 1: Bucket collectives
         if self.collective_bucketing:
             self._bucket_collectives_impl()
 
-        if apply_deps:
-            self._apply_deps_and_effect_tokens()
+        # Step 2: Inline fusion regions
+        replaced: dict[fx.Node, fx.Node] = {}
+        if self.region_of:
+            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
 
-        self.graph.lint()
+            replaced = expand_fusion_regions(
+                self.gm, self.region_of, self.fusion_replaced
+            )
 
-    def apply_deps_and_effect_tokens(self) -> None:
-        """Apply topological sort and effect tokens. Called after fusion regions expanded."""
+        # Step 3: Apply deps (transferred from fusion groups to inlined nodes)
+        if replaced:
+            self.aug_graph.transfer_erased_node_deps(replaced)
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 

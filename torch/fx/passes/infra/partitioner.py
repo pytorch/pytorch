@@ -233,10 +233,13 @@ class CapabilityBasedPartitioner:
                 merge_candidates[partition_id] = None
 
             if self.skip_horizontal_fusion:
-                # Only merge with partitions of direct users (skip horizontal fusion)
-                for user in node.users:
-                    if user in assignment:
-                        merge_candidates[assignment[user]] = None
+                # Only merge with partitions of direct users when we created a new
+                # partition for the current node (vertical fusion only).
+                # Skip merging consumers of unsupported nodes (horizontal fusion).
+                if self._is_node_supported(node):
+                    for user in node.users:
+                        if user in assignment:
+                            merge_candidates[assignment[user]] = None
             else:
                 # merge all possible partitions (horizontal fusion enabled)
                 for partition_id, _ in sorted(

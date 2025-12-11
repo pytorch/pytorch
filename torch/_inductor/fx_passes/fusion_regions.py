@@ -4,43 +4,10 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.fx as fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupportBase
 from torch.utils._ordered_set import OrderedSet
-
-
-def _get_tensor_bytes(node: fx.Node) -> int:
-    """Get tensor bytes, accounting for expanded dims (stride=0)."""
-    val = node.meta.get("val")
-    if not isinstance(val, torch.Tensor) or val.numel() == 0:
-        return 0
-    # Account for expanded/broadcast dims by computing actual storage span
-    # For dims with stride=0, only 1 element is accessed regardless of size
-    real_numel = 1
-    for size, stride in zip(val.shape, val.stride()):
-        if not statically_known_true(stride == 0):
-            real_numel *= size
-    return real_numel * val.element_size()
-
-
-def estimate_mem_bound_runtime_ms(node: fx.Node) -> float:
-    """Estimate runtime for a memory-bound node based on input/output bytes."""
-    from torch._inductor.utils import get_gpu_dram_gbps
-
-    total_bytes = 0
-    # Input bytes
-    for inp in node.all_input_nodes:
-        total_bytes += _get_tensor_bytes(inp)
-    # Output bytes
-    total_bytes += _get_tensor_bytes(node)
-
-    if total_bytes == 0:
-        return 0.0
-
-    bw_gbps = get_gpu_dram_gbps()
-    bw_bytes_per_s = bw_gbps * 1e9
-    return (total_bytes / bw_bytes_per_s) * 1000
+from torch.utils._runtime_estimation import get_num_bytes
 
 
 @dataclass
@@ -51,30 +18,23 @@ class FusionRegion:
     cost_ms: float = field(default=0.0, init=False)  # Estimated cost in milliseconds
     subgraph_node: fx.Node | None = field(default=None, init=False)
 
-    @property
-    def start(self) -> fx.Node:
-        """First node in the region."""
-        return next(iter(self.nodes))
-
-    @property
-    def end(self) -> fx.Node:
-        """Last node (anchor) in the region."""
-        return list(self.nodes)[-1]
-
     def compute_cost(self, subgraph: fx.GraphModule) -> None:
         """Compute cost based on subgraph's placeholder inputs and output node."""
         from torch._inductor.utils import get_gpu_dram_gbps
+
+        def get_node_bytes(node: fx.Node) -> int:
+            val = node.meta.get("val")
+            return get_num_bytes(val) if isinstance(val, torch.Tensor) else 0
 
         total_bytes = 0
 
         for node in subgraph.graph.nodes:
             if node.op == "placeholder":
-                total_bytes += _get_tensor_bytes(node)
+                total_bytes += get_node_bytes(node)
             elif node.op == "output":
-                # Output args are the returned values
                 for arg in node.args[0] if isinstance(node.args[0], (list, tuple)) else [node.args[0]]:
                     if isinstance(arg, fx.Node):
-                        total_bytes += _get_tensor_bytes(arg)
+                        total_bytes += get_node_bytes(arg)
 
         if total_bytes > 0:
             fusion_bw_gbps = get_gpu_dram_gbps()
@@ -143,8 +103,6 @@ def build_fusion_regions(
 
     Returns a dict mapping each node to its containing region (if any).
     """
-    from torch.fx.passes.utils.fuser_utils import topo_sort
-
     operator_support = FusibleOperatorSupport()
     partitioner = CapabilityBasedPartitioner(
         gm,
@@ -159,15 +117,17 @@ def build_fusion_regions(
     region_of: dict[fx.Node, FusionRegion] = {}
 
     for partition in partitions:
+        # partition.nodes is already sorted topologically by the partitioner
         nodes_list = list(partition.nodes.keys())
-        if len(nodes_list) < 2:
+
+        # Skip regions with fewer than 2 non-view nodes (views have no cost)
+        non_view_count = sum(1 for n in nodes_list if not is_view_node(n))
+        if non_view_count < 2:
             continue
 
-        # Sort nodes topologically
-        nodes_sorted = topo_sort(nodes_list)
-        region = FusionRegion(nodes=OrderedSet(nodes_sorted))
+        region = FusionRegion(nodes=OrderedSet(nodes_list))
 
-        for node in nodes_sorted:
+        for node in nodes_list:
             region_of[node] = region
 
     return region_of
@@ -260,26 +220,24 @@ def expand_fusion_regions(
         if not hasattr(gm, subgraph_name):
             continue
 
-        # Track nodes before inlining to identify new nodes after
-        nodes_before = set(gm.graph.nodes)
+        # _inline_module returns subgraph_node -> new_node mapping
+        subgraph_to_new = _inline_module(gm, subgraph_name)
 
-        # Use existing _inline_module utility to inline the subgraph
-        _inline_module(gm, subgraph_name)
+        # Build name -> new_node mapping (node_copy preserves names)
+        name_to_new = {n.name: new_n for n, new_n in subgraph_to_new.items()}
 
-        # Find newly inlined nodes (nodes that weren't in the graph before)
-        new_nodes = [n for n in gm.graph.nodes if n not in nodes_before]
-        new_call_nodes = [n for n in new_nodes if n.op == "call_function"]
+        # Map original nodes to inlined nodes by name
+        last_new_call = None
+        for orig_node in region.nodes:
+            if orig_node.name in name_to_new:
+                new_node = name_to_new[orig_node.name]
+                replaced[orig_node] = new_node
+                if new_node.op == "call_function":
+                    last_new_call = new_node
 
-        # Map original region nodes to inlined nodes by position
-        # fuse_as_graphmodule preserves node order, so we can match by index
-        nodes_list = list(region.nodes)
-        for i, orig_node in enumerate(nodes_list):
-            if i < len(new_call_nodes):
-                replaced[orig_node] = new_call_nodes[i]
-
-        # Map module_node to the last inlined node (the output)
-        if new_call_nodes:
-            replaced[module_node] = new_call_nodes[-1]
+        # Map module_node to the last inlined call_function node (the output)
+        if last_new_call:
+            replaced[module_node] = last_new_call
 
         # Remove the submodule attribute (if _inline_module didn't remove it)
         if hasattr(gm, subgraph_name):
