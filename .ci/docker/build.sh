@@ -116,7 +116,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.0.0
+    CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
@@ -204,7 +204,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    XPU_VERSION=2025.1
+    XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -212,7 +212,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     VISION=yes
-    XPU_VERSION=2025.2
+    XPU_VERSION=2025.3
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
@@ -260,6 +260,11 @@ case "$tag" in
     GCC_VERSION=11
     HALIDE=yes
     TRITON=yes
+    ;;
+  pytorch-linux-jammy-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
     ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
