@@ -397,8 +397,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
-  // Condition on the input
-  disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
+  // Restrict complex inputs in the Lt path for now
+  disable_addmm_cuda_lt = disable_addmm_cuda_lt || result.is_complex();
 
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
@@ -446,6 +446,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       // NOTE: self should broadcast over result
       at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
   }
+  std::cout << "Case bias: " << args.bias.has_value() << " ld: " << args.bias_ld.has_value() << std::endl;
+  std::cout << "alpha: " << alpha << " beta: " << beta << std::endl;
+  std::cout << std::endl;
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {

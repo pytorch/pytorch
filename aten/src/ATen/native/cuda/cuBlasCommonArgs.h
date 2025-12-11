@@ -174,6 +174,7 @@ struct cublasCommonArgs {
           && self->is_contiguous()
           && (self->dim() == 1 || self->squeeze().dim() == 1)
           && self->sizes().back() == m // should match the rows, hence transpose_result is essential
+          && !result->is_complex() // No Epilogue support for complex types
       );
       if (can_use_bias_in_epilogue) { // Case for bias in epilogue
         bias = c10::MaybeOwned<Tensor>::borrowed(*self);
