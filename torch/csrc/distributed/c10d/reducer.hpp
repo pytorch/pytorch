@@ -377,7 +377,7 @@ class TORCH_API Reducer {
 
     // Number of gradients left to be computed before the bucket is ready to
     // be reduced
-    size_t pending;
+    size_t pending{};
 
     // Global indices of participating variables in the bucket
     std::vector<size_t> variable_indices;
@@ -485,7 +485,7 @@ class TORCH_API Reducer {
     at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.
-    bool useStaticWorldSize;
+    bool useStaticWorldSize{};
   };
 
   // Handle for the currently scheduled allreduce in the forward pass, if

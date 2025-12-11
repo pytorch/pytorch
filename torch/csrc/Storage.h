@@ -9,6 +9,7 @@
 
 #define THPStorageStr "torch.UntypedStorage"
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPStorage {
   PyObject_HEAD
   c10::Storage cdata;

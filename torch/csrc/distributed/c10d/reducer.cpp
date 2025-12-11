@@ -101,6 +101,7 @@ Reducer::Reducer(
       find_unused_parameters_(find_unused_parameters),
       gradient_as_bucket_view_(gradient_as_bucket_view),
       bucket_bytes_cap_(bucket_bytes_cap),
+      div_factor_(kUnsetDivFactor),
       skip_all_reduce_unused_params_(skip_all_reduce_unused_params),
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),

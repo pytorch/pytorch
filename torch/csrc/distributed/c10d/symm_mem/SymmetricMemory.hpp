@@ -144,8 +144,8 @@ TORCH_API void set_group_info(
     c10::intrusive_ptr<Store> store);
 
 struct GroupInfo {
-  int rank;
-  int world_size;
+  int rank{};
+  int world_size{};
   c10::intrusive_ptr<c10d::Store> store;
   // Note this field is not automatically populated by set_group_info().  If a
   // SymmetricMemory implementation needs to use it, it must be populated by a
