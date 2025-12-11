@@ -493,7 +493,8 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
-        if self._load_mask and self._load_other:
+        if self._load_mask:
+            assert self._load_other is not None
             line = f"{self._load_mask} ? {line} : {value_to_metal(self._load_other)}"
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
@@ -501,7 +502,9 @@ class MetalKernel(SIMDKernel):
             # Otherwise it can lead to a correctness issues with eager
             line = f"static_cast<float>({line})"
             dtype = torch.float32
-        return self.cse.generate(self.loads, line, dtype=dtype)
+        return self.cse.generate(
+            self.loads if self._load_mask is None else self.compute, line, dtype=dtype
+        )
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
