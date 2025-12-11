@@ -2352,7 +2352,7 @@ class FunctoolsPartialVariable(VariableTracker):
         )
         # Preserve cache_hash for SAC context_fn caching
         if self.original_cache_hash is not None:
-            result.cache_hash = self.original_cache_hash
+            result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
 
 
