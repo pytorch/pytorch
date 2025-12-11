@@ -402,7 +402,7 @@ class TestSetOps(TestCase):
 
     @skipIf(
         numpy.lib.NumpyVersion(numpy.__version__) >= "2.4.0",
-        reason="NP_VER: in1d was deprecated in numpy 2.4"
+        reason="NP_VER: in1d was deprecated in numpy 2.4",
     )
     @parametrize("kind", [None, "sort", "table"])
     def test_in1d_ravel(self, kind):
