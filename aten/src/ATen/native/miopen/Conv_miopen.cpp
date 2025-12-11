@@ -27,7 +27,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -134,7 +134,7 @@ at::Tensor miopen_convolution_relu(
   TORCH_CHECK(false, "miopen_convolution_relu: ATen not compiled with MIOpen support");
 }
 
-}}
+}
 
 #else  // AT_ROCM_ENABLED
 
