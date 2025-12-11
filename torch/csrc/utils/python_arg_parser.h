@@ -177,7 +177,7 @@ struct PYBIND11_EXPORT PythonArgParser {
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
-  size_t max_args;
+  size_t max_args{0};
   bool traceable;
 };
 
@@ -200,12 +200,12 @@ struct FunctionSignature {
 
   std::string name;
   std::vector<FunctionParameter> params;
-  size_t min_args;
-  size_t max_args;
-  size_t max_pos_args;
+  size_t min_args{0};
+  size_t max_args{0};
+  size_t max_pos_args{0};
   int index;
-  bool hidden;
-  bool deprecated;
+  bool hidden{false};
+  bool deprecated{false};
 };
 
 // PythonArgs contains bound Python arguments for an actual invocation
@@ -332,11 +332,11 @@ struct FunctionParameter {
   TORCH_PYTHON_API std::string type_name() const;
 
   ParameterType type_;
-  bool optional;
-  bool allow_none;
+  bool optional{false};
+  bool allow_none{false};
   bool keyword_only;
   bool allow_numbers_as_tensors = false;
-  int size;
+  int size{0};
   std::string name;
   // having this as a raw PyObject * will presumably leak it, but these are only
   // held by static objects anyway, and Py_Finalize can already be called when
@@ -621,7 +621,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
           } else if (is_dynint(py::handle(obj))) {
-            res.push_back(py::handle(obj).cast<int>());
+            res.emplace_back(py::handle(obj).cast<int>());
           } else {
             res.emplace_back(THPUtils_unpackIndex(obj));
           }
