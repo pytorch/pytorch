@@ -20,5 +20,3 @@ else
     export ROCM_CMAKE="${ROCM_PATH}"
     export ROCM_DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
 fi
-
-
