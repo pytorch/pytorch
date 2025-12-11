@@ -107,11 +107,11 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
+    @torch._functorch.config.patch(enable_activation_offloading=True)
     def test_inductor_offload(self):
         torch._dynamo.reset()
 
         def run_compiled():
-            torch._functorch.config.enable_activation_offloading = True
             torch._functorch.config.joint_custom_pass = self.joint_custom_pass
             return torch.compile(self.fn)(self.x)
 
