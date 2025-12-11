@@ -208,7 +208,7 @@ def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
     Returns:
         JAX dtype object (e.g., jnp.float32 object itself)
     """
-    import jax.numpy as jnp  # pyrefly: ignore [import-error]
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
 
     dtype_map = {
         torch.float32: jnp.float32,

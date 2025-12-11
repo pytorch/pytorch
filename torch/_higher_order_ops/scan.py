@@ -239,6 +239,7 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, init, xs, additional_inputs)
 
     # pyrefly: ignore [bad-override]

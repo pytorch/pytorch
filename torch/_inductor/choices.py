@@ -527,6 +527,7 @@ class InductorChoices:
                 )
                 if len(common_buf_names) > 0:
                     get_metric_table("fusion_failure_due_to_indexing_mismatch").add_row(
+                        # pyrefly: ignore [bad-argument-type]
                         lambda: {
                             "pre_grad_graph_id": V.graph.graph_id,
                             "post_grad_graph_id": V.graph.post_grad_graph_id,

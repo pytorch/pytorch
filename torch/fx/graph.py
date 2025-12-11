@@ -1352,8 +1352,11 @@ class Graph:
             assert isinstance(output_vals, tuple)
             output_val, old_output_node = output_vals
             new_output_node = g.output(
-                output_val, type_expr=getattr(old_output_node, "type", None)
+                # pyrefly: ignore [bad-argument-type]
+                output_val,
+                type_expr=getattr(old_output_node, "type", None),
             )
+            # pyrefly: ignore [missing-attribute]
             new_output_node.meta = copy.copy(old_output_node.meta)
         return g
 

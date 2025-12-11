@@ -830,7 +830,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore [import-error,missing-module-attribute]
+        # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -1406,6 +1406,7 @@ class MemPool(_MemPool):
         use_on_oom: bool = False,
         no_split: bool = False,
     ):
+        # pyrefly: ignore [bad-argument-count]
         super().__init__(allocator, True, use_on_oom, no_split)
 
     @property

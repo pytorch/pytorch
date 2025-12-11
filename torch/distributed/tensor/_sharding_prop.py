@@ -260,6 +260,7 @@ class ShardingPropagator:
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
 
+            # pyrefly: ignore [bad-argument-type]
             for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
