@@ -1713,6 +1713,10 @@ def xfailIfLinux(func):
     return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM and not IS_FBCODE else func
 
 
+def xfailIfWindows(func):
+    return unittest.expectedFailure(func) if IS_WINDOWS else func
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     """
     Usage:
@@ -4594,13 +4598,14 @@ class TestCase(expecttest.TestCase):
     def run_process_no_exception(code, env=None):
         import subprocess
 
-        popen = subprocess.Popen(
-            [sys.executable, '-c', code],
+        with subprocess.Popen(
+            [sys.executable, "-c", code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env)
-        (stdout, stderr) = popen.communicate()
-        return (stdout, stderr)
+            env=env,
+        ) as p:
+            (stdout, stderr) = p.communicate()
+            return (stdout, stderr)
 
     # returns captured stderr
     @staticmethod
@@ -4667,9 +4672,9 @@ def download_file(url, binary=True):
     if os.path.exists(path):
         return path
     try:
-        data = request.urlopen(url, timeout=15).read()
-        with open(path, 'wb' if binary else 'w') as f:
-            f.write(data)
+        with request.urlopen(url, timeout=15) as f1, open(path, 'wb' if binary else 'w') as f2:
+            data = f1.read()
+            f2.write(data)
         return path
     except error.URLError as e:
         msg = f"could not download test file '{url}'"
@@ -5697,6 +5702,13 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
+    # 3.10 CALL_FUNCTION bytecode compatibility for dynamo graph break messages
+    s = re.sub(
+        r"attempting to trace CALL_FUNCTION:.*$",
+        "attempting to trace CALL: a function call, e.g. f(x, y):",
+        s,
+        flags=re.MULTILINE,
+    )
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
