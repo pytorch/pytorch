@@ -1884,6 +1884,7 @@ def check_memory_pool(
         objgraph_files_hint = ""
 
         if config.triton.cudagraph_trees_objgraph:
+            # pyrefly: ignore  # import-error
             import objgraph
 
             generated_files: list[str] = []
