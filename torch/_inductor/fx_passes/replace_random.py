@@ -20,7 +20,6 @@ log = logging.getLogger(__name__)
 patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
-from torch._utils import _get_device_index
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1

@@ -167,7 +167,9 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         (y_comp.square().mean()).backward()
 
         # outputs
-        torch.testing.assert_close(y_eager.detach(), y_comp.detach(), rtol=1e-3, atol=1e-4)
+        torch.testing.assert_close(
+            y_eager.detach(), y_comp.detach(), rtol=1e-3, atol=1e-4
+        )
         # grads
         for p_ref, p_new in zip(eager.parameters(), compiled.parameters()):
             assert p_ref.grad is not None and p_new.grad is not None

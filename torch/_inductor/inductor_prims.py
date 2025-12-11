@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+from torch._utils import _get_device_index
 
 
 if TYPE_CHECKING:
@@ -97,6 +98,7 @@ randint = make_prim(
     doc="torch.randint() using backend-specific RNG that can be fused",
 )
 
+
 def _reserve_rng_state(device: torch.device, used_offset: int) -> tuple[int, int]:
     """
     Reserve `used_offset` 32-bit Philox samples on the given CUDA device and
@@ -153,6 +155,8 @@ def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
 
 def _rand_eager_offsets_meta(offsets, device: torch.device):
     return torch.empty((len(offsets),), dtype=torch.int64, device=device)
+
+
 rand_eager_offset = make_prim(
     "inductor_rand_eager_offset(int offset, Device device) -> Tensor",
     _rand_eager_offset_impl,
@@ -162,6 +166,7 @@ rand_eager_offset = make_prim(
     ),
     tags=(torch.Tag.nondeterministic_seeded, torch.Tag.cudagraph_unsafe),
 )
+
 
 rand_eager_offsets = _prims._make_prim(
     schema="inductor_rand_eager_offsets(int[] offsets, Device device) -> Tensor",
