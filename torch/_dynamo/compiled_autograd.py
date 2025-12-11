@@ -155,7 +155,7 @@ class NaNChecker:
 
         self.output_names = [node.name for node in output_nodes]
 
-    def prep_with_inputs(self, inputs: tuple[torch.Tensor]) -> None:
+    def prep_with_inputs(self, inputs: tuple[torch.Tensor, ...]) -> None:
         if not self.accumulate_grad:
             # Using .grad, nothing to prep
             return
@@ -171,7 +171,7 @@ class NaNChecker:
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
 
-    def check(self, out: tuple[torch.Tensor]) -> None:
+    def check(self, out: tuple[torch.Tensor, ...]) -> None:
         if self.accumulate_grad:
             # Using .backward, graph outputs are empty
             assert not out

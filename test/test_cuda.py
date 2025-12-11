@@ -35,6 +35,7 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
+    _get_torch_cuda_version,
     SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
@@ -3991,6 +3992,10 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() >= (13, 1),
+        "This test does not fail on CUDA 13.1 or newer",
+    )
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -5664,6 +5669,64 @@ class TestMemPool(TestCase):
 
         self._teardown_mempool_limited_memory_test()
 
+    @serialTest()
+    def test_mempool_no_split(self):
+        torch.cuda.empty_cache()
+
+        # Create two pools - one with no_split=True, one without
+        pool_split = torch.cuda.MemPool()  # default: no_split=False
+        pool_no_split = torch.cuda.MemPool(no_split=True)
+
+        # 1 MB in number of float32 elements
+        nelem_1mb = 1024 * 1024 // 4
+
+        # Allocate 4 MB in each pool - this should allocate a 20 MB segment
+        with torch.cuda.use_mem_pool(pool_split):
+            a_split = torch.randn(4 * nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_no_split):
+            a_no_split = torch.randn(4 * nelem_1mb, device="cuda")
+
+        # Now allocate another 4 MB - this should cause splitting in the normal
+        # pool but not in the no_split pool. Instead, the no_split pool should
+        # have a new segment.
+        with torch.cuda.use_mem_pool(pool_split):
+            b_split = torch.randn(4 * nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_no_split):
+            b_no_split = torch.randn(4 * nelem_1mb, device="cuda")
+
+        # assert the number of segments in the no_split pool is larger than that
+        # of the split pool
+        assert len(pool_no_split.snapshot()) > len(pool_split.snapshot()), (
+            f"Expected no_split pool to have more segments, "
+            f"but got {len(pool_no_split.snapshot())} vs {len(pool_split.snapshot())}"
+        )
+
+        # Specifically, the no_split pool should have exactly 1 block per segment
+        for seg in pool_no_split.snapshot():
+            assert len(seg["blocks"]) == 1, (
+                f"Expected 1 block in no_split segment, got {len(seg['blocks'])}"
+            )
+
+        # Count blocks in each pool
+        def count_blocks(pool):
+            total = 0
+            for seg in pool.snapshot():
+                total += len(seg["blocks"])
+            return total
+
+        blocks_split = count_blocks(pool_split)
+        blocks_no_split = count_blocks(pool_no_split)
+
+        # The pool with no_split should have fewer blocks because it doesn't
+        # have a remaining block representing the remaining memory in the segment.
+        self.assertLess(
+            blocks_no_split,
+            blocks_split,
+            f"Expected no_split pool to have fewer blocks, "
+            f"but got {blocks_no_split} vs {blocks_split}",
+        )
+
+    @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
         Test that a deleted mempool with use_on_oom=True is properly removed from use_on_oom_pools.
