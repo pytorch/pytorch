@@ -1089,9 +1089,13 @@ def _context_parallel_buffers(
     sharded_buffer: torch.Tensor | BlockMask
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
-            # TODO: the load balance doesn't perform error handling.
-
             # NOTE: assuming batch dim is 0
+
+            if len(buffer.shape) > 2:
+                raise ValueError(
+                    "context_parallel_shard currently only supports tensors "
+                    "with shape (seq_len,) or (batch_size, seq_len)."
+                )
 
             if load_balance_indices is not None:
                 # TODO: we should expclitly ask users to unsqueeze the batch dim.
@@ -1117,12 +1121,10 @@ def _context_parallel_buffers(
                         size = [data_batch_size] + list(indices.size())[1:]
                         indices = indices.expand(*size)
 
-                    for i in range(data_batch_size):
-                        buffer[i] = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=indices[i]
-                        )
+                    buffer = torch.gather(buffer, dim=seq_dim, index=indices)
 
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+            # use DTensor to shard the buffer on sequence dimension,
+            # retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
@@ -1308,7 +1310,8 @@ class _ContextParallel(ParallelStyle):
             return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+                partial(self.sdpa_input_fn, mesh=mesh),
+                with_kwargs=True,
             )
             module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
             return module
@@ -1318,18 +1321,18 @@ class _ContextParallel(ParallelStyle):
     def flex_input_fn(
         self, module: nn.Module | None, args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
+        # We don't care about other args, and these argument order must be consistent
+        # with the signature of flex_attention.
+        expected_arg_names = ("query", "key", "value")
         args_list = list(args)
-        for idx, name in enumerate(
-            ("query", "key", "value", "score_mod", "block_mask")
-        ):
+        for idx, name in enumerate(expected_arg_names):
             if idx >= len(args):
                 args_list.append(kwargs.pop(name, None))
 
-        query, key, value, score_mod, block_mask = args_list[:5]
+        query, key, value = args_list[: len(expected_arg_names)]
         assert isinstance(query, torch.Tensor)
         assert isinstance(key, torch.Tensor)
         assert isinstance(value, torch.Tensor)
-        assert isinstance(block_mask, BlockMask | tuple)
 
         key = key.contiguous()
         value = value.contiguous()
@@ -1340,6 +1343,9 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
+        for idx in range(len(args), len(expected_arg_names)):
+            kwargs[expected_arg_names[idx]] = args_list[idx]
+        args_list = args_list[: len(args)]
         return tuple(args_list), kwargs
 
     def sdpa_input_fn(

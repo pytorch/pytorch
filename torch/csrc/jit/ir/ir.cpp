@@ -1085,7 +1085,7 @@ const FunctionSchema* Node::maybeSchema() const {
 
 const Operator* Node::maybeOperator() const {
   if (!op_) {
-    auto candidates = getAllOperatorsFor(kind());
+    const auto& candidates = getAllOperatorsFor(kind());
     for (const auto& candidate : candidates) {
       if (matches(candidate->schema())) {
         op_ = candidate.get();
@@ -1288,10 +1288,9 @@ void Node::assignTopoPosition() {
 Node::Node(Graph* graph_, NodeKind kind_)
     : kind_(kind_),
       graph_(graph_),
-      owning_block_(nullptr),
+
       scope_(graph_->current_scope_),
-      callstack_(std::nullopt),
-      op_(nullptr) {
+      callstack_(std::nullopt) {
   graph_->all_nodes.emplace(this);
 }
 
