@@ -215,7 +215,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
@@ -1215,41 +1215,6 @@ else()
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
   # inconsistent dll linkage
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  vst1q_f32_x2(a, v);
-  return 0;
-}"
-    HAS_VST1)
-
-  if(NOT HAS_VST1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  vld1q_f32_x2(a);
-  return 0;
-}"
-    HAS_VLD1)
-
-  if(NOT HAS_VLD1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
-  endif()
 endif()
 
 # Add code coverage flags to supported compilers

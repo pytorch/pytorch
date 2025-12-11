@@ -71,7 +71,7 @@ class DTensorSpec:
     placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
-    tensor_meta: Optional[TensorMeta] = None
+    tensor_meta: TensorMeta | None = None
 
     # When a tensor dimension is sharded across multiple mesh axes,
     # `shard_order` specifies the sequence in which these shardings are applied.
@@ -93,8 +93,36 @@ class DTensorSpec:
             self.placements = tuple(self.placements)
         if self.shard_order is None:
             # pyrefly: ignore [bad-assignment]
-            self.shard_order = DTensorSpec.compute_default_shard_order(self.placements)
+
+            _, self.shard_order = self._normalize_placements_into_shard_order(
+                self.placements, self.mesh
+            )
         self._hash: int | None = None
+
+    @staticmethod
+    def _normalize_placements_into_shard_order(
+        placements: tuple[Placement, ...], mesh: DeviceMesh
+    ) -> tuple[tuple[Placement, ...], Optional[ShardOrder]]:
+        # If the returned shard_order is None, it means the StridedShard/Shard
+        # combinations can't be interpreted as shard order.
+        # If no _StridedShard in placements, we create default order.
+        if not any(isinstance(p, _StridedShard) for p in placements):
+            return placements, DTensorSpec.compute_default_shard_order(placements)
+        # _StridedShard in placements, try check if it can be decoded as shard order
+        shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+            placements, mesh
+        )
+        if shard_order is not None:
+            normalized_placements = tuple(
+                [
+                    p if not isinstance(p, _StridedShard) else Shard(p.dim)
+                    for p in placements
+                ]
+            )
+            return normalized_placements, shard_order
+        # unable to decode placements to shard order(e.g., the _StridedShard is
+        # also used by `view` op shard propagation).
+        return placements, None
 
     @staticmethod
     def compute_default_shard_order(
@@ -206,7 +234,7 @@ class DTensorSpec:
     @staticmethod
     def _maybe_convert_StridedShard_to_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> Optional[ShardOrder]:
+    ) -> ShardOrder | None:
         """
         Try to convert _StridedShard placements to ShardOrder.
 
@@ -441,7 +469,7 @@ class DTensorSpec:
     @staticmethod
     def format_shard_order_str(
         placements: tuple[Placement, ...],
-        shard_order: Optional[ShardOrder] = None,
+        shard_order: ShardOrder | None = None,
     ) -> str:
         """
         Format DTensor sharding information as a human-readable string.
@@ -617,7 +645,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: list[int],
         sums: list[int],
-        tensor_meta: Optional[TensorMeta] = None,
+        tensor_meta: TensorMeta | None = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -664,12 +692,12 @@ class DTensorSpec:
 
     def is_sharded(self) -> bool:
         """
-        return True if the current DTensorSpec is sharded on any mesh dims (devices)
+        return True if the current DTensorSpec uses Shard() placement on any mesh dims (devices)
         """
         return any(placement.is_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
-        self, tensor_meta: Optional[TensorMeta]
+        self, tensor_meta: TensorMeta | None
     ) -> "DTensorSpec":
         """
         Shallow copy the DTensorSpec with a new tensor_meta.

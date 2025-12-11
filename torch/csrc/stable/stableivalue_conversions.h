@@ -65,6 +65,9 @@ struct FromImpl {
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
     static_assert(std::is_trivially_copyable_v<T>);
@@ -108,45 +111,45 @@ struct FromImpl<ScalarType> {
       [[maybe_unused]] bool is_internal) {
     switch (val) {
       case ScalarType::Byte:
-        return from(aoti_torch_dtype_uint8());
+        return torch::stable::detail::from(aoti_torch_dtype_uint8());
       case ScalarType::Char:
-        return from(aoti_torch_dtype_int8());
+        return torch::stable::detail::from(aoti_torch_dtype_int8());
       case ScalarType::Short:
-        return from(aoti_torch_dtype_int16());
+        return torch::stable::detail::from(aoti_torch_dtype_int16());
       case ScalarType::Int:
-        return from(aoti_torch_dtype_int32());
+        return torch::stable::detail::from(aoti_torch_dtype_int32());
       case ScalarType::Long:
-        return from(aoti_torch_dtype_int64());
+        return torch::stable::detail::from(aoti_torch_dtype_int64());
       case ScalarType::Half:
-        return from(aoti_torch_dtype_float16());
+        return torch::stable::detail::from(aoti_torch_dtype_float16());
       case ScalarType::Float:
-        return from(aoti_torch_dtype_float32());
+        return torch::stable::detail::from(aoti_torch_dtype_float32());
       case ScalarType::Double:
-        return from(aoti_torch_dtype_float64());
+        return torch::stable::detail::from(aoti_torch_dtype_float64());
       case ScalarType::ComplexHalf:
-        return from(aoti_torch_dtype_complex32());
+        return torch::stable::detail::from(aoti_torch_dtype_complex32());
       case ScalarType::ComplexFloat:
-        return from(aoti_torch_dtype_complex64());
+        return torch::stable::detail::from(aoti_torch_dtype_complex64());
       case ScalarType::ComplexDouble:
-        return from(aoti_torch_dtype_complex128());
+        return torch::stable::detail::from(aoti_torch_dtype_complex128());
       case ScalarType::Bool:
-        return from(aoti_torch_dtype_bool());
+        return torch::stable::detail::from(aoti_torch_dtype_bool());
       case ScalarType::BFloat16:
-        return from(aoti_torch_dtype_bfloat16());
+        return torch::stable::detail::from(aoti_torch_dtype_bfloat16());
       case ScalarType::Float8_e5m2:
-        return from(aoti_torch_dtype_float8_e5m2());
+        return torch::stable::detail::from(aoti_torch_dtype_float8_e5m2());
       case ScalarType::Float8_e4m3fn:
-        return from(aoti_torch_dtype_float8_e4m3fn());
+        return torch::stable::detail::from(aoti_torch_dtype_float8_e4m3fn());
       case ScalarType::Float8_e5m2fnuz:
-        return from(aoti_torch_dtype_float8_e5m2fnuz());
+        return torch::stable::detail::from(aoti_torch_dtype_float8_e5m2fnuz());
       case ScalarType::Float8_e4m3fnuz:
-        return from(aoti_torch_dtype_float8_e4m3fnuz());
+        return torch::stable::detail::from(aoti_torch_dtype_float8_e4m3fnuz());
       case ScalarType::UInt16:
-        return from(aoti_torch_dtype_uint16());
+        return torch::stable::detail::from(aoti_torch_dtype_uint16());
       case ScalarType::UInt32:
-        return from(aoti_torch_dtype_uint32());
+        return torch::stable::detail::from(aoti_torch_dtype_uint32());
       case ScalarType::UInt64:
-        return from(aoti_torch_dtype_uint64());
+        return torch::stable::detail::from(aoti_torch_dtype_uint64());
       default:
         STD_TORCH_CHECK(
             false,
@@ -179,17 +182,18 @@ struct FromImpl<DeviceType> {
       [[maybe_unused]] bool is_internal) {
     switch (val) {
       case DeviceType::CPU:
-        return from(aoti_torch_device_type_cpu());
+        return torch::stable::detail::from(aoti_torch_device_type_cpu());
       case DeviceType::CUDA:
-        return from(aoti_torch_device_type_cuda());
+        return torch::stable::detail::from(aoti_torch_device_type_cuda());
       case DeviceType::Meta:
-        return from(aoti_torch_device_type_meta());
+        return torch::stable::detail::from(aoti_torch_device_type_meta());
       case DeviceType::XPU:
-        return from(aoti_torch_device_type_xpu());
+        return torch::stable::detail::from(aoti_torch_device_type_xpu());
       case DeviceType::MPS:
-        return from(aoti_torch_device_type_mps());
+        return torch::stable::detail::from(aoti_torch_device_type_mps());
       case DeviceType::PrivateUse1:
-        return from(aoti_torch_device_type_privateuse1());
+        return torch::stable::detail::from(
+            aoti_torch_device_type_privateuse1());
       default:
         STD_TORCH_CHECK(
             false,
@@ -205,7 +209,7 @@ struct FromImpl<std::nullopt_t> {
       std::nullopt_t val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    return from(nullptr);
+    return torch::stable::detail::from(nullptr);
   }
 };
 
@@ -245,10 +249,11 @@ struct FromImpl<std::optional<T>> {
       uint64_t extension_build_version,
       bool is_internal) {
     if (!val.has_value()) {
-      return from(std::nullopt);
+      return torch::stable::detail::from(std::nullopt);
     }
-    return from(new StableIValue(detail::FromImpl<T>::call(
-        val.value(), extension_build_version, is_internal)));
+    return torch::stable::detail::from(
+        new StableIValue(detail::FromImpl<T>::call(
+            val.value(), extension_build_version, is_internal)));
   }
 };
 
@@ -262,7 +267,7 @@ struct FromImpl<torch::stable::Tensor> {
       [[maybe_unused]] bool is_internal) {
     AtenTensorHandle new_ath;
     TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
-    return from(new_ath);
+    return torch::stable::detail::from(new_ath);
   }
 };
 
@@ -271,10 +276,10 @@ struct FromImpl<torch::stable::Tensor> {
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-// Specialization for c10::Layout => StableIValue
+// Specialization for torch::headeronly::Layout => StableIValue
 // Note that we call into the shim to translate between the user's
 // Layout and libtorch's Layout, which can be different!
-using c10::Layout;
+using torch::headeronly::Layout;
 template <>
 struct FromImpl<Layout> {
   static StableIValue call(
@@ -283,21 +288,21 @@ struct FromImpl<Layout> {
       [[maybe_unused]] bool is_internal) {
     switch (val) {
       case Layout::Strided:
-        return from(aoti_torch_layout_strided());
+        return torch::stable::detail::from(aoti_torch_layout_strided());
       case Layout::Sparse:
-        return from(aoti_torch_layout_sparse_coo());
+        return torch::stable::detail::from(aoti_torch_layout_sparse_coo());
       case Layout::SparseCsr:
-        return from(aoti_torch_layout_sparse_csr());
+        return torch::stable::detail::from(aoti_torch_layout_sparse_csr());
       case Layout::SparseCsc:
-        return from(aoti_torch_layout_sparse_csc());
+        return torch::stable::detail::from(aoti_torch_layout_sparse_csc());
       case Layout::SparseBsr:
-        return from(aoti_torch_layout_sparse_bsr());
+        return torch::stable::detail::from(aoti_torch_layout_sparse_bsr());
       case Layout::SparseBsc:
-        return from(aoti_torch_layout_sparse_bsc());
+        return torch::stable::detail::from(aoti_torch_layout_sparse_bsc());
       case Layout::Mkldnn:
-        return from(aoti_torch_layout__mkldnn());
+        return torch::stable::detail::from(aoti_torch_layout__mkldnn());
       case Layout::Jagged:
-        return from(aoti_torch_layout_jagged());
+        return torch::stable::detail::from(aoti_torch_layout_jagged());
       default:
         STD_TORCH_CHECK(
             false,
@@ -306,10 +311,10 @@ struct FromImpl<Layout> {
   }
 };
 
-// Specialization for c10::MemoryFormat => StableIValue
+// Specialization for torch::headeronly::MemoryFormat => StableIValue
 // Note that we call into the shim to translate between the user's
 // MemoryFormat and libtorch's MemoryFormat, which can be different!
-using c10::MemoryFormat;
+using torch::headeronly::MemoryFormat;
 template <>
 struct FromImpl<MemoryFormat> {
   static StableIValue call(
@@ -318,13 +323,17 @@ struct FromImpl<MemoryFormat> {
       [[maybe_unused]] bool is_internal) {
     switch (val) {
       case MemoryFormat::Contiguous:
-        return from(aoti_torch_memory_format_contiguous_format());
+        return torch::stable::detail::from(
+            aoti_torch_memory_format_contiguous_format());
       case MemoryFormat::Preserve:
-        return from(aoti_torch_memory_format_preserve_format());
+        return torch::stable::detail::from(
+            aoti_torch_memory_format_preserve_format());
       case MemoryFormat::ChannelsLast:
-        return from(aoti_torch_memory_format_channels_last());
+        return torch::stable::detail::from(
+            aoti_torch_memory_format_channels_last());
       case MemoryFormat::ChannelsLast3d:
-        return from(aoti_torch_memory_format_channels_last_3d());
+        return torch::stable::detail::from(
+            aoti_torch_memory_format_channels_last_3d());
       default:
         STD_TORCH_CHECK(
             false,
@@ -346,10 +355,10 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        TORCH_ERROR_CODE_CHECK(
-            torch_list_push_back(new_list_handle, from(elem)));
+        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
+            new_list_handle, torch::stable::detail::from(elem)));
       }
-      return from(new_list_handle);
+      return torch::stable::detail::from(new_list_handle);
     } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
@@ -369,7 +378,8 @@ struct FromImpl<std::vector<T>> {
       const std::vector<T>& val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    return from<torch::headeronly::HeaderOnlyArrayRef<T>>(val);
+    return torch::stable::detail::from<
+        torch::headeronly::HeaderOnlyArrayRef<T>>(val);
   }
 };
 
@@ -385,13 +395,28 @@ struct FromImpl<torch::stable::Device> {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     // Convert DeviceType to shim representation (int32_t)
-    StableIValue device_type_shim = from(val.type());
+    StableIValue device_type_shim = torch::stable::detail::from(val.type());
     // Pack: lower 32 bits = device index, upper 32 bits = device type (shim)
     uint64_t device_index_bits =
         static_cast<uint64_t>(static_cast<uint32_t>(val.index()));
     uint64_t device_type_bits =
         static_cast<uint64_t>(static_cast<uint32_t>(device_type_shim)) << 32;
     return device_index_bits | device_type_bits;
+  }
+};
+
+// Specialization for std::string, which should return a new owning reference of
+// the string
+template <>
+struct FromImpl<std::string> {
+  static StableIValue call(
+      const std::string& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle;
+    TORCH_ERROR_CODE_CHECK(
+        torch_new_string_handle(val.c_str(), val.length(), &handle))
+    return torch::stable::detail::from(handle);
   }
 };
 
@@ -408,7 +433,6 @@ struct ToImpl {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(std::is_trivially_copyable_v<T>);
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
     // compile-time errors.
     static_assert(
@@ -420,6 +444,10 @@ struct ToImpl {
     static_assert(
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
@@ -457,7 +485,7 @@ struct ToImpl<ScalarType> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_scalartype = to<int32_t>(val);
+    int32_t shim_scalartype = torch::stable::detail::to<int32_t>(val);
     if (shim_scalartype == aoti_torch_dtype_uint8()) {
       return ScalarType::Byte;
     } else if (shim_scalartype == aoti_torch_dtype_int8()) {
@@ -516,7 +544,7 @@ struct ToImpl<DeviceType> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_devicetype = to<int32_t>(val);
+    int32_t shim_devicetype = torch::stable::detail::to<int32_t>(val);
     if (shim_devicetype == aoti_torch_device_type_cpu()) {
       return DeviceType::CPU;
     } else if (shim_devicetype == aoti_torch_device_type_cuda()) {
@@ -560,7 +588,7 @@ struct ToImpl<std::optional<T>> {
       StableIValue val,
       uint64_t extension_build_version,
       bool is_internal) {
-    auto sivp = to<StableIValue*>(val);
+    auto sivp = torch::stable::detail::to<StableIValue*>(val);
 
     // sivp is either nullptr or a pointer to a StableIValue
     if (sivp == nullptr) {
@@ -585,7 +613,8 @@ struct ToImpl<torch::stable::Tensor> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    return torch::stable::Tensor(to<AtenTensorHandle>(val));
+    return torch::stable::Tensor(
+        torch::stable::detail::to<AtenTensorHandle>(val));
   }
 };
 
@@ -594,14 +623,14 @@ struct ToImpl<torch::stable::Tensor> {
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-// Specialization for StableIValue => c10::Layout
+// Specialization for StableIValue => torch::headeronly::Layout
 template <>
 struct ToImpl<Layout> {
   static Layout call(
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_layout = to<int32_t>(val);
+    int32_t shim_layout = torch::stable::detail::to<int32_t>(val);
     if (shim_layout == aoti_torch_layout_strided()) {
       return Layout::Strided;
     } else if (shim_layout == aoti_torch_layout_sparse_coo()) {
@@ -628,14 +657,14 @@ struct ToImpl<Layout> {
   }
 };
 
-// Specialization for StableIValue => c10::MemoryFormat
+// Specialization for StableIValue => torch::headeronly::MemoryFormat
 template <>
 struct ToImpl<MemoryFormat> {
   static MemoryFormat call(
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_memory_format = to<int32_t>(val);
+    int32_t shim_memory_format = torch::stable::detail::to<int32_t>(val);
     if (shim_memory_format == aoti_torch_memory_format_contiguous_format()) {
       return MemoryFormat::Contiguous;
     } else if (
@@ -667,7 +696,7 @@ struct ToImpl<std::vector<T>> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    auto list_handle = to<StableListHandle>(val);
+    auto list_handle = torch::stable::detail::to<StableListHandle>(val);
     size_t size;
     try {
       TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
@@ -676,7 +705,7 @@ struct ToImpl<std::vector<T>> {
       for (size_t i = 0; i < size; i++) {
         StableIValue element;
         TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
-        result.push_back(to<T>(element));
+        result.push_back(torch::stable::detail::to<T>(element));
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return result;
@@ -701,8 +730,30 @@ struct ToImpl<torch::stable::Device> {
     // Unpack: lower 32 bits = device index, upper 32 bits = device type (shim)
     int32_t device_index = static_cast<int32_t>(val & 0xFFFFFFFF);
     StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
-    DeviceType device_type = to<DeviceType>(device_type_shim);
+    DeviceType device_type =
+        torch::stable::detail::to<DeviceType>(device_type_shim);
     return torch::stable::Device(device_type, device_index);
+  }
+};
+
+// Specialization for std::string
+// Returns a new std::string; the string in val is deleted.
+template <>
+struct ToImpl<std::string> {
+  static std::string call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle = torch::stable::detail::to<StringHandle>(val);
+    size_t length;
+    TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
+    const char* data;
+    TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
+    auto strptr = new std::string(data, length);
+
+    // delete the old string before returning new string
+    TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
+    return *strptr;
   }
 };
 
@@ -780,11 +831,31 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-C10_DEPRECATED_MESSAGE("Use torch::stable::detail::from instead.")
-auto from = &torch::stable::detail::from<T>;
+[[deprecated("Use torch::stable::detail::from instead.")]]
+inline StableIValue from(T val) {
+  return torch::stable::detail::from(val);
+}
 
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-C10_DEPRECATED_MESSAGE("Use torch::stable::detail::to instead.")
-auto to = &torch::stable::detail::to<T>;
+[[deprecated("Use torch::stable::detail::from instead.")]]
+inline StableIValue from(const std::optional<T>& val) {
+  return torch::stable::detail::from(val);
+}
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+[[deprecated(
+    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
+from(const torch::stable::Tensor& val) {
+  return torch::stable::detail::from(val);
+}
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+template <typename T>
+[[deprecated("Use torch::stable::detail::to instead.")]]
+inline T to(StableIValue val) {
+  return torch::stable::detail::to<T>(val);
+}

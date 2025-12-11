@@ -3,12 +3,13 @@
 import contextlib
 import warnings
 from logging import getLogger
-from typing import Optional, Union
+from typing import Optional
 
 import torch
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 logger = getLogger(__name__)
@@ -174,7 +175,7 @@ class _RNGStateTracker:
         self._use_distribute_region = value
 
     def _distribute_region(
-        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
     ):
         pass
 
@@ -240,7 +241,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
 
     @contextlib.contextmanager
     def _distribute_region(
-        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
     ):
         from torch.distributed._local_tensor import maybe_enable_local_tracker
 
@@ -336,44 +337,14 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             The last value to calculate before obtaining the starting offset is the shard linear index.
             The starting offset for each rank will be its shard_linear_index * local_tensor_numel.
         """
-        dtensor_shape = spec.shape
         mesh = spec.mesh
-        # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
-        # case. Replace the custom logic with dim_map once we support it.
-        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
-        for i, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                if dim_map[shard_dim] == -1:
-                    dim_map[shard_dim] = [i]
-                else:
-                    mesh_dim_list = dim_map[shard_dim]
-                    assert isinstance(mesh_dim_list, list)
-                    mesh_dim_list.append(i)
-
-        # Compute shard coordinate:
-        # The coordinate on each tensor dim is a tuple (idx, range)
-        # If a DTensor is partitioned on its dim i into n shards, and the current rank
-        # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
         mesh_coordinate = mesh.get_coordinate()
         assert mesh_coordinate is not None
-        mesh_size = mesh.shape
-        shard_idx_by_dim = []
-        total_num_shards_by_dim = []  # total number of shards on each tensor dim
-        for mesh_dim in dim_map:
-            shard_idx = 0
-            total_num_shards = 1
-            # the tensor dim is sharded on more than 1 mesh dim
-            if isinstance(mesh_dim, list):
-                rank_coord = [mesh_coordinate[d] for d in mesh_dim]
-                num_shards = [mesh_size[d] for d in mesh_dim]
-                # compute the shard idx and total number of shards
-                for idx, size in zip(rank_coord, num_shards):
-                    shard_idx = shard_idx * size + idx
-                    total_num_shards *= size
 
-            shard_idx_by_dim.append(shard_idx)
-            total_num_shards_by_dim.append(total_num_shards)
+        # Compute shard index and total number of shards on each tensor dim
+        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+            mesh_coordinate, spec
+        )
 
         # compute shard linear index
         shard_linear_idx = self._calc_shard_linear_idx(
@@ -381,18 +352,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         )
 
         # compute starting offset using the first shard's size
-        local_size_on_rank_0 = list(dtensor_shape)
-        for idx, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
-                mesh_dim_size = mesh.size(idx)
-                shard_dim = placement.dim
-                local_size_on_rank_0[shard_dim], _ = (
-                    placement._local_shard_size_and_offset(
-                        dtensor_shape[shard_dim],
-                        mesh_dim_size,
-                        0,
-                    )
-                )
+        local_size_on_rank_0 = _calc_first_shard_size(spec)
 
         from torch.distributed.tensor._ops.utils import prod
 
@@ -435,14 +395,74 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     def _calc_shard_linear_idx(
         self, shard_coord: list[int], shard_size: list[int]
     ) -> int:
-        # compute shard linear index
-        shard_linear_idx = 0
-        shard_coord_stride = 1
-        for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
-            shard_linear_idx += idx * shard_coord_stride
-            shard_coord_stride *= size
+        return _calc_shard_linear_idx(shard_coord, shard_size)
 
-        return shard_linear_idx
+
+def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
+    local_size_on_rank_0 = list(spec.shape)
+    for idx, placement in enumerate(spec.placements):
+        if isinstance(placement, Shard | _StridedShard):
+            mesh_dim_size = spec.mesh.size(idx)
+            shard_dim = placement.dim
+            local_size_on_rank_0[shard_dim], _ = placement._local_shard_size_and_offset(
+                spec.shape[shard_dim],
+                mesh_dim_size,
+                0,
+            )
+    return local_size_on_rank_0
+
+
+def _calc_shard_info(
+    mesh_coordinate: list[int], spec: DTensorSpec
+) -> tuple[list[int], list[int]]:
+    mesh = spec.mesh
+    # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
+    # case. Replace the custom logic with dim_map once we support it.
+    dim_map: list[int | list[int]] = [-1] * spec.ndim
+    for i, placement in enumerate(spec.placements):
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
+            if dim_map[shard_dim] == -1:
+                dim_map[shard_dim] = [i]
+            else:
+                mesh_dim_list = dim_map[shard_dim]
+                assert isinstance(mesh_dim_list, list)
+                mesh_dim_list.append(i)
+
+    # Compute shard coordinate:
+    # The coordinate on each tensor dim is a tuple (idx, range)
+    # If a DTensor is partitioned on its dim i into n shards, and the current rank
+    # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
+    assert mesh_coordinate is not None
+    mesh_size = mesh.shape
+    shard_idx_by_dim = []
+    total_num_shards_by_dim = []  # total number of shards on each tensor dim
+    for mesh_dim in dim_map:
+        shard_idx = 0
+        total_num_shards = 1
+        # the tensor dim is sharded on more than 1 mesh dim
+        if isinstance(mesh_dim, list):
+            rank_coord = [mesh_coordinate[d] for d in mesh_dim]
+            num_shards = [mesh_size[d] for d in mesh_dim]
+            # compute the shard idx and total number of shards
+            for idx, size in zip(rank_coord, num_shards):
+                shard_idx = shard_idx * size + idx
+                total_num_shards *= size
+
+        shard_idx_by_dim.append(shard_idx)
+        total_num_shards_by_dim.append(total_num_shards)
+    return shard_idx_by_dim, total_num_shards_by_dim
+
+
+def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int:
+    # compute shard linear index
+    shard_linear_idx = 0
+    shard_coord_stride = 1
+    for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
+        shard_linear_idx += idx * shard_coord_stride
+        shard_coord_stride *= size
+
+    return shard_linear_idx
 
 
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
@@ -450,4 +470,9 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_handle = _get_device_handle(device_type)
     assert device_handle is not None
     device_idx = device_mesh.get_rank() % device_handle.device_count()
-    return torch.device(f"{device_type}:{device_idx:d}")
+
+    @maybe_run_for_local_tensor
+    def get_device(device_idx):
+        return torch.device(f"{device_type}:{device_idx:d}")
+
+    return get_device(device_idx)
