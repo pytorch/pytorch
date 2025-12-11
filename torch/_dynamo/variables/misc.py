@@ -433,6 +433,9 @@ class ExceptionVariable(VariableTracker):
         # Contains the call stack where the exception was raised. Dynamo does
         # not track traceback. So, this variable is always set to None
         self.__traceback__ = ConstantVariable(None)
+        # The user stack at the time this exception was first raised.
+        # Used to preserve the original exception location when re-raising.
+        self.python_stack = None
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context

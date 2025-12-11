@@ -301,9 +301,15 @@ class PackageError(TorchDynamoException):
 
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, real_stack: Optional[StackSummary] = None, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
-        self.real_stack: StackSummary = torch._guards.TracingContext.extract_stack()
+        self.real_stack: StackSummary = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class ObservedUserStopIteration(ObservedException):
@@ -312,8 +318,10 @@ class ObservedUserStopIteration(ObservedException):
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__("unhandled `raise StopIteration`")
+    def __init__(
+        self, *args: Any, real_stack: Optional[StackSummary] = None, **kwargs: Any
+    ) -> None:
+        super().__init__("unhandled `raise StopIteration`", real_stack=real_stack)
         if len(args) > 0:
             self.value = args[0]
         else:

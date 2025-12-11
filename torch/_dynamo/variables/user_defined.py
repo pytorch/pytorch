@@ -2124,6 +2124,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def exc_type(self):
         return self.exc_vt.exc_type
 
+    @property
+    def python_stack(self):
+        return self.exc_vt.python_stack
+
+    @python_stack.setter
+    def python_stack(self, value):
+        self.exc_vt.python_stack = value
+
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
