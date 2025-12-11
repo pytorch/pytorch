@@ -5284,8 +5284,6 @@ class AOTInductorTestsTemplate:
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
-        elif sys.version_info >= (3, 14, 2) and max_autotune:
-            raise unittest.SkipTest("Crashes on python 3.14.2")
 
         class Model(nn.Module):
             def __init__(self) -> None:

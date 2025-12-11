@@ -9026,6 +9026,7 @@ for shape in [(1,), ()]:
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
 
+    @skipIfTorchDynamo("Fails in python 3.14.2")
     def test_custom_function_saving_mutated_view_no_leak(self):
         class Test(torch.autograd.Function):
             @staticmethod
@@ -9641,6 +9642,7 @@ for shape in [(1,), ()]:
                     )
                     assert_only_first_requires_grad(res)
 
+    @skipIfTorchDynamo("Fails in python 3.14.2")
     def test_custom_function_cycle(self):
         class MyFn(Function):
             @staticmethod
