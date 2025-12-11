@@ -1259,7 +1259,10 @@ def _exported_program_to_onnx_program(
         )
 
     # 5b. Add constants as initializers. Constants are not renamed to reduce the chance of name conflicts.
-    reversed_constant_names = {v: k for k, v in exported_program.graph_signature.inputs_to_lifted_tensor_constants.items()}
+    reversed_constant_names = {
+        v: k
+        for k, v in exported_program.graph_signature.inputs_to_lifted_tensor_constants.items()
+    }
     for lookup_name, torch_tensor in exported_program.constants.items():
         name = reversed_constant_names[lookup_name]
         initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
