@@ -869,6 +869,14 @@ class MetaConverter(Generic[_TensorT]):
         err = errfn(t)
         return typing.cast(_TensorT, err)
 
+    def _clear_memos(self) -> None:
+        """
+        Clears all weakref memos
+        """
+        self.tensor_memo.clear()
+        # TODO @azahed98: Clearing lookup_storage causes segfaults
+        self.describer.lookup_tensor.clear()
+
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
     # precisely to the Source.name of the tensor we're fakeifying and

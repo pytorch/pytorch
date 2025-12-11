@@ -2337,6 +2337,12 @@ class OutputGraph(OutputGraphCommon):
                 # This is safe because we pre-process name to be unique
                 self.install_global_unsafe(name, compiled_fn)
 
+            # Cleanup old_fake_mode to release weakrefs
+            # Export uses this fake mode again, so don't clear if export
+            # TODO @azahed98: Branching  shouldn't be needed when torch._dynamo.export is cleaned up.
+            if not self.export:
+                old_fake_mode.fake_tensor_converter.meta_converter._clear_memos()
+
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
 
