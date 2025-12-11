@@ -108,7 +108,7 @@ if [ -n "$ROCM_VERSION" ]; then
     else
       ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
     fi
-    
+
     # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
     # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
     # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
