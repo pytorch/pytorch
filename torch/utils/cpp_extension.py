@@ -2701,7 +2701,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
             cwd=build_directory,
             check=True,
             env=env)
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.

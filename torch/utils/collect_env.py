@@ -129,7 +129,7 @@ def run(command):
         )
         raw_output, raw_err = p.communicate()
         rc = p.returncode
-    except (FileNotFoundError, OSError) as e:
+    except OSError as e:
         return 127, "", str(e)
 
     if get_platform() == "win32":

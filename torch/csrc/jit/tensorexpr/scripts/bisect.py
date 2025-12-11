@@ -19,7 +19,7 @@ def test(cmd, limit):
             encoding="utf-8",
             check=False,
         )
-    except (FileNotFoundError, OSError):
+    except OSError:
         print("bad")
         return 0
     print(p.stdout)
