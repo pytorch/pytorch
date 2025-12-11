@@ -387,6 +387,48 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ):
             partial_dt.clamp_(max=10)
 
+    @with_comms
+    def test_maximum_partial_max_propagation(self):
+        # Test that torch.maximum preserves Partial("max") placements
+        # since max(max(a), max(b)) == max(a, b)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input1 = torch.rand(8, 8) * self.rank
+        input2 = torch.rand(8, 8) * (self.world_size - self.rank)
+
+        d_input1 = DTensor.from_local(input1, device_mesh, [Partial("max")])
+        d_input2 = DTensor.from_local(input2, device_mesh, [Partial("max")])
+
+        with comm_mode:
+            result = torch.maximum(d_input1, d_input2)
+
+        # Should not require any communication
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # Result should still be Partial("max")
+        self.assertEqual(result.placements, (Partial("max"),))
+
+    @with_comms
+    def test_minimum_partial_min_propagation(self):
+        # Test that torch.minimum preserves Partial("min") placements
+        # since min(min(a), min(b)) == min(a, b)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input1 = torch.rand(8, 8) * self.rank
+        input2 = torch.rand(8, 8) * (self.world_size - self.rank)
+
+        d_input1 = DTensor.from_local(input1, device_mesh, [Partial("min")])
+        d_input2 = DTensor.from_local(input2, device_mesh, [Partial("min")])
+
+        with comm_mode:
+            result = torch.minimum(d_input1, d_input2)
+
+        # Should not require any communication
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # Result should still be Partial("min")
+        self.assertEqual(result.placements, (Partial("min"),))
+
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
