@@ -644,7 +644,7 @@ class FakeTensorTest(TestCase):
                 b14,
                 b15,
             ]
-            
+
             if torch.version.cuda:
                 return torch.ops.aten._cudnn_rnn(
                     a0,
