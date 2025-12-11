@@ -819,6 +819,55 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    def test_context_parallel_shard_with_positions(self) -> None:
+        """Test context parallel sharding with expanded batch dimensions.
+
+        This test validates the fix for buffer sharding when the batch dimension
+        is created through expand() or view() operations. Before the fix, the
+        loop-based torch.index_select approach failed on expanded tensors.
+        """
+        B = 4
+        seq_len = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+
+        # Create positions tensor and expand to add batch dimension
+        positions = torch.arange(0, seq_len, device=self.device_type)
+        positions = positions.expand(B, seq_len)
+
+        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+
+        load_balancer = _HeadTailLoadBalancer(
+            seq_len, self.world_size, torch.device(self.device_type)
+        )
+
+        # positions has seq_dim=1 (same as q, k, v) after expansion
+        positions_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
+            device_mesh, [positions, q, k, v], [1, 1, 1, 1], load_balancer=load_balancer
+        )
+
+        # Verify the sharded positions tensor has correct shape
+        self.assertEqual(positions_shard.size(), (B, seq_len // 2))
+
+        # Verify the sharded values match expected chunked and concatenated results
+        # For each batch, the positions should be chunked and rearranged
+        chunks = positions.chunk(self.world_size * 2, dim=1)
+        expected_positions = map_local_tensor_for_rank(
+            chunks,
+            self.rank,
+            lambda chunks, rank: torch.cat(
+                [chunks[rank], chunks[self.world_size * 2 - rank - 1]],
+                dim=1,
+            ),
+        )
+        self.assertEqual(positions_shard, expected_positions)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
