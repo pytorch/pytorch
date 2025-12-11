@@ -1700,6 +1700,33 @@ from user code:
     torch._dynamo.graph_break()""",
             )
 
+    def test_runtime_error_readable_shape_mismatch(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4)
+        y = torch.randn(10, 10)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        from torch._dynamo.exc import TorchRuntimeError
+
+        def post_munge(s):
+            s = re.sub(r"s\d+: hint = 10", "s94: hint = 10", s)
+            return s
+
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
+            """\
+Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return x + y""",
+            post_munge=post_munge,
+        )
+
 
 class NestedGraphBreakLoggingTests(
     LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
