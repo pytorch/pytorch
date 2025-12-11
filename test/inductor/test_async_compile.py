@@ -74,14 +74,7 @@ class TestAsyncCompile(TestCase):
             return (a @ b).to(torch.float32).sum(dim=1)
 
         # Fake name to make sure the lookup table is name agnostic
-        # When codegen/triton.py is changed, func_def must be updated
-        loop_header = (
-            "for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):"
-            if torch.version.hip
-            else "for r0_offset in tl.range(0, r0_numel, R0_BLOCK):"
-        )
-
-        func_def = f"""
+        func_def = """
 def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
     xnumel = 1024
     r0_numel = 11776
@@ -94,7 +87,7 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
     rbase = r0_base
     x0 = xindex
     _tmp3 = tl.full([XBLOCK, R0_BLOCK], 0, tl.float32)
-    {loop_header}
+    for r0_offset in range(0, r0_numel, R0_BLOCK):
         r0_index = r0_offset + r0_base
         r0_mask = r0_index < r0_numel
         roffset = r0_offset

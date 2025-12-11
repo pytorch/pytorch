@@ -595,6 +595,7 @@ def is_impure(
         bool: True if the callable has side effects, False otherwise
     """
     # Import here to avoid circular dependencies
+    from torch._higher_order_ops.effects import _get_effect
     from torch.fx.node import _side_effectful_functions
 
     if isinstance(op, torch._ops.OpOverload):
@@ -604,8 +605,6 @@ def is_impure(
 
         if op in _side_effectful_functions:
             return True
-
-        from torch._higher_order_ops.effects import _get_effect
 
         if _get_effect(op) is not None:
             return True
@@ -619,6 +618,9 @@ def is_impure(
             # side-effectful
             if args and len(args) > 0:
                 return args[0] in _side_effectful_functions
+
+        if _get_effect(op) is not None:
+            return True
 
         return False
 
