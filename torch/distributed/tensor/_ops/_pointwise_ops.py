@@ -610,12 +610,27 @@ def common_pointwise_strategy(
                     common_shape, input_arg_spec.shape
                 )
 
-                # Determine if this input should convert Partial to Replicate base on linearity
+                # Determine if this input should convert Partial to Replicate based on linearity
                 should_convert_partial = (
                     linearity == 2
                     and input_idx
                     != followed_strategy_index  # Don't convert the "followed" strategy
                 )
+
+                # For preserve_partial ops, check if non-followed input has incompatible
+                # Partial type. If so, it must be redistributed to Replicate first.
+                if (
+                    preserve_partial is not None
+                    and input_idx != followed_strategy_index
+                ):
+                    for out_p, in_p in zip(out_placements, input_arg_spec.placements):
+                        if (
+                            isinstance(out_p, Partial)
+                            and isinstance(in_p, Partial)
+                            and out_p != in_p
+                        ):
+                            should_convert_partial = True
+                            break
 
                 input_target_placements = map_placements_after_broadcast(
                     tuple(out_placements),
