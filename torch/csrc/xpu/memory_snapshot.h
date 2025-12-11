@@ -1,0 +1,17 @@
+#pragma once
+
+#include <torch/csrc/Export.h>
+#include <cstdint>
+#include <optional>
+#include <string>
+
+namespace torch::xpu {
+
+TORCH_PYTHON_API void _record_memory_history(
+    std::optional<std::string> enabled = "all",
+    std::optional<std::string> context = "all",
+    const std::string& stacks = "all",
+    size_t max_entries = SIZE_MAX,
+    bool clearHistory = false);
+
+} // namespace torch::xpu
