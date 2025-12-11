@@ -1070,7 +1070,9 @@ class TestContextParallelStyle(DTensorTestBase):
         )
 
         # Mix of positional and keyword with extra args
-        score_mod = lambda q, k, b, h, m, n: q
+        def score_mod(q, k, b, h, m, n):
+            return q
+
         block_mask = None
         args = (query, key, value, score_mod, block_mask)
         kwargs = {"enable_gqa": False}
