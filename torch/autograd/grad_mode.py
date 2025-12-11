@@ -329,7 +329,8 @@ class set_multithreading_enabled(_DecoratorContextManager):
                     default) or disable (``False``).
 
     .. note::
-        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`,
+        which never uses multithreading.
 
     """
     def __init__(self, mode: bool) -> None:
