@@ -23,6 +23,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     LocalDTensorOpTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -441,6 +442,39 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             "in-place operations that require placement changes are not supported",
         ):
             partial_dt.clamp_(max=10)
+
+    @with_comms
+    def test_mul_div_scalar_partial(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+
+        # regular partial *,/ scalar
+        local_tensor = map_local_for_rank(self.rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = aten.mul.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank * 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 12)
+
+        res = aten.div.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank / 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+
+        self.assertEqual(res, 3)
 
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
