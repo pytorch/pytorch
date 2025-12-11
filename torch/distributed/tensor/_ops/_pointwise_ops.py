@@ -557,7 +557,9 @@ def common_pointwise_strategy(
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 # Check if this partial type should be preserved (for ops like max/min)
-                if preserve_partial is not None and placement.is_partial(preserve_partial):
+                if preserve_partial is not None and placement.is_partial(
+                    preserve_partial
+                ):
                     out_placements.append(placement)
                 # Existing linearity handling for sum/avg
                 elif linearity > 0 and (
