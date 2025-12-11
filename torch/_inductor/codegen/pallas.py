@@ -1196,9 +1196,13 @@ class PallasKernel(SIMDKernel):
             try:
                 buf_obj = V.graph.get_buffer(name)
                 buf_size = buf_obj.get_size()
+                # If buffer is 0-dimensional (scalar), use [...] to access it
+                # JAX/Pallas doesn't support indexing scalars with [0]
+                if len(buf_size) == 0:
+                    index_str = "..."
                 # If buffer is multi-dimensional and index is a constant/scalar expression,
                 # use flattened access to get a single element
-                if len(buf_size) > 1:
+                elif len(buf_size) > 1:
                     has_iter_vars = self._has_iteration_vars(index)
                     if not has_iter_vars:
                         needs_flatten = True
