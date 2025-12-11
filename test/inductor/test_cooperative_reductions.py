@@ -220,8 +220,7 @@ class CooperativeReductionTests(TestCase):
 
         # With online softmax, the computation of max and sum are done
         # jointly and they share a single barrier call.
-        # XPU doesn't support online softmax yet.
-        expected_num_barrier = 8 if config.online_softmax and GPU_TYPE != "xpu" else 16
+        expected_num_barrier = 8 if config.online_softmax else 16
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )

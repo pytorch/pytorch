@@ -2,7 +2,7 @@
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 from typing_extensions import deprecated
 
 
@@ -225,7 +225,7 @@ def process_signature(line: str) -> list[str]:
 
 
 def get_method_definitions(
-    file_path: Union[str, list[str]],
+    file_path: str | list[str],
     files_to_exclude: set[str],
     deprecated_files: set[str],
     default_output_type: str,

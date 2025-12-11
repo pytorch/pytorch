@@ -84,10 +84,10 @@ def pin_memory(data):
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
             return {k: pin_memory(sample) for k, sample in data.items()}
-    elif isinstance(data, tuple) and hasattr(data, "_fields"):  # namedtuple
-        return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, tuple):
-        return [pin_memory(sample) for sample in data]  # Backwards compatibility.
+        if hasattr(data, "_fields"):  # namedtuple
+            return type(data)(*(pin_memory(sample) for sample in data))
+        return type(data)(pin_memory(sample) for sample in data)
     elif isinstance(data, collections.abc.Sequence):
         try:
             if isinstance(data, collections.abc.MutableSequence):

@@ -968,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
@@ -1135,6 +1144,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test = f_compiled(x_test, y_test)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
+
+    # https://github.com/pytorch/pytorch/issues/168381
+    def test_index_select_contiguous_with_compile(self):
+        def fn(x):
+            x = x.permute(1, 2, 0)
+            x = x.unsqueeze(2)
+            idx = torch.tensor([0], device=x.device)
+            x = torch.index_select(x, 0, idx)
+            return x
+
+        x = torch.randn(6, 3, 6)
+        eager_out = fn(x)
+        self.assertTrue(eager_out.is_contiguous())
+        compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        compiled_out = compiled_fn(x)
+        self.assertTrue(compiled_out.is_contiguous())
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
 
     # https://github.com/pytorch/pytorch/issues/109053
     def test_view_dtype_overload(self):
@@ -5026,7 +5053,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
@@ -7085,15 +7112,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
@@ -7234,11 +7260,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7251,9 +7279,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)
@@ -7456,6 +7486,66 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit(self):
+        old_recursion_limit = sys.getrecursionlimit()
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            sys.setrecursionlimit(100)
+
+            with self.assertRaises(RecursionError):
+                fn(torch.ones(3), 500)
+
+            sys.setrecursionlimit(1000)
+
+            fn(torch.ones(3), 500)
+            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            sys.setrecursionlimit(20000)
+            with self.assertRaises(Exception):
+                opt_fn(torch.ones(3), 500)
+
+            torch._dynamo.set_recursion_limit(20000)
+            self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
+        finally:
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            sys.setrecursionlimit(old_recursion_limit)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit_usage(self):
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+            torch._dynamo.set_recursion_limit(500)
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+
+            @torch.compile(backend="eager", dynamic=False)
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            # a limit of 500 should be lower than the default limit
+            with self.assertWarnsRegex(RuntimeWarning, "new c_recursion limit"):
+                fn(torch.ones(3), 5)
+
+            with self.assertRaisesRegex(ValueError, "recursion limit"):
+                torch._dynamo.set_recursion_limit(0)
+
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+        finally:
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
         @torch.compile(backend="eager")
@@ -7542,6 +7632,36 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             run()
         finally:
             torch._C._dynamo.eval_frame._set_lru_cache(True)
+
+    def test_patch_track_step_called_skipped(self):
+        # Regression test for patch_track_step_called being ignored by dynamo
+        # We need to clear FORCE_SKIP_FILES to test that the function name check
+        # properly ignores patch_track_step_called even when lr_scheduler.py is not
+        # in FORCE_SKIP_FILES
+        import torch._dynamo.trace_rules as trace_rules
+
+        old_force_skip_files = trace_rules.FORCE_SKIP_FILES
+        try:
+            trace_rules.FORCE_SKIP_FILES = set()
+
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def fn(x, optimizer):
+                # Create an LR scheduler which internally calls patch_track_step_called
+                scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+                return x * 2, scheduler
+
+            model = torch.nn.Linear(10, 10)
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            x = torch.randn(10, 10)
+
+            result, _ = fn(x, optimizer)
+            expected = x * 2
+            self.assertEqual(result, expected)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            trace_rules.FORCE_SKIP_FILES = old_force_skip_files
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -8146,7 +8266,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
 
-    @torch._dynamo.config.patch(install_free_tensors=True)
     def test_partial_export(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -8166,14 +8285,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             def forward(self, a, b):
                 return a + b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         foo = Foo()
         foo.parallelize()
         x = torch.randn(4, 4, dtype=torch.float32)
         y = torch.randn(4, 4, dtype=torch.float32)
         ref = foo(x, y)
-        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
 
@@ -8184,6 +8303,130 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return x + 1
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_pytree_get_node_type_not_traced(self):
+        # Test that torch.utils._pytree._get_node_type is not traced into
+        # and doesn't cause excessive trace time overhead
+        from torch.utils._pytree import _get_node_type
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Call _get_node_type which is used internally by pytree operations
+            node_type = _get_node_type([x, y])
+            assert node_type is list
+            # Do some work with pytree structures
+            data = {"a": x, "b": y}
+            flat, spec = pytree.tree_flatten(data)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_get_node_type_with_namedtuple(self):
+        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
+        # without being traced into, even when is_namedtuple_class is True
+        from collections import namedtuple
+
+        from torch.utils._pytree import _get_node_type
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Create a namedtuple
+            point = Point(a, b)
+            # Call _get_node_type with a namedtuple instance
+            node_type = _get_node_type(point)
+            assert node_type is namedtuple
+            # Use pytree operations with namedtuples
+            flat, spec = pytree.tree_flatten(point)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_not_traced(self):
+        # Test that torch.utils._pytree.tree_is_leaf is not traced into
+        # when is_leaf parameter is None (the common case)
+        from torch.utils._pytree import tree_is_leaf
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Test with various types
+            # Tensors are leaves
+            is_leaf_tensor = tree_is_leaf(x)
+            assert is_leaf_tensor is True
+
+            # Lists are not leaves (they're in SUPPORTED_NODES)
+            is_leaf_list = tree_is_leaf([x, y])
+            assert is_leaf_list is False
+
+            # Dicts are not leaves
+            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
+            assert is_leaf_dict is False
+
+            return x + y
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True
+
+            return a + b
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
 
 
 instantiate_parametrized_tests(ReproTests)

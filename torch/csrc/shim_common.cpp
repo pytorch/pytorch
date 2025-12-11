@@ -1,14 +1,69 @@
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#include <ATen/Parallel.h>
+#include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
+
+AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
+  auto list_ptr = std::make_unique<std::vector<StableIValue>>();
+  list_ptr->reserve(size);
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = list_pointer_to_list_handle(list_ptr.release()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_size(StableListHandle list_handle, size_t* size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *size = list->size();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue* element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *element = list->at(index);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->at(index) = element;
+  });
+}
+
+AOTITorchError torch_list_push_back(
+    StableListHandle list_handle,
+    StableIValue element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->push_back(element);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_list(StableListHandle list_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list_ptr =
+        list_handle_to_list_pointer(list_handle);
+    delete list_ptr;
+  });
+}
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
@@ -37,8 +92,14 @@ static StableIValue from_ivalue(
           ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      return torch::stable::detail::_from(
-          ivalue.toDevice(), extension_build_version);
+      // Pack device type and index into StableIValue in platform-independent
+      // format Lower 32 bits = device index, upper 32 bits = device type
+      const auto& device = ivalue.toDevice();
+      uint64_t device_index_bits =
+          static_cast<uint64_t>(static_cast<uint32_t>(device.index()));
+      uint64_t device_type_bits =
+          static_cast<uint64_t>(static_cast<int8_t>(device.type())) << 32;
+      return device_index_bits | device_type_bits;
     }
     case c10::TypeKind::LayoutType: {
       return torch::stable::detail::_from(
@@ -70,6 +131,23 @@ static StableIValue from_ivalue(
       StableIValue* sivp = new StableIValue(
           from_ivalue(inner_type, ivalue, extension_build_version));
       return torch::stable::detail::_from(sivp, extension_build_version);
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto ivalue_list = ivalue.toList();
+      auto stableivalue_list = std::make_unique<std::vector<StableIValue>>();
+      stableivalue_list->reserve(ivalue_list.size());
+      for (const auto& elem : ivalue_list) {
+        stableivalue_list->emplace_back(
+            from_ivalue(inner_type, elem, extension_build_version));
+      }
+      return torch::stable::detail::_from(
+          list_pointer_to_list_handle(stableivalue_list.release()),
+          extension_build_version);
+    }
+    case c10::TypeKind::StringType: {
+      return torch::stable::detail::_from(
+          ivalue.toStringRef(), extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -109,8 +187,25 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(torch::stable::detail::_to<c10::Device>(
-          stable_ivalue, extension_build_version));
+      // Unpack device type and index from StableIValue
+      // Lower 32 bits = device index, upper 32 bits = device type
+      int32_t device_index = static_cast<int32_t>(
+          static_cast<uint32_t>(stable_ivalue & 0xFFFFFFFF));
+      c10::DeviceType device_type =
+          static_cast<c10::DeviceType>(static_cast<int8_t>(
+              static_cast<uint32_t>((stable_ivalue >> 32) & 0xFFFFFFFF)));
+      TORCH_CHECK(
+          device_index >= std::numeric_limits<int8_t>::min() &&
+              device_index <= std::numeric_limits<int8_t>::max(),
+          "Device index ",
+          device_index,
+          " is out of range for int8_t [",
+          static_cast<int>(std::numeric_limits<int8_t>::min()),
+          ", ",
+          static_cast<int>(std::numeric_limits<int8_t>::max()),
+          "]");
+      return c10::IValue(
+          c10::Device(device_type, static_cast<int8_t>(device_index)));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(torch::stable::detail::_to<c10::Layout>(
@@ -144,6 +239,25 @@ static c10::IValue to_ivalue(
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto list_handle = torch::stable::detail::_to<StableListHandle>(
+          stable_ivalue, extension_build_version);
+      std::vector<StableIValue>* stableivalue_list =
+          list_handle_to_list_pointer(list_handle);
+      auto ivalue_list = c10::impl::GenericList(inner_type);
+      ivalue_list.reserve(stableivalue_list->size());
+      for (const auto& elem : *stableivalue_list) {
+        ivalue_list.emplace_back(
+            to_ivalue(inner_type, elem, extension_build_version));
+      }
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      return ivalue_list;
+    }
+    case c10::TypeKind::StringType: {
+      return c10::IValue(torch::stable::detail::_to<std::string>(
+          stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(
@@ -206,6 +320,19 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(fn, TORCH_ABI_VERSION)));
+  });
+}
+
+// Helper function to parse device string using c10::Device
+// Returns device type and index
+AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
+    const char* device_string,
+    uint32_t* out_device_type,
+    int32_t* out_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device device{std::string(device_string)};
+    *out_device_type = static_cast<uint32_t>(device.type());
+    *out_device_index = static_cast<int32_t>(device.index());
   });
 }
 
@@ -413,5 +540,89 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    ParallelFunc func,
+    void* ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::parallel_for(
+        begin, end, grain_size, [func, ctx](int64_t begin, int64_t end) {
+          func(begin, end, ctx);
+        });
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_thread_idx(uint32_t* out_thread_idx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_thread_idx = static_cast<uint32_t>(at::get_thread_num()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_num_threads(uint32_t* out_num_threads) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_const_data_ptr(AtenTensorHandle tensor, const void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->const_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_mutable_data_ptr(AtenTensorHandle tensor, void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->mutable_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_string_handle(const char* data, size_t length, StringHandle* handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = new std::string(data, length);
+    *handle = reinterpret_cast<StringHandle>(str_ptr);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_string(StringHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    delete str_ptr;
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_length(StringHandle handle, size_t* length) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *length = str_ptr->length();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_c_str(StringHandle handle, const char** data) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *data = str_ptr->c_str();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    t->set_requires_grad(requires_grad);
   });
 }

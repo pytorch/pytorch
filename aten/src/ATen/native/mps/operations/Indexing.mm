@@ -179,7 +179,8 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                    iter.strides(2),
                    index_size,
                    index_stride,
-                   ndim_nindiees);
+                   ndim_nindiees,
+                   mpsStream->getErrorBuffer());
     mtl_dispatch1DJob(computeEncoder, indexSelectPSO, serial ? 1 : iter.numel());
   });
 }
@@ -299,7 +300,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
   MPSStream* stream = getCurrentMPSStream();
   using CachedGraph = MPSUnaryCachedGraph;
 
-  dispatch_sync(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
@@ -384,7 +385,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   MPSStream* stream = getCurrentMPSStream();
   using CachedGraph = MPSUnaryCachedGraph;
 
-  dispatch_sync(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
@@ -699,24 +700,6 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   return output;
-}
-
-// Checks if one tensor is broadcastable into another
-static bool is_dense_broadcastable(const Tensor& from, const Tensor& into) {
-  if (!from.is_contiguous() || !into.is_contiguous()) {
-    return false;
-  }
-  bool checking_squeezable_dims = false;
-  for (const auto dim : c10::irange(from.ndimension())) {
-    if (checking_squeezable_dims) {
-      if (from.size(-dim - 1) == 1) {
-        continue;
-      }
-      return false;
-    }
-    checking_squeezable_dims = from.size(-dim - 1) != into.size(-dim - 1);
-  }
-  return true;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
