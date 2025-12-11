@@ -128,7 +128,7 @@ enum GEMMAndBiasActivationEpilogue {
       Dtype, \
       C_Dtype, \
       const Dtype* bias_ptr = nullptr, \
-      std::optional<int64_t> bias_ld = std::nullopt, \
+      int64_t bias_ld = -1, \
       GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None \
   )
 
@@ -138,7 +138,7 @@ enum GEMMAndBiasActivationEpilogue {
       Dtype, \
       C_Dtype, \
       const Dtype* bias_ptr, \
-      std::optional<int64_t> bias_ld, \
+      int64_t bias_ld, \
       GEMMAndBiasActivationEpilogue activation \
   )
 

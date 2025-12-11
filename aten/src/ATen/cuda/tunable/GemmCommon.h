@@ -466,7 +466,7 @@ struct GemmAndBiasParams : OpParams {
   T* c{};
   int64_t ldc{};
   const T* bias{};
-  std::optional<int64_t> ldbias{};
+  int64_t ldbias{};
   at::cuda::blas::GEMMAndBiasActivationEpilogue activation{};
 private:
   bool duplicate_inputs_{false};

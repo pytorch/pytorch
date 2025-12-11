@@ -311,12 +311,13 @@ bool launchGemmAndBiasCublasLt(
       // This is because bias is float and not of the reduced type
       // INVESTIGATE
     : static_cast<const scalar_t*>(nullptr);
+  const int64_t self_ld = -1;
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
-      args, alpha, beta, self_ptr, -1, activation_to_gemm_and_blas_arg(activation)
+      args, alpha, beta, self_ptr, self_ld, activation_to_gemm_and_blas_arg(activation)
     );
     return true;
   }
@@ -336,7 +337,7 @@ bool launchGemmAndBiasCublasLt(
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
     self_ptr,
-    args.bias_ld,
+    self_ld,
     activation_to_gemm_and_blas_arg(activation)
   );
 }
