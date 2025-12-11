@@ -1203,6 +1203,36 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual, expect)
         check_count(2)  # Reused existing kernel
 
+    def test_coalescing_analysis_sympy_is_constant(self, device):
+        # Regression test for issue where sympy's is_constant() would trigger
+        # numerical evaluation that caused assertion errors in our custom Mod function
+        def fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6):
+            t3 = torch.nn.functional.scaled_dot_product_attention(arg0, arg1, arg2)
+            t4 = t3.min(dim=3).values
+            t6 = arg3.var(dim=0)
+            t7 = t6.reshape((29, 50, 32))
+            t10 = arg5.clone()
+            t10.zero_()
+            t11 = t10.transpose(0, 2)
+            t12 = torch.pow(torch.pow(t4, arg4), t11)
+            t15 = torch.nn.functional.layer_norm(arg6, (32,))
+            t16 = t12 / t15
+            t17 = ((((t4) - t7) - t16) - t11) - t16
+            return t17
+
+        arg0 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg1 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg2 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg3 = torch.rand([3, 10, 4640], dtype=torch.float16, device=device)
+        arg4 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+        arg5 = torch.rand([32, 50, 29], dtype=torch.float16, device=device)
+        arg6 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        expected = fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 

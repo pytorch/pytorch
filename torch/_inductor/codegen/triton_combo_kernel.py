@@ -401,6 +401,7 @@ class ComboKernel(Kernel):
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
+            is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
         )
