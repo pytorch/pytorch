@@ -117,6 +117,7 @@ enum GEMMAndBiasActivationEpilogue {
     int64_t mat1_ld, \
     const Dtype* mat2_ptr, \
     int64_t mat2_ld, \
+    at::opmath_type<Dtype> beta_val, \
     C_Dtype* result_ptr, \
     int64_t result_ld, \
     __VA_ARGS__

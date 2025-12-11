@@ -57,6 +57,7 @@ class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
           params->alpha,
           params->a, params->lda,
           params->b, params->ldb,
+          params->beta,
           params->c, params->ldc,
           params->bias, params->ldbias,
           params->activation);

@@ -343,6 +343,7 @@ bool launchGemmAndBiasCublasLt(
     args.lda,
     args.matb->const_data_ptr<scalar_t>(),
     args.ldb,
+    /*beta*/ static_cast<at::opmath_type<scalar_t>>(1), // 1 for now
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
     self_ptr,
