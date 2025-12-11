@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-AlbertForMaskedLM,pass,3
+AlbertForMaskedLM,pass,4
 
 
 
@@ -22,23 +22,23 @@ DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
-ElectraForCausalLM,pass,3
+ElectraForCausalLM,pass,4
 
 
 
-GPT2ForSequenceClassification,pass,4
+GPT2ForSequenceClassification,pass,6
 
 
 
-GoogleFnet,pass,4
+GoogleFnet,pass,5
 
 
 
-LayoutLMForMaskedLM,pass,4
+LayoutLMForMaskedLM,pass,5
 
 
 
-M2M100ForConditionalGeneration,pass,3
+M2M100ForConditionalGeneration,pass,4
 
 
 
@@ -46,11 +46,11 @@ MBartForCausalLM,pass,6
 
 
 
-MT5ForConditionalGeneration,pass,4
+MT5ForConditionalGeneration,pass,5
 
 
 
-MegatronBertForCausalLM,pass,4
+MegatronBertForCausalLM,pass,5
 
 
 
@@ -74,11 +74,11 @@ Qwen/Qwen3-0.6B,eager_fail_to_run,0
 
 
 
-T5ForConditionalGeneration,pass,4
+T5ForConditionalGeneration,pass,5
 
 
 
-T5Small,pass,4
+T5Small,pass,5
 
 
 
@@ -90,11 +90,11 @@ XGLMForCausalLM,pass,6
 
 
 
-XLNetLMHeadModel,pass,4
+XLNetLMHeadModel,pass,5
 
 
 
-YituTechConvBert,pass,4
+YituTechConvBert,pass,5
 
 
 

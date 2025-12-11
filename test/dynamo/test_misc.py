@@ -6176,6 +6176,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2

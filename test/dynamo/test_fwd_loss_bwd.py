@@ -642,7 +642,7 @@ class GraphModule(torch.nn.Module):
             r"autograd.grad with external GradientEdge",
         ):
             fn(edges, x)
-            
+
     @skipIfCrossRef
     def test_tensor_backward_basic(self):
         """Test that tensor.backward(inputs=params) works in compiled code."""

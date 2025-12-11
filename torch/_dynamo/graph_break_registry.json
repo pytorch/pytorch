@@ -1528,6 +1528,18 @@
       "Hints": []
     }
   ],
+  "GB7878": [
+    {
+      "Gb_type": "autograd.grad with external GradientEdge",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains an autograd node that was created outside the compiled region boundary.",
+      "Hints": [
+        "Move the autograd.grad() call outside the compiled region.",
+        "Or create the GradientEdge inside the compiled function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0152": [
     {
       "Gb_type": "Unsupported key type for itertools.groupby",

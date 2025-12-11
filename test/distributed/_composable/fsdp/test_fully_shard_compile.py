@@ -593,6 +593,7 @@ autograd.grad with compiled autograd
                 },
                 inline_inbuilt_nn_modules=True,
                 skip_fsdp_hooks=False,
+                trace_autograd_ops=True,
             ),
             torch._functorch.config.patch(
                 enable_autograd_cache=False,
