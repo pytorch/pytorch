@@ -421,6 +421,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, Union[torch._C.ScriptObject, FakeScriptObject]
         ] = {}
+        self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
         self.removed_operations: OrderedSet[str] = OrderedSet()
@@ -2501,7 +2502,11 @@ class GraphLowering(torch.fx.Interpreter):
                 key,
                 path,
                 linemap=linemap,  # type: ignore[arg-type]
-                attrs={**self.constants, **self.torchbind_constants},
+                attrs={
+                    **self.constants,
+                    **self.torchbind_constants,
+                    **self.opaque_value_type_classes,
+                },
             )
         self.cache_key = key
         self.cache_path = path

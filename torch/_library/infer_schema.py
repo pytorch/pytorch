@@ -128,7 +128,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
