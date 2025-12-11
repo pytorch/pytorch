@@ -310,29 +310,28 @@ def _exit_inference_mode(mode):
     mode.__exit__(None, None, None)
 
 
-  class set_multithreading_enabled(_DecoratorContextManager):
-      r"""Context-manager that enables or disables multithreaded backward.
+class set_multithreading_enabled(_DecoratorContextManager):
+    r"""Context-manager that enables or disables multithreaded backward.
 
-      By default, when :ref:`accelerator<accelerators>` devices are in use,
-      the backward pass runs on device-specific worker threads. The engine
-      creates these threads based on the number of available devices and
-      reuses them across iterations. This context manager controls the
-      behavior via its :attr:`mode` argument. When ``False``, the backward
-      pass runs sequentially on the calling thread instead. It can be used
-      as a context-manager or as a function.
+    Ordinarily, when :ref:`accelerator<accelerators>` devices are in use,
+    the backward pass runs on device-specific worker threads. The engine
+    creates these threads based on the number of available devices and
+    reuses them across iterations.
 
-      This context manager is thread-local and will not affect computation in
-      other threads.
+    When ``mode=False``, the backward pass runs on the calling thread
+    instead. ``mode=True`` restores the default behavior.
 
-      Args:
-          mode (bool): Flag whether to enable multithreaded backward
-                       (``True``) or disable (``False``).
+    This can be used as a context-manager or as a function. It is
+    thread-local and will not affect computation in other threads.
 
-      .. note::
-          This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+    Args:
+        mode (bool): Whether to enable multithreaded backward (``True``,
+                    default) or disable (``False``).
 
-      """
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
+    """
     def __init__(self, mode: bool) -> None:
         self.prev = torch._C._is_multithreading_enabled()
         torch._C._set_multithreading_enabled(mode)
