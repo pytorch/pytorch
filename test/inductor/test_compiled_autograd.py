@@ -2771,7 +2771,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
             self.assertEqual(counters["stats"]["unique_graphs"], 3)
         else:
             self.check_output_and_recompiles(
-                fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
+                fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
             )
             self.assertEqual(counters["stats"]["unique_graphs"], 2)
 

@@ -717,11 +717,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Create a new VariableTracker from a value and optional Source"""
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
-        elif type(value) in (int, float, bool, str):
-            # Use LazyConstantVariable for primitives to enable deferred
-            # guard installation - constants that are just passed through
-            # won't cause recompilation when their values change.
-            return variables.LazyConstantVariable.create(value, source)
         else:
             return variables.LazyVariableTracker.create(value, source)
 

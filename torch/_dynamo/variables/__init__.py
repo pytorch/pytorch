@@ -90,7 +90,7 @@ from .iter import (
     RepeatIteratorVariable,
     ZipVariable,
 )
-from .lazy import LazyConstantVariable, LazyVariableTracker
+from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -183,7 +183,6 @@ __all__ = [
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
-    "LazyConstantVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
