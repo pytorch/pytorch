@@ -78,6 +78,10 @@ class DeviceInterface:
         def get_device_properties(device: torch.types.Device = None) -> Any:
             raise NotImplementedError
 
+    class profilerActivity:
+        def __new__(cls) -> Any:
+            raise NotImplementedError
+
     @staticmethod
     def current_device() -> int:
         raise NotImplementedError
@@ -204,6 +208,7 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+    profilerActivity = torch.profiler.ProfilerActivity.CUDA  # type: ignore[assignment]
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -384,6 +389,7 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+    profilerActivity = torch.profiler.ProfilerActivity.XPU  # type: ignore[assignment]
 
     # pyrefly: ignore [bad-override]
     class Worker:
