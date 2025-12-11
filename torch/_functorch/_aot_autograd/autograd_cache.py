@@ -153,6 +153,10 @@ def check_node_safe(node: Node):
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
         "einops.einops.repeat",
+        # DTensor side table functions for redistribute/to_local/from_local
+        "torch._dynamo.side_tables.dtensor_to_local",
+        "torch._dynamo.side_tables.dtensor_redistribute",
+        "torch._dynamo.side_tables.dtensor_from_local",
     )
 
     def is_public_torch_api(target):
@@ -280,6 +284,14 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
+def _reconstruct_source(source_type, field_values):
+    """
+    Reconstruct a Source object from its type and field values.
+    Used by AOTAutogradCachePickler to unpickle Source objects.
+    """
+    return source_type(**field_values)
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -349,6 +361,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
+        # Include DTensor args hashes in cache key for redistribute/to_local calls
+        from torch._dynamo.side_tables import get_dtensor_args_hashes_from_gm
+
+        self.dtensor_args_hashes = get_dtensor_args_hashes_from_gm(gm)
+
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
             def _add_wrapped_user_cache_hashes(_gm, _l):
@@ -387,6 +404,47 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
             }
         )
+        # Add DTensor to dispatch table if available
+        try:
+            from torch.distributed.tensor import DTensor
+
+            self.dispatch_table[DTensor] = functools.partial(self._reduce_dtensor)
+        except ImportError:
+            pass
+
+    def reducer_override(self, obj):
+        """
+        Override reducer for Source objects to exclude cached fields like _hash.
+
+        Source objects use @dataclass_with_cached_hash which adds a _hash field
+        that contains a process-specific Python hash. This field changes between
+        processes due to PYTHONHASHSEED randomization, causing cache key instability.
+
+        We reduce Source objects to only their dataclass fields, excluding:
+        - _hash: cached Python hash (process-specific)
+        - name: cached property
+        - guard_source: cached property
+        - _name_template: can be a cached property in some subclasses
+        """
+        from torch._guards import Source
+
+        if isinstance(obj, Source):
+            return self._reduce_source(obj)
+        # Return NotImplemented to use the default reducer
+        return NotImplemented
+
+    def _reduce_source(self, source):
+        """
+        Reduce a Source object to only its dataclass fields for stable caching.
+        """
+        import dataclasses
+
+        # Get only the declared dataclass fields, not cached properties
+        field_values = {f.name: getattr(source, f.name) for f in dataclasses.fields(source)}
+        return (
+            _reconstruct_source,
+            (type(source), field_values),
+        )
 
     def _reduce_aot_config(self, aot_config: AOTConfig):
         """
@@ -412,6 +470,19 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         metadata = extract_tensor_metadata_for_cache_key(tensor)
         return (_ident, (metadata,))
+
+    def _reduce_dtensor(self, dtensor):
+        """
+        Reduce a DTensor to a stable key for caching.
+
+        Uses repr() to capture all DTensor-specific metadata (DeviceMesh, placements, etc.)
+        in a human-readable format that can be diffed to identify nondeterministic aspects.
+        """
+        # Get the base tensor metadata
+        metadata = extract_tensor_metadata_for_cache_key(dtensor)
+        # Get DTensor-specific info via repr for debugging/diffing
+        dtensor_repr = repr(dtensor)
+        return (_ident, (metadata, dtensor_repr))
 
 
 @contextlib.contextmanager
