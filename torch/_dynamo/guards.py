@@ -1812,7 +1812,10 @@ class GuardBuilder(GuardBuilderBase):
                 "epilogue",
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(
+                guard_fn,
+                verbose_code_parts,
+                "lambda")
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -4203,7 +4206,7 @@ class CheckFunctionManager:
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
                     [code_part],
-                    get_verbose_user_stack(guard),
+                    "install_storage_overlapping_guard",
                 )
                 add_code_part(code_part, None, True)
             else:
