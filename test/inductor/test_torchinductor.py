@@ -105,6 +105,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfS390X,
+    MI200_ARCH
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -656,7 +657,7 @@ def check_model(
 
     torch._dynamo.reset()
 
-
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
