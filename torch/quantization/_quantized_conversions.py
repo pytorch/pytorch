@@ -6,9 +6,12 @@ import torch
 # value goes into lower order bits, and second int4 value into higher
 # order bits of resulting int8 value.
 def pack_int4_to_int8(weight):
-    assert weight.dim() == 2
-    assert weight.shape[1] % 2 == 0
-    assert weight.dtype == torch.int8
+    if weight.dim() != 2:
+        raise AssertionError(f"weight must be 2D, got {weight.dim()}D")
+    if weight.shape[1] % 2 != 0:
+        raise AssertionError(f"weight.shape[1] must be even, got {weight.shape[1]}")
+    if weight.dtype != torch.int8:
+        raise AssertionError(f"weight.dtype must be int8, got {weight.dtype}")
     return ((weight[:, 1::2] & 0xF) << 4) | (weight[:, 0::2] & 0xF)
 
 
@@ -16,8 +19,10 @@ def pack_int4_to_int8(weight):
 # major order; lower 4 bits go into first int4 value goes, and upper 4
 # bits go into second int4 value.
 def unpack_int8_to_int4(weight):
-    assert weight.dim() == 2
-    assert weight.dtype == torch.int8
+    if weight.dim() != 2:
+        raise AssertionError(f"weight must be 2D, got {weight.dim()}D")
+    if weight.dtype != torch.int8:
+        raise AssertionError(f"weight.dtype must be int8, got {weight.dtype}")
     return torch.stack((weight & 0xF, (weight >> 4) & 0xF), dim=2).view(
         weight.shape[0], 2 * weight.shape[1]
     )
@@ -29,10 +34,14 @@ def unpack_int8_to_int4(weight):
 def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
     weight, dtypeq, transpose=False
 ):
-    assert weight.dim() == 2
-    assert weight.dtype == torch.int8
-    assert dtypeq == torch.int8 or dtypeq == torch.quint4x2
-    assert weight.device.type == "cuda"
+    if weight.dim() != 2:
+        raise AssertionError(f"weight must be 2D, got {weight.dim()}D")
+    if weight.dtype != torch.int8:
+        raise AssertionError(f"weight.dtype must be int8, got {weight.dtype}")
+    if dtypeq != torch.int8 and dtypeq != torch.quint4x2:
+        raise AssertionError(f"dtypeq must be int8 or quint4x2, got {dtypeq}")
+    if weight.device.type != "cuda":
+        raise AssertionError(f"weight must be on CUDA, got {weight.device.type}")
 
     device = weight.device
 
@@ -46,8 +55,11 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
         outp = weight
 
     ncols, nrows = outp.shape  # type: ignore[possibly-undefined]
-    assert nrows % (32 if dtypeq == torch.quint4x2 else 64) == 0
-    assert ncols % 64 == 0
+    divisor = 32 if dtypeq == torch.quint4x2 else 64
+    if nrows % divisor != 0:
+        raise AssertionError(f"nrows must be divisible by {divisor}, got {nrows}")
+    if ncols % 64 != 0:
+        raise AssertionError(f"ncols must be divisible by 64, got {ncols}")
 
     # permute_B_rows_for_mixed_gemm
     # (permute cols actually, as transpose is applied first here)
