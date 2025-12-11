@@ -932,10 +932,20 @@ def validate_args_and_maybe_create_graph_inputs(
             ListVariable(flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
     elif set_subgraph_inputs == "flatten_automatic":
+        # The goal of flatten_automatic is to extract all tensor variables from the
+        # inputs, in the order of *args and **kwargs, and immediately lift them as
+        # subgraph inputs. It's possible that a subgraph input might not actually be
+        # used in the subgraph, but that's acceptable.
+        #
+        # This behavior is beneficial for:
+        #   - local_map (TODO), which wants the same ordering as the original function args
+        #   - invoke_subgraph's upcoming `is_pure` logic, which needs a stable, guaranteed
+        #     ordering of subgraph inputs for a simpler implementation.
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(sub_args)
         ).unpack_var_sequence(tx)
 
+        # lift the tensor variables as subgraph inputs right away.
         for arg in flat_args.unpack_var_sequence(tx):
             if isinstance(arg, variables.TensorVariable):
                 tracer.maybe_lift_tracked_freevar_to_input(arg.proxy)
@@ -1351,13 +1361,14 @@ def get_hop_args(
         sub_args_names,
     )
 
-    validate_args_and_maybe_create_graph_inputs(
-        sub_kwargs.values(),
-        subtracer,
-        tx,
-        set_subgraph_inputs="automatic",
-        description=description,
-    )
+    if sub_kwargs:
+        validate_args_and_maybe_create_graph_inputs(
+            sub_kwargs.values(),
+            subtracer,
+            tx,
+            set_subgraph_inputs=set_subgraph_inputs,
+            description=description,
+        )
     return args
 
 
@@ -1378,10 +1389,7 @@ def speculate_subgraph_with_auto_output_flattening(
     enable_grad: Optional[bool] = None,
     # TODO - We can probably just make everyone use automatic for wrap_semantics
     set_subgraph_inputs: Literal[
-        "automatic",
-        "semi_automatic",
-        "flatten_manual",
-        "manual",
+        "automatic", "semi_automatic", "flatten_manual", "manual", "flatten_automatic"
     ] = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
@@ -1514,8 +1522,8 @@ def speculate_subgraph_with_auto_output_flattening(
         "automatic",
         "semi_automatic",
         "flatten_manual",
-        "manual",
         "flatten_automatic",
+        "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
