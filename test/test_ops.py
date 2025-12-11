@@ -486,7 +486,6 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
-    @slowTest
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
