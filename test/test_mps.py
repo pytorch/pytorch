@@ -8313,6 +8313,94 @@ class TestMPS(TestCaseMPS):
         b = torch.rand((0), device="mps")
         self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
 
+    def test_binary_kernels(self):
+        def check(a, b, ops="+-*/"):
+            op_funcs = {'+': lambda x, y: x + y, '-': lambda x, y: x - y,
+                        '*': lambda x, y: x * y, '/': lambda x, y: x / y}
+            for op in ops:
+                self.assertEqual(op_funcs[op](a, b), op_funcs[op](a.cpu(), b.cpu()))
+                self.assertEqual(op_funcs[op](b, a), op_funcs[op](b.cpu(), a.cpu()))
+
+        def rand(*shape, **kw):
+            return torch.rand(shape, device="mps", **kw)
+
+        def randint(*shape, **kw):
+            return torch.randint(0, 100, shape, device="mps", **kw)
+
+        # basic case
+        check(rand(100), rand(100))
+        # empty tensors
+        check(rand(0), rand(0), "+-")
+        # strided tensors
+        check(rand(100, 100).t(), rand(100, 100).t(), "+*")
+
+        # broadcasting cases
+        for sa, sb in [((100, 100), (100,)), ((100, 10, 100), (100, 1, 100)), ((100, 1, 10), (1, 100, 10))]:
+            check(rand(*sa), rand(*sb), "+*")
+
+        # scalar cases
+        a = rand(100)
+        self.assertEqual(a + 2.0, a.cpu() + 2.0)
+        self.assertEqual(a * 2.0, a.cpu() * 2.0)
+        self.assertEqual(torch.add(a, a, alpha=2.0), torch.add(a.cpu(), a.cpu(), alpha=2.0))
+
+        # cast cases
+        check(rand(100, dtype=torch.float32), rand(100, dtype=torch.float16), "+*-")
+        check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")
+        check(randint(100, dtype=torch.int32), randint(100, dtype=torch.int64), "+*-")
+
+        # non contiguous cases/slices
+        check(rand(100, 100)[10:50, 20:80], rand(100, 100)[10:50, 20:80])
+        check(rand(100, 100)[::2, ::3], rand(100, 100)[::2, ::3], "+*")
+        check(rand(10, 20, 30).permute(2, 0, 1), rand(10, 20, 30).permute(2, 0, 1), "+*")
+        check(rand(50, 50).flip(0), rand(50, 50).flip(1), "+*")
+        check(rand(100, 100).diagonal(), rand(100, 100).diagonal(), "+*")
+        check(rand(1).expand(100, 100), rand(1), "+*-")
+
+        # integer ops
+        a_int, b_int = randint(100, dtype=torch.int32), torch.randint(1, 100, (100,), device="mps", dtype=torch.int32)
+        self.assertEqual(a_int // b_int, a_int.cpu() // b_int.cpu())
+        self.assertEqual(a_int % b_int, a_int.cpu() % b_int.cpu())
+
+        # boolean. bitwise
+        a_bool, b_bool = rand(100) > 0.5, rand(100) > 0.5
+        self.assertEqual(a_bool & b_bool, a_bool.cpu() & b_bool.cpu())
+        self.assertEqual(a_bool | b_bool, a_bool.cpu() | b_bool.cpu())
+
+        # comparisons
+        a, b = rand(100), rand(100)
+        self.assertEqual(a > b, a.cpu() > b.cpu())
+        self.assertEqual(a < b, a.cpu() < b.cpu())
+        self.assertEqual(a >= b, a.cpu() >= b.cpu())
+        self.assertEqual(a <= b, a.cpu() <= b.cpu())
+        self.assertEqual(a == b, a.cpu() == b.cpu())
+        self.assertEqual(a != b, a.cpu() != b.cpu())
+
+        # power
+        a_pow, b_pow = rand(100) + 0.5, rand(100) * 3
+        self.assertEqual(a_pow ** b_pow, a_pow.cpu() ** b_pow.cpu())
+
+        # complex
+        check(rand(100, dtype=torch.complex64), rand(100, dtype=torch.complex64))
+
+        # inplace
+        a, b = rand(100), rand(100)
+        a_cpu = a.cpu().clone()
+        a.add_(b)
+        a_cpu.add_(b.cpu())
+        self.assertEqual(a, a_cpu)
+
+        # with out parameter
+        a, b, c = rand(100), rand(100), torch.empty(100, device="mps")
+        c_cpu = torch.empty(100)
+        torch.add(a, b, out=c)
+        torch.add(a.cpu(), b.cpu(), out=c_cpu)
+        self.assertEqual(c, c_cpu)
+
+        # where
+        cond, a, b = rand(100) > 0.5, rand(100), rand(100)
+        self.assertEqual(torch.where(cond, a, b), torch.where(cond.cpu(), a.cpu(), b.cpu()))
+
 
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
