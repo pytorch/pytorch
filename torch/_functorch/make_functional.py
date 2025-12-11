@@ -550,7 +550,7 @@ def combine_state_for_ensemble(
 
 def functional_init(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):
@@ -577,7 +577,7 @@ def functional_init(
 
 def functional_init_with_buffers(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 
+import logging
 from typing import Any
 
 import sympy
@@ -30,6 +31,8 @@ from .common import (
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+log = logging.getLogger(__name__)
 
 
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
@@ -92,7 +95,15 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and valid_block_mask_num_heads
         and pw_of_two
     )
-    print(f">>> use flex decoding {out}")
+    log.debug(
+        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, can_use_single_block_m=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        out,
+        force_flex,
+        short_query_length,
+        can_use_single_block_m,
+        static_batch,
+        static_num_heads,
+    )
     return out
 
 
