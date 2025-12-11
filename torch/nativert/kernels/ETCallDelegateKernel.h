@@ -13,7 +13,7 @@ class ETCallDelegateKernel : public OpKernel {
       const Node* node,
       ETDelegateExecutor& delegateExecutor);
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final;
+  void computeInternal(ExecutionFrame& executionFrame) const final;
 
  private:
   ETDelegateExecutor& delegateExecutor_;
