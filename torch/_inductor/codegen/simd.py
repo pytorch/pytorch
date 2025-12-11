@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
+from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -1625,7 +1625,7 @@ class SIMDScheduling(BaseScheduling):
 
             # split_size is decided based on hint
             numel_hint = V.graph.sizevars.size_hint(numel)
-            split_size = max(next_power_of_2(numel_hint // estimated_num_splits), 16)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1678,7 +1678,6 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            # print(f"Autotuning pick split size {split_size}")
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
@@ -1749,9 +1748,12 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # The workspace tensor is in torch.float, need a cast if the buffer is
+            # not.
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                final_reduce += f".to({buffer_dtype})"
+            V.graph.wrapper_code.writeline(final_reduce)
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
@@ -2274,11 +2276,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
-        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
-
-        # This is currently the only type supported by this method
-        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
@@ -2291,7 +2289,6 @@ class SIMDScheduling(BaseScheduling):
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
-                triton_kernel_cls=self.kernel_type,
             )
 
         partitions = ComboKernel.horizontal_partition(
@@ -2311,7 +2308,6 @@ class SIMDScheduling(BaseScheduling):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
-                triton_kernel_cls=self.kernel_type,
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )

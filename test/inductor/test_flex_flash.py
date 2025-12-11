@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     create_block_mask,
@@ -193,6 +194,36 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {fwd_atol:.2e}"
     )
 
+    needs_backward = any(
+        isinstance(t, torch.Tensor) and t.requires_grad for t in (q, k, v)
+    )
+    if needs_backward:
+        grad = torch.randn_like(out_flash)
+        inputs = (q, k, v)
+        grads_ref = torch.autograd.grad(out_ref_fp32, inputs, grad)
+        grads_triton = torch.autograd.grad(out_triton, inputs, grad)
+        grads_flash = torch.autograd.grad(out_flash, inputs, grad)
+
+        dq_atol = 2 * (grads_ref[0] + 0.3 - 0.3 - grads_ref[0]).abs().max().item()
+        dk_atol = 2 * (grads_ref[1] + 0.3 - 0.3 - grads_ref[1]).abs().max().item()
+        dv_atol = 2 * (grads_ref[2] + 0.3 - 0.3 - grads_ref[2]).abs().max().item()
+
+        atol_pack = (dq_atol, dk_atol, dv_atol)
+        for grad_flash, grad_triton, grad_ref, atol in zip(
+            grads_flash, grads_triton, grads_ref, atol_pack
+        ):
+            assert torch.isfinite(grad_flash).all()
+            assert torch.isfinite(grad_triton).all()
+            assert torch.isfinite(grad_ref).all()
+
+            triton_error = (grad_triton - grad_ref).abs().max().item()
+            flash_error = (
+                (grad_flash - grad_ref.to(grad_flash.dtype)).abs().max().item()
+            )
+            assert flash_error <= rtol * triton_error + atol, (
+                f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {atol:.2e}"
+            )
+
     return out_flash, out_triton, out_ref_fp32
 
 
@@ -329,6 +360,99 @@ class TestFlexFlash(InductorTestCase):
                 score_mod=score_mod_with_grad,
                 kernel_options={"BACKEND": "FLASH"},
             )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_rejects_mask_mod(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = _create_block_mask_for_device(
+            causal_mask, 2, 4, 512, 512, device=device
+        )
+        q.requires_grad_(True)
+        compiled_fn = torch.compile(flex_attention)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"NYI: Flex Flash Attention doesn't support block_sparsity yet",
+        ):
+            compiled_fn(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            ).sum().backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_rejects_score_mod_capture(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        bias = torch.randn(4, device=device, dtype=dtype)
+
+        def score_mod_with_capture(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        q.requires_grad_(True)
+        compiled_fn = torch.compile(flex_attention)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"NYI: Flex Flash Attention doesn't support score_mods in bwds yet",
+        ):
+            compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=score_mod_with_capture,
+                kernel_options={"BACKEND": "FLASH"},
+            ).sum().backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_rejects_score_mod(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        def score_mod_twice(score, b, h, q_idx, kv_idx):
+            return score * 2
+
+        q.requires_grad_(True)
+        k.requires_grad_(True)
+        v.requires_grad_(True)
+        compiled_fn = torch.compile(flex_attention)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"NYI: Flex Flash Attention doesn't support score_mods in bwds yet",
+        ):
+            compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=score_mod_twice,
+                kernel_options={"BACKEND": "FLASH"},
+            ).sum().backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_kernel_called(self, device, dtype):
+        q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
+        q.requires_grad_(True)
+        k.requires_grad_(True)
+        v.requires_grad_(True)
+
+        flash_vs_triton(q, k, v)
+
+        compiled_fn = torch.compile(flex_attention)
+
+        def run_for_profile():
+            q_run, k_run, v_run = (
+                t.detach().clone().requires_grad_(True) for t in (q, k, v)
+            )
+            compiled_fn(
+                q_run, k_run, v_run, kernel_options={"BACKEND": "FLASH"}
+            ).sum().backward()
+
+        with cuda_kernel_profiler("flash_attncuteflash_bwd") as prof_result:
+            run_for_profile()
+
+        self.assertTrue(
+            prof_result["found"],
+            f"Flash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
+        )
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_with_block_mask(self, device, dtype):
@@ -497,6 +621,54 @@ class TestFlexFlash(InductorTestCase):
             mask_with_buffer, 2, 4, 512, 512, device=device
         )
         flash_vs_triton(q, k, v, score_mod=score_with_buffer, block_mask=block_mask)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_generates_cute_hash(self, device, dtype):
+        """Test that generated code sets __cute_hash__ on score_mod for fast hashing."""
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=_causal,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        # Check that the generated code sets __cute_hash__ on score_mod
+        code_str = "\n".join(code)
+        self.assertIn(
+            "score_mod.__cute_hash__",
+            code_str,
+            "Generated code should set __cute_hash__ on score_mod for fast hashing",
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_fused_qkv_reinterpret_view(self, device, dtype):
+        """Test that fused QKV projection (creating ReinterpretViews) works.
+
+        When Q/K/V are slices of a shared buffer (from fused QKV projection),
+        they become ReinterpretViews with non-contiguous strides. CuteDSL must
+        handle these by generating proper reinterpret_tensor() calls.
+        """
+        B, M, H, D = 2, 256, 4, 64
+        embed_dim = H * D
+
+        def fn(x, weight):
+            qkv = x @ weight
+            qkv = qkv.view(B, M, 3, H, D)
+            q, k, v = qkv.unbind(2)
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            return flex_attention(q, k, v, kernel_options={"BACKEND": "FLASH"})
+
+        x = torch.randn(B, M, embed_dim, device=device, dtype=dtype)
+        weight = torch.randn(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
+
+        compiled_fn = torch.compile(fn)
+        out = compiled_fn(x, weight)
+        self.assertEqual(out.shape, (B, H, M, D))
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")

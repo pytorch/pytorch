@@ -4311,7 +4311,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
     idx = (slice(None),) * dim + (index,)
-    return x[idx]
+    return x[idx].contiguous()
 
 
 @register_decomposition(aten.squeeze.dims)
@@ -4913,6 +4913,10 @@ def take_along_dim(
         indices_sizes[dim] = a.size(dim)
         broadcast_shape = utils.infer_size_shapes(indices_sizes, a.size())
         self_broadcast = broadcast_to(a, broadcast_shape)
+
+        # wrap negative indices
+        dim_size = self_broadcast.size(dim)
+        indices_broadcast = indices_broadcast % dim_size
 
         return torch.gather(self_broadcast, dim, indices_broadcast)
 

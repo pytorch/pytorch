@@ -50,7 +50,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -119,7 +118,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cutlass.cuda_template import CUDATemplate
+    from .codegen.cuda.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -528,6 +527,16 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
         sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
 
     return list(sym_vars)
+
+
+def try_get_name(x):
+    if isinstance(x, TensorBox):
+        x = x.data
+    if isinstance(x, BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, StorageBox):
+        x = x.data
+    return x.get_name() if isinstance(x, Buffer) else None
 
 
 class IRNode:
@@ -947,9 +956,6 @@ class Loops(IRNode):
             + [f"{name}={getattr(self, name)}" for name in names]
             + [f"origin_node={self.origin_node!r}"]
         )
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
 
     def __str__(self) -> str:
         return self._to_str(("ranges",))
@@ -1435,7 +1441,9 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            outer = all(s > 1 for s in strides)
+            # A 0 stride does not make a reduction contiguous.
+            # This can happen when the reduction ranges contains a 1.
+            outer = all(s == 0 or s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -3106,14 +3114,14 @@ class SqueezeView(BaseView):
     @staticmethod
     def squeezer(
         size: Sequence[Expr],
-    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr, ...]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.S.Zero] * length
+            new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -7427,18 +7435,24 @@ class IndexPutFallback(ExternKernel):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+        x_device = x.get_device()
+        assert x_device is not None
         if (
             not x.is_extern()
+            # Can not apply this optimization if x has been mutated
+            and try_get_name(x) not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
+            if V.graph.cpp_wrapper:
+                # Even if x is promoted to be a device constant, we still need to
+                # register device info to construct the correct CppWrapper class later
+                V.graph.add_device_info(device)
+                V.graph.add_device_info(x_device)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
-        x_device = x.get_device()
-        assert x_device is not None
         V.graph.add_device_info(x_device)
-
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
         # Device Copy should keep the same layout as input
@@ -7871,9 +7885,11 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return False
-        return get_schema_info(self.op_overload).is_mutable()
+        from torch._library.utils import is_impure
+
+        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
+        # The check is done on the op_overload itself
+        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
@@ -8217,9 +8233,6 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = [outputs]
         # pyrefly: ignore [bad-return]
         return outputs
-
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
 
 
 @ir_dataclass(frozen=False)
@@ -8654,11 +8667,22 @@ class InvokeSubgraph(ExternKernel):
         fake_operands = None
         if eager_input_vals := current_node.meta.get("eager_input_vals"):
             # eager_input_vals is (args_values, kwargs_values). We need args for invoke_subgraph
-            fake_operands = eager_input_vals[0][2:]
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # Aruguments eagerly are (token, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 3
+            fake_operands = eager_input_vals[0][offset:]
         else:
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # with_effects args: (token, invoke_subgraph, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 4
+
             # For the partitioned backward graph, we do not have
             # eager_input_vals. Here, we rely on the recorded example values.
-            fx_operands = current_node.args[2:]
+            fx_operands = current_node.args[offset:]
             fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
@@ -8827,9 +8851,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
