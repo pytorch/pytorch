@@ -2048,9 +2048,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     op.wait()
                 del self.unshard_ops[stage_idx]
                 self.unsharded_stages.add(stage_idx)
-            assert stage_idx in self.unsharded_stages, (
-                f"Attempted to compute on sharded {stage_idx=}"
-            )
+            if stage_idx not in self.unsharded_stages:
+                raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
     def _step_microbatches(
         self,
