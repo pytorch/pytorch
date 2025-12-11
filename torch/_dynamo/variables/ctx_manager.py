@@ -212,22 +212,29 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         # We don't call super().__init__() because we're delegating most methods to cm_vt
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        # Custom enter implementation with side effects
-
-        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
-        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
-        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
-        return self.cm_vt.enter(tx)
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+            self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+            tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+            tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+            return self.cm_vt.enter(tx)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
-        # Custom exit implementation with side effects
-        x = self.cm_vt.exit(tx, *args)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
-        return x
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            x = self.cm_vt.exit(tx, *args)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+            return x
 
     # Forward all other method calls to self.cm_vt
     def __getattr__(self, name: str) -> Any:
