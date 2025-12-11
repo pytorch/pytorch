@@ -76,7 +76,8 @@ def _add_op_to_registry(registry, op, fn):
     elif isinstance(op, OpOverload):
         overloads.append(op)
     else:
-        assert isinstance(op, OpOverloadPacket)
+        if not isinstance(op, OpOverloadPacket):
+            raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
         for ol in op.overloads():
             overloads.append(getattr(op, ol))
 
@@ -109,7 +110,10 @@ def _convert_out_params(f):
             out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
             # Either all of the out kwargs are set or none of them
             is_none = out_kwargs[0] is None
-            assert all((o is None) == is_none for o in out_kwargs)
+            if not all((o is None) == is_none for o in out_kwargs):
+                raise AssertionError(
+                    f"all out kwargs must be set or none of them, got {out_kwargs}"
+                )
             return f(*args, **kwargs, out=None if is_none else out_kwargs)
 
         out_params = [
@@ -200,7 +204,10 @@ def register_decomposition(
     things
     """
 
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     def decomposition_decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         orig_fn = fn
@@ -236,7 +243,10 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
