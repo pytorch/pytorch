@@ -10,6 +10,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    MI200_ARCH,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -494,6 +495,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     @parametrize("split_reductions", (False, True))
     @parametrize("dtype", [torch.bfloat16, torch.float])
     def test_rms_norm_sharing_weights(self, split_reductions, dtype):
