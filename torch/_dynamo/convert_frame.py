@@ -476,12 +476,13 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         )
         prof = cProfile.Profile()
         try:
-            prof.enable()
             start_ts = time.time()
+            # runcall calls prof.enable() and prof.disable(), so do NOT call
+            # enable outside. This leads to issues like
+            # ValueError: Another profiling tool is already active
             # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
-            prof.disable()
         except ValueError:
             log.exception("failed to enable cProfile")
             profile_latency = 0
@@ -500,7 +501,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
-            gprof2dot_process = subprocess.Popen(
+            with subprocess.Popen(
                 [
                     "gprof2dot",
                     "-f",
@@ -511,12 +512,12 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                     str(profile_path),
                 ],
                 stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            log.warning("Generated SVG from profile at %s", svg_path)
+            ) as gprof2dot_process:
+                subprocess.check_call(
+                    ["dot", "-Tsvg", "-o", str(svg_path)],
+                    stdin=gprof2dot_process.stdout,
+                )
+                log.warning("Generated SVG from profile at %s", svg_path)
         except FileNotFoundError:
             log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
