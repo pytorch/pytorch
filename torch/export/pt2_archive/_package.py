@@ -6,7 +6,7 @@ import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, IO, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -61,28 +61,26 @@ if TYPE_CHECKING:
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
-AOTI_FILES: TypeAlias = Union[
-    list[Union[str, Weights]], dict[str, list[Union[str, Weights]]]
-]
+AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def is_pt2_package(serialized_model: Union[bytes, str]) -> bool:
+def is_pt2_package(serialized_model: bytes | str) -> bool:
     """
     Check if the serialized model is a PT2 Archive package.
     """
     try:
-        zip_reader = zipfile.ZipFile(
+        with zipfile.ZipFile(
             io.BytesIO(serialized_model)
             if isinstance(serialized_model, bytes)
             else serialized_model
-        )
-        root_folder = zip_reader.namelist()[0].split(os.path.sep)[0]
-        archive_format_path = f"{root_folder}/{ARCHIVE_FORMAT_PATH}"
-        if archive_format_path in zip_reader.namelist():
-            return zip_reader.read(archive_format_path) == b"pt2"
+        ) as zip_reader:
+            root_folder = zip_reader.namelist()[0].split(os.path.sep)[0]
+            archive_format_path = f"{root_folder}/{ARCHIVE_FORMAT_PATH}"
+            if archive_format_path in zip_reader.namelist():
+                return zip_reader.read(archive_format_path) == b"pt2"
     except Exception:
         logger.info("Model is not a PT2 package")
     return False
@@ -248,7 +246,7 @@ PT2ArchiveReader.__module__ = "torch.export.pt2_archive"
 
 def _package_aoti_files(
     archive_writer: PT2ArchiveWriter,
-    aoti_files: Optional[AOTI_FILES],
+    aoti_files: AOTI_FILES | None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     if aoti_files is None:
@@ -569,8 +567,8 @@ def _package_payload_config(
 
 def _package_exported_programs(
     archive_writer: PT2ArchiveWriter,
-    exported_programs: Optional[Union[ExportedProgram, dict[str, ExportedProgram]]],
-    opset_version: Optional[dict[str, int]] = None,
+    exported_programs: ExportedProgram | dict[str, ExportedProgram] | None,
+    opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     if exported_programs is None:
@@ -610,7 +608,7 @@ def _package_exported_programs(
 
 
 def _package_extra_files(
-    archive_writer: PT2ArchiveWriter, extra_files: Optional[dict[str, Any]]
+    archive_writer: PT2ArchiveWriter, extra_files: dict[str, Any] | None
 ) -> None:
     if extra_files is None:
         return
@@ -620,7 +618,7 @@ def _package_extra_files(
 
 
 def _package_executorch_files(
-    archive_writer: PT2ArchiveWriter, executorch_files: Optional[dict[str, bytes]]
+    archive_writer: PT2ArchiveWriter, executorch_files: dict[str, bytes] | None
 ) -> None:
     if executorch_files is None:
         return
@@ -632,14 +630,12 @@ def _package_executorch_files(
 def package_pt2(
     f: FileLike,
     *,
-    exported_programs: Optional[
-        Union[ExportedProgram, dict[str, ExportedProgram]]
-    ] = None,
-    aoti_files: Optional[AOTI_FILES] = None,
-    extra_files: Optional[dict[str, Any]] = None,
-    opset_version: Optional[dict[str, int]] = None,
+    exported_programs: ExportedProgram | dict[str, ExportedProgram] | None = None,
+    aoti_files: AOTI_FILES | None = None,
+    extra_files: dict[str, Any] | None = None,
+    opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
-    executorch_files: Optional[dict[str, bytes]] = None,
+    executorch_files: dict[str, bytes] | None = None,
 ) -> FileLike:
     r"""
     Saves the artifacts to a PT2Archive format. The artifact can then be loaded
@@ -759,7 +755,7 @@ class AOTICompiledModel:
     def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()
 
-    def __deepcopy__(self, memo: Optional[dict[Any, Any]]) -> "AOTICompiledModel":
+    def __deepcopy__(self, memo: dict[Any, Any] | None) -> "AOTICompiledModel":
         logger.warning(
             "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
         )
@@ -843,7 +839,7 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-) -> Union[dict[str, torch.Tensor], bytes]:
+) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
     if legacy_weights_file in archive_reader.get_file_names():
@@ -897,7 +893,7 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-) -> Union[dict[str, torch.Tensor], bytes]:
+) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
     if legacy_constants_file in archive_reader.get_file_names():
@@ -957,7 +953,7 @@ def _load_constants(
 def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
-    expected_opset_version: Optional[dict[str, int]],
+    expected_opset_version: dict[str, int] | None,
 ) -> dict[str, ExportedProgram]:
     exported_program_files = [
         file for file in file_names if file.startswith(MODELS_DIR)
@@ -1049,7 +1045,7 @@ def _load_aoti(
 def load_pt2(
     f: FileLike,
     *,
-    expected_opset_version: Optional[dict[str, int]] = None,
+    expected_opset_version: dict[str, int] | None = None,
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
