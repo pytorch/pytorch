@@ -444,8 +444,9 @@ def patch_inductor_backend(
 
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]):
     """
-    Create a custom pass which falls back based on the specified predicate.
-    Then, return a context activating this config.
+    Create a custom pass which falls back based on the provided predicate. For example,
+    we could provide a predicate which returns True for all aten.add.default nodes.
+    Returns a context activating the pass.
     """
     class Pass(CustomGraphPass):
         def __call__(self, graph: torch.fx.Graph):
