@@ -32,6 +32,7 @@ class TORCH_CUDA_CPP_API GreenContext {
 
   int32_t device_id_ = -1;
   CUgreenCtx green_ctx_ = nullptr;
+  CUstream green_ctx_stream_;
   CUcontext context_ = nullptr;
   cudaStream_t parent_stream_ = nullptr;
 };
