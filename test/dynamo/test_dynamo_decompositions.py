@@ -4,7 +4,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfCrossRef
 
 
 class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
@@ -15,6 +15,7 @@ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     When False, the original ops are preserved.
     """
 
+    @skipIfCrossRef
     def test_addcmul_inplace_decomposition_enabled(self):
         """With decompositions enabled, addcmul_ should decompose into mul and add_."""
 
@@ -49,6 +50,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_addcmul_inplace_decomposition_disabled(self):
         """With decompositions disabled, addcmul_ should remain as the original op.
 
@@ -83,6 +85,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_addcmul_inplace_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, addcmul_ with
         scalar value should work without graph breaks.
@@ -117,6 +120,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_add_inplace_with_alpha_decomposition_enabled(self):
         """With decompositions enabled, add_ with alpha should decompose into mul and add_."""
 
@@ -148,6 +152,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_add_inplace_with_alpha_decomposition_disabled(self):
         """With decompositions disabled, add_ with alpha should remain as the original op.
 
@@ -180,6 +185,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_add_inplace_with_alpha_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, add_ with
         scalar alpha should work without graph breaks.
@@ -212,6 +218,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_addcdiv_inplace_decomposition_enabled(self):
         """With decompositions enabled, addcdiv_ should decompose into div, mul, and add_."""
 
@@ -246,6 +253,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_addcdiv_inplace_decomposition_disabled(self):
         """With decompositions disabled, addcdiv_ should remain as the original op.
 
@@ -280,6 +288,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_addcdiv_inplace_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, addcdiv_ with
         scalar value should work without graph breaks.
@@ -314,6 +323,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_enabled(self):
         """With decompositions enabled, foreach_lerp_ with scalar weight should decompose."""
 
@@ -358,6 +368,7 @@ l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_disabled(self):
         """With decompositions disabled, foreach_lerp_ should remain as the original op.
 
