@@ -3055,12 +3055,9 @@ main()
             torch._inductor.config.triton.cudagraphs = False
             torch._inductor.config.graph_partition = True  # restore default
 
-        if graph_partition:
-            # With graph_partition, CPU graphs are partitioned around (not skipped)
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
-        else:
-            # Without graph_partition, CPU graphs cause cudagraphs to be skipped
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        # CPU-only graphs skip cudagraphs regardless of graph_partition setting
+        # (no GPU devices to use cudagraphs with)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     @skipIfXpu(msg="cudagraphs not supported on xpu for now!")
     @requires_gpu_and_triton
