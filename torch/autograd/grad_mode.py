@@ -310,23 +310,28 @@ def _exit_inference_mode(mode):
     mode.__exit__(None, None, None)
 
 
-class set_multithreading_enabled(_DecoratorContextManager):
-    r"""Context-manager that sets multithreaded backwards on or off.
+  class set_multithreading_enabled(_DecoratorContextManager):
+      r"""Context-manager that enables or disables multithreaded backward.
 
-    ``set_multithreading_enabled`` will enable or disable multithreaded backwards based on its argument :attr:`mode`.
-    It can be used as a context-manager or as a function.
+      By default, when :ref:`accelerator<accelerators>` devices are in use,
+      the backward pass runs on device-specific worker threads. The engine
+      creates these threads based on the number of available devices and
+      reuses them across iterations. This context manager controls the
+      behavior via its :attr:`mode` argument. When ``False``, the backward
+      pass runs sequentially on the calling thread instead. It can be used
+      as a context-manager or as a function.
 
-    This context manager is thread local; it will not affect computation
-    in other threads.
+      This context manager is thread-local and will not affect computation in
+      other threads.
 
-    Args:
-        mode (bool): Flag whether to enable multithreaded backwards (``True``), or disable
-                     (``False``).
+      Args:
+          mode (bool): Flag whether to enable multithreaded backward
+                       (``True``) or disable (``False``).
 
-    .. note::
-        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+      .. note::
+          This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
-    """
+      """
 
     def __init__(self, mode: bool) -> None:
         self.prev = torch._C._is_multithreading_enabled()
