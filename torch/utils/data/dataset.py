@@ -416,8 +416,10 @@ class Subset(Dataset[_T_co]):
         self.indices = indices
 
         # Check if __getitem__ is overridden but __getitems__ is not
-        if (type(self).__getitem__ is not Subset.__getitem__ and
-            type(self).__getitems__ is Subset.__getitems__):
+        if (
+            type(self).__getitem__ is not Subset.__getitem__
+            and type(self).__getitems__ is Subset.__getitems__
+        ):
             raise NotImplementedError(
                 f"{type(self).__name__} overrides __getitem__ but not __getitems__. "
                 "When subclassing Subset and overriding __getitem__, you must also override "
