@@ -264,13 +264,14 @@ def _run_pre_dispatch_passes(
                 f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
             )
 
-    # Remove noops at the end, which may be generated other passes.
-    pass_execution_and_save(
-        remove_noop_pass,
-        gm,
-        example_inputs,
-        "[Pre grad(predispatch IR)]Apply remove_noop pass",
-    )
+    if "remove_noop" not in remove_passes_list:
+        # Remove noops at the end, which may be generated other passes.
+        pass_execution_and_save(
+            remove_noop_pass,
+            gm,
+            example_inputs,
+            "[Pre grad(predispatch IR)]Apply remove_noop pass",
+        )
     shape_prop(gm)
 
 
@@ -508,7 +509,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 conv = conv_bn_fusion.conv_module
                 bn = conv_bn_fusion.bn_module
 
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
                     replace_node_module(bn_node.args[0], modules, fused_conv)
@@ -596,11 +597,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
                     fused_conv.weight,
                     fused_conv.bias,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     bn_running_mean,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     bn_running_var,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     bn_eps,
                     bn_weight,
                     bn_bias,
@@ -737,7 +738,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 input_node = node.kwargs["input"]
             if (
                 input_node.op == "call_function"
-                and input_node.target == torch.nn.functional.linear
+                and input_node.target is torch.nn.functional.linear
             ):
                 normalized = NormalizedLinearNode(input_node)
                 input = normalized.get_input()

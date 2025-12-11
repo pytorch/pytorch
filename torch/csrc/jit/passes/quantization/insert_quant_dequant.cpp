@@ -1230,7 +1230,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
     TORCH_INTERNAL_ASSERT(
         dequantized_val->uses().size() == 1,
         "Expect to have one dequantize node for each use");
-    // Replace useses of dequantized_val with the input of
+    // Replace uses of dequantized_val with the input of
     // dequantize node
     dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
     dequantize_node->removeAllInputs();

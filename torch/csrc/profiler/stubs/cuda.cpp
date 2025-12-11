@@ -1,7 +1,7 @@
 #include <sstream>
 
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
+#if CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #include <nvtx3/nvtx3.hpp>
 #else
 #include <nvToolsExt.h>
@@ -21,7 +21,7 @@ namespace {
 static void cudaCheck(cudaError_t result, const char* file, int line) {
   if (result != cudaSuccess) {
     std::stringstream ss;
-    ss << file << ":" << line << ": ";
+    ss << file << ':' << line << ": ";
     if (result == cudaErrorInitializationError) {
       // It is common for users to use DataLoader with multiple workers
       // and the autograd profiler. Throw a nice error message here.
@@ -64,8 +64,8 @@ struct CUDAMethods : public ProfilerStubs {
   float elapsed(
       const ProfilerVoidEventStub* event_,
       const ProfilerVoidEventStub* event2_) const override {
-    auto event = (const ProfilerEventStub*)(event_);
-    auto event2 = (const ProfilerEventStub*)(event2_);
+    auto event = (const ProfilerEventStub*)event_;
+    auto event2 = (const ProfilerEventStub*)event2_;
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
     float ms = 0;

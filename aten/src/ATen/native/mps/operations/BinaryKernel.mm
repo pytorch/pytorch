@@ -75,6 +75,14 @@ static void fmin_mps_kernel(TensorIteratorBase& iter) {
   }
 }
 
+static void maximum_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "maximum");
+}
+
+static void minimum_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "minimum");
+}
+
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "copysign");
 }
@@ -87,6 +95,14 @@ static void nextafter_mps_kernel(TensorIteratorBase& iter) {
 static void zeta_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "zeta_mps not implemented for non-floating types");
   lib.exec_binary_kernel(iter, "zeta");
+}
+
+static void logaddexp_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "logaddexp");
+}
+
+static void logaddexp2_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "logaddexp2");
 }
 
 static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
@@ -202,11 +218,19 @@ static void igammac_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "igammac");
 }
 
+static void hypot_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "hypot");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
+REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
+REGISTER_DISPATCH(minimum_stub, &minimum_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_mps_kernel);
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_mps_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
@@ -229,4 +253,5 @@ REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
+REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 } // namespace at::native

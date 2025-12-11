@@ -457,6 +457,24 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::busy_wait_for_flag();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::clear_flag();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // We need to ensure that as long as a thread will NEVER loose the GIL as long
 // as it holds the CUDA mutex. Otherwise another thread might be scheduled and
 // try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
@@ -1017,7 +1035,7 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static void registerCudaDeviceProperties(PyObject* module) {
-  // Add _cudaDevicePropertires class to torch._C
+  // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
@@ -1042,6 +1060,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly(
+          "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
@@ -1096,7 +1116,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
 #if USE_ROCM
-               << ", gcnArchName='" << prop.gcnArchName << "'"
+               << ", gcnArchName='" << prop.gcnArchName << '\''
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
@@ -1468,7 +1488,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
-          freed_pointer_set.insert((ptr));
+          freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
         // so even those this will error, so too will the allocator
@@ -2074,6 +2094,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
+    {"_cuda_busy_wait_for_flag",
+     THCPModule_cudaBusyWaitForFlag,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",

@@ -653,8 +653,14 @@ struct ReduceOp {
     }
 
     __syncthreads();
-
+    // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
+    // matching Triton, etc.
+    // TODO(PaulZhang12): AMD and internal
+    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
+    #else
+    for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
+    #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
@@ -1080,12 +1086,12 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // load instructions.
   //
   // Case 1: "vectorize along input"
-  // This case happens when we are reducing along fastest moving dimesion. In such case, threads
+  // This case happens when we are reducing along fastest moving dimension. In such case, threads
   // with the same threadIdx.y works on the same reduction cooperatively and will produce results
   // for the same output. In such case, values in each loaded vector always correspond to the same output.
   //
   // Case 2: "vectorize along output"
-  // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,
+  // This case happens when the fastest moving dimension is not the dimension of reduction. In such case,
   // threads with different threadIdx.x are independent and will produce results for different outputs.
   // In such case, values in each loaded vector always correspond to different outputs.
   if (fastest_moving_stride == sizeof(scalar_t)) {

@@ -6,15 +6,12 @@ import warnings
 from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Optional, Union
+from typing import cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import STATE_DICT_TYPE
-from torch.distributed.checkpoint._async_executor import (  # noqa: TC001
-    _AsyncCheckpointExecutor,
-)
 from torch.distributed.checkpoint._async_process_executor import (
     _ProcessBasedAsyncCheckpointExecutor,
 )
@@ -36,6 +33,10 @@ from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
 from torch.distributed.distributed_c10d import _get_default_group
 
 from .utils import _api_bc_check, _DistWrapper, _profile
+
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
 
 
 __all__ = [
@@ -182,7 +183,8 @@ def save(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -328,7 +330,7 @@ def async_save(
     upload_future: Future = upload_executor.execute_save(
         staging_future_or_state_dict,
         checkpoint_id=checkpoint_id,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
@@ -375,9 +377,15 @@ def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
     stateful_state_dict = {}
     for key, elem in state_dict.items():
-        stateful_state_dict[key] = (
-            elem.state_dict() if isinstance(elem, Stateful) else elem
-        )
+        # Apply _dcp_method_logger to each state_dict() call
+        def _elem_to_state_dict(elem):
+            return elem.state_dict() if isinstance(elem, Stateful) else elem
+
+        _elem_to_state_dict.__name__ = f"_stateful_to_state_dict.{key}"
+
+        stateful_state_dict[key] = _dcp_method_logger(log_exceptions=True)(
+            _elem_to_state_dict
+        )(elem)
     return stateful_state_dict
 
 
@@ -414,7 +422,8 @@ def _save_state_dict(
             warnings.warn(
                 "The function definition for SavePlanner.set_up_planner has been updated"
                 " to include the storage_meta argument. Please update your implementation"
-                " to include this parameter."
+                " to include this parameter.",
+                stacklevel=2,
             )
             planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
         else:

@@ -51,7 +51,7 @@ nan
 >>> INF / INF
 nan
 
-However unambigous operations with inf return inf:
+However unambiguous operations with inf return inf:
 >>> INF * INF
 inf
 >>> 1.5 * INF

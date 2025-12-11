@@ -87,7 +87,7 @@ class TestBuiltin(TestCase):
             assert_raises(TypeError, np.dtype, "l8")
             assert_raises(TypeError, np.dtype, "L8")
 
-    # XXX: what is 'q'? on my 64-bit ubuntu maching it's int64, same as 'l'
+    # XXX: what is 'q'? on my 64-bit ubuntu machine it's int64, same as 'l'
     #       if np.dtype('q').itemsize == 8:
     #           assert_raises(TypeError, np.dtype, 'q4')
     #           assert_raises(TypeError, np.dtype, 'Q4')
@@ -307,7 +307,7 @@ class TestPromotion(TestCase):
     )
     def test_permutations_do_not_influence_result(self, dtypes, expected):
         # Tests that most permutations do not influence the result.  In the
-        # above some uint and int combintations promote to a larger integer
+        # above some uint and int combinations promote to a larger integer
         # type, which would then promote to a larger than necessary float.
         for perm in permutations(dtypes):
             assert np.result_type(*perm) == expected
@@ -351,7 +351,7 @@ class TestFromDTypeAttribute(TestCase):
             np.dtype(dt_instance)
 
 
-@skip(reason="Parameteric dtypes, our stuff is simpler.")
+@skip(reason="Parametric dtypes, our stuff is simpler.")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:

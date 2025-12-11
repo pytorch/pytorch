@@ -46,7 +46,7 @@ bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
 
 struct UsageStreamHash {
   size_t operator()(const UsageStream& us) const noexcept {
-    return std::hash<void*>{}(us.stream) + size_t(us.device);
+    return std::hash<void*>{}(us.stream) + static_cast<size_t>(us.device);
   }
 };
 
@@ -320,7 +320,7 @@ void mallocAsync(
   TORCH_INTERNAL_ASSERT(
       0 <= device && device < device_count,
       "Invalid device index ",
-      device,
+      static_cast<int>(device),
       ": did you call init?");
 
   // If stream is a null (default) stream,
@@ -370,7 +370,7 @@ void mallocAsync(
         OutOfMemoryError,
         false,
         "Allocation on device ",
-        device,
+        static_cast<int>(device),
         " would exceed allowed memory. (out of memory)",
         "\nCurrently allocated     : ",
         format_size(pytorch_used_bytes[device]),
@@ -427,7 +427,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   // on the current device each later call sees.
   void init(int dev_count) override {
     static bool called = [](int dev_count) {
-      ;
       // Are there external guarantees init will be called before
       // any of the allocator's other functions?
       // std::lock_guard<std::mutex> lk(general_mutex);
@@ -913,7 +912,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
   std::string name() override {
-    return "cudaMallocAsync";
+    // break up token to trick hipify
+    return "c"
+           "udaMallocAsync";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     C10_CUDA_CHECK(

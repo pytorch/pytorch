@@ -526,6 +526,41 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    TYPED_TEST(Exponents, ExpU20) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using UVT = UvalueType<TypeParam>;
+
+        // Explicit edge values
+        VT v_too_small = VT(-100.0); // much less than -87.3
+        VT exp_too_small = std::exp(v_too_small);
+        VT v_neg_edge = VT(-0x1.5d5e2ap+6f);   // just at the edge
+        VT exp_neg_edge = std::exp(v_neg_edge);
+        VT v_zero = VT(0.0);         // middle, normal case
+        VT exp_zero = std::exp(v_zero);
+        VT v_pos_edge = VT(0x1.5d5e2ap+6f);    // just at the edge
+        VT exp_pos_edge = std::exp(v_pos_edge);
+        VT v_too_large = VT(100.0);  // much more than 87.3
+        VT exp_too_large = std::exp(v_too_large);
+
+        auto test_case = TestingCase<vec>::getBuilder()
+            // Randoms in normal range, but the .addCustom() below guarantees we hit the special/fallback cases
+            .addDomain(CheckWithinDomains<UVT>{{{-100, 100}}, false, getDefaultTolerance<UVT>()})
+            .addCustom({ {v_too_small}, exp_too_small })
+            .addCustom({ {v_neg_edge}, exp_neg_edge })
+            .addCustom({ {v_zero}, exp_zero })
+            .addCustom({ {v_pos_edge}, exp_pos_edge })
+            .addCustom({ {v_too_large}, exp_too_large })
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
+
+        test_unary<vec>(
+            NAME_INFO(exp_u20_edge_cases),
+            RESOLVE_OVERLOAD(std::exp),
+            [](const vec& v) { return v.exp_u20(); },
+            test_case
+        );
+    }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -1428,7 +1463,6 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
-        typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
@@ -1793,9 +1827,9 @@ namespace {
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
-            << "Test failed for float to uint16 " << f32s[i] << "\n";
+            << "Test failed for float to uint16 " << f32s[i] << '\n';
         EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
-            << "Test failed for uint16 to float " << u16 << "\n";
+            << "Test failed for uint16 to float " << u16 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
@@ -1813,10 +1847,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
@@ -1980,10 +2014,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e5m2_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e5m2_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E5M2Test, FP8E5M2BinaryAdd) {

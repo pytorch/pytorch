@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from collections.abc import Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
@@ -45,7 +46,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
-    unimplemented_v2,
+    unimplemented,
     UnknownPropertiesDuringBackwardTrace,
     UserError,
     UserErrorType,
@@ -62,12 +63,13 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
+    raise_args_mismatch,
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import SizeVariable
+from .lists import ListIteratorVariable, SizeVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -80,6 +82,8 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .functions import UserFunctionVariable
 
 
 log = logging.getLogger(__name__)
@@ -225,6 +229,9 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
+    def is_tensor(self) -> bool:
+        return True
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -312,7 +319,7 @@ class TensorVariable(VariableTracker):
             # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             raise NotImplementedError from exc
 
@@ -388,7 +395,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_nested)
 
     def method_attr_retain_grad(self, tx):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
             context=f"var_getattr {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
@@ -402,7 +409,7 @@ class TensorVariable(VariableTracker):
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Tensor with grad_fn()",
                 context=f"var_getattr {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
@@ -426,7 +433,7 @@ class TensorVariable(VariableTracker):
         # Today, var_getattr returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
-        if name in ("size", "stride"):
+        if name in all_tensor_attrs:
             return ConstantVariable(True)
 
         try:
@@ -449,7 +456,7 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Strict mode banned op",
                     context=f"var_getattr {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
@@ -539,7 +546,7 @@ class TensorVariable(VariableTracker):
 
     def call_id(self, tx):
         if not self.source:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported call_id() without source",
                 context=f"call_id {self}",
                 explanation="call_id() not supported for sourceless TensorVariable.",
@@ -549,9 +556,9 @@ class TensorVariable(VariableTracker):
         # For local source, we associate the real value. We use this real value
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
         try:
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Error getting associated real value",
                 context=f"call_id {self}",
                 explanation="Dynamo encountered an error while trying to "
@@ -561,7 +568,7 @@ class TensorVariable(VariableTracker):
             )
 
         if _input_associated_real_value is None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="call_id() without associated real value",
                 context=f"call_id {self}",
                 explanation="Dynamo could not find an associated real value for the tensor.",
@@ -593,11 +600,14 @@ class TensorVariable(VariableTracker):
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
             # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
             # symbolic_shapes, but that end up as int/sympy.Integer
-            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            assert (
+                isinstance(dyn_length, SymNodeVariable)
+                or dyn_length.is_python_constant()
+            )
             if isinstance(dyn_length, SymNodeVariable):
                 length = dyn_length.evaluate_expr(tx.output)
             else:
-                length = dyn_length.value
+                length = dyn_length.as_python_constant()
 
         if idxes is None:
             idxes = range(length)
@@ -609,6 +619,16 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    def call_tree_map(
+        self,
+        tx,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn,
+        rest,
+        tree_map_kwargs,
+    ) -> "VariableTracker":
+        return map_fn.call_function(tx, [self, *rest], {})
 
     def valid_size(self):
         return self._size is not None
@@ -630,14 +650,14 @@ class TensorVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Illegal method invocation in strict mode",
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation="Dynamo currently does not support this method "
@@ -681,7 +701,7 @@ class TensorVariable(VariableTracker):
         # discussions in #151432 for more details.
         # We graph break for now since this use case is uncommon.
         if name == "random_":
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Tensor.random_ op",
                 context=f"Tensor.{name}({args=}, {kwargs=})",
                 explanation="This is currently not supported.",
@@ -691,7 +711,7 @@ class TensorVariable(VariableTracker):
                 ],
             )
         elif name == "uniform_" and "from" in kwargs:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Tensor.uniform_ op called with `from` keyword",
                 context=f"Tensor.{name}({args=}, {kwargs=})",
                 explanation="This is currently not supported.",
@@ -711,7 +731,7 @@ class TensorVariable(VariableTracker):
                 if result:
                     return result
             except TypeError as e:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unhandled args for method",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation="Dynamo encountered an error while calling "
@@ -802,7 +822,7 @@ class TensorVariable(VariableTracker):
 
     def method_is_inference(self):
         if config.fake_tensor_disable_inference_mode:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Encountered tensor.is_inference() during tracing",
                 context="",
                 explanation="tensor.is_inference() is not supported",
@@ -888,7 +908,7 @@ class TensorVariable(VariableTracker):
                 object(), var, mutation_type_cls=AttributeMutationNew
             )
             return var
-        unimplemented_v2(
+        unimplemented(
             gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
             context=f"{self}.as_subclass({cls})",
             explanation="Currently not supported",
@@ -908,7 +928,7 @@ class TensorVariable(VariableTracker):
 
     def method_numpy(self, *, force=False):
         if not config.trace_numpy:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Tensor.numpy() with trace_numpy=False",
                 context=f"call_method {self} numpy",
                 explanation="`Tensor.numpy()` was called, but the `trace_numpy` "
@@ -919,7 +939,7 @@ class TensorVariable(VariableTracker):
                 ],
             )
         if not np:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Tensor.numpy() without NumPy installed",
                 context=f"call_method {self} numpy",
                 explanation="`Tensor.numpy()` was called, but the NumPy library "
@@ -968,7 +988,7 @@ class TensorVariable(VariableTracker):
                 torch.int32,
                 torch.int64,
             ]:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Tensor.tolist() with non-integer tensor",
                     context=f"call_method {self} to_list",
                     explanation="Dynamo currently does not support tracing "
@@ -995,7 +1015,7 @@ class TensorVariable(VariableTracker):
         return VariableTracker.build(tx, out)
 
     def method_backward(self, *args, **kwargs):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported Tensor.backward() call",
             context=f"call_method {self} backward {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
@@ -1012,7 +1032,7 @@ class TensorVariable(VariableTracker):
         # We enable capture_scalar_outputs when full_graph=True by default.
         if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported Tensor.item() call with capture_scalar_outputs=False",
                 context=f"call_method {self} item {args} {kwargs}",
                 explanation="Dynamo does not support tracing `Tensor.item()` "
@@ -1078,11 +1098,19 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
 
+    def method___iter__(self):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        return ListIteratorVariable(
+            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
+
     def method_addcmul_(self, tensor1, tensor2, *, value=None):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             from .. import polyfills
 
             return tx.inline_user_function_return(
@@ -1101,7 +1129,7 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        if isinstance(value, TensorVariable):
+        if value.is_tensor():
             # [Note: Tensor.__setitem__ and VariableTracker metadata]
             # At this point, we proxied a node representing `self[key] = value` into the graph.
             # When executed, this node will mutate `self`'s tensor metadata, so it's important
@@ -1137,7 +1165,7 @@ class TensorVariable(VariableTracker):
         return ConstantVariable.create(None)
 
     def method_resize_(self, *args, **kwargs):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported Tensor.resize_() call",
             context=f"call_method {self} resize_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.resize_()`.",
@@ -1145,7 +1173,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_resize_as_(self, *args, **kwargs):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported Tensor.resize_as_() call",
             context=f"call_method {self} resize_as_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.resize_as_()`.",
@@ -1153,7 +1181,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_sparse_resize_(self, *args, **kwargs):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_() call",
             context=f"call_method {self} sparse_resize_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.sparse_resize_()`.",
@@ -1161,7 +1189,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_sparse_resize_and_clear_(self, *args, **kwargs):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_and_clear_() call",
             context=f"call_method {self} sparse_resize_and_clear_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.sparse_resize_and_clear_()`.",
@@ -1176,7 +1204,7 @@ class TensorVariable(VariableTracker):
             # overload and is used by FSDP.
             # graph-breaking on aten::set_source_Tensor_storage_offset for now,
             # unless we find that we need to make it work.
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported Tensor.set_() call",
                 context=f"call_method {self} set_ {args} {kwargs}",
                 explanation="Dynamo currently does not support tracing `Tensor.set_()` "
@@ -1185,7 +1213,7 @@ class TensorVariable(VariableTracker):
             )
 
     def method_add_(self, other, *, alpha=None):
-        if alpha is not None:
+        if alpha is not None and config.enable_dynamo_decompositions:
             from ..symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
@@ -1198,7 +1226,7 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )
@@ -1256,6 +1284,19 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
         # and rewrite args to have only proxyable args, then insert call_function
+
+        grad_placements_vt = kwargs.get(
+            "grad_placements", ConstantVariable.create(None)
+        )
+        if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
+            # grad_placement is a sequence-like structure, iterate over the value
+            grad_placements_vt = variables.BuiltinVariable(tuple).call_function(
+                tx, [grad_placements_vt], {}
+            )
+
+        if kwargs.get("grad_placements") is not None:
+            kwargs["grad_placements"] = grad_placements_vt
+
         args_as_value = [x.as_python_constant() for x in args]
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
@@ -1308,7 +1349,7 @@ class TensorVariable(VariableTracker):
                 # would have no recourse - their forward traces just fine, but will fail at backwards unless
                 # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
                 # then they have nothing they can do except disable compile.
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Compilation of intermediate hooks requires compiled autograd",
                     context=f"var_getattr {self} {name}",
                     explanation="Dynamo must be in compiled_autograd to register hooks.",
@@ -1358,7 +1399,7 @@ class TensorVariable(VariableTracker):
             requires_grad = requires_grad.as_python_constant()
 
         if self.as_proxy().node.meta["example_value"].requires_grad != requires_grad:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported Tensor.requires_grad_() call",
                 context=f"call_method {self} requires_grad_",
                 explanation="Dynamo does not support changes to a Tensor's "
@@ -1374,7 +1415,8 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                a.is_python_constant() and isinstance(a.as_python_constant(), int)
+                for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1392,6 +1434,20 @@ class TensorVariable(VariableTracker):
         if not self._is_name_set:
             self.proxy.node._rename(name)
             self._is_name_set = True
+
+    def is_python_hashable(self):
+        # Tensors are hashable if they have an example_value (a fake tensor)
+        # Most VT's should have one.
+        # It'd be nice if at some point we could assert that they all have one
+        return self.as_proxy().node.meta["example_value"] is not None
+
+    def get_python_hash(self):
+        return hash(self.as_proxy().node.meta["example_value"])
+
+    def is_python_equal(self, other):
+        a = self.as_proxy().node.meta["example_value"]
+        b = other.as_proxy().node.meta["example_value"]
+        return a is b
 
 
 class SymNodeVariable(VariableTracker):
@@ -1422,7 +1478,10 @@ class SymNodeVariable(VariableTracker):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 
-        return SymNodeVariable(proxy, sym_num, **options)
+        out = SymNodeVariable(proxy, sym_num, **options)
+        if proxy.node.op != "placeholder":
+            tx.output.current_tracer.record_tensor_or_symint_vt(out)
+        return out
 
     def __init__(self, proxy, sym_num, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1436,6 +1495,9 @@ class SymNodeVariable(VariableTracker):
             return self.sym_num.node.pytype
         else:
             return type(self.sym_num)
+
+    def is_symnode_like(self) -> bool:
+        return True
 
     def as_proxy(self):
         return self.proxy
@@ -1477,6 +1539,20 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        # Essentially convert the SymNode to a constant variable whenever its
+        # searched for a dict key.
+        return hash(self.evaluate_expr())
+
+    def is_python_equal(self, other):
+        if isinstance(other, SymNodeVariable):
+            return self.evaluate_expr() == other.evaluate_expr()
+        # could be constant variable as well
+        return self.evaluate_expr() == other.as_python_constant()
 
 
 class NumpyNdarrayVariable(TensorVariable):
@@ -1550,14 +1626,14 @@ class NumpyNdarrayVariable(TensorVariable):
                 return ConstantVariable.create(int(r))
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported ndarray attribute access",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
         elif name == "__version__":
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
@@ -1581,7 +1657,7 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from ..exc import unimplemented_v2
+        from ..exc import unimplemented
         from ..utils import numpy_method_wrapper
 
         args, kwargs = self.patch_args(name, args, kwargs)
@@ -1594,14 +1670,12 @@ class NumpyNdarrayVariable(TensorVariable):
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            is_object_str = (
-                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
-            )
+            is_object_str = dtype_arg is not None and dtype_arg.is_constant_match("O")
             is_object_type = (
                 isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
             )
             if is_object_str or is_object_type:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="ndarray.astype(object)",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation=(
@@ -1611,11 +1685,11 @@ class NumpyNdarrayVariable(TensorVariable):
                     ),
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
-        if name in ["__len__", "size", "tolist"]:
+        if name in ["__len__", "size", "tolist", "__iter__"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         if name in ("tostring", "tobytes", "__delattr__"):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported ndarray method call",
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation=f"`ndarray.{name}()` is not modelled in `torch._numpy`.",
@@ -1691,11 +1765,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
 
         new_func = self.value.__new__
         if new_func is torch.Tensor.__new__:
-            if (
-                len(args) == 1
-                and isinstance(args[0], TensorVariable)
-                and len(kwargs) == 0
-            ):
+            if len(args) == 1 and args[0].is_tensor() and len(kwargs) == 0:
                 data = args[0]
                 # Simulate `torch.Tensor.__new__` as shallow-copying the input
                 # tensor data with a new type. TODO polyfill?
@@ -1703,7 +1773,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
                     tx, data, self.value, self.source
                 )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Calling subclass default constructor with more than tensor argument",
                     context=f"{self.value}(args={args}, kwargs={kwargs})",
                     explanation="Currently not supported",
@@ -1761,8 +1831,13 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
-            assert not args
-            assert not kwargs
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
@@ -1781,7 +1856,8 @@ class UntypedStorageVariable(VariableTracker):
                     ),
                 )
         if name == "resize_" and len(args) == 1:
-            assert not kwargs
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.inductor.resize_storage_bytes_,

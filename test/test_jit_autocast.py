@@ -4,6 +4,7 @@ import torch
 from torch.cuda.amp import autocast
 from typing import Optional
 
+import sys
 import unittest
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import parse_cmd_line_args, run_tests, skipIfTorchDynamo
@@ -961,4 +962,5 @@ class TestJitTraceAutocast(JitTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

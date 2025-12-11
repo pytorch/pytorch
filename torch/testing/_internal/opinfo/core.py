@@ -1534,7 +1534,10 @@ def test_foo(self, device, dtype, op):
         device_type = torch.device(device_type).type
         if device_type == "cuda" and TEST_WITH_ROCM:
             device_type = "rocm"
-        return self.dtypesIf.get(device_type, self.dtypes)
+        result = self.dtypesIf.get(device_type, self.dtypes)
+        if device_type == "mps":
+            return result - {torch.float64, torch.cdouble}
+        return result
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
@@ -1552,6 +1555,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "mps":
+            backward_dtypes = self.backward_dtypes - {torch.double, torch.cdouble}
         else:
             backward_dtypes = self.backward_dtypes
 
