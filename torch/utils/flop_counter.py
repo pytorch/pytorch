@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from types import NoneType
+import logging
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
@@ -17,6 +19,9 @@ __all__ = ["FlopCounterMode", "register_flop_formula"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
+log = logging.getLogger(__name__)
+
+
 aten = torch.ops.aten
 
 def get_shape(i):
@@ -34,16 +39,22 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    try:
+        from triton.runtime.jit import JITFunction
+    except ImportError:
+        log.warning("triton not found; flop counting will not work for triton kernels")
+        JITFunction = NoneType
+
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target) -> None:
-            if not isinstance(target, torch._ops.OpOverloadPacket):
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, JITFunction))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
-                    f"{target} which is of type {type(target)}")
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
+                    f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
             flop_registry[target] = flop_formula
@@ -781,7 +792,6 @@ class FlopCounterMode:
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
-
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
@@ -811,15 +821,25 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func is not torch.ops.higher_order.cond:
-            return NotImplemented
-
-        # The flop counter for cond counts the upper bound of flops.
-        # For example, if a matmul is executed 2 times in true branch
-        # but only 1 time in the false branch, the flop counter will
-        # record the larger number of flops, i.e. 2 times.
-        if func is torch.ops.higher_order.cond:
-
+        is_triton = func in {torch.ops.higher_order.triton_kernel_wrapper_mutation,
+                             torch.ops.higher_order.triton_kernel_wrapper_functional}
+        if is_triton:
+            from torch._higher_order_ops.triton_kernel_wrap import get_kernel
+            # Special case - look in the triton flop registry for the kernel
+            from triton.runtime.jit import JITFunction
+            kernel_name = get_kernel(kwargs["kernel_idx"])
+            # Unwrap heuristics if they are present
+            while not isinstance(kernel_name, JITFunction):
+                if hasattr(kernel_name, "fn"):
+                    kernel_name = kernel_name.fn
+                else:
+                    break
+            return self.counter._count_flops(kernel_name, None, args, kwargs)
+        elif func is torch.ops.higher_order.cond:
+            # The flop counter for cond counts the upper bound of flops.
+            # For example, if a matmul is executed 2 times in true branch
+            # but only 1 time in the false branch, the flop counter will
+            # record the larger number of flops, i.e. 2 times.
             pred, true_branch, false_branch, operands = args
             # Step 1: Count flops for true branch and false branch separately
             true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
@@ -858,6 +878,8 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+        else:
+            return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
