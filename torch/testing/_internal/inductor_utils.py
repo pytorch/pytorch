@@ -442,7 +442,7 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
-def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]):
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
     we could provide a predicate which returns True for all aten.add.default nodes.
