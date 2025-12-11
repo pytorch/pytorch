@@ -1050,16 +1050,22 @@ class OverlapScheduler:
 
             candidates.append(collective)
 
-        # Sort: prioritize off-path nodes past current position, then by domination
+        def get_priority(n: fx.Node) -> int:
+            dominates_next_compute = (
+                self.compute_index_domination[n] == self.current_compute_index + 1
+            )
+            if dominates_next_compute:
+                return 0  # Dominates next compute layer - most urgent
+            elif self.off_compute_path(n) and self.dominates_reduce_scatter(n):
+                return 1  # Off-path but blocks reduce_scatter
+            elif not self.off_compute_path(n):
+                return 2  # On-path but not immediate
+            else:
+                return 3  # Off-path, doesn't block reduce_scatter
+
         candidates.sort(
             key=lambda n: (
-                # Off-path nodes past current idx get priority (0), others get (1)
-                0
-                if (
-                    self.off_compute_path(n)
-                    and self.node_idx[n] <= self.last_on_path_node_idx
-                )
-                else 1,
+                get_priority(n),
                 self.compute_index_domination[n],
                 self.node_idx[n],
             ),
