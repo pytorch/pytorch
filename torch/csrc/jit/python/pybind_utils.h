@@ -66,7 +66,7 @@ TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 // numbers in places where a Tensor is expected
 // See also torch::should_allow_numbers_as_tensors
 class TORCH_PYTHON_API ToIValueAllowNumbersAsTensors {
-  bool old_{allow_numbers_as_tensors};
+  bool old_;
 
  public:
   ToIValueAllowNumbersAsTensors(bool enable);

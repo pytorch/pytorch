@@ -222,14 +222,14 @@ class TORCH_API Reducer {
       hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool expect_autograd_hooks_;
+  bool expect_autograd_hooks_{false};
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool require_finalize_;
+  bool require_finalize_{false};
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t next_bucket_;
+  size_t next_bucket_{0};
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool has_marked_unused_parameters_;
+  bool has_marked_unused_parameters_{false};
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool find_unused_parameters_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -257,7 +257,7 @@ class TORCH_API Reducer {
   at::Tensor local_used_map_;
   at::Tensor local_used_map_dev_;
   // Indicate that reduction is done and D2H copy is done as well.
-  bool local_used_map_reduced_;
+  bool local_used_map_reduced_{false};
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
@@ -425,19 +425,19 @@ class TORCH_API Reducer {
   std::vector<VariableLocator> variable_locators_;
 
   // track the number of iterations to synchronize grads in training so far.
-  long num_iterations_;
+  long num_iterations_{0};
   // track distinct iteration of backward call. This is distinct from
   // num_iterations_, for example in the case of multiple forward before
   // backward.
-  long num_bwd_calls_;
+  long num_bwd_calls_{0};
   // whether the first autograd hook for a distinct backward pass has been
   // called.
-  bool first_autograd_hook_called_;
+  bool first_autograd_hook_called_{false};
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
-  int num_buckets_ready_;
+  int num_buckets_ready_{0};
   // track the number of buckets that have been reduced.
-  int num_buckets_reduced_;
+  int num_buckets_reduced_{0};
 
   // Timing information.
   int64_t backward_compute_start_time_ = -1;
@@ -461,7 +461,7 @@ class TORCH_API Reducer {
   bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
-  bool has_rebuilt_bucket_;
+  bool has_rebuilt_bucket_{false};
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
@@ -497,7 +497,7 @@ class TORCH_API Reducer {
   // input.
   int div_factor_;
 
-  bool static_graph_;
+  bool static_graph_{false};
 
   bool skip_all_reduce_unused_params_;
 

@@ -219,7 +219,8 @@ int NodeTask::getReentrantDepth() const {
 }
 
 CheckpointValidGuard::CheckpointValidGuard(
-    const std::shared_ptr<const GraphTask>& graph_task) {
+    const std::shared_ptr<const GraphTask>& graph_task)
+    : prev_checkpoint_valid_state(checkpoint_valid) {
   checkpoint_valid =
       graph_task->can_checkpoint() && prev_checkpoint_valid_state;
 }

@@ -18,7 +18,8 @@ namespace torch::jit {
 
 static thread_local bool allow_numbers_as_tensors = false;
 
-ToIValueAllowNumbersAsTensors::ToIValueAllowNumbersAsTensors(bool enable) {
+ToIValueAllowNumbersAsTensors::ToIValueAllowNumbersAsTensors(bool enable)
+    : old_(allow_numbers_as_tensors) {
   allow_numbers_as_tensors = enable;
 }
 
