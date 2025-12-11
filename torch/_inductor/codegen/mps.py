@@ -495,7 +495,9 @@ class MetalKernel(SIMDKernel):
         line = f"{var}[{self.index_to_str(index)}]"
         if self._load_mask:
             assert self._load_other is not None
-            line = f"{self._load_mask} ? {line} : {value_to_metal(self._load_other)}"
+            val_type = f"::metal::remove_reference_t<decltype({var}[0])>"
+            cast_other = f"static_cast<{val_type}>({value_to_metal(self._load_other)})"
+            line = f"{self._load_mask} ? {line} : {cast_other}"
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
