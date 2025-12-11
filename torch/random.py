@@ -39,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
+    return _manual_seed_impl(seed)
+
+
+def _manual_seed_impl(seed) -> torch._C.Generator:
     seed = int(seed)
     import torch.cuda
 
@@ -54,6 +58,11 @@ def manual_seed(seed) -> torch._C.Generator:
 
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
@@ -79,6 +88,11 @@ def seed() -> int:
 
     if not torch.xpu._is_in_bad_fork():
         torch.xpu.manual_seed_all(seed)
+
+    import torch.mtia
+
+    if not torch.mtia._is_in_bad_fork():
+        torch.mtia.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 

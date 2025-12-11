@@ -511,6 +511,13 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
+    def test_hash_size(self):
+        # See issue #168254
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
+
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -3250,6 +3257,57 @@ class TestGuardsExpressions(TestCase):
             f"Size comparison should not cause recompilation.",
         )
 
+    @skipIfTorchDynamo("Test uses torch.compile")
+    def test_python_mod_padding_no_recompile(self):
+        """
+        Test that padding with PythonMod and slicing back to original size
+        doesn't cause guards or recompilation.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(x):
+            # Padding to align to multiple of 4
+            padding = (-x.size()[0]) % 4
+            aligned_size = x.size()[0] + padding
+            tensor = torch.empty(aligned_size, x.size()[1])
+            # Do some work on padded tensor
+            tensor = tensor * 100
+            # Remove padding with slicing
+            remove_padding = tensor[0 : x.size()[0], ...]
+            # View should work without guards since shapes match
+            return remove_padding.view(x.size())
+
+        # First call we pass something does not need padding
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        # Second call with different size needs padding
+        result1 = func(torch.rand(10, 12))
+        self.assertEqual(result1.shape, (10, 12))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            f"Expected 1 compilation, got {cnt.frame_count}. "
+            f"PythonMod padding should not cause recompilation.",
+        )
+
+        # test with unbacked.
+        torch._dynamo.reset()
+
+        a = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        result1 = func(a)
+        self.assertEqual(result1.shape, (10, 10))
+
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
@@ -3485,6 +3543,58 @@ class TestUnbacked(TestCase):
         a = torch.tensor([1])
         b = torch.tensor([1])
         func(a, b)
+
+    def test_ignorable_fresh_unbacked_symbols(self):
+        # Test that symbols created during fake tensor tracing but not returned
+        # can be marked as ignorable to avoid unbound symbol errors
+
+        # Positive case: marking symbol as ignorable should work
+        with torch.library._scoped_library("test_ignorable", "FRAGMENT") as lib:
+            torch.library.define(
+                "test_ignorable::custom_op",
+                "(Tensor x, bool y) -> Tensor",
+                lib=lib,
+            )
+
+            @torch.library.register_fake("test_ignorable::custom_op", lib=lib)
+            def custom_op_fake(x, y):
+                ctx = torch._custom_op.impl.get_ctx()
+                # Create a symint during fake tensor tracing
+                if y:
+                    with ctx._shape_env.ignore_fresh_unbacked_symbols():
+                        sz = ctx.new_dynamic_size()
+                else:
+                    sz = ctx.new_dynamic_size()
+                # Return something else (not the symint we created)
+                return x.clone()
+
+            @torch.library.impl(
+                "test_ignorable::custom_op",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def custom_op_impl(x, y):
+                return x.clone()
+
+            @torch.compile(fullgraph=True)
+            def func_positive(x):
+                return torch.ops.test_ignorable.custom_op(x, True)
+
+            @torch.compile(fullgraph=True)
+            def func_negative(x):
+                return torch.ops.test_ignorable.custom_op(x, False)
+
+            x = torch.randn(3, 4)
+
+            # This should not raise an error about unbound symbols
+            result = func_positive(x)
+            self.assertEqual(result, x)
+
+            # This should raise an error about unbound symbols
+            with self.assertRaisesRegex(
+                Exception, "Pending unbacked symbols.*not in returned outputs"
+            ):
+                func_negative(x)
 
 
 class TestUbackedOps(TestCase):

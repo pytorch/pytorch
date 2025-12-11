@@ -1217,6 +1217,20 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    def test_triton_kernel_to_cpu(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_kernel[(1,)](x, y, out, 16, 16)
+            out_cpu = out.cpu() + 1
+            return out_cpu
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f)(x, y)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
     def test_triton_kernel_out_of_order(self):
         @triton.jit
         def add_kernel(
@@ -2542,10 +2556,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(
-        msg="XPU Triton result in nan, "
-        "https://github.com/intel/torch-xpu-ops/issues/2330"
-    )
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])

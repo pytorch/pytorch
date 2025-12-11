@@ -1769,6 +1769,32 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
     ]
 
 
+def module_error_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for GroupNorm that test error messages include actual values.
+    """
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 10),  # num_groups=3, num_channels=10
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(10\) must be divisible by num_groups \(3\)"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(5, 13),  # num_groups=5, num_channels=13
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(13\) must be divisible by num_groups \(5\)"
+        ),
+    ]
+
+
 def module_inputs_torch_nn_Hardshrink(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3328,6 +3354,44 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
         ),
+        # Test bias parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias="True")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: str"
+        ),
+        # Test batch_first parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first="False")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: str"
+        ),
     ]
     return samples
 
@@ -3958,6 +4022,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
+               module_error_inputs_func=module_error_inputs_torch_nn_GroupNorm,
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
