@@ -333,6 +333,7 @@ class set_multithreading_enabled(_DecoratorContextManager):
         which never uses multithreading.
 
     """
+
     def __init__(self, mode: bool) -> None:
         self.prev = torch._C._is_multithreading_enabled()
         torch._C._set_multithreading_enabled(mode)
