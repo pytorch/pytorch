@@ -786,7 +786,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # Two-dimensional tiling: split size across current_group and next group.
                 #
                 # statically_known_gt(size, remaining) may return False for symbolic
-                # expressions like 64*u0 vs u0, because both could be 0. Similary for
+                # expressions like 64*u0 vs u0, because both could be 0. Similarly for
                 # backed expressions like s25*(((s70 - 5)//4)) - s25 and
                 # (s25*(((s70 - 5)//4)) - s25)*64.
                 #
