@@ -5362,6 +5362,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
