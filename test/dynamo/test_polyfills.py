@@ -3,7 +3,7 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 
 
 class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
@@ -185,6 +185,7 @@ class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(f64_lists[0][1], t_f64_1))
         self.assertEqual(f64_indices, [1, 3])
 
+    @skipIfTorchDynamo("test uses CompileCounter which doesn't work under dynamo")
     def test_group_tensors_traceable_with_compile(self):
         """Test that torch._C._group_tensors_by_device_and_dtype is traceable with torch.compile.
 
