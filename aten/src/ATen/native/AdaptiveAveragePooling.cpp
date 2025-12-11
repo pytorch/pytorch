@@ -1,8 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/native/AdaptivePooling.h>
-#include <ATen/native/xnnpack/Engine.h>
-#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

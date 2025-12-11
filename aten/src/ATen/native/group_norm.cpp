@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
-#include <c10/util/accumulate.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

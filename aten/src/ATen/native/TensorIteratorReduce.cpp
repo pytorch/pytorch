@@ -9,8 +9,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <c10/util/irange.h>
-
 /// Contains the implementation of parallel reductions in TensorIterator.
 
 namespace at {

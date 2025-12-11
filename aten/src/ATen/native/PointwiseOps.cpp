@@ -2,7 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/PointwiseOps.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

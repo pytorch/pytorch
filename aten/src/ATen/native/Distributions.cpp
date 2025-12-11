@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
@@ -12,7 +11,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/DistributionTemplates.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

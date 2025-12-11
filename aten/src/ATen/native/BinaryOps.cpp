@@ -4,7 +4,6 @@
 #include <type_traits>
 #include <utility>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>

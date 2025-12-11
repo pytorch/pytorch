@@ -1,8 +1,5 @@
-#include <ATen/ATen.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/Copy.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/util/irange.h>
 
 
 namespace at::native {

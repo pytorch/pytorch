@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Repeat.h>
@@ -9,7 +8,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
 #endif

@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
 #include <ATen/NestedTensorImpl.h>
 
-#include <torch/library.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 

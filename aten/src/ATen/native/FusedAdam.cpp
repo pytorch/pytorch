@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/FusedAdam.h>
 
@@ -7,9 +6,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_adam.h>
 #include <ATen/ops/_fused_adam_native.h>
-#include <ATen/ops/_fused_adamw.h>
 #include <ATen/ops/_fused_adamw_native.h>
 #endif
 

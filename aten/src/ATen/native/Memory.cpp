@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/Context.h>
 #include <c10/core/Storage.h>

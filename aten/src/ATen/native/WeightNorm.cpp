@@ -1,6 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 

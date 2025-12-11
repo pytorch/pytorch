@@ -1,12 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/core/DimVector.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/Scalar.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
