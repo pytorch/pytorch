@@ -5755,6 +5755,7 @@ class CommonTemplate:
             (weight, indices),
         )
 
+    @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
         def fn(x):
             return (
@@ -14917,6 +14918,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         if self.device.lower() == "cuda":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda_and_triton
+    @config.patch(combo_kernels=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_combo_kernel_store_mask(self):
+        def fn(x):
+            return (
+                x.mean(),
+                torch.mean(x, -2, keepdim=True),
+            )
+
+        x = torch.randn([1, 2, 4, 8], device=GPU_TYPE)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        expected = fn(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
     # end of class CommonTemplate - add new tests here
 
