@@ -14,6 +14,9 @@ inputs:
     description: Works as stated in actions/checkout, but the default value is 0
     required: false
     default: "0"
+  checkout-mode:
+    description: 'Mode of checkout; one of "normal", "blobless", "treeless".'
+    default: "normal"
 
 runs:
   using: composite
@@ -35,6 +38,7 @@ runs:
         cd "${GITHUB_WORKSPACE}"
         git config --global fetch.parallel 0
         git config --global submodule.fetchJobs 0
+        git config --global clone.filterSubmodules true
 
         # Clean workspace. The default checkout action should also do this, but
         # do it here as well just in case
@@ -49,13 +53,18 @@ runs:
     - name: Checkout PyTorch
       id: first-checkout-attempt
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: pytorch/test-infra/.github/actions/checkout@main
+      env:
+        filter: ${{ inputs.checkout-mode == 'blobless' && 'blob:none' || inputs.checkout-mode == 'treeless' && 'tree:0' || null }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
+        single-branch: true
         submodules: ${{ inputs.submodules }}
         show-progress: false
+        filter: ${{ env.filter }}
+        submodules-filter: ${{ env.filter }}
 
     - name: Clean submodules post checkout
       id: clean-submodules
@@ -91,10 +100,15 @@ runs:
         mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch (try again)
-      uses: actions/checkout@v4
+      uses: pytorch/test-infra/.github/actions/checkout@main
+      env:
+        filter: ${{ inputs.checkout-mode == 'blobless' && 'blob:none' || inputs.checkout-mode == 'treeless' && 'tree:0' || null }}
       if: ${{ steps.first-clean.outcome != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
+        single-branch: true
         submodules: ${{ inputs.submodules }}
         show-progress: false
+        filter: ${{ env.filter }}
+        submodules-filter: ${{ env.filter }}
