@@ -406,6 +406,7 @@ l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, foreach_lerp_
         with scalar weight should work without graph breaks.
@@ -444,6 +445,7 @@ l_end_tensors_1_ = _foreach_lerp_ = None
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_pow_scalar_decomposition_enabled(self):
         """With decompositions enabled, foreach_pow with scalar base should decompose."""
 
@@ -476,6 +478,7 @@ l_scalar_ = l_exps_0_ = l_exps_1_ = None
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_pow_scalar_decomposition_disabled(self):
         """With decompositions disabled, foreach_pow with scalar base should remain.
 
@@ -509,6 +512,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @skipIfCrossRef
     def test_foreach_pow_scalar_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, foreach_pow
         with scalar base should work without graph breaks.
