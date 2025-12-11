@@ -52,7 +52,6 @@ from ..pattern_matcher import (
 from ..utils import (
     decode_device,
     get_all_devices,
-    get_current_backend,
     get_gpu_type,
     is_gpu,
     is_pointwise_use,
