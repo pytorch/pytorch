@@ -297,14 +297,6 @@ class DTensorRedistributePlanner:
         assert self.coordinate is not None
         self.tensor_dimension = tensor_dimension
         self.setup_collective_cost()
-        # cache for find_min_cost_path results: (src_state, dst_state) -> path
-        self._path_cache: dict[
-            tuple[
-                DTensorRedistributePlanner.DistState,
-                DTensorRedistributePlanner.DistState,
-            ],
-            list[DTensorRedistributePlanner.DistState],
-        ] = {}
 
     def setup_collective_cost(
         self,
@@ -492,8 +484,7 @@ class DTensorRedistributePlanner:
     ) -> list["DTensorRedistributePlanner.DistState"]:
         """
         Find the min cost path from src_state to dst_state using Dijkstra's
-        algorithm. Results are cached for repeated queries with the same
-        src_state and dst_state.
+        algorithm.
 
         Args:
             src_state: The source state
@@ -503,10 +494,6 @@ class DTensorRedistributePlanner:
             A list of states representing the min cost path from src_state to
             dst_state
         """
-        cache_key = (src_state, dst_state)
-        if cache_key in self._path_cache:
-            return self._path_cache[cache_key]
-
         import heapq
 
         # priority queue (cost, counter, state, path) for Dijkstra's algorithm
@@ -524,7 +511,6 @@ class DTensorRedistributePlanner:
         while pq:
             cost, _, current_state, path = heapq.heappop(pq)
             if current_state == dst_state:
-                self._path_cache[cache_key] = path
                 return path
             if current_state in visited:
                 continue
