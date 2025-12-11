@@ -156,6 +156,10 @@ jobs:
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+
       - name: Chown workspace
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
