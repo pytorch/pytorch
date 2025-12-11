@@ -3601,7 +3601,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timeout_seconds = config.collective_benchmark_timeout
 
         nruns = config.collective_benchmark_nruns
-        nwarmup = ir.autotune_warmup
+        nwarmup = config.inductor_default_autotune_warmup
 
         # Use default process group (None = all ranks)
         process_group = None
