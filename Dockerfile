@@ -68,8 +68,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libpng-dev \
         && rm -rf /var/lib/apt/lists/*
 COPY --from=pytorch-installs /opt/pytorch-venv /opt/pytorch-venv
-RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
-        DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc; \
+RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
+        apt-get update -qq && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
         rm -rf /var/lib/apt/lists/*; \
     fi
 ENV PATH /opt/pytorch-venv/bin:$PATH
