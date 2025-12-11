@@ -214,6 +214,23 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Build Docker Image
+        if: inputs.build_environment == 'linux-s390x-binary-manywheel'
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || format('{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
+        shell: bash
+        run: |
+          .ci/docker/manywheel/build.sh "${DOCKER_IMAGE}" -t "${DOCKER_IMAGE}"
+
+          GITHUB_REF="${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}"
+          GIT_BRANCH_NAME="${GITHUB_REF##*/}"
+          GIT_COMMIT_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+          CI_FOLDER_SHA="$(git rev-parse HEAD:.ci/docker)"
+
+          docker tag "${DOCKER_IMAGE}" "${DOCKER_IMAGE}-${GIT_BRANCH_NAME}"
+          docker tag "${DOCKER_IMAGE}" "${DOCKER_IMAGE}-${GIT_COMMIT_SHA}"
+          docker tag "${DOCKER_IMAGE}" "${DOCKER_IMAGE}-${CI_FOLDER_SHA}"
+
       - name: Test Pytorch binary
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: ./pytorch/.github/actions/test-pytorch-binary
