@@ -14,23 +14,11 @@ BartForCausalLM,pass,6
 
 
 
-BertForMaskedLM,pass,5
-
-
-
 BlenderbotForCausalLM,eager_fail_to_run,0
 
 
 
 DebertaV2ForMaskedLM,pass_due_to_skip,0
-
-
-
-DistilBertForMaskedLM,pass,5
-
-
-
-DistillGPT2,pass,7
 
 
 
@@ -118,7 +106,7 @@ google/gemma-2-2b,eager_fail_to_run,0
 
 
 
-google/gemma-3-4b-it,eager_fail_to_run,0
+meta-llama/Llama-3.2-1B,eager_fail_to_run,0
 
 
 
