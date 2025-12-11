@@ -44,7 +44,6 @@ import traceback
 import types
 import weakref
 from collections import deque
-from traceback import StackSummary
 from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import TypeIs
 
@@ -91,6 +90,7 @@ from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import (
     ArgsMismatchError,
+    augment_exc_message_with_hop_name,
     BackendCompilerFailed,
     collapse_resume_frames,
     format_graph_break_message,
@@ -893,7 +893,7 @@ def break_graph_if_unsupported(
                 self.log_graph_break(
                     self.code_options,
                     reason=f"{msg_prefix}:\n\n{str(excp)}",
-                    user_stack=excp.real_stack,
+                    exc=excp,
                 )
 
                 if self.maybe_has_backedge():
@@ -1391,7 +1391,7 @@ class InstructionTranslatorBase(
             self.log_graph_break(
                 self.code_options,
                 reason=reason,
-                user_stack=e.real_stack,
+                exc=e,
             )
 
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
@@ -4192,8 +4192,12 @@ class InstructionTranslatorBase(
         self,
         code_options: dict[str, Any],
         reason: str = "",
-        user_stack: Optional[StackSummary] = None,
+        exc: Optional[Exception] = None,
     ) -> None:
+        user_stack = None
+        if exc is not None:
+            user_stack = getattr(exc, "real_stack", None)
+
         if user_stack is None:
             user_stack = torch._guards.TracingContext.extract_stack()
 
@@ -4228,10 +4232,15 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
+
+        # Add HOP context after the first line of reason if present
+        if exc is not None:
+            reason = augment_exc_message_with_hop_name(exc, reason)
+
         user_stack_trace = (
             f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
             f"Graph Break Reason: {reason}\n"
-            "User code traceback:\n"
+            "\nUser code traceback:\n"
         )
 
         if config.verbose:
