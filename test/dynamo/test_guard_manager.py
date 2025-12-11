@@ -106,7 +106,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_global_state_guard(self):
         root = RootGuardManager()
-        guard = guards.GLOBAL_STATE(root, ["global_state_check"])
+        guard = guards.GLOBAL_STATE(root, ["global_state_check"], "")
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
@@ -154,6 +154,7 @@ user_stack=None)
             root,
             functools.partial(equals_match, expected=5),
             equals_match_verbose_code_parts(5),
+            "",
         )
         self.assertTrue(const_guard(5))
         self.assertFalse(const_guard(4))
@@ -162,14 +163,14 @@ user_stack=None)
     def test_type_guard(self):
         root = RootGuardManager()
         foo = 4
-        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == int"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == int"], "")
 
         self.assertTrue(guard(5))
         self.assertTrue(guard(4))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == dict"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == dict"], "")
         self.assertTrue(guard(foo))
         self.assertTrue(guard({}))
         self.assertFalse(guard(5))
@@ -182,7 +183,7 @@ user_stack=None)
 
         foo = Foo(1, 2)
 
-        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == Foo"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == Foo"], "")
         self.assertTrue(guard(foo))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
@@ -191,14 +192,14 @@ user_stack=None)
     def test_id_guard(self):
         root = RootGuardManager()
         foo = 4
-        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"])
+        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"], "")
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"])
+        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"], "")
         self.assertTrue(guard(foo))
         self.assertFalse(guard({"a": 1}))
         self.assertFalse(guard({}))
@@ -207,7 +208,7 @@ user_stack=None)
     def test_equals_guard(self):
         root = RootGuardManager()
         foo = 4
-        guard = guards.EQUALS_MATCH(root, foo, ["x == 4"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == 4"], "")
 
         self.assertTrue(guard(4))
         self.assertFalse(guard(5))
@@ -215,7 +216,7 @@ user_stack=None)
 
         # tuple
         foo = (1, 2, 3)
-        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"], "")
         self.assertTrue(guard(foo))
         self.assertTrue(guard((1, 2, 3)))
         self.assertFalse(guard((1, 2, 3, 4)))
@@ -223,14 +224,14 @@ user_stack=None)
 
         # list
         foo = [1, 2, 3]
-        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"], "")
         self.assertTrue(guard(foo))
         self.assertTrue(guard([1, 2, 3]))
         self.assertFalse(guard([1, 2, 3, 4]))
 
         # type
         foo = int
-        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"], "")
         self.assertTrue(guard(foo))
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
@@ -238,7 +239,7 @@ user_stack=None)
     def test_default_device_guard(self):
         root = RootGuardManager()
         foo = 1
-        guard = guards.DEFAULT_DEVICE(root, ["cpu device"])
+        guard = guards.DEFAULT_DEVICE(root, ["cpu device"], "")
         self.assertTrue(guard(foo))
 
         try:
@@ -250,7 +251,7 @@ user_stack=None)
     def test_length_check_guard(self):
         root = RootGuardManager()
         foo = [1, 2, 3]
-        guard = guards.LENGTH_CHECK(root, len(foo), ["len(x) == len(foo)"])
+        guard = guards.LENGTH_CHECK(root, len(foo), ["len(x) == len(foo)"], "")
         self.assertTrue(guard(foo))
         self.assertFalse(guard([]))
 
@@ -269,7 +270,7 @@ user_stack=None)
 
         foo = Foo()
 
-        guard = guards.NO_HASATTR(root, "foo", ["hasattr(x, 'foo') == False"])
+        guard = guards.NO_HASATTR(root, "foo", ["hasattr(x, 'foo') == False"], "")
         self.assertTrue(guard(bar))
         self.assertFalse(guard(foo))
 
@@ -287,7 +288,7 @@ user_stack=None)
 
         x_guard_mgr = guard_manager.getattr_manager("x", "", a, default_mgr_enum)
         y_guard_mgr = guard_manager.getattr_manager("y", "", a, default_mgr_enum)
-        install_object_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
+        install_object_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"], "")
 
         # Check structure
         x_guards = x_guard_mgr.get_leaf_guards()
@@ -309,7 +310,7 @@ user_stack=None)
     def test_dict_version_guard(self):
         root = RootGuardManager()
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_VERSION(root, foo, ["x.version == foo.version"])
+        guard = guards.DICT_VERSION(root, foo, ["x.version == foo.version"], "")
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(dict(foo)))
@@ -320,8 +321,10 @@ user_stack=None)
 
     def test_dynamic_indices_guard(self):
         root = RootGuardManager()
-        guard1 = guards.DYNAMIC_INDICES(root, set(), ["x.size(0) == y.size(0)"])
-        guard2 = guards.DYNAMIC_INDICES(root, set({0, 1}), ["x.size(0) == y.size(0)"])
+        guard1 = guards.DYNAMIC_INDICES(root, set(), ["x.size(0) == y.size(0)"], "")
+        guard2 = guards.DYNAMIC_INDICES(
+            root, set({0, 1}), ["x.size(0) == y.size(0)"], ""
+        )
 
         x = torch.randn(4)
         self.assertTrue(guard1(x))
@@ -346,6 +349,7 @@ user_stack=None)
             stride,
             "x",
             ["check_tensor(x)"],
+            "",
             type(x),
             torch._C._dispatch_keys(x),
         )
@@ -383,6 +387,7 @@ user_stack=None)
             [x_guard_mgr, y_guard_mgr, z_guard_mgr],
             ["x", "y", "z"],
             ["no_aliasing(x, y, z)"],
+            "",
         )
 
         # Check structure
@@ -423,7 +428,7 @@ user_stack=None)
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.NOT_NONE(root, ["weakref_x is not None"])
+        guard = guards.NOT_NONE(root, ["weakref_x is not None"], "")
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
@@ -432,7 +437,7 @@ user_stack=None)
     def test_call_function_no_args_guard(self):
         root = RootGuardManager()
         x = torch.cuda.current_device()
-        guard = guards.EQUALS_MATCH(root, x, [0])
+        guard = guards.EQUALS_MATCH(root, x, [0], "")
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
         self.assertFalse(guard(2))
@@ -763,14 +768,14 @@ user_stack=None)
     def test_dict_contains_guard(self):
         root = RootGuardManager()
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_CONTAINS(root, True, "a", ["has a"])
+        guard = guards.DICT_CONTAINS(root, True, "a", ["has a"], "")
 
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))
         self.assertFalse(guard({}))
 
-        guard = guards.DICT_CONTAINS(root, False, "c", ["not has c"])
+        guard = guards.DICT_CONTAINS(root, False, "c", ["not has c"], "")
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))

@@ -223,25 +223,25 @@ class GuardManager:
     ) -> GuardManager: ...
     # Leaf guards
     def add_lambda_guard(
-        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str], user_stack: str
+        self,
+        user_lambda: Callable[..., Any],
+        verbose_code_parts: list[str],
+        user_stack: str,
     ) -> None: ...
     def add_id_match_guard(
         self, id_val: int, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_equals_match_guard(
-        self,
-        equals_val: Any,
-        verbose_code_parts: list[str],
-        user_stack:str
+        self, equals_val: Any, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_global_state_guard(
-        self, initial_state: Any, verbose_code_parts: list[str]
+        self, initial_state: Any, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_torch_function_mode_stack_guard(
-        self, initial_stack: list[Any], verbose_code_parts: list[str]
+        self, initial_stack: list[Any], verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_mapping_keys_guard(
-        self, value: Any, verbose_code_parts: list[str]
+        self, value: Any, verbose_code_parts: list[str], user_stack: str
     ) -> None: ...
     def add_dict_length_check_guard(
         self, value: int, verbose_code_parts: list[str], user_stack: str
@@ -282,6 +282,7 @@ class GuardManager:
         strides: list[int],
         tensor_name: str,
         verbose_code_parts: list[str],
+        user_stack: str,
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
@@ -366,9 +367,7 @@ class GuardManager:
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
     def add_epilogue_lambda_guard(
-        self,
-        guard: LeafGuard,
-        verbose_code_parts: list[str],
+        self, guard: LeafGuard, verbose_code_parts: list[str], user_stack, str
     ) -> None: ...
     def clone_manager(
         self, clone_filter_fn: Callable[[GuardManager], bool]
@@ -411,19 +410,19 @@ class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
 def install_object_aliasing_guard(
-    x: GuardManager,
-    y: GuardManager,
-    verbose_code_parts: list[str],
+    x: GuardManager, y: GuardManager, verbose_code_parts: list[str], user_stack: str
 ) -> None: ...
 def install_no_tensor_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
     verbose_code_parts: list[str],
+    user_stack: str,
 ) -> None: ...
 def install_storage_overlapping_guard(
     overlapping_guard_managers: list[GuardManager],
     non_overlapping_guard_managers: list[GuardManager],
     verbose_code_parts: list[str],
+    user_stack: str,
 ) -> None: ...
 def install_symbolic_shape_guard(
     guard_managers: list[GuardManager],

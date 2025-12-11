@@ -807,13 +807,16 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
                 extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
+
 def get_verbose_user_stack(guard: Guard) -> str:
     user_stack_frames = []
     if is_recompiles_verbose_enabled():
         for fs in reversed(guard.user_stack):
             if fs.filename not in uninteresting_files():
                 user_stack_frames.append(format_frame(fs, line=True))
-    user_stack_format = [f"#  {i}: {frame}" for i, frame in enumerate(user_stack_frames)]
+    user_stack_format = [
+        f"#  {i}: {frame}" for i, frame in enumerate(user_stack_frames)
+    ]
     return "\n".join(user_stack_format)
 
 
@@ -1135,12 +1138,14 @@ class GuardBuilder(GuardBuilderBase):
                     get_verbose_code_parts(
                         f"__check_obj_id({key_source}, {id_val})", guard
                     ),
-                    get_verbose_user_stack(guard)
+                    get_verbose_user_stack(guard),
                 )
             else:
                 # Install EQUALS_MATCH guard
                 key_manager.add_equals_match_guard(
-                    key, get_verbose_code_parts(f"{key_source} == {key!r}", guard), get_verbose_user_stack(guard)
+                    key,
+                    get_verbose_code_parts(f"{key_source} == {key!r}", guard),
+                    get_verbose_user_stack(guard),
                 )
 
     @staticmethod
@@ -1801,7 +1806,9 @@ class GuardBuilder(GuardBuilderBase):
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                verbose_code_parts,
+                "epilogue",
             )
         else:
             self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
@@ -1925,7 +1932,9 @@ class GuardBuilder(GuardBuilderBase):
                     guard_manager_enum=guard_manager_enum,
                 )
         else:
-            base_manager.add_no_hasattr_guard(attr, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard))
+            base_manager.add_no_hasattr_guard(
+                attr, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            )
         self.already_added_code_parts.add(code)
 
     def NOT_PRESENT_IN_GENERIC_DICT(
@@ -1949,7 +1958,10 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         mod_generic_dict_manager.add_dict_contains_guard(
-            False, attr, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            False,
+            attr,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
         self.already_added_code_parts.add(code)
 
@@ -1999,7 +2011,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
-            not invert, key, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            not invert,
+            key,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
         self.already_added_code_parts.add(code)
 
@@ -2015,7 +2030,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
-            contains, item, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            contains,
+            item,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
         self.already_added_code_parts.add(code)
 
@@ -2079,7 +2097,9 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
-            id_val, get_verbose_code_parts(code, guard, recompile_hint), get_verbose_user_stack(guard)
+            id_val,
+            get_verbose_code_parts(code, guard, recompile_hint),
+            get_verbose_user_stack(guard),
         )
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
@@ -2112,7 +2132,9 @@ class GuardBuilder(GuardBuilderBase):
         code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
 
         self.get_guard_manager(guard).add_dispatch_key_set_guard(
-            val, get_verbose_code_parts(code_parts, guard), get_verbose_user_stack(guard)
+            val,
+            get_verbose_code_parts(code_parts, guard),
+            get_verbose_user_stack(guard),
         )
 
     def DUAL_LEVEL(self, guard: Guard) -> None:
@@ -2123,7 +2145,9 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, code)
         self.guard_manager.root.add_dual_level_match_guard(
-            dual_level, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            dual_level,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:
@@ -2192,7 +2216,9 @@ class GuardBuilder(GuardBuilderBase):
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
-            metadata_checker, get_verbose_code_parts(global_name, guard), get_verbose_user_stack(guard)
+            metadata_checker,
+            get_verbose_code_parts(global_name, guard),
+            get_verbose_user_stack(guard),
         )
 
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
@@ -2280,7 +2306,8 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
-                get_verbose_code_parts(code, guard), get_verbose_user_stack(guard),
+                get_verbose_code_parts(code, guard),
+                get_verbose_user_stack(guard),
             )
             return
 
@@ -2291,7 +2318,8 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_complex_is_nan_guard(
-                get_verbose_code_parts(code, guard), get_verbose_user_stack(guard),
+                get_verbose_code_parts(code, guard),
+                get_verbose_user_stack(guard),
             )
             return
 
@@ -2309,7 +2337,9 @@ class GuardBuilder(GuardBuilderBase):
                 f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
             ]
 
-        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts, get_verbose_user_stack(guard))
+        self.get_guard_manager(guard).add_equals_match_guard(
+            val, verbose_code_parts, get_verbose_user_stack(guard)
+        )
         self._set_guard_export_info(guard, code)
         return
 
@@ -2406,11 +2436,15 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         if isinstance(value, dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+                len(value),
+                get_verbose_code_parts(code, guard),
+                get_verbose_user_stack(guard),
             )
         else:
             self.get_guard_manager(guard).add_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+                len(value),
+                get_verbose_code_parts(code, guard),
+                get_verbose_user_stack(guard),
             )
 
     def TUPLE_ITERATOR_LEN(self, guard: Guard) -> None:
@@ -2426,7 +2460,10 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            tuple_iterator_len(value),
+            obj_id,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
 
     def RANGE_ITERATOR_MATCH(self, guard: Guard) -> None:
@@ -2444,7 +2481,12 @@ class GuardBuilder(GuardBuilderBase):
 
         start, stop, step = normalized_range_iter
         self.get_guard_manager(guard).add_range_iterator_match_guard(
-            start, stop, step, obj_id, get_verbose_code_parts(code, guard), get_verbose_user_stack(guard)
+            start,
+            stop,
+            step,
+            obj_id,
+            get_verbose_code_parts(code, guard),
+            get_verbose_user_stack(guard),
         )
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
@@ -2486,6 +2528,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
+                get_verbose_user_stack(guard),
             )
 
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
@@ -2504,7 +2547,9 @@ class GuardBuilder(GuardBuilderBase):
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
         self._set_guard_export_info(guard, code)
-        self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
+        self.get_guard_manager(guard).add_mapping_keys_guard(
+            value, code, get_verbose_user_stack(guard)
+        )
 
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
@@ -2553,7 +2598,7 @@ class GuardBuilder(GuardBuilderBase):
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
         self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
+            global_state, ["___check_global_state()"], get_verbose_user_stack(guard)
         )
 
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
@@ -2566,6 +2611,7 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_manager.root.add_torch_function_mode_stack_guard(
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
+            get_verbose_user_stack(guard),
         )
 
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
@@ -2948,12 +2994,14 @@ class GuardBuilder(GuardBuilderBase):
                     ),
                     guard,
                 )
+                user_stack = get_verbose_user_stack(guard)
                 guard_manager.add_tensor_match_guard(
                     value,
                     size,  # type: ignore[arg-type]
                     stride,  # type: ignore[arg-type]
                     tensor_name,
                     verbose_code_parts,
+                    user_stack,
                     pytype,
                     dispatch_keys,
                 )
@@ -3002,7 +3050,9 @@ class GuardBuilder(GuardBuilderBase):
                     code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
-                        dynamic_indices, get_verbose_code_parts(code_part, guard), get_verbose_user_stack(guard)
+                        dynamic_indices,
+                        get_verbose_code_parts(code_part, guard),
+                        get_verbose_user_stack(guard),
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -3013,7 +3063,8 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(code_part)
                     self.get_guard_manager(guard).add_no_hasattr_guard(
                         "_dynamo_dynamic_indices",
-                        get_verbose_code_parts(code_part, guard), get_verbose_user_stack(guard),
+                        get_verbose_code_parts(code_part, guard),
+                        get_verbose_user_stack(guard),
                     )
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
@@ -4080,6 +4131,7 @@ class CheckFunctionManager:
                 builder.no_tensor_aliasing_guard_managers,
                 no_tensor_aliasing_names,
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+                f"{seen}",
             )
 
         # Note - On Lambda guarding of object aliasing
@@ -4118,6 +4170,7 @@ class CheckFunctionManager:
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
                     [code_part],
+                    get_verbose_user_stack(guard),
                 )
                 add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlap):
@@ -4138,6 +4191,7 @@ class CheckFunctionManager:
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
                     [code_part],
+                    get_verbose_user_stack(guard),
                 )
                 add_code_part(code_part, None, True)
             else:
