@@ -2092,9 +2092,9 @@ void ProcessGroupNCCL::Watchdog::run() {
           e.what());
       LOG(ERROR) << exitMsg;
       if (C10_LIKELY(rethrowCUDAErrors_) ||
-          !(std::string(e.what()).find("CUDA Error"))) {
-        // TODO(whc) clean up the rethrow - why is it stored in a class var and
-        // rethrown?
+          std::string(e.what()).find("CUDA Error") != std::string::npos) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var
+        // and rethrown?
         watchDogException_ =
             std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
         std::rethrow_exception(watchDogException_);

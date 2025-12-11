@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
@@ -285,6 +286,13 @@ def _is_tangent(node: fx.Node) -> bool:
     return node.op == "placeholder" and "tangents" in str(node.target)
 
 
+def is_non_builtin_to_include(node: fx.Node) -> bool:
+    return config.is_non_builtin_to_include and (
+        (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
+        or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+    )
+
+
 def _is_bwd_seed_offset(node: fx.Node) -> bool:
     return node.op == "placeholder" and (
         "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
@@ -367,7 +375,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]],
+    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node, ...]],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -1857,7 +1865,11 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return True
         else:
-            if op_types.is_random(node) or op_types.is_compute_intensive(node):
+            if (
+                op_types.is_random(node)
+                or op_types.is_compute_intensive(node)
+                or is_non_builtin_to_include(node)
+            ):
                 return True
 
         # If a node *must* be materialized in the backwards pass, then we
@@ -2543,7 +2555,10 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
-                and get_node_storage(i) not in input_storages
+                and (
+                    get_node_storage(i) not in input_storages
+                    or is_non_builtin_to_include(i)
+                )
             )
         ]
 
@@ -3025,6 +3040,19 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
+        )
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
