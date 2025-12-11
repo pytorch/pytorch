@@ -335,7 +335,7 @@ class LazyConstantVariable(LazyVariableTracker):
         self._ensure_type_guard()
         from .constant import ConstantVariable
 
-        return issubclass(cls, ConstantVariable)
+        return issubclass(ConstantVariable, cls)
 
 
 class LazySymNodeFormatString:
