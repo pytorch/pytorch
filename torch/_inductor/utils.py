@@ -2037,7 +2037,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cutlass.utils import try_import_cutlass
+    from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -2413,11 +2413,14 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    remove_quote = kwargs.pop("remove_quote", False)
     # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
         kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if remove_quote:
+            kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 

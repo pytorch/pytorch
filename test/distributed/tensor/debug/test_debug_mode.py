@@ -529,6 +529,39 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+    def test_record_function(self):
+        def fn(x, y):
+            z = x @ y
+            with torch.profiler.record_function("this_is_ignored"):
+                z = z + 1
+            return z.sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(4, 2, requires_grad=True)
+        with DebugMode() as debug_mode:
+            with torch.profiler.record_function("FWD"):
+                out = torch.compile(fn, backend="aot_eager")(x, y)
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [record function] FWD
+      aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
+      aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
+      aten::sum(t: f32[8, 2])  ->  t: f32[]
+      aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
+      aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+      aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
+      aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
+    aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
+    aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
+        )
+
     def test_in_place_mutation(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
