@@ -69,7 +69,6 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             y_fp8 = (y_base * y_scale).to(self.float8_dtype).detach().requires_grad_(self.auto_set())
 
         # Scales need to be scalar tensors for TensorWise scaling
-        # Remove .contiguous() as it doesn't apply to scalar tensors
         scale_a_scalar = x_scale.reciprocal().item()
         scale_b_scalar = y_scale.reciprocal().item()
 
