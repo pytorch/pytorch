@@ -3989,7 +3989,9 @@ class NativeCachingAllocator : public CUDAAllocator {
       const std::vector<std::string>& skip_actions) override {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
-    annotation_buffer.clear();
+    if (!enabled || clearHistory) {
+      annotation_buffer.clear();
+    }
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled,
