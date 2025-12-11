@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     create_block_mask,
@@ -620,6 +621,54 @@ class TestFlexFlash(InductorTestCase):
             mask_with_buffer, 2, 4, 512, 512, device=device
         )
         flash_vs_triton(q, k, v, score_mod=score_with_buffer, block_mask=block_mask)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_generates_cute_hash(self, device, dtype):
+        """Test that generated code sets __cute_hash__ on score_mod for fast hashing."""
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=_causal,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        # Check that the generated code sets __cute_hash__ on score_mod
+        code_str = "\n".join(code)
+        self.assertIn(
+            "score_mod.__cute_hash__",
+            code_str,
+            "Generated code should set __cute_hash__ on score_mod for fast hashing",
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_fused_qkv_reinterpret_view(self, device, dtype):
+        """Test that fused QKV projection (creating ReinterpretViews) works.
+
+        When Q/K/V are slices of a shared buffer (from fused QKV projection),
+        they become ReinterpretViews with non-contiguous strides. CuteDSL must
+        handle these by generating proper reinterpret_tensor() calls.
+        """
+        B, M, H, D = 2, 256, 4, 64
+        embed_dim = H * D
+
+        def fn(x, weight):
+            qkv = x @ weight
+            qkv = qkv.view(B, M, 3, H, D)
+            q, k, v = qkv.unbind(2)
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            return flex_attention(q, k, v, kernel_options={"BACKEND": "FLASH"})
+
+        x = torch.randn(B, M, embed_dim, device=device, dtype=dtype)
+        weight = torch.randn(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
+
+        compiled_fn = torch.compile(fn)
+        out = compiled_fn(x, weight)
+        self.assertEqual(out.shape, (B, H, M, D))
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
