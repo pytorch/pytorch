@@ -13414,6 +13414,12 @@ graph():
             int_1: int
             int_2: int
 
+            def __fx_repr__(self):
+                return (
+                    f"MyInput(int_1={self.int_1!r}, int_2={self.int_2!r})",
+                    {"MyInput": MyInput},
+                )
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()

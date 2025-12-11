@@ -90,7 +90,7 @@ class ValueConfig:
     def __hash__(self):
         return hash(self.mode)
 
-    def __fx_eval__(self):
+    def __fx_repr__(self):
         return f"ValueConfig(mode={self.mode!r})", {"ValueConfig": ValueConfig}
 
 
@@ -104,7 +104,7 @@ class SizeStore:
     def __hash__(self):
         return hash(self.size)
 
-    def __fx_eval__(self):
+    def __fx_repr__(self):
         # Return (repr_string, dict_mapping_name_to_type)
         return f"SizeStore(size={self.size!r})", {"SizeStore": SizeStore}
 
@@ -123,10 +123,10 @@ class NestedValueSize:
     def __hash__(self):
         return hash(self.size) ^ hash(self.config)
 
-    def __fx_eval__(self):
-        # Recursively call __fx_eval__ on nested opaque objects
-        size_eval, size_globals = self.size.__fx_eval__()
-        config_eval, config_globals = self.config.__fx_eval__()
+    def __fx_repr__(self):
+        # Recursively call __fx_repr__ on nested opaque objects
+        size_eval, size_globals = self.size.__fx_repr__()
+        config_eval, config_globals = self.config.__fx_repr__()
 
         # Combine repr and globals
         repr_str = f"NestedValueSize(size={size_eval}, config={config_eval})"
@@ -713,7 +713,7 @@ def forward(self, primals, tangents):
             def __hash__(self):
                 return hash(self.x)
 
-        with self.assertRaisesRegex(TypeError, "expected to have a `__fx_eval__`"):
+        with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
 
     def test_invalid_schema(self):
@@ -914,7 +914,7 @@ def forward(self, arg0_1):
                 def __hash__(self):
                     return hash(self.value)
 
-                def __fx_eval__(self):
+                def __fx_repr__(self):
                     return f"TmpClass(value={self.value!r})", {"TmpClass": TmpClass}
 
             register_opaque_type(TmpClass, typ="value")
