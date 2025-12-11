@@ -193,6 +193,26 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.where({cond}, {a}, {b})"
 
     @staticmethod
+    def masked(mask: str, body: Callable[[], str], other: float) -> str:
+        """
+        Computes body, but only uses the result where mask is true.
+        Where mask is false, uses the 'other' value instead.
+        """
+        result = body()
+        # Format the 'other' value properly for JAX
+        if isinstance(other, float):
+            if math.isnan(other):
+                other_str = "jnp.nan"
+            elif math.isinf(other):
+                other_str = "jnp.inf" if other > 0 else "-jnp.inf"
+            else:
+                other_str = repr(other)
+        else:
+            other_str = repr(other)
+        # Use jnp.where to select between result and other based on mask
+        return f"jnp.where({mask}, {result}, {other_str})"
+
+    @staticmethod
     def to_dtype(
         x: str,
         dtype: torch.dtype,
