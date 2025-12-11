@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 import copy
 import math
+import unittest
 from dataclasses import dataclass
 
 import torch
@@ -1542,6 +1543,43 @@ class GraphModule(torch.nn.Module):
         loss = z.sum()
         loss.backward()
         self.assertEqual(x + y, z)
+
+    @unittest.expectedFailure
+    def test_nonlocal_list_mutation_in_autograd_function(self):
+        """Test that nonlocal list mutation in autograd.Function forward is handled correctly."""
+
+        class SimpleAutogradFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, z):
+                # Simple computation
+                o = torch.matmul(x, x) @ x
+                out = x.sin()
+                # Mutate the nonlocal list
+                z.append(out)
+                return torch.cos(torch.sin(o)), torch.sin(x)
+
+            @staticmethod
+            def backward(ctx, grad_output1, grad_output2):
+                # Simple backward
+                return grad_output1 + grad_output2, None
+
+        def fn(x):
+            z = []
+
+            outs = SimpleAutogradFunc.apply(x, z)
+            out1 = outs[0]
+            # Check that the extra output pytree handling is done properly
+            out2 = outs[-1]
+
+            return out1 + out2, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
 
 
 if __name__ == "__main__":
