@@ -2,7 +2,6 @@
 import warnings
 import weakref
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -98,10 +97,10 @@ class ModTracker:
 
     def register_user_hooks(
         self,
-        pre_fw_hook: Optional[Callable] = None,
-        post_fw_hook: Optional[Callable] = None,
-        pre_bw_hook: Optional[Callable] = None,
-        post_bw_hook: Optional[Callable] = None,
+        pre_fw_hook: Callable | None = None,
+        post_fw_hook: Callable | None = None,
+        pre_bw_hook: Callable | None = None,
+        post_bw_hook: Callable | None = None,
     ):
         """
         Registers user-specified hooks to be called before/after the forward/backward pass for each
