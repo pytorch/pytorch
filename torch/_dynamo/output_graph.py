@@ -1700,7 +1700,10 @@ class OutputGraph(OutputGraphCommon):
                             unimplemented(
                                 gb_type="nested function with closure in output",
                                 context="as_python_constant for out_spec",
-                                explanation="Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo cannot reconstruct the function."
+                                ),
                                 hints=[
                                     "Define the function at module scope instead of inside another function"
                                 ],
