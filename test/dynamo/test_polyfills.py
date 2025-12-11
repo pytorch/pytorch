@@ -2,6 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -183,6 +184,58 @@ class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(f64_lists[0][0], t_f64_0))
         self.assertTrue(torch.equal(f64_lists[0][1], t_f64_1))
         self.assertEqual(f64_indices, [1, 3])
+
+    def test_group_tensors_traceable_with_compile(self):
+        """Test that torch._C._group_tensors_by_device_and_dtype is traceable with torch.compile.
+
+        This test verifies:
+        1. The function can be compiled without graph breaks
+        2. The frame is actually compiled (not skipped)
+        3. There is tensor compute happening in the compiled graph
+        """
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(tensors, grads):
+            # Group tensors by device and dtype (this uses the polyfill under compile)
+            grouped = torch._C._group_tensors_by_device_and_dtype(
+                [tensors, grads], True
+            )
+
+            # Perform some tensor computation to ensure the frame is not skipped
+            # Sum up results for each dtype group
+            total = torch.tensor(0.0)
+            for grouped_tensors, indices in grouped.values():
+                tensor_list, grad_list = grouped_tensors
+                for t, g in zip(tensor_list, grad_list):
+                    if t is not None and g is not None:
+                        # This adds tensor compute to ensure frame isn't skipped
+                        total = total + (t + g).sum().float()
+            return total
+
+        tensors = [
+            torch.randn(4, dtype=torch.float32),
+            torch.randn(4, dtype=torch.float32),
+            torch.randn(4, dtype=torch.float32),
+        ]
+        grads = [torch.randn_like(t) for t in tensors]
+
+        # Run without compile to get expected result
+        expected = fn(tensors, grads)
+
+        # Run with compile
+        compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        result = compiled_fn(tensors, grads)
+
+        # Verify correctness
+        self.assertTrue(torch.allclose(result, expected))
+
+        # Verify compilation happened (frame was not skipped)
+        self.assertGreaterEqual(
+            cnts.frame_count, 1, "Expected at least 1 frame to be compiled"
+        )
+
+        # Verify there was tensor compute (op_count > 0 means tensor ops were traced)
+        self.assertGreater(cnts.op_count, 0, "Expected tensor operations to be traced")
 
 
 if __name__ == "__main__":
