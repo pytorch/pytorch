@@ -69,8 +69,7 @@ def _get_mm_specs(
 class TestExpandPlaceholder(TestCase):
     def setUp(self):
         super().setUp()
-        # Initialize fake process group for testing
-        self.world_size = 8  # 3D mesh size
+        self.world_size = 8
         store = FakeStore()
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
@@ -80,11 +79,6 @@ class TestExpandPlaceholder(TestCase):
         super().tearDown()
         dist.destroy_process_group()
 
-    # TODO list
-    # - test cat well
-    #   - test replicate + shard -> shard
-    #   - test partial + partial -> partial
-    # - test unshardable filters correctly (in expander util test)
     def test_expand_cat_strategy_to_3d_mesh(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 
@@ -161,6 +155,20 @@ class TestExpandPlaceholder(TestCase):
         strategy = _expand_cat(inputs, placements)
         self.assertEqual(len(strategy.strategies), expected_num_strategies)
 
+        # Test 'cant shard based on tensor dim % mesh dim' case
+        inputs = [torch.empty((8, 4, 8))] * 2
+        placements = [
+            (Replicate(), Replicate(), Shard(1)),
+            (Shard(1), Shard(1), Replicate()),
+        ]
+        strategy = _expand_cat(inputs, placements)
+        # Only strategy filtered out should be S1S1S1.
+        self.assertEqual(len(strategy.strategies), expected_num_strategies - 1)
+        min_cost_strategy = _select_min_cost_strategy(strategy)
+        # We can shard tensor dim 1 at most twice, then we run out of values
+        self.assertEqual(
+            min_cost_strategy.output_spec.placements, (Shard(1), Replicate(), Shard(1))
+        )
         # for i, s in enumerate(strategy.strategies):
         #     print(f"{i=}, cost={s.redistribute_cost}, {s}")
 
