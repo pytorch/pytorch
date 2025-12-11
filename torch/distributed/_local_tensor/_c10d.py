@@ -281,15 +281,6 @@ def _local_functional_all_to_all_single(
     return output
 
 
-def _local_functional_wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    # "wait_tensor(Tensor input) -> Tensor"
-    from . import LocalTensor
-
-    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
-
-    return tensor
-
-
 def _local_broadcast_(
     tensors: list[torch.Tensor],
     process_group_so: ScriptObject,
