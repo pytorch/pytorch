@@ -372,5 +372,13 @@ def redistribute_cost(
             # ban shard -> partial as it does not make sense to perform
             # this redistribute
             return float("inf")
+        elif current.is_replicate() and target.is_partial():
+            # ban replicate -> partial: Partial is not a state you can
+            # redistribute into, only out of
+            return float("inf")
+        elif current.is_partial() and target.is_partial():
+            # ban partial(A) -> partial(B) where A != B: can't transform
+            # one reduction type to another (current == target case handled above)
+            return float("inf")
 
     return cost
