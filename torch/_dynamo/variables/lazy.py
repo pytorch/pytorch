@@ -377,6 +377,7 @@ class LazyConstantVariable(LazyVariableTracker):
         SymNodeVariable instead, so we must realize in those cases.
         """
         from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
 
         # If already realized, just check the realized type
         if self.is_realized():
@@ -385,15 +386,28 @@ class LazyConstantVariable(LazyVariableTracker):
         # Check if this lazy variable might realize to SymNodeVariable
         # instead of ConstantVariable due to specialize_int/specialize_float
         value_type = self.peek_type()
-        if value_type is int and not config.specialize_int:
-            # Could become SymNodeVariable, must realize to check properly
-            return type.__instancecheck__(cls, self.realize())
-        if value_type is float and not config.specialize_float:
-            # Could become SymNodeVariable, must realize to check properly
+        might_be_symnode = (value_type is int and not config.specialize_int) or (
+            value_type is float and not config.specialize_float
+        )
+
+        if might_be_symnode:
+            # We don't know if this will become ConstantVariable or SymNodeVariable.
+            # Check if we can answer without realizing:
+            const_match = issubclass(ConstantVariable, cls)
+            sym_match = issubclass(SymNodeVariable, cls)
+
+            if const_match and sym_match:
+                # Both types would match, so answer is True
+                self._ensure_type_guard()
+                return True
+            if not const_match and not sym_match:
+                # Neither type would match, so answer is False
+                return False
+            # Only one would match - must realize to know which type we get
             return type.__instancecheck__(cls, self.realize())
 
         self._ensure_type_guard()
-        return issubclass(cls, ConstantVariable)
+        return issubclass(ConstantVariable, cls)
 
 
 class ComputedLazyConstantVariable(LazyVariableTracker):
@@ -488,7 +502,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         """Check isinstance without triggering realization."""
         from .constant import ConstantVariable
 
-        return issubclass(cls, ConstantVariable)
+        return issubclass(ConstantVariable, cls)
 
     def is_python_constant(self) -> bool:
         return True
