@@ -867,6 +867,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -876,6 +879,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_pow)
         def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
