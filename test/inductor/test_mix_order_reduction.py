@@ -502,7 +502,7 @@ class MixOrderReductionTest(TestBase):
             self.skipTest("Mix order reduction not enabled")
 
         if dtype is torch.bfloat16 and runOnRocmArch(MI200_ARCH):
-            self.skipTest("Currently failing non rocm mi200") 
+            self.skipTest("Currently failing on rocm mi200") 
 
         def f(xs, w, eps):
             ys = []
