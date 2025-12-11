@@ -101,10 +101,10 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
             """\
 def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
-    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='cuda', index=0), non_blocking = True);  cpu_offload_cos_1 = None
+    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_cos_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, gpu_reload_cos_1);  gpu_reload_cos_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
-    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
     def test_inductor_offload(self):
@@ -126,7 +126,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
 
         (
             FileCheck()
-            .check("buf1 = empty_strided_cuda(")
+            .check("buf1 = empty_strided_GPU_TYPE(".replace("GPU_TYPE", GPU_TYPE))
             .check("buf1.copy_(cpu_offload_cos_1, True)")
             .check("del cpu_offload_cos_1")
             .run(bw_code)
@@ -175,13 +175,13 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
     stream_in_gpu_reload_cos_1 = torch.ops.streams.fork.default(4, 5);  stream_in_gpu_reload_cos_1 = None
     wait_stream_default = torch.ops.streams.wait_stream.default(5, 4);  wait_stream_default = None
-    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='cuda', index=0), non_blocking = True);  cpu_offload_cos_1 = None
+    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_cos_1 = None
     record_event_default = torch.ops.streams.record_event.default(6, 5);  record_event_default = None
     stream_out_gpu_reload_cos_1 = torch.ops.streams.join.default(5, 4);  stream_out_gpu_reload_cos_1 = None
     wait_event_default = torch.ops.streams.wait_event.default(6, 4);  wait_event_default = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, gpu_reload_cos_1);  gpu_reload_cos_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
-    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
     @torch._functorch.config.patch(
@@ -258,14 +258,14 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
 def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     stream_in_gpu_reload_cos_1 = torch.ops.streams.fork.default(4, 5);  stream_in_gpu_reload_cos_1 = None
     wait_stream_default = torch.ops.streams.wait_stream.default(5, 4);  wait_stream_default = None
-    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='cuda', index=0), non_blocking = True);  cpu_offload_cos_1 = None
+    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_cos_1 = None
     record_event_default = torch.ops.streams.record_event.default(6, 5);  record_event_default = None
     stream_out_gpu_reload_cos_1 = torch.ops.streams.join.default(5, 4);  stream_out_gpu_reload_cos_1 = None
     mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
     wait_event_default = torch.ops.streams.wait_event.default(6, 4);  wait_event_default = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, gpu_reload_cos_1);  gpu_reload_cos_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
-    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
     @torch._functorch.config.patch(

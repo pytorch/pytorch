@@ -2248,6 +2248,7 @@ class _CudaDeviceProperties:
     clock_rate: _int
     memory_clock_rate: _int
     memory_bus_width: _int
+    shared_memory_per_block: _int
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -2386,6 +2387,7 @@ class _MemPool:
         allocator: _cuda_CUDAAllocator | None = None,
         is_user_created: _bool = True,
         use_on_oom: _bool = False,
+        no_split: _bool = False,
     ) -> None: ...
     @property
     def id(self) -> tuple[_int, _int]: ...

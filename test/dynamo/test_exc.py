@@ -177,13 +177,16 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
 User code traceback:
   File "test_exc.py", line N, in test_graph_break_log
     torch.compile(fn001, backend="eager")(torch.randn(1))

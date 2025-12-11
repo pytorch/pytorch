@@ -230,6 +230,9 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
+    def is_tensor(self) -> bool:
+        return True
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -431,7 +434,7 @@ class TensorVariable(VariableTracker):
         # Today, var_getattr returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
-        if name in ("size", "stride", "__iter__"):
+        if name in all_tensor_attrs:
             return ConstantVariable(True)
 
         try:
@@ -598,11 +601,14 @@ class TensorVariable(VariableTracker):
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
             # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
             # symbolic_shapes, but that end up as int/sympy.Integer
-            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            assert (
+                isinstance(dyn_length, SymNodeVariable)
+                or dyn_length.is_python_constant()
+            )
             if isinstance(dyn_length, SymNodeVariable):
                 length = dyn_length.evaluate_expr(tx.output)
             else:
-                length = dyn_length.value
+                length = dyn_length.as_python_constant()
 
         if idxes is None:
             idxes = range(length)
@@ -1180,7 +1186,7 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             from .. import polyfills
 
             return tx.inline_user_function_return(
@@ -1199,7 +1205,7 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        if isinstance(value, TensorVariable):
+        if value.is_tensor():
             # [Note: Tensor.__setitem__ and VariableTracker metadata]
             # At this point, we proxied a node representing `self[key] = value` into the graph.
             # When executed, this node will mutate `self`'s tensor metadata, so it's important
@@ -1283,7 +1289,7 @@ class TensorVariable(VariableTracker):
             )
 
     def method_add_(self, other, *, alpha=None):
-        if alpha is not None:
+        if alpha is not None and config.enable_dynamo_decompositions:
             from ..symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
@@ -1296,7 +1302,7 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )
@@ -1485,7 +1491,8 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                a.is_python_constant() and isinstance(a.as_python_constant(), int)
+                for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1564,6 +1571,9 @@ class SymNodeVariable(VariableTracker):
             return self.sym_num.node.pytype
         else:
             return type(self.sym_num)
+
+    def is_symnode_like(self) -> bool:
+        return True
 
     def as_proxy(self):
         return self.proxy
@@ -1736,9 +1746,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            is_object_str = (
-                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
-            )
+            is_object_str = dtype_arg is not None and dtype_arg.is_constant_match("O")
             is_object_type = (
                 isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
             )
@@ -1833,11 +1841,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
 
         new_func = self.value.__new__
         if new_func is torch.Tensor.__new__:
-            if (
-                len(args) == 1
-                and isinstance(args[0], TensorVariable)
-                and len(kwargs) == 0
-            ):
+            if len(args) == 1 and args[0].is_tensor() and len(kwargs) == 0:
                 data = args[0]
                 # Simulate `torch.Tensor.__new__` as shallow-copying the input
                 # tensor data with a new type. TODO polyfill?
