@@ -2111,7 +2111,9 @@ class InstructionTranslatorBase(
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             # Pass the stored real_stack to preserve the original exception location
             real_stack = getattr(val, "real_stack", None)
-            raise observed_exception_type(f"raised exception {val}", real_stack=real_stack)
+            raise observed_exception_type(
+                f"raised exception {val}", real_stack=real_stack
+            )
         unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),

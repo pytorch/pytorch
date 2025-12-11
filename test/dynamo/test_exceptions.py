@@ -970,7 +970,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         # doesn't suppress it, the error message should point to the original raise
         # location, not the context manager cleanup code.
         def g():
-            assert False
+            assert False  # noqa: B011
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
@@ -991,13 +991,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         # When an exception is caught and re-raised, the error message should
         # point to the original raise location, not the reraise location.
         def g():
-            raise Exception("Invalid")
+            raise Exception("Invalid")  # noqa: TRY002
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
             try:
                 g()
-            except Exception:
+            except Exception:  # noqa: TRY203
                 raise
             return x
 
