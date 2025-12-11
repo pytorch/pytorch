@@ -905,10 +905,6 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
-    @skipIfXpu(
-        msg="AssertionError: Scalars are not equal!, "
-        "https://github.com/intel/torch-xpu-ops/issues/2332"
-    )
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
