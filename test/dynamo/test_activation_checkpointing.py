@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -396,7 +397,11 @@ class ActivationCheckpointingViaTagsTests(
 
         def partition_fn(joint_gm, *args, **kwargs):
             gm_str = joint_gm.print_readable(print_output=False)
-            self.assertTrue("# ac_graph_id: 2 - PREFER_RECOMPUTE" in gm_str)
+            # Check for the pattern with any graph ID (the ID depends on test order)
+            self.assertTrue(
+                re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
+                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+            )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
         backend = aot_autograd(
