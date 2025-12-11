@@ -1936,12 +1936,12 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self.exc_vt.exc_type
 
     @property
-    def real_stack(self):
-        return self.exc_vt.real_stack
+    def python_stack(self):
+        return self.exc_vt.python_stack
 
-    @real_stack.setter
-    def real_stack(self, value):
-        self.exc_vt.real_stack = value
+    @python_stack.setter
+    def python_stack(self, value):
+        self.exc_vt.python_stack = value
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
