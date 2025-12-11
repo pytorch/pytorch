@@ -4751,7 +4751,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 f.seek(0)
                 f.write(data)
 
-            # Verify that loading the corrupted file produces a helpful error message
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"invalid header or archive is corrupted"
