@@ -9,6 +9,7 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
+from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from .utils import is_using_cudagraph_partition
@@ -421,3 +422,21 @@ def get_partition_cudagraph_metadata(
         partition_stack_traces,
         partition_constants,
     )
+
+
+def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
+    """Debug helper that collects the data pointers of all CUDA tensors in the object."""
+    if not isinstance(obj, torch.Tensor):
+        return OrderedSet()
+
+    ptrs: OrderedSet[int] = OrderedSet()
+    for base in get_plain_tensors(obj, out=[]):
+        if type(base) is not torch.Tensor:
+            continue
+        if is_fake(base) or base.is_meta or base.device.type != "cuda":
+            continue
+        try:
+            ptrs.add(base.data_ptr())
+        except Exception:
+            pass
+    return ptrs

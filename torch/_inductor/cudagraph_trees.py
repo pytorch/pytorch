@@ -69,6 +69,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
+    collect_cuda_data_ptrs,
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
@@ -1885,30 +1886,12 @@ def check_memory_pool(
         if config.triton.cudagraph_trees_objgraph:
             import objgraph
 
-            from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
-
             generated_files: list[str] = []
-
-            def tensor_data_ptrs(t: object) -> OrderedSet[int]:
-                if not isinstance(t, torch.Tensor):
-                    return OrderedSet()
-
-                ptrs: OrderedSet[int] = OrderedSet()
-                for base in get_plain_tensors(t, out=[]):
-                    if type(base) is not torch.Tensor:
-                        continue
-                    if is_fake(base) or base.is_meta or base.device.type != "cuda":
-                        continue
-                    try:
-                        ptrs.add(base.data_ptr())
-                    except Exception:
-                        pass
-                return ptrs
 
             tensors = objgraph.by_type("torch.Tensor")
             for index, bad_dp in enumerate(allocated_not_in_live_storages):
                 bad_tensor = next(
-                    (t for t in tensors if bad_dp in tensor_data_ptrs(t)), None
+                    (t for t in tensors if bad_dp in collect_cuda_data_ptrs(t)), None
                 )
                 if bad_tensor is None:
                     continue
