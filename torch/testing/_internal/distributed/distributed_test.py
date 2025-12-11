@@ -84,11 +84,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    MI200_ARCH,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
-    skipIfRocmArch,
     TemporaryFileName,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -4862,7 +4859,6 @@ class DistributedTest:
                         # case.
                         optim.zero_grad(set_to_none=True)
 
-        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls, init_before in itertools.product(
@@ -4885,7 +4881,6 @@ class DistributedTest:
                     gradient_as_bucket_view=False,
                 )
 
-        @skipIfRocmArch(MI200_ARCH)
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
