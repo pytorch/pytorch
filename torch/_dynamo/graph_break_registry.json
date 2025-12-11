@@ -3545,6 +3545,12 @@
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(fn)",
+      "Explanation": "Expected {method_name} to be a function or method.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
       "Explanation": "Expected forward function to be a function or method.",
       "Hints": []
