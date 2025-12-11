@@ -156,6 +156,10 @@ jobs:
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+
       - name: Chown workspace
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
@@ -166,9 +170,6 @@ jobs:
         shell: bash
         run: |
           set -eux
-
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
 
           if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]] || [[ ${{ inputs.build_environment }} == 'linux-s390x-binary-manywheel' ]] ; then
             rm -rf "${RUNNER_TEMP}/artifacts"

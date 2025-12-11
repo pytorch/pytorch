@@ -669,6 +669,9 @@ class AOTInductorTestsTemplate:
 
     @requires_gpu
     def test_device_moved_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
         # testing both directions
         device_movements = [
             (torch.device(type=GPU_TYPE, index=0), torch.device("cpu")),
@@ -6666,7 +6669,16 @@ class AOTInductorTestsTemplate:
 
         model = Model()
         example_inputs = (torch.tensor([1.0], device=self.device),)
-        self.check_model(model, example_inputs)
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = torch._inductor.aoti_load_package(package_path)
+
+        # First call: predicate is False
+        result1 = optimized(*example_inputs)
+        self.assertEqual(result1.item(), 1.0)
+
+        # Second call: predicate is now True
+        result2 = optimized(*example_inputs)
+        self.assertEqual(result2.item(), 2.0)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -7740,6 +7752,30 @@ class AOTInductorTestsTemplate:
             torch.randn(10, device=self.device),
         )
         self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_constant_int_kernel_input(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                device = x.device
+
+                inp = torch.zeros(u0, device=device)
+                inp_rand0 = inp + torch.rand(u0, device=device)
+                inp_rand1 = inp_rand0 - torch.rand(u0, device=device)
+                return torch.where(
+                    torch.rand(u0, device=device) > 0.5,
+                    inp_rand0 + inp_rand1,
+                    inp_rand0 - inp_rand1,
+                )
+
+        example_inputs = (torch.tensor(6, dtype=torch.int64, device=self.device),)
+
+        with config.patch("triton.autotune_with_sample_inputs", True):
+            AOTIRunnerUtil.run(Model(), example_inputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

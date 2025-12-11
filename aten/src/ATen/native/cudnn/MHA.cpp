@@ -139,8 +139,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
 #include <iostream>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace fe = cudnn_frontend;
 
@@ -1882,6 +1881,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
       mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 #endif
