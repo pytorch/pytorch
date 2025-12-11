@@ -1093,6 +1093,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
+#if USE_ROCM
+      // ROCm: expose shared_memory_per_block for shared memory based pruning
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+#endif
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
@@ -1488,7 +1493,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
-          freed_pointer_set.insert((ptr));
+          freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
         // so even those this will error, so too will the allocator
