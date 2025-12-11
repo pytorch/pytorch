@@ -71,6 +71,7 @@ class CapabilityBasedPartitioner:
         allows_single_node_partition: bool = False,
         non_compute_ops: Optional[Sequence[str]] = None,
         allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
+        skip_horizontal_fusion: bool = False,
     ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
@@ -81,6 +82,7 @@ class CapabilityBasedPartitioner:
             if allowed_single_node_partition_ops is not None
             else []
         )
+        self.skip_horizontal_fusion = skip_horizontal_fusion
         self.dependency_viewer = _DependencyViewer(graph_module)
 
     def _is_node_supported(self, node: Node) -> bool:
@@ -221,8 +223,8 @@ class CapabilityBasedPartitioner:
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
             #
-            # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
-            # the fusion by adding an `else` block here to skip horizontal fusion.
+            # When skip_horizontal_fusion is True, we only merge partitions that share edges
+            # through the current node, which is much faster for large graphs.
             if self._is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
@@ -230,11 +232,20 @@ class CapabilityBasedPartitioner:
                 merge_single_node(node, node_order, partition_id)
                 merge_candidates[partition_id] = None
 
-            # merge all possible partitions
-            for partition_id, _ in sorted(
-                partitions_order.items(), key=operator.itemgetter(1)
-            ):
-                merge_candidates[partition_id] = None
+            if self.skip_horizontal_fusion:
+                # Only merge with partitions of direct users when we created a new
+                # partition for the current node (vertical fusion only).
+                # Skip merging consumers of unsupported nodes (horizontal fusion).
+                if self._is_node_supported(node):
+                    for user in node.users:
+                        if user in assignment:
+                            merge_candidates[assignment[user]] = None
+            else:
+                # merge all possible partitions (horizontal fusion enabled)
+                for partition_id, _ in sorted(
+                    partitions_order.items(), key=operator.itemgetter(1)
+                ):
+                    merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
