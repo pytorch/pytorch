@@ -2308,7 +2308,6 @@ def _aot_stage2b_compile_forward_or_inference(
         )
 
         compiled_fw_func = AOTDispatchSubclassWrapper(
-            fw_only=None,
             trace_joint=False,
             maybe_subclass_meta=maybe_subclass_meta,
             num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,

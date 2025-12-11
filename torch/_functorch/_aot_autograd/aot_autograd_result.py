@@ -492,7 +492,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
-            fw_only=None,
             maybe_subclass_meta=self.maybe_subclass_meta,
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
