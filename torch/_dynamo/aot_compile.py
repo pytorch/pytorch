@@ -1,4 +1,5 @@
 import dataclasses
+import importlib
 import inspect
 import io
 import logging
@@ -69,10 +70,16 @@ class AOTCompilePickler(pickle.Pickler):
         assert _.__closure__ is not None
         return _.__closure__[0]
 
+    @classmethod
+    def _unpickle_module(cls, name: str) -> Any:
+        return importlib.import_module(name)
+
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
         if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
             return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif inspect.ismodule(obj):
+            return type(self)._unpickle_module, (obj.__name__,)
         return NotImplemented
 
 
@@ -238,7 +245,12 @@ def aot_compile_fullgraph(
             )
             # If Inductor backend is used, grab the compiled_fn from PrecompileContext
             # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-            if isinstance(backend, torch._TorchCompileInductorWrapper):
+            if isinstance(backend, torch._TorchCompileInductorWrapper) or (
+                hasattr(backend, "compiler_fn")
+                and isinstance(
+                    backend.compiler_fn, torch._dynamo.backends.common.AotAutograd
+                )
+            ):
                 compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
         if not isinstance(compiled_fn, SerializableCallable):
