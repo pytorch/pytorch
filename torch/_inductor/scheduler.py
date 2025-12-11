@@ -5985,6 +5985,7 @@ class Scheduler:
         if len(partitions) > 1:
             msg = f"cudagraph partition into {len(partitions)} partitions"
             maybe_log_cudagraph_partition(msg=msg, prefix="")
+            counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):
