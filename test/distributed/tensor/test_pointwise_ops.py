@@ -23,6 +23,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     LocalDTensorOpTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -368,6 +369,61 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     @with_comms
+    def test_masked_fill_scalar(self):
+        """Test masked_fill_ with scalar value."""
+        device_mesh = self.build_device_mesh()
+
+        # Test with deterministic values to avoid random seed issues in threaded tests
+        # Test with Shard(0) placement
+        input_tensor = torch.arange(
+            40, dtype=torch.float32, device=self.device_type
+        ).reshape(8, 5)
+        mask = input_tensor > 20
+        fill_value = -999.0
+
+        # Create DTensor
+        dt_input = distribute_tensor(input_tensor.clone(), device_mesh, [Shard(0)])
+        dt_mask = distribute_tensor(mask, device_mesh, [Shard(0)])
+
+        # Perform in-place masked_fill
+        input_tensor.masked_fill_(mask, fill_value)
+        dt_input.masked_fill_(dt_mask, fill_value)
+
+        # Compare results
+        self.assertEqual(input_tensor, dt_input.full_tensor())
+
+        # Test with Replicate placement
+        input_tensor2 = (
+            torch.arange(40, dtype=torch.float32, device=self.device_type).reshape(8, 5)
+            - 20
+        )
+        mask2 = input_tensor2 < 0
+        fill_value2 = 42.0
+
+        dt_input2 = distribute_tensor(input_tensor2.clone(), device_mesh, [Replicate()])
+        dt_mask2 = distribute_tensor(mask2, device_mesh, [Replicate()])
+
+        input_tensor2.masked_fill_(mask2, fill_value2)
+        dt_input2.masked_fill_(dt_mask2, fill_value2)
+
+        self.assertEqual(input_tensor2, dt_input2.full_tensor())
+
+        # Test with Shard(1) placement
+        input_tensor3 = torch.arange(
+            48, dtype=torch.float32, device=self.device_type
+        ).reshape(4, 12)
+        mask3 = input_tensor3 % 2 == 0  # even numbers
+        fill_value3 = 0.0
+
+        dt_input3 = distribute_tensor(input_tensor3.clone(), device_mesh, [Shard(1)])
+        dt_mask3 = distribute_tensor(mask3, device_mesh, [Shard(1)])
+
+        input_tensor3.masked_fill_(mask3, fill_value3)
+        dt_input3.masked_fill_(dt_mask3, fill_value3)
+
+        self.assertEqual(input_tensor3, dt_input3.full_tensor())
+
+    @with_comms
     def test_inplace_op_partial_to_replicate(self):
         # test that in-place operations that require redistribution raise an error
         # to preserve aliasing semantics (issue #163374)
@@ -386,6 +442,39 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             "in-place operations that require placement changes are not supported",
         ):
             partial_dt.clamp_(max=10)
+
+    @with_comms
+    def test_mul_div_scalar_partial(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+
+        # regular partial *,/ scalar
+        local_tensor = map_local_for_rank(self.rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = aten.mul.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank * 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 12)
+
+        res = aten.div.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank / 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+
+        self.assertEqual(res, 3)
 
     @with_comms
     def test_maximum_partial_max_propagation(self):
@@ -428,7 +517,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
         # Result should still be Partial("min")
         self.assertEqual(result.placements, (Partial("min"),))
-
 
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
