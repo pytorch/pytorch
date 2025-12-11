@@ -650,6 +650,26 @@
   ],
   "GB0067": [
     {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a ",
+        "side effect in forward method. Eager activation checkpointing replays that side-effect while ",
+        "recomputing the forward in the backward. If you are ok with side-effect not replayed in the ",
+        "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing, try setting ",
+        "`torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
       "Gb_type": "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
       "Context": "",
       "Explanation": "This is not supported.",
