@@ -272,8 +272,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-Engine::Engine()
-    : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : non_reentrant_device_thread_count_(0) {}
 
 Engine::~Engine() {
   stop();
@@ -664,7 +663,7 @@ GraphTask::GraphTask(
     bool exit_on_error)
     : keep_graph_(keep_graph),
       graph_roots_(std::move(graph_roots)),
-      owner_(NO_DEVICE),
+
       reentrant_depth_(reentrant_depth),
       exit_on_error_(exit_on_error),
       cpu_ready_queue_(std::move(cpu_ready_queue)),
