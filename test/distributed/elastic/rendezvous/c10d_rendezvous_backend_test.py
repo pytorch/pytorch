@@ -16,7 +16,6 @@ from unittest import mock, TestCase
 
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
-import torch
 from torch.distributed import FileStore, TCPStore
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
@@ -28,11 +27,6 @@ from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     create_backend,
 )
 from torch.distributed.elastic.utils.distributed import get_free_port
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -156,18 +150,11 @@ class CreateBackendTest(TestCase):
                 )
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
-        if device_type == "xpu":
-            store = TCPStore(  # type: ignore[call-arg] # noqa: F841
-                self._expected_endpoint_host,
-                self._expected_endpoint_port,
-                is_master=True,
-            )
-        else:
-            TCPStore(  # type: ignore[call-arg]
-                self._expected_endpoint_host,
-                self._expected_endpoint_port,
-                is_master=True,
-            )
+        store = TCPStore(  # type: ignore[call-arg] # noqa: F841
+            self._expected_endpoint_host,
+            self._expected_endpoint_port,
+            is_master=True,
+        )
 
         self._params.config["is_host"] = "false"
 
