@@ -10,6 +10,7 @@ import sympy  # noqa: TC002
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pallas import has_tpu_pallas
+from torch.utils._sympy.functions import FloorDiv
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -1167,13 +1168,16 @@ class PallasKernel(SIMDKernel):
                 for l in used_range_lengths:
                     output_numel *= l
 
+                # Check for non-affine patterns (like FloorDiv) which indicate gather-style indexing
+                has_non_affine = index.has(sympy.floor) or index.has(FloorDiv)
+
                 # Use strided indexing if:
-                # 1. Index has non-unit strides AND
-                # 2. Buffer size differs from expected output size
+                # 1. Buffer size differs from expected output size AND
+                # 2. Either has non-unit strides OR has non-affine patterns (like FloorDiv)
                 if (
-                    has_non_unit_stride
-                    and output_numel > 0
+                    output_numel > 0
                     and buf_numel != output_numel
+                    and (has_non_unit_stride or has_non_affine)
                 ):
                     index_str = self._generate_strided_index(index)
                     needs_flatten = True
