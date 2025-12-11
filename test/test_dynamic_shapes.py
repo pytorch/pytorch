@@ -3544,6 +3544,58 @@ class TestUnbacked(TestCase):
         b = torch.tensor([1])
         func(a, b)
 
+    def test_ignorable_fresh_unbacked_symbols(self):
+        # Test that symbols created during fake tensor tracing but not returned
+        # can be marked as ignorable to avoid unbound symbol errors
+
+        # Positive case: marking symbol as ignorable should work
+        with torch.library._scoped_library("test_ignorable", "FRAGMENT") as lib:
+            torch.library.define(
+                "test_ignorable::custom_op",
+                "(Tensor x, bool y) -> Tensor",
+                lib=lib,
+            )
+
+            @torch.library.register_fake("test_ignorable::custom_op", lib=lib)
+            def custom_op_fake(x, y):
+                ctx = torch._custom_op.impl.get_ctx()
+                # Create a symint during fake tensor tracing
+                if y:
+                    with ctx._shape_env.ignore_fresh_unbacked_symbols():
+                        sz = ctx.new_dynamic_size()
+                else:
+                    sz = ctx.new_dynamic_size()
+                # Return something else (not the symint we created)
+                return x.clone()
+
+            @torch.library.impl(
+                "test_ignorable::custom_op",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def custom_op_impl(x, y):
+                return x.clone()
+
+            @torch.compile(fullgraph=True)
+            def func_positive(x):
+                return torch.ops.test_ignorable.custom_op(x, True)
+
+            @torch.compile(fullgraph=True)
+            def func_negative(x):
+                return torch.ops.test_ignorable.custom_op(x, False)
+
+            x = torch.randn(3, 4)
+
+            # This should not raise an error about unbound symbols
+            result = func_positive(x)
+            self.assertEqual(result, x)
+
+            # This should raise an error about unbound symbols
+            with self.assertRaisesRegex(
+                Exception, "Pending unbacked symbols.*not in returned outputs"
+            ):
+                func_negative(x)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
