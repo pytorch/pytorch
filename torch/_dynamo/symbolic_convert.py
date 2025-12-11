@@ -2095,13 +2095,23 @@ class InstructionTranslatorBase(
         ):
             val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
+        # Capture the real_stack when the exception is first raised.
+        # This preserves the original exception location even if the exception
+        # is later re-raised (e.g., in context manager cleanup).
+        # ExceptionVariable and UserDefinedExceptionObjectVariable both have
+        # a real_stack attribute.
+        if self._isinstance_exception(val) and getattr(val, "real_stack", None) is None:
+            val.real_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
+
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
 
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            raise observed_exception_type(f"raised exception {val}")
+            # Pass the stored real_stack to preserve the original exception location
+            real_stack = getattr(val, "real_stack", None)
+            raise observed_exception_type(f"raised exception {val}", real_stack=real_stack)
         unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),
