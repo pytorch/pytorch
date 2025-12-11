@@ -1577,8 +1577,8 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
       TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  //beta_val = bias_ptr ? 0 : 1; // bias is added in epilogue unless nullptr
-  beta_val = bias_ptr ? 0 : beta_val;
+  const auto use_bias_epilogue = (bias_ptr != nullptr) && (bias_ld < 0);
+  beta_val = use_bias_epilogue ? 0 : beta_val;
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1673,16 +1673,16 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
     // but we keep it verbose here for clarity.
     switch (activation) {
       case GEMMAndBiasActivationEpilogue::RELU:
-        return bias_ptr ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
       case GEMMAndBiasActivationEpilogue::GELU:
-        return bias_ptr ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
       default:
-        return bias_ptr ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
+        return use_bias_epilogue ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
     }
   }();
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
 
-  if (bias_ptr) {
+  if (use_bias_epilogue) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
   }
 
