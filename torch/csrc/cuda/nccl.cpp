@@ -146,7 +146,7 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
 }
 
 ncclRedOp_t to_nccl_red_op(int var) {
-  return (ncclRedOp_t)(var);
+  return (ncclRedOp_t)var;
 }
 
 namespace torch::cuda::nccl {
