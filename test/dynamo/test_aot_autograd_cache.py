@@ -2368,22 +2368,26 @@ def _policy_save_mm(ctx, op, *args, **kwargs):
     return CheckpointPolicy.MUST_RECOMPUTE
 
 
-_policy_save_mm.cache_hash = "policy_save_mm_v1"
-
-
 def _policy_save_add(ctx, op, *args, **kwargs):
     if op == torch.ops.aten.add.Tensor:
         return CheckpointPolicy.MUST_SAVE
     return CheckpointPolicy.MUST_RECOMPUTE
 
 
-_policy_save_add.cache_hash = "policy_save_add_v1"
-
-
 def _policy_no_hash(ctx, op, *args, **kwargs):
     if op == torch.ops.aten.mm.default:
         return CheckpointPolicy.MUST_SAVE
     return CheckpointPolicy.MUST_RECOMPUTE
+
+
+def _create_sac_ctx_fn(policy, cache_hash=None):
+    """
+    Helper to create a SAC context_fn with cache_hash set on the partial.
+    """
+    ctx_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+    if cache_hash is not None:
+        ctx_fn.cache_hash = cache_hash
+    return ctx_fn
 
 
 class HOPCacheTests(torch._dynamo.test_case.TestCase):
@@ -2408,13 +2412,9 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
             b = torch.add(a, x)
             return b
 
-        ctx_fn_save_mm = functools.partial(
-            create_selective_checkpoint_contexts, _policy_save_mm
-        )
+        ctx_fn_save_mm = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
 
-        ctx_fn_save_add = functools.partial(
-            create_selective_checkpoint_contexts, _policy_save_add
-        )
+        ctx_fn_save_add = _create_sac_ctx_fn(_policy_save_add, "policy_save_add_v1")
 
         @torch.compile(backend="inductor")
         def fn_with_checkpoint(x, y, ctx_fn):
@@ -2449,9 +2449,7 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
             b = torch.add(a, x)
             return b
 
-        ctx_fn = functools.partial(
-            create_selective_checkpoint_contexts, _policy_save_mm
-        )
+        ctx_fn = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
 
         @torch.compile(backend="inductor")
         def fn_with_checkpoint(x, y):
@@ -2516,9 +2514,7 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
             b = torch.add(a, x)
             return b
 
-        ctx_fn = functools.partial(
-            create_selective_checkpoint_contexts, _policy_no_hash
-        )
+        ctx_fn = _create_sac_ctx_fn(_policy_no_hash)  # No cache_hash
 
         @torch.compile(backend="inductor")
         def fn_with_checkpoint(x, y):
@@ -2545,13 +2541,9 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
             b = torch.add(a, x)
             return b
 
-        ctx_fn_mm = functools.partial(
-            create_selective_checkpoint_contexts, _policy_save_mm
-        )
+        ctx_fn_mm = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
 
-        ctx_fn_add = functools.partial(
-            create_selective_checkpoint_contexts, _policy_save_add
-        )
+        ctx_fn_add = _create_sac_ctx_fn(_policy_save_add, "policy_save_add_v1")
 
         @torch.compile(backend="inductor")
         def fn_mm(x, y):

@@ -2258,11 +2258,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    _nonvar_fields = {
+        "original_cache_hash",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         func: VariableTracker,
         args: Sequence[VariableTracker],
         keywords: dict[str, VariableTracker],
+        original_cache_hash: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2274,6 +2280,8 @@ class FunctoolsPartialVariable(VariableTracker):
         # fake_value is used for id calculation. Creating this value and id'ng
         # on it is sufficient for the tracing purposes.
         self.fake_value = functools.partial(identity)
+        # Store cache_hash from the original partial for SAC context_fn caching
+        self.original_cache_hash = original_cache_hash
 
     def python_type(self) -> type:
         return functools.partial
@@ -2337,11 +2345,15 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def guard_as_python_constant(self) -> Any:
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
-        return functools.partial(
+        result = functools.partial(
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+        # Preserve cache_hash for SAC context_fn caching
+        if self.original_cache_hash is not None:
+            result.cache_hash = self.original_cache_hash
+        return result
 
 
 class PolyfilledFunctionVariable(VariableTracker):

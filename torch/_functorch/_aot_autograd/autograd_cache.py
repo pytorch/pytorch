@@ -288,28 +288,16 @@ def _get_context_fn_cache_hash(context_fn):
     Since context_fn can be an arbitrary Python function, we cannot reliably pickle
     it for cache key generation (pickle only captures the function name, not the code).
 
-    Users can provide a stable hash by setting a `cache_hash` attribute on the context_fn
-    (or on the underlying policy function for functools.partial objects).
+    Users must provide a stable hash by setting a `cache_hash` attribute on the context_fn.
+    For functools.partial objects, set the cache_hash on the partial object itself, not on
+    the underlying function.
 
     Returns:
         The cache hash if found
         None: If no hash is provided (caller should bypass caching)
     """
-    import functools
-
     if hasattr(context_fn, "cache_hash"):
         return context_fn.cache_hash
-
-    if isinstance(context_fn, functools.partial):
-        if hasattr(context_fn.func, "cache_hash"):
-            return context_fn.func.cache_hash
-        # Check if the first positional argument has a cache_hash (e.g., a policy function).
-        # Include the wrapped function identity in the hash to distinguish different builders.
-        # Use the function's qualified name for pickle safety.
-        if context_fn.args and hasattr(context_fn.args[0], "cache_hash"):
-            func = context_fn.func
-            func_id = f"{func.__module__}.{func.__qualname__}"
-            return (func_id, context_fn.args[0].cache_hash)
 
     return None
 
@@ -332,9 +320,10 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list:
                 raise BypassAOTAutogradCache(
                     "SAC context_fn does not have a cache_hash attribute. "
                     "To enable caching with selective activation checkpointing, "
-                    "add a 'cache_hash' attribute to your policy function. This can be "
+                    "add a 'cache_hash' attribute to your context_fn. This can be "
                     "a string or any hashable value that uniquely identifies the checkpointing "
-                    "behavior (e.g., based on source code hash and closed-over globals)."
+                    "behavior (e.g., based on source code hash and closed-over globals). "
+                    "For functools.partial objects, set cache_hash on the partial itself."
                 )
             hashes.append(cache_hash)
     return hashes
