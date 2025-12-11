@@ -231,6 +231,13 @@ def get_overridable_functions():
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
     funcs.update(_device_constructors())
+    more: set[Callable[..., Any]] = {
+        torch.ones_like,
+        torch.zeros_like,
+        torch.empty_like,
+        torch.full_like,
+    }
+    funcs.update(more)
     return funcs
 
 
