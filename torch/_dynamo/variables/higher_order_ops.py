@@ -20,6 +20,7 @@ their semantic behavior.
 """
 
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -67,6 +68,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+
+
+class PureOutputType(enum.Enum):
+    TENSOR = 0
+    TUPLE_OF_TENSORS = 1
 
 
 @dataclass
@@ -838,6 +844,18 @@ def validate_args_and_maybe_create_graph_inputs(
         return _make_inlined(tx, pytree.tree_unflatten)(
             ListVariable(flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
+    elif set_subgraph_inputs == "flatten_automatic":
+        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(sub_args)
+        ).unpack_var_sequence(tx)
+
+        for arg in flat_args.unpack_var_sequence(tx):
+            if isinstance(arg, variables.TensorVariable):
+                tracer.maybe_lift_tracked_freevar_to_input(arg.proxy)
+
+        return _make_inlined(tx, pytree.tree_unflatten)(
+            flat_args, tree_spec
+        ).unpack_var_sequence(tx)
     else:
         if sub_args_names is not None:
             # Can be greater if user passes some args as kwargs
@@ -846,24 +864,6 @@ def validate_args_and_maybe_create_graph_inputs(
         for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
-                args.append(a)
-                continue
-            elif set_subgraph_inputs == "automatic_with_input_arg_ordering":
-                # Add the tensor input to the subgraph right away. This way, the
-                # tensor inputs are in the same order as that of original
-                # function. This improve readability, and can also simplify the
-                # future implementation of certain hops like invoke_subgraph and
-                # autograd.Function.
-                # This is the default for speculate_subgraph_with_auto_output_flattening.
-                # TODO - Consider unifying automatic and
-                # automatic_with_input_arg_ordering. Currently, the CI fails a
-                # lot with control flow hops if we try to switch.
-                if isinstance(a, variables.TensorVariable):
-                    tracer.maybe_lift_tracked_freevar_to_input(a.proxy)
-                elif isinstance(a, variables.ConstDictVariable):
-                    tensor_vts = [x for x in a.items.values() if isinstance(x, variables.TensorVariable)]
-                    for tensor_vt in tensor_vts:
-                        tracer.maybe_lift_tracked_freevar_to_input(tensor_vt.proxy)
                 args.append(a)
                 continue
             elif set_subgraph_inputs == "semi_automatic":
@@ -1277,8 +1277,7 @@ def speculate_subgraph_with_auto_output_flattening(
         "semi_automatic",
         "flatten_manual",
         "manual",
-        "automatic_with_input_arg_ordering",
-    ] = "automatic_with_input_arg_ordering",
+    ] = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -1368,17 +1367,14 @@ def speculate_subgraph_with_auto_output_flattening(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "automatic_with_input_arg_ordering",
         "semi_automatic",
         "flatten_manual",
         "manual",
+        "flatten_automatic",
     }, "Please use one of the supported set_subgraph_inputs options."
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
-    if sub_kwargs and set_subgraph_inputs not in (
-        "automatic",
-        "automatic_with_input_arg_ordering",
-    ):
+    if sub_kwargs and set_subgraph_inputs != "automatic":
         unimplemented(
             gb_type="Invalid set_subgraph_inputs and sub_kwargs settings",
             context=f"set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
@@ -2931,6 +2927,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         description,
         *,
         subgraph_name="wrap_body",
+        set_subgraph_inputs="automatic",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
         (
@@ -2948,6 +2945,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             allow_side_effects=self.allow_side_effects,
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            set_subgraph_inputs=set_subgraph_inputs,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -4333,6 +4331,66 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
+    def get_inputs_for_subgraph_assuming_pure(self, tx, args):
+        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(args)
+        ).unpack_var_sequence(tx)
+
+        lifted_tensor_args = []
+        for x in flat_args.unpack_var_sequence(tx):
+            if isinstance(x, variables.TensorVariable):
+                lifted_tensor_args.append(x)
+        return lifted_tensor_args
+
+    def get_fake_outputs_for_subgraph_assuming_pure(self, tx, mod):
+        # args, body_graph_output_vts):
+        old_fake_outputs = [
+            x.meta["example_value"]
+            for x in mod.graph.find_nodes(op="output")[0].args[0]
+        ]
+        new_fake_outputs = []
+        for old_fake in old_fake_outputs:
+            # Create new fake tensors for subgraph outputs
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            empty = torch.empty_strided(
+                old_fake.shape,
+                old_fake.stride(),
+                dtype=old_fake.dtype,
+                layout=old_fake.layout,
+                device="meta",
+                requires_grad=old_fake.requires_grad,
+            )
+
+            new_fake_outputs.append(
+                FakeTensor(tx.output.fake_mode, empty, old_fake.device)
+            )
+        flat_example_value = tuple(new_fake_outputs)
+        return flat_example_value
+
+    def validate_output_requirements_assuming_pure(self, tx, out_vt):
+        if isinstance(out_vt, variables.TensorVariable):
+            return PureOutputType.TENSOR
+
+        has_unsupported_signature = False
+        if not isinstance(out_vt, variables.BaseListVariable):
+            has_unsupported_signature = True
+        else:
+            for x in out_vt.unpack_var_sequence(tx):
+                if not isinstance(x, variables.TensorVariable):
+                    has_unsupported_signature = True
+            return PureOutputType.TUPLE_OF_TENSORS
+
+        if has_unsupported_signature:
+            unimplemented(
+                gb_type="invoke_subgraph: unsupported output type with is_pure=True",
+                context=f"out_vt: {out_vt}",
+                explanation="invoke_subgraph(is_pure=True) requires the output to be Union[Tensor|tuple[Tensor]]",
+                hints=[
+                    "Change the output signature to be a tensor or a tuple of tensors",
+                ],
+            )
+
     @raise_hard_error_if_graph_break(
         reason="torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
     )
@@ -4351,25 +4409,24 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
         )
 
+        set_subgraph_inputs = "automatic"
+        if is_pure:
+            set_subgraph_inputs = "flatten_automatic"
+
+        if isinstance(fn_vt, UserFunctionVariable):
+            fn_id = id(fn_vt.get_function())
+        else:
+            assert isinstance(fn_vt, UnspecializedNNModuleVariable)
+            fn_id = id(fn_vt.value.forward.__func__)
         previously_installed_submodules = []
         if is_pure and invoke_subgraph_cache:
             """
-            1) Must be pure - its stronger than no side effects, the function
-            should not rely on any global state that can change between calls.
-            Depends ONLY on inputs.
-            2) Must have all inputs already lifted as the original function arguments
-            3) Must return a flat tuple of tensors. Can be extended to support tensor or tuple of tensors.
-            4) All the inputs must be tensors. Can be probably extended to support constants, but no checking.
-            5) Different distinct layers need to be wrapped with different
-            compile_nested_region. This is because we cache on fn_id. Different API is possible, but it can be clunky.
-            6)
+            Remaining items
+            1) Figure out how to switch off side effects - while allowing reparameterize side effects
+            2) Write the input and output contract.
+            3) Investigate the complexity of supporting pytree-able outputs
+            4) Write lots of nn.Module functional tests.
             """
-
-            if isinstance(fn_vt, UserFunctionVariable):
-                fn_id = id(fn_vt.get_function())
-            else:
-                assert isinstance(fn_vt, UnspecializedNNModuleVariable)
-                fn_id = id(fn_vt.value.forward.__func__)
 
             previously_installed_submodules = (
                 invoke_subgraph_cache.get_dynamo_installed_submodules(fn_id)
@@ -4377,67 +4434,44 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             if previously_installed_submodules:
                 submodule_name = previously_installed_submodules[0]
                 mod = tx.output.nn_modules[submodule_name]
-                old_fake_outputs = [
-                    x.meta["example_value"]
-                    for x in mod.graph.find_nodes(op="output")[0].args[0]
-                ]
-                new_fake_outputs = []
-                for old_fake in old_fake_outputs:
-                    # Create new fake tensors for subgraph outputs
-                    from torch._subclasses.fake_tensor import FakeTensor
+                flat_example_value = self.get_fake_outputs_for_subgraph_assuming_pure(
+                    tx, mod
+                )
 
-                    empty = torch.empty_strided(
-                        old_fake.shape,
-                        old_fake.stride(),
-                        dtype=old_fake.dtype,
-                        layout=old_fake.layout,
-                        device="meta",
-                        requires_grad=old_fake.requires_grad,
-                    )
+                subgraph_args = self.get_inputs_for_subgraph_assuming_pure(tx, args)
+                proxy_tensor_args = [x.as_proxy() for x in subgraph_args]
+                body_node = make_attr(tx, submodule_name)
+                p_args = (
+                    body_node,
+                    submodule_name,
+                    *proxy_tensor_args,
+                )
 
-                    new_fake_outputs.append(
-                        FakeTensor(tx.output.fake_mode, empty, old_fake.device)
-                    )
-                    flat_example_value = tuple(new_fake_outputs)
+                from .builder import wrap_fx_proxy
 
-                    # Find proxies for the inputs for invoke_subgraph.
-                    # Since we use `automatic_with_ordered_inputs`, we can
-                    # assume that that the inputs to the subgraph are same as
-                    # the original inputs.
-                    tensor_args = []
+                # Store the invocation as a call
+                flat_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch._higher_order_ops.invoke_subgraph,
+                        args=p_args,
+                        kwargs={},
+                    ),
+                    example_value=flat_example_value,
+                )
 
-                    for x in args:
-                        if isinstance(x, variables.TensorVariable):
-                            tensor_args.append(x)
-                        elif isinstance(x, variables.ConstDictVariable):
-                            for vt in x.items.values():
-                                if isinstance(vt, variables.TensorVariable):
-                                    tensor_args.append(vt)
-
-                    proxy_tensor_args = [x.as_proxy() for x in tensor_args]
-                    body_node = make_attr(tx, submodule_name)
-                    p_args = (
-                        body_node,
-                        submodule_name,
-                        *proxy_tensor_args,
-                    )
-
-                    from .builder import wrap_fx_proxy
-
-                    # Store the invocation as a call
-                    flat_variable = wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_function",
-                            torch._higher_order_ops.invoke_subgraph,
-                            args=p_args,
-                            kwargs={},
-                        ),
-                        example_value=flat_example_value,
-                    )
-
-                    # For is_pure, we will have to assume that flat_variable is same as body_r.
+                # For is_pure, we will have to assume that flat_variable is same as body_r.
+                out_type = (
+                    invoke_subgraph_cache.get_dynamo_installed_submodule_out_type(fn_id)
+                )
+                assert out_type is not None
+                if out_type == PureOutputType.TENSOR:
+                    return flat_variable.items[0]
+                elif out_type == PureOutputType.TUPLE_OF_TENSORS:
                     return flat_variable
+                else:
+                    raise NotImplementedError(f"Unknown output type {out_type}")
 
         # This flattens the kwargs into lifted args
         (
@@ -4448,7 +4482,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             _,
             body_name,
             body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, args[0], args[2:], kwargs, "invoke_subgraph")
+        ) = self.create_wrapped_node(
+            tx,
+            args[0],
+            args[2:],
+            kwargs,
+            "invoke_subgraph",
+            set_subgraph_inputs=set_subgraph_inputs,
+        )
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -4459,6 +4500,13 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     *graph_break_hints.DYNAMO_BUG,
                 ],
             )
+
+        if is_pure:
+            out_type = self.validate_output_requirements_assuming_pure(tx, body_r)
+            if invoke_subgraph_cache:
+                invoke_subgraph_cache.add_dynamo_installed_submodule_out_type(
+                    fn_id, out_type
+                )
 
         p_args = (
             p_args[0],

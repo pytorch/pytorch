@@ -3374,6 +3374,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._export.db.examples",
     "torch._export.wrappers",
     "torch._functorch.apis",
+    "torch._functorch._aot_autograd.graph_capture_wrappers",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
     "torch.nn.utils._named_member_accessor",

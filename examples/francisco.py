@@ -1,8 +1,8 @@
 import torch
-from torch import nn
-from torch.compiler import nested_compile_region
 import torch.utils._pytree as pytree
+from torch import nn
 from torch._functorch.aot_autograd import create_functional_call
+from torch.compiler import nested_compile_region
 
 
 def get_mod_params_and_buffers(mod):
@@ -99,7 +99,7 @@ class Sequential(nn.Module):
             if self.func_type == "v1":
                 args = get_mod_params_and_buffers(module)
                 new_args = tuple(args) + tuple(x)
-                x = f(*new_args, **{})
+                x = f(*new_args)
             else:
                 x = f(get_parameters_and_buffer_dicts(module), x, {})[0]
         return tuple(x)
@@ -112,7 +112,8 @@ class MyBlock(nn.Module):
         self.l2 = nn.Linear(out_dim, out_dim)
 
     def forward(self, x):
-        return (self.l2(self.l1(x)), )
+        return (self.l2(self.l1(x)),)
+
 
 class MyBlock2(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -121,9 +122,17 @@ class MyBlock2(nn.Module):
         self.l2 = nn.Linear(out_dim, out_dim)
 
     def forward(self, x):
-        return (self.l1(x) + self.l2(x), )
+        return (self.l1(x) + self.l2(x),)
 
-m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10), MyBlock2(10, 10), MyBlock(10, 10), MyBlock2(10, 10))
+
+m = Sequential(
+    MyBlock(10, 10),
+    MyBlock(10, 10),
+    MyBlock(10, 10),
+    MyBlock2(10, 10),
+    MyBlock(10, 10),
+    MyBlock2(10, 10),
+)
 # m = Sequential(MyBlock(10, 10), MyBlock(10, 10), MyBlock(10, 10))
 # , nn.Linear(10, 1))
 x = torch.randn(1, 10, requires_grad=True)
