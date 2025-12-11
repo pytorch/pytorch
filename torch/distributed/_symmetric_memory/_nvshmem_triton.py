@@ -2,7 +2,7 @@ import logging
 import os
 import subprocess
 import sysconfig
-from typing import Any, Optional
+from typing import Any
 
 import torch.distributed as dist
 from torch.utils._triton import has_triton
@@ -24,7 +24,7 @@ class NvshmemLibFinder:
     """
 
     # Class variable to store the found library path for reuse
-    found_device_lib_path: Optional[str] = None
+    found_device_lib_path: str | None = None
 
     @classmethod
     def find_device_library(cls) -> str:
@@ -99,7 +99,7 @@ class NvshmemLibFinder:
         raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
 
 
-def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
+def enable_triton(lib_dir: str | None = None) -> dict[str, str]:
     raise NotImplementedError(
         "`enable_triton` is deprecated. "
         "If you need NVSHMEM device function support for Triton, "

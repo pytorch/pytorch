@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import ast
-from typing import Optional
 
 from ._importlib import _resolve_name
 
@@ -11,7 +10,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     """
 
     @classmethod
-    def run(cls, src: str, package: str) -> list[tuple[str, Optional[str]]]:
+    def run(cls, src: str, package: str) -> list[tuple[str, str | None]]:
         visitor = cls(package)
         tree = ast.parse(src)
         visitor.visit(tree)
