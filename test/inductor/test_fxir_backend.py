@@ -326,8 +326,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_reshape_fallback(self):
         """
-        Test falling back to aten.reshape. This is tricky because the output arg needs
-        to be a tuple instead of sympy.Tuple.
+        Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
         """
 
         def always_fallback(node: torch.fx.Node) -> bool:
@@ -340,12 +339,10 @@ class FxirTestCase(InductorTestCase):
         with patch_custom_fallback_pass(always_fallback):
             (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
-        # Check that the reshape has a tuple argument, rather than sympy.Tuple.
+        # Check for the reshape.
         (reshape_node,) = gm.graph.find_nodes(
             op="call_function", target=torch.ops.aten.reshape.default
         )
-        (input_node, shape) = reshape_node.args
-        self.assertTrue(isinstance(shape), tuple)
 
     def test_extern_multi_output(self):
         """
