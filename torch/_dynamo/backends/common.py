@@ -41,6 +41,23 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+def wrap_serializable(compiler):
+    from torch._inductor.output_code import RegionalOutputCode
+
+    if isinstance(compiler, SerializableAOTDispatchCompiler):
+        return compiler
+    elif compiler is torch.fx.passes.regional_inductor.regional_inductor:
+        # Directly wrapping regional inductor inplace will cause circular import,
+        # so not sure where's the best place to put this.
+        return SerializableAOTDispatchCompiler(
+            RegionalOutputCode, compiler, wrap_output_code=True
+        )
+    else:
+        raise RuntimeError(
+            f"AOT Autograd doesn't support serialization for compiler: {compiler}"
+        )
+
+
 class AotAutograd:
     def __init__(self, **kwargs: Any) -> None:
         self.__name__ = "compiler_fn"
@@ -91,25 +108,14 @@ class AotAutograd:
             )
             return _wrapped_bw_compiler
 
-        bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
-        fw_compiler = self.kwargs.get("fw_compiler")
-        from torch._inductor.output_code import RegionalOutputCode
+        fw_compiler = self.kwargs["fw_compiler"]
+        bw_compiler = self.kwargs.get("bw_compiler") or fw_compiler
+        inference_compiler = self.kwargs.get("inference_compiler") or fw_compiler
 
-        # Directly wrapping regional inductor inplace will cause circular import,
-        # so not sure where's the best place to put this.
-        if (
-            torch._functorch.config.force_non_lazy_backward_lowering
-            and fw_compiler is torch.fx.passes.regional_inductor.regional_inductor
-        ):
-
-            def fw_bw_serializable_wrapper(compiler):
-                return SerializableAOTDispatchCompiler(
-                    RegionalOutputCode, compiler, wrap_output_code=True
-                )
-        else:
-
-            def fw_bw_serializable_wrapper(compiler):
-                return compiler
+        if torch._functorch.config.force_serializable_output_code:
+            fw_compiler = wrap_serializable(fw_compiler)
+            bw_compiler = wrap_serializable(bw_compiler)
+            inference_compiler = wrap_serializable(inference_compiler)
 
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
@@ -118,11 +124,9 @@ class AotAutograd:
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
-        self.kwargs["bw_compiler"] = fw_bw_serializable_wrapper(bw_compiler)
-        self.kwargs["fw_compiler"] = fw_bw_serializable_wrapper(fw_compiler)
-        self.kwargs["inference_compiler"] = (
-            self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
-        )
+        self.kwargs["fw_compiler"] = fw_compiler
+        self.kwargs["bw_compiler"] = bw_compiler
+        self.kwargs["inference_compiler"] = inference_compiler
 
         from functorch.compile import nop
         from torch._inductor.debug import enable_aot_logging
