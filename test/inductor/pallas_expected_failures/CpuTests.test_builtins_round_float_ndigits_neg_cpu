@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpydvajwso/s3/cs3jysywfyz5vpupvg3kw2bdquh5kzopccqko5ulrztse32dumnd.py", line 11, in pallas_fused_add_7e98929f_kernel
-    tmp1 = round(123.45670000000000*(s77 / 2), -1)
-                                     ^^^
-NameError: name 's77' is not defined
