@@ -495,12 +495,14 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @skipIfRocmArch(MI200_ARCH)
     @parametrize("split_reductions", (False, True))
     @parametrize("dtype", [torch.bfloat16, torch.float])
     def test_rms_norm_sharing_weights(self, split_reductions, dtype):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
+
+        if dtype is torch.bfloat16 and runOnRocmArch(MI200_ARCH):
+            self.skipTest("Currently failing non rocm mi200") 
 
         def f(xs, w, eps):
             ys = []
