@@ -2978,6 +2978,14 @@
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
       "Explanation": "logging.Logger methods are not supported for non-export cases.",
       "Hints": [
+        "Add the logging method to `torch._dynamo.config.ignore_logging_functions`."
+      ]
+    },
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
         "Add the logging method to `torch._dynamo.config.ignore_logger_methods."
       ]
     }
