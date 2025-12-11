@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
+
 import torch
 import torch._dynamo
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
@@ -11,6 +13,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
+@torch._dynamo.config.patch(trace_autograd_ops=True)
 @skipIfTorchDynamo()
 class TestForwardLossBackward(TestCase):
     @skipIfCrossRef
@@ -228,6 +231,71 @@ class <lambda>(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_autograd_grad_output_not_connected_to_grad(self):
+        x = torch.randn(4, requires_grad=True)
+
+        def fn(x):
+            y = x.sin()
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            # z is independent - not connected to autograd.grad
+            z = x.cos()
+            # Return both: grad (from autograd.grad) and z (independent, requires_grad)
+            return grad.sum(), z
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        eager_result = fn(x)
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1], compiled_result[1])
+        self.assertEqual(len(backend.graphs), 1)
+
+        gm = backend.graphs[0]
+        actual = normalize_gm(gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4]"):
+        l_x_ = L_x_
+
+        y: "f32[4]" = l_x_.sin()
+
+        sum_1: "f32[]" = y.sum();  y = None
+        grad = torch.autograd.grad(sum_1, l_x_);  sum_1 = None
+        grad_1: "f32[4]" = grad[0];  grad = None
+
+        z: "f32[4]" = l_x_.cos();  l_x_ = None
+
+        sum_2: "f32[]" = grad_1.sum();  grad_1 = None
+        return (sum_2, z)
+""",  # noqa: B950
+        )
+
+        # z requires_grad=True, so we should have a joint graph
+        # Call backward to trigger backward compilation
+        compiled_result[1].sum().backward()
+
+        # Verify backward graph was compiled (joint partitioning happened)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        bw_graph = backend.bw_graphs[0]
+        bw_actual = normalize_gm(bw_graph.print_readable(print_output=False))
+        self.assertExpectedInline(
+            bw_actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[4]", tangents_1: "f32[4]"):
+        sin: "f32[4]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
+
+        neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
+        mul_1: "f32[4]" = torch.ops.aten.mul.Tensor(tangents_1, neg);  tangents_1 = neg = None
+        return (mul_1,)
+""",  # noqa: B950
+        )
+
+    @skipIfCrossRef
     def test_autograd_grad_rejects_graph_input_with_grad_fn(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4, requires_grad=True)
@@ -287,6 +355,110 @@ class <lambda>(torch.nn.Module):
         self.assertIsNotNone(mod_eager.bias.grad)
         self.assertIsNotNone(mod_compiled.bias.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    @skipIfCrossRef
+    def test_autograd_grad_with_unrelated_requires_grad_output(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4, requires_grad=True)
+
+        def step_fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            (weight_grad, bias_grad) = torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+            grad_norm = weight_grad.sum() + bias_grad.sum()
+            # return unrelated output that requires_grad
+            unrelated_output = x.sin()
+            return grad_norm.detach(), unrelated_output
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(step_fn, backend=backend, fullgraph=True)
+        result = compiled_fn(x)
+        self.assertTrue(result[1].requires_grad)
+
+        # Verify dynamo graph captures autograd.grad and unrelated output
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        actual = normalize_gm(gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_x_ = L_x_
+
+        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_)
+
+        loss: "f32[]" = res.sum();  res = None
+
+        grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  loss = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+        weight_grad: "f32[4, 4]" = grad[0]
+        bias_grad: "f32[4]" = grad[1];  grad = None
+
+        sum_2: "f32[]" = weight_grad.sum();  weight_grad = None
+        sum_3: "f32[]" = bias_grad.sum();  bias_grad = None
+        grad_norm: "f32[]" = sum_2 + sum_3;  sum_2 = sum_3 = None
+
+        unrelated_output: "f32[2, 4]" = l_x_.sin();  l_x_ = None
+
+        detach: "f32[]" = grad_norm.detach();  grad_norm = None
+        return (detach, unrelated_output)
+""",  # noqa: B950
+        )
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        fw_graph = backend.fw_graphs[0]
+        fw_actual = normalize_gm(fw_graph.print_readable(print_output=False))
+        self.assertExpectedInline(
+            fw_actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[4, 4]", primals_2: "f32[4]", primals_3: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(primals_1);  primals_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = t = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
+
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+        expand: "f32[2, 4]" = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
+        t_1: "f32[4, 2]" = torch.ops.aten.t.default(expand)
+        mm: "f32[4, 4]" = torch.ops.aten.mm.default(t_1, primals_3);  t_1 = None
+        t_2: "f32[4, 4]" = torch.ops.aten.t.default(mm);  mm = None
+        sum_2: "f32[1, 4]" = torch.ops.aten.sum.dim_IntList(expand, [0], True);  expand = None
+        view: "f32[4]" = torch.ops.aten.view.default(sum_2, [4]);  sum_2 = None
+        t_3: "f32[4, 4]" = torch.ops.aten.t.default(t_2);  t_2 = None
+
+        sum_3: "f32[]" = torch.ops.aten.sum.default(t_3);  t_3 = None
+        sum_4: "f32[]" = torch.ops.aten.sum.default(view);  view = None
+        add: "f32[]" = torch.ops.aten.add.Tensor(sum_3, sum_4);  sum_3 = sum_4 = None
+
+        sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
+
+        detach: "f32[]" = torch.ops.aten.detach.default(add);  add = None
+        return (detach, sin, primals_3)
+""",  # noqa: B950
+        )
+
+        # Trigger backward to compile the backward graph
+        result[1].sum().backward()
+
+        self.assertEqual(len(backend.bw_graphs), 1)
+        bw_graph = backend.bw_graphs[0]
+        bw_actual = normalize_gm(bw_graph.print_readable(print_output=False))
+        self.assertExpectedInline(
+            bw_actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_3: "f32[2, 4]", tangents_1: "f32[2, 4]"):
+        cos: "f32[2, 4]" = torch.ops.aten.cos.default(primals_3);  primals_3 = None
+        mul: "f32[2, 4]" = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
+        return (None, None, mul)
+""",  # noqa: B950
+        )
 
     @skipIfCrossRef
     def test_autograd_grad_missing_detach_errors_like_eager(self):
@@ -359,14 +531,6 @@ class <lambda>(torch.nn.Module):
         x = torch.tensor(1.0, requires_grad=True)
         eager_result = fn(x)
 
-        # With trace_autograd_ops=True (default), should trace in single graph
-        torch._dynamo.reset()
-        cnt = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(backend=cnt)(fn)
-        compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
-        self.assertEqual(eager_result, compiled_result)
-        self.assertEqual(cnt.frame_count, 1)
-
         # With trace_autograd_ops=False, should graph break
         torch._dynamo.reset()
         with torch._dynamo.config.patch(trace_autograd_ops=False):
@@ -376,6 +540,79 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(eager_result, compiled_result)
             # Should have graph break due to autograd.grad being skipped
             self.assertEqual(cnt.frame_count, 2)
+
+        # With trace_autograd_ops=True, should trace in single graph
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(trace_autograd_ops=True):
+            cnt = torch._dynamo.testing.CompileCounter()
+            compiled_fn = torch.compile(backend=cnt)(fn)
+            compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(cnt.frame_count, 1)
+
+    # TODO (tmanlaibaatar) should fix it later
+    @unittest.expectedFailure
+    @skipIfCrossRef
+    def test_autograd_grad_external_grad_fn_not_reachable(self):
+        torch._dynamo.reset()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(y_ext, x_internal):
+            # y_ext has external grad_fn but we detach it
+            y_detached = y_ext.detach()
+            z = y_detached + x_internal * 3
+            return torch.autograd.grad(z.sum(), x_internal)
+
+        x_external = torch.randn(3, requires_grad=True)
+        y_external = x_external * 2  # has grad_fn
+        x_internal = torch.randn(3, requires_grad=True)
+
+        # This should work because y_external's grad_fn is detached
+        result = fn(y_external, x_internal)
+        self.assertEqual(result[0], torch.full((3,), 3.0))
+
+    @skipIfCrossRef
+    def test_autograd_grad_rejects_external_gradient_edge(self):
+        from torch.autograd.graph import GradientEdge
+
+        torch._dynamo.reset()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(edge, x):
+            return torch.autograd.grad(edge, x, grad_outputs=torch.ones(3))
+
+        x = torch.randn(3, requires_grad=True)
+        y = x * 2
+        edge = GradientEdge(y.grad_fn, 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"autograd.grad with external GradientEdge",
+        ):
+            fn(edge, x)
+
+    @skipIfCrossRef
+    def test_autograd_grad_rejects_tuple_of_external_gradient_edges(self):
+        from torch.autograd.graph import GradientEdge
+
+        torch._dynamo.reset()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(edges, x):
+            return torch.autograd.grad(
+                edges, x, grad_outputs=[torch.ones(3), torch.ones(3)]
+            )
+
+        x = torch.randn(3, requires_grad=True)
+        y = x * 2
+        z = x * 3
+        edges = (GradientEdge(y.grad_fn, 0), GradientEdge(z.grad_fn, 0))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"autograd.grad with external GradientEdge",
+        ):
+            fn(edges, x)
 
 
 if __name__ == "__main__":
