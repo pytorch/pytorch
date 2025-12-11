@@ -95,7 +95,12 @@ class AotAutograd:
         fw_compiler = self.kwargs.get("fw_compiler")
         from torch._inductor.output_code import RegionalOutputCode
 
-        if fw_compiler is torch.fx.passes.regional_inductor.regional_inductor:
+        # Directly wrapping regional inductor inplace will cause circular import,
+        # so not sure where's the best place to put this.
+        if (
+            torch._functorch.config.force_non_lazy_backward_lowering
+            and fw_compiler is torch.fx.passes.regional_inductor.regional_inductor
+        ):
 
             def fw_bw_serializable_wrapper(compiler):
                 return SerializableAOTDispatchCompiler(
