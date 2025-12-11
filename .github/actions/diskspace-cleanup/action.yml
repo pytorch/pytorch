@@ -20,7 +20,7 @@ runs:
         if [ ! -d "$docker_root_dir" ]; then
             echo "Docker root directory ($docker_root_dir) does not exist. Skipping disk space check."
             exit 0
-        fi        
+        fi
         avail_gib=$(df -BG --output=avail "$docker_root_dir" | sed -n 2p | tr -d ' ' | sed 's/G$//')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
         if [[ "$avail_gib" -le "$diskspace_cutoff" ]] ; then
