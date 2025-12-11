@@ -4,10 +4,13 @@ import sys
 
 import torch
 import torch.distributed as dist
+from torch.distributed._functional_collectives import (
+    all_gather_tensor_autograd,
+    all_reduce,
+)
 from torch.distributed._tensor import distribute_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.experimental._func_map import local_map
-from torch.distributed._functional_collectives import all_reduce
 from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import run_tests
@@ -169,7 +172,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         self.assertEqual(w2_dtensor_norm, w2_local_map_norm)
         self.assertEqual(x_dtensor_norm, x_local_map_norm)
 
-    def test_megatron_tp_parallelism(self):
+    def test_megatron_tp_parallel(self):
         """
         Megatron-style tensor parallelism with paired ColumnParallel + RowParallel layers
         https://arxiv.org/pdf/1909.08053
@@ -205,12 +208,15 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
 
         # Attention weights
         # Q, K, V projections: Column Parallel (sharded on output dim)
-        wq_global = torch.randn(hidden_dim, hidden_dim, device=DEVICE, requires_grad=True)
-        wk_global = torch.randn(hidden_dim, hidden_dim, device=DEVICE, requires_grad=True)
-        wv_global = torch.randn(hidden_dim, hidden_dim, device=DEVICE, requires_grad=True)
+        # wq, wk are placeholders and skipped
+        wv_global = torch.randn(
+            hidden_dim, hidden_dim, device=DEVICE, requires_grad=True
+        )
 
         # Output projection: Row Parallel (sharded on input dim)
-        wo_global = torch.randn(hidden_dim, hidden_dim, device=DEVICE, requires_grad=True)
+        wo_global = torch.randn(
+            hidden_dim, hidden_dim, device=DEVICE, requires_grad=True
+        )
 
         # MLP weights
         # First linear (gate/up): Column Parallel (sharded on output dim)
@@ -224,8 +230,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         y_dtensor = distribute_tensor(y_global, mesh, placements=[Replicate()])
 
         # Attention weights distributed
-        wq_dtensor = distribute_tensor(wq_global, mesh, placements=[Shard(1)])
-        wk_dtensor = distribute_tensor(wk_global, mesh, placements=[Shard(1)])
+        # wq, wk are placeholders and skipped
         wv_dtensor = distribute_tensor(wv_global, mesh, placements=[Shard(1)])
         wo_dtensor = distribute_tensor(wo_global, mesh, placements=[Shard(0)])
 
@@ -234,8 +239,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         w2_dtensor = distribute_tensor(w2_global, mesh, placements=[Shard(0)])
 
         # Attention forward (simplified, no actual attention computation)
-        _ = x_dtensor @ wq_dtensor
-        _ = x_dtensor @ wk_dtensor
+        # wq, wk are placeholders and skipped
         v = x_dtensor @ wv_dtensor
         # Simplified attention: just use v for demonstration
         attn_out = v @ wo_dtensor
@@ -257,19 +261,18 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
 
         # ========== Test: LTensor with all_reduce ==========
         x_local = distribute_tensor(
-            x_global.detach().clone().requires_grad_(True), mesh, placements=[Replicate()]
+            x_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate()],
         )
         y_local = distribute_tensor(
-            y_global.detach().clone().requires_grad_(True), mesh, placements=[Replicate()]
+            y_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate()],
         )
 
         # Distribute weights
-        wq_local = distribute_tensor(
-            wq_global.detach().clone().requires_grad_(True), mesh, placements=[Shard(1)]
-        )
-        wk_local = distribute_tensor(
-            wk_global.detach().clone().requires_grad_(True), mesh, placements=[Shard(1)]
-        )
+        # wq, wk are placeholders and skipped
         wv_local = distribute_tensor(
             wv_global.detach().clone().requires_grad_(True), mesh, placements=[Shard(1)]
         )
@@ -290,8 +293,6 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             in_placements=[
                 (Replicate(),),  # x
                 (Replicate(),),  # y
-                (Shard(1),),  # wq
-                (Shard(1),),  # wk
                 (Shard(1),),  # wv
                 (Shard(0),),  # wo
                 (Shard(1),),  # w1
@@ -300,21 +301,16 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             device_mesh=mesh,
             track_variant_axes=True,
         )
-        def megatron_tp_forward(x, y, wq, wk, wv, wo, w1, w2):
+        def megatron_tp_forward(x, y, wv, wo, w1, w2):
             # === Attention Block ===
+            # wq, wk are placeholders and skipped ((x @ wq) @ (x @ wk)^T) <-> [B, S, H]
+
             # Column Parallel: Q, K, V projections (no communication)
-            _ = x @ wq  # [B, S, H] @ [H, H/TP] -> [B, S, H/TP]
-            _ = x @ wk
-            v = x @ wv
+            v = x @ wv  # [B, S, H] @ [H, H/TP] -> [B, S, H/TP]
 
             # Row Parallel: Output projection (needs all-reduce)
             # After v @ wo: [B, S, H/TP] @ [H/TP, H] -> [B, S, H] (partial sum)
             attn_partial = v @ wo
-
-            # import pdb
-            # import torch.distributed as dist
-            # if dist.get_rank() == 0:
-            #     pdb.set_trace()
 
             # all_reduce: forward does all-reduce, backward is identity
             attn_out = all_reduce(attn_partial, "sum", tp_group_name)
@@ -333,7 +329,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
 
         # Forward with LTensor
         out_local = megatron_tp_forward(
-            x_local, y_local, wq_local, wk_local, wv_local, wo_local, w1_local, w2_local
+            x_local, y_local, wv_local, wo_local, w1_local, w2_local
         )
         loss_local = (out_local - y_local).pow(2).mean()
 
@@ -353,6 +349,141 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         self.assertEqual(w1_dtensor_grad_norm, w1_local_grad_norm)
         self.assertEqual(w2_dtensor_grad_norm, w2_local_grad_norm)
         self.assertEqual(x_dtensor_grad_norm, x_local_grad_norm)
+
+    def test_fsdp_tp_parallel(self):
+        """
+        FSDP + TP (Fully Sharded Data Parallel + Tensor Parallel) with local_map.
+
+        - FSDP axis: Parameters are sharded and gathered via all_gather, gradients
+          use reduce_scatter
+        - TP axis: Activations are sharded across the TP dimension, using psum_scatter
+          for forward and all_gather for backward
+        """
+
+        # 2D mesh: 2 FSDP groups x 2 TP groups = 4 total devices
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("tp", "fsdp"),
+        )
+
+        torch.manual_seed(0)
+
+        # Dimensions
+        batch_size = 8
+        d_in = 16
+        d_hidden = 32
+        d_out = 8
+
+        # Create global tensors
+        # Input: sharded along batch (FSDP) and features (TP)
+        x_global = torch.randn(batch_size, d_in, device=DEVICE, requires_grad=True)
+        y_global = torch.randn(batch_size, d_out, device=DEVICE, requires_grad=True)
+
+        # Weights: sharded along both FSDP and TP axes
+        # W1: [d_in, d_hidden] - sharded along FSDP (dim 0) and TP (dim 1)
+        w1_global = torch.randn(d_in, d_hidden, device=DEVICE, requires_grad=True)
+
+        # W2: [d_hidden, d_out] - sharded along FSDP (dim 0) and TP (dim 1)
+        w2_global = torch.randn(d_hidden, d_out, device=DEVICE, requires_grad=True)
+
+        # ========== Test: FSDP+TP with regular tensors ==========
+
+        x_ref = x_global.detach().clone().requires_grad_(True)
+        y_ref = y_global.detach().clone().requires_grad_(True)
+        w1_ref = w1_global.detach().clone().requires_grad_(True)
+        w2_ref = w2_global.detach().clone().requires_grad_(True)
+
+        # Forward pass (reference)
+        h1_ref = x_ref @ w1_ref
+        pred_ref = h1_ref @ w2_ref
+        loss_ref = ((pred_ref - y_ref) ** 2).mean()
+        loss_ref.backward()
+
+        # ========== Test: FSDP+TP with local_map ==========
+
+        # Input: Shard(1) on TP (heads) and Replicate() on FSDP (batch)
+        x_dist = distribute_tensor(
+            x_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate(), Shard(0)],
+        )
+        y_dist = distribute_tensor(
+            y_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate(), Shard(0)],
+        )
+
+        # Weights: Shard(1)/Shard(0) on TP and Shard(0) on FSDP
+        # For FSDP all_gather, reduce_scatter occurs in the backward
+        w1_dist = distribute_tensor(
+            w1_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Shard(1), Shard(0)],  # Sharded on both axes
+        )
+        w2_dist = distribute_tensor(
+            w2_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Shard(0), Shard(0)],  # Sharded on both axes (dim 0)
+        )
+
+        fsdp_group_name = mesh.get_group("fsdp").group_name
+        tp_group_name = mesh.get_group("tp").group_name
+
+        @local_map(
+            out_placements=[Replicate(), Shard(0)],
+            in_placements=[
+                (Replicate(), Shard(0)),  # x: batch on FSDP, features on TP
+                (Replicate(), Shard(0)),  # y: batch on FSDP
+                (Shard(1), Shard(0)),  # w1: FSDP + TP sharded
+                (Shard(0), Shard(0)),  # w2: FSDP + TP sharded
+            ],
+            device_mesh=mesh,
+            track_variant_axes=True,
+        )
+        def fsdp_tp_forward(x_local, y_local, w1_frag, w2_frag):
+            # FSDP: all_gather weights along FSDP axis
+            w1 = all_gather_tensor_autograd(
+                w1_frag, gather_dim=0, group=fsdp_group_name
+            )
+            w2 = all_gather_tensor_autograd(
+                w2_frag, gather_dim=0, group=fsdp_group_name
+            )
+
+            # Layer 1: matmul
+            # x_local: [batch/fsdp, d_in], w1(before all_gather): [d_in/fsdp, d_hidden/tp], w1(after all_gather): [d_in, d_hidden/tp]
+            # After all_gather on FSDP, w1 is full on dim 0, still sharded on dim 1 (TP)
+            h1_shard = x_local @ w1  # [batch/fsdp, d_hidden/tp]
+
+            # Layer 2: matmul
+            h2_partial = (
+                h1_shard @ w2
+            )  # [batch/fsdp, d_hidden/tp] @ [d_hidden/tp, dout]
+            output = all_reduce(h2_partial, "sum", group=tp_group_name)
+
+            # Compute loss with two reductions
+            return output
+
+        # Forward with FSDP+TP
+        pred_dist = fsdp_tp_forward(x_dist, y_dist, w1_dist, w2_dist)
+
+        loss_dist = ((pred_dist - y_dist) ** 2).mean()
+        loss_dist.backward()
+
+        # Compare gradient norms
+        w1_ref_grad_norm = w1_ref.grad.norm()
+        w1_dist_grad_norm = w1_dist.grad.full_tensor().norm()
+        self.assertTrue(
+            torch.allclose(w1_ref_grad_norm, w1_dist_grad_norm, atol=1e-4),
+            f"W1 grad norm mismatch: ref={w1_ref_grad_norm.item()}, dist={w1_dist_grad_norm.item()}",
+        )
+
+        w2_ref_grad_norm = w2_ref.grad.norm()
+        w2_dist_grad_norm = w2_dist.grad.full_tensor().norm()
+        self.assertTrue(
+            torch.allclose(w2_ref_grad_norm, w2_dist_grad_norm, atol=1e-4),
+            f"W2 grad norm mismatch: ref={w2_ref_grad_norm.item()}, dist={w2_dist_grad_norm.item()}",
+        )
 
 
 if __name__ == "__main__":

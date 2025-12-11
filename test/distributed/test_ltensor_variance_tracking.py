@@ -179,6 +179,24 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.variant_axes, {"tp"})
 
+    def test_tuple_of_ltensors(self):
+        """torch.cat with a tuple of LTensors preserves variance and returns LTensor."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        x = LTensor(torch.randn(4, 8), {"dp"}, mesh)
+        y = LTensor(torch.randn(4, 8), {"dp"}, mesh)
+        z = LTensor(torch.randn(4, 8), {"dp"}, mesh)
+
+        result = torch.cat((x, y, z), dim=0)
+
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.shape, (12, 8))
+        self.assertEqual(result.variant_axes, {"dp"})
+
 
 if __name__ == "__main__":
     run_tests()

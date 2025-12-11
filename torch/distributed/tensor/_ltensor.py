@@ -13,6 +13,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import Replicate
 from torch.utils._pytree import tree_map
+
 from . import _varying_collectives as vcols
 
 
@@ -43,10 +44,12 @@ def _get_axis_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str
     return None
 
 
+# Note: Intentionally do not include all_gather in the invariant-output registration.
+# Keeping all_gather's output as varying prevents mark_varying from being inserted in the forward,
+# which would otherwise cause a redundant all_reduce to be introduced during the backward pass.
 @register_variance_strategy(
     [
         torch.ops._c10d_functional.all_reduce,
-        torch.ops._c10d_functional.all_gather_into_tensor,
     ]
 )
 def _invariant_output_strategy(input_variant_axes, *args, **kwargs):
@@ -144,10 +147,13 @@ class LTensor(torch.Tensor):
 
         out_variant_axes: set[str] = set()
         meshes: set[DeviceMesh] = set()
-        for arg in tree_map(lambda x: x, args):
-            if isinstance(arg, LTensor):
-                out_variant_axes |= arg._variant_axes
-                meshes |= {arg._mesh}
+
+        def _extract_metadata(t):
+            if isinstance(t, LTensor):
+                out_variant_axes.update(t._variant_axes)
+                meshes.add(t._mesh)
+
+        tree_map(_extract_metadata, args)
 
         if len(meshes) > 1:
             raise RuntimeError(
