@@ -832,13 +832,18 @@ void all2all_single_equal_split(
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.mutable_data_ptr());
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) || defined(NCCL_ALLTOALL_SUPPORTED)
+#if defined(USE_ROCM) || defined(IS_NCCLX)
+  // ROCm's RCCL and NCCLx use ncclAllToAll with capital T
+  NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  // Standard NCCL 2.28.0+ uses ncclAlltoAll with lowercase t
+  NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
+#elif defined(NCCL_ALLTOALL_SUPPORTED)
+  // Older NCCLx uses ncclAllToAll with capital T
   // NCCL_ALLTOALL_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoall) vs those
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-  NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
@@ -883,7 +888,32 @@ void all2all_single_unequal_split(
 
   auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) || defined(NCCL_ALLTOALLV_SUPPORTED)
+#if defined(USE_ROCM) || defined(IS_NCCLX)
+  // ROCm's RCCL and NCCLx use ncclAllToAllv with capital T
+  NCCL_CHECK(ncclAllToAllv(
+      sendbuff,
+      sendcounts,
+      senddispls,
+      recvbuff,
+      recvcounts,
+      recvdispls,
+      type,
+      comm,
+      stream.stream()));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  // Standard NCCL 2.28.0+ uses ncclAlltoAllv with lowercase t
+  NCCL_CHECK(ncclAlltoAllv(
+      sendbuff,
+      sendcounts,
+      senddispls,
+      recvbuff,
+      recvcounts,
+      recvdispls,
+      type,
+      comm,
+      stream.stream()));
+#elif defined(NCCL_ALLTOALLV_SUPPORTED)
+  // Older NCCLx uses ncclAllToAllv with capital T
   // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoallv) vs those
   // inside traditional p2p operations.
