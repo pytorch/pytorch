@@ -255,7 +255,7 @@ static bool isInputCompliesAddmmCudaLt(
 }
 
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, int64_t bias_ld, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const Scalar& beta, const scalar_t* bias, int64_t bias_ld, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -269,6 +269,7 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
   params.lda = args.lda;
   params.b = args.matb->const_data_ptr<scalar_t>();
   params.ldb = args.ldb;
+  params.beta = beta.to<at::opmath_type<scalar_t>>();
   params.c = args.result->data_ptr<scalar_t>();
   params.ldc = args.result_ld;
   params.bias = bias;
@@ -305,28 +306,19 @@ bool launchGemmAndBiasCublasLt(
 ) {
   const auto* self_ptr = args.can_use_bias_epilogue()
     ? (*args.bias)->const_data_ptr<scalar_t>()
+      // Fails test
+      // pytest -sv test/test_matmul_cuda.py -k test_addmm_baddmm_dtype_overload_float16_M_64_N_64_K_64_batch_size0_broadcast_self_True_high_precision_self_True_backend_cublaslt_cuda
+      // This is because bias is float and not of the reduced type
+      // INVESTIGATE
     : static_cast<const scalar_t*>(nullptr);
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, -1, activation_to_gemm_and_blas_arg(activation)
+      args, alpha, beta, self_ptr, -1, activation_to_gemm_and_blas_arg(activation)
     );
     return true;
-  }
-
-  if (args.bias.has_value()) {
-    std::cout << "HERE!";
-    if (args.bias_ld.has_value()) {
-      std::cout << " bias ld: " << *args.bias_ld << std::endl;
-    } else {
-      // Fails test
-      // pytest -sv test/test_matmul_cuda.py -k test_addmm_baddmm_dtype_overload_float16_M_64_N_64_K_64_batch_size0_broadcast_self_True_high_precision_self_True_backend_cublaslt_cuda
-      // This is because bias is float and not of the reduced type
-      // INVESTIGATE
-      self_ptr = args.bias.value()->const_data_ptr<scalar_t>();
-    }
   }
 
   return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
@@ -415,19 +407,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || is_float_output_with_half_input;
   #endif
 
-  bool use_bias_ptr_lt = (self.dim() == 1) && !disable_addmm_cuda_lt;
-  // for float output with half input cublasLT with bias produces wrong results
-  use_bias_ptr_lt &= !is_float_output_with_half_input;
-
   // Handle result/self shapes
   if (!result.is_same(self)) {
     at::native::resize_output(result, {mat1.sizes()[0], mat2.sizes()[1]});
-
-      // We do not copy bias only when we need the bias ptr
-    if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
-      // NOTE: self should broadcast over result
-      at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
-    }
   }
 
   // Short circuit on empty result
@@ -459,6 +441,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
+  if (args.must_copy_bias_into_result()
+      /*REMOVE THAT*/ || args.bias_ld.has_value()) {
+      // NOTE: self should broadcast over result
+      at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
+  }
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {
