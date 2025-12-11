@@ -284,9 +284,9 @@ class TestTritonHeuristics(TestCase):
 
         expected_count = 1 if do_pruning else 2
         mm_configs = [
-            GemmConfig(32, 32, 32, 1, 8, 8),
+            GemmConfig(32, 32, 32, 1, 8, group_m=8),
             GemmConfig(
-                128, 128, 128, 100, 8, 4
+                128, 128, 128, 100, 8, group_m=4
             ),  # intentionally large to exceed shared memory limit
         ]
         with config.patch(

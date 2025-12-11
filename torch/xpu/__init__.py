@@ -518,6 +518,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
 
 # import here to avoid circular import
 from .memory import (
+    change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
     max_memory_allocated,
@@ -530,6 +531,7 @@ from .memory import (
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
     set_per_process_memory_fraction,
+    XPUPluggableAllocator,
 )
 from .random import (
     get_rng_state,
@@ -548,7 +550,9 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "XPUPluggableAllocator",
     "can_device_access_peer",
+    "change_current_allocator",
     "current_device",
     "current_stream",
     "default_generators",

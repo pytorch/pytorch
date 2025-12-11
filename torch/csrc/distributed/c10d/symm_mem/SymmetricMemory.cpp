@@ -1,10 +1,18 @@
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#include <atomic>
 
 namespace {
 
 using namespace c10d::symmetric_memory;
 
 static bool is_finalizing_ = false;
+
+// Signal pad size configuration - uses default if not explicitly set.
+// A value of 0 indicates "not set" (use default).
+// Using std::atomic for thread safety when accessed from C++ without GIL.
+static std::atomic<size_t> configured_signal_pad_size_{0};
 
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class AllocatorMap {
@@ -184,6 +192,15 @@ void set_backend(const std::string& name) {
 
 std::optional<std::string> get_backend(c10::Device device) {
   return AllocatorMap::get().get_backend(device.type());
+}
+
+size_t get_signal_pad_size() {
+  size_t val = configured_signal_pad_size_.load(std::memory_order_acquire);
+  return val == 0 ? default_signal_pad_size : val;
+}
+
+void set_signal_pad_size(size_t size) {
+  configured_signal_pad_size_.store(size, std::memory_order_release);
 }
 
 bool has_allocator(c10::DeviceType device_type) {
@@ -385,6 +402,10 @@ at::Tensor SymmetricMemory::get_remote_tensor(
   return get_buffer_at_byte_offset(this, peer, sizes, dtype, get_offset());
 }
 
+size_t SymmetricMemory::get_signal_pad_size() {
+  return c10d::symmetric_memory::get_signal_pad_size();
+}
+
 at::Tensor SymmetricMemory::get_signal_pad(
     int rank,
     c10::IntArrayRef sizes,
@@ -503,6 +524,10 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
+  m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
+  m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
