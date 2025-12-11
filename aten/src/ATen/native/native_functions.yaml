@@ -3482,6 +3482,7 @@
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  tags: pointwise
 
 - func: ldexp_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: function, method

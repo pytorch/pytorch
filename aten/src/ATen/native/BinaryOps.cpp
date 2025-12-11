@@ -1569,7 +1569,9 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
-Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+// This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
+// Both of these require floating types for 'self' and integer types for 'other'.
+static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
