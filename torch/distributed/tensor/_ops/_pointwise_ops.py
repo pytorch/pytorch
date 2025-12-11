@@ -293,10 +293,6 @@ pointwise_ops = [
     aten.logit_.default,
     aten.masked_fill.Scalar,
     aten.masked_fill_.Scalar,
-    aten.maximum.default,
-    aten.maximum.out,
-    aten.minimum.default,
-    aten.minimum.out,
     aten.mul.out,
     aten.mvlgamma.default,
     aten.mvlgamma.out,
@@ -426,8 +422,22 @@ linear_pointwise_ops = {
     aten.copy_.default: 1,
 }
 
+# Ops that preserve specific Partial types through the operation.
+# For example, torch.maximum preserves Partial("max") because
+# max(max(a), max(b)) == max(a, b).
+partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
+    aten.maximum.default: "max",
+    aten.maximum.out: "max",
+    aten.minimum.default: "min",
+    aten.minimum.out: "min",
+}
 
-def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
+
+def pointwise_strategy(
+    op_schema: OpSchema,
+    linearity: int = -1,
+    preserve_partial: str | None = None,
+) -> OpStrategy:
     followed_strategy_index = -1
     max_shards = -1
     max_ndim = -1
@@ -471,6 +481,7 @@ def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
         followed_strategy,
         followed_strategy_index,
         linearity,
+        preserve_partial=preserve_partial,
     )
 
 
@@ -490,12 +501,25 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
+def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for pointwise ops that preserve specific Partial types.
+
+    For example, torch.maximum preserves Partial("max") placements because
+    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
+    Partial("min") placements.
+    """
+    preserve_partial = partial_preserving_ops.get(op_schema.op)
+    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
+
+
 def common_pointwise_strategy(
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
     linearity: int = -1,
     scalar_tensor_idx: int | None = None,
+    preserve_partial: str | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -514,6 +538,8 @@ def common_pointwise_strategy(
                 output propagates partial.
         scalar_tensor_idx: Index of the Replicate scalar tensor for which we allow the mesh
             to be different from the mesh of followed_strategy
+        preserve_partial: If set, Partial placements with this reduce_op will be preserved
+            through the operation (e.g., "max" for torch.maximum, "min" for torch.minimum).
     """
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
@@ -539,11 +565,15 @@ def common_pointwise_strategy(
                 else:
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
+                # Check if this partial type should be preserved
+                if preserve_partial is not None and placement.is_partial(
+                    preserve_partial
+                ):
+                    out_placements.append(placement)
                 # note that only partial-sum and partial-avg are supported for linearity
-                partial_supports_linearity = placement.is_partial(
-                    "sum"
-                ) or placement.is_partial("avg")
-                if linearity >= 0 and partial_supports_linearity:
+                elif linearity >= 0 and (
+                    placement.is_partial("sum") or placement.is_partial("avg")
+                ):
                     # propagate the partial placement
                     out_placements.append(placement)
                 else:
@@ -630,6 +660,11 @@ def common_pointwise_strategy(
 for op in linear_pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         linear_pointwise_strategy
+    )
+
+for op in partial_preserving_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        partial_preserving_pointwise_strategy
     )
 
 for op in pointwise_ops:
