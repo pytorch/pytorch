@@ -1963,7 +1963,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
-            obj_id, get_verbose_code_parts(code, guard)
+            obj_id,
+            get_verbose_code_parts(
+                code, guard, recompile_hint=f"type {t.__qualname__}"
+            ),
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
