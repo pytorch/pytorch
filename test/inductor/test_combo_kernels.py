@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._inductor
 from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TestCase,
@@ -159,6 +160,24 @@ class ComboKernelTests(TestCase):
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    def test_persistent_reduction_size_hint(self):
+        def fn(x, y):
+            return x.max(1), y.min(1)
+
+        inps = (
+            torch.rand(768, 16, device=GPU_TYPE),
+            torch.rand(768, 32, device=GPU_TYPE),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        FileCheck().check("triton_heuristics.persistent_reduction").check(
+            "size_hints={'x': 1024, 'r0_': 32}"
+        ).run(code[0])
+        self.assertEqual(out_eager, out_compiled)
 
 
 @instantiate_parametrized_tests
