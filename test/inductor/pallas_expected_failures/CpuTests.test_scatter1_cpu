@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/array_methods.py", line 1141, in op
-    return getattr(self.aval, f"_{name}")(self, *args)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-ValueError: Invalid shape for `swap`. Ref shape: (2, 3). Expected shape: (1, 3). Value shape: (3,). Transforms: (NDIndexer(indices=(ShapedArray(int64[1]), Slice(start=0, size=3, stride=1)), shape=(2, 3), int_indexer_shape=(1,), validate=False),).

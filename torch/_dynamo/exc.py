@@ -601,6 +601,18 @@ class KeyErrorMsg:
         return self.__str__()
 
 
+def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
+    # Add HOP context right after before the explanation if present;
+    # otherwise after the message
+    if hasattr(exc, "_hop_name"):
+        lines = msg.partition("\n  Explanation:")
+        msg = (
+            f"{lines[0]}\n  Higher Order Operator: {exc._hop_name}{lines[1]}{lines[2]}"  # type: ignore[attr-defined]
+        )
+
+    return msg
+
+
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
     import traceback
 
@@ -640,6 +652,8 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
             )
 
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
+
+    old_msg = augment_exc_message_with_hop_name(exc, old_msg)
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
