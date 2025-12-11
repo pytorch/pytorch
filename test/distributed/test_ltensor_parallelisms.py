@@ -400,6 +400,37 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         loss_ref = ((pred_ref - y_ref) ** 2).mean()
         loss_ref.backward()
 
+        # ========== Test: FSDP+TP with DTensors ==========
+
+        x_dtensor = distribute_tensor(
+            x_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate(), Shard(0)],
+        )
+        y_dtensor = distribute_tensor(
+            y_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Replicate(), Shard(0)],
+        )
+
+        # Weights: Shard(1)/Shard(0) on TP and Shard(0) on FSDP
+        # For FSDP all_gather, reduce_scatter occurs in the backward
+        w1_dtensor = distribute_tensor(
+            w1_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Shard(1), Shard(0)],  # Sharded on both axes
+        )
+        w2_dtensor = distribute_tensor(
+            w2_global.detach().clone().requires_grad_(True),
+            mesh,
+            placements=[Shard(0), Shard(0)],  # Sharded on both axes (dim 0)
+        )
+
+        h1_dtensor = x_dtensor @ w1_dtensor
+        pred_dtensor = h1_dtensor @ w2_dtensor
+        loss_dtensor = (pred_dtensor - y_dtensor).pow(2).mean()
+        loss_dtensor.backward()
+
         # ========== Test: FSDP+TP with local_map ==========
 
         # Input: Shard(1) on TP (heads) and Replicate() on FSDP (batch)
@@ -451,14 +482,12 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             )
 
             # Layer 1: matmul
-            # x_local: [batch/fsdp, d_in], w1(before all_gather): [d_in/fsdp, d_hidden/tp], w1(after all_gather): [d_in, d_hidden/tp]
-            # After all_gather on FSDP, w1 is full on dim 0, still sharded on dim 1 (TP)
-            h1_shard = x_local @ w1  # [batch/fsdp, d_hidden/tp]
+            # x_local: [batch/fsdp, d_in], w1_frag: [d_in/fsdp, d_hidden/tp]
+            h1_shard = x_local @ w1
 
             # Layer 2: matmul
-            h2_partial = (
-                h1_shard @ w2
-            )  # [batch/fsdp, d_hidden/tp] @ [d_hidden/tp, dout]
+            # h_shard: [batch/fsdp, d_hidden/tp], w2_frag: [d_hidden/tp, dout]
+            h2_partial = h1_shard @ w2
             output = all_reduce(h2_partial, "sum", group=tp_group_name)
 
             # Compute loss with two reductions
@@ -470,19 +499,18 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         loss_dist = ((pred_dist - y_dist) ** 2).mean()
         loss_dist.backward()
 
-        # Compare gradient norms
-        w1_ref_grad_norm = w1_ref.grad.norm()
+        w1_dtensor_grad_norm = w1_dtensor.grad.full_tensor().norm()
         w1_dist_grad_norm = w1_dist.grad.full_tensor().norm()
         self.assertTrue(
-            torch.allclose(w1_ref_grad_norm, w1_dist_grad_norm, atol=1e-4),
-            f"W1 grad norm mismatch: ref={w1_ref_grad_norm.item()}, dist={w1_dist_grad_norm.item()}",
+            torch.allclose(w1_dtensor_grad_norm, w1_dist_grad_norm, atol=1e-4),
+            f"W1 grad norm mismatch: ref={w1_dtensor_grad_norm.item()}, dist={w1_dist_grad_norm.item()}",
         )
 
-        w2_ref_grad_norm = w2_ref.grad.norm()
+        w2_dtensor_grad_norm = w2_dtensor.grad.full_tensor().norm()
         w2_dist_grad_norm = w2_dist.grad.full_tensor().norm()
         self.assertTrue(
-            torch.allclose(w2_ref_grad_norm, w2_dist_grad_norm, atol=1e-4),
-            f"W2 grad norm mismatch: ref={w2_ref_grad_norm.item()}, dist={w2_dist_grad_norm.item()}",
+            torch.allclose(w2_dtensor_grad_norm, w2_dist_grad_norm, atol=1e-4),
+            f"W2 grad norm mismatch: ref={w2_dtensor_grad_norm.item()}, dist={w2_dist_grad_norm.item()}",
         )
 
 

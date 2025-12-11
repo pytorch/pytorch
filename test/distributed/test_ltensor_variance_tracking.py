@@ -172,9 +172,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
 
         import torch.distributed._functional_collectives as fcols
 
-        result = fcols.all_reduce(
-            x, "sum", mesh.get_group("dp").group_name
-        ).trigger_wait()
+        result = fcols.all_reduce(x, "sum", mesh.get_group("dp").group_name)
 
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.variant_axes, {"tp"})

@@ -10,10 +10,7 @@ def all_reduce_invariant(
     group_name: str,
 ) -> torch.Tensor:
     """Forward: all_reduce, Backward: identity (no grad aggregation)."""
-    output = torch.ops._c10d_functional.all_reduce_invariant(
-        input, reduce_op, group_name
-    )
-    return torch.ops._c10d_functional.wait_tensor(output)
+    return torch.ops._c10d_functional.all_reduce_invariant(input, reduce_op, group_name)
 
 
 def mark_varying(
@@ -21,8 +18,7 @@ def mark_varying(
     group_name: str,
 ) -> torch.Tensor:
     """Forward: identity (no-op), Backward: all_reduce(sum) gradients."""
-    output = torch.ops._c10d_functional.mark_varying(input, group_name)
-    return torch.ops._c10d_functional.wait_tensor(output)
+    return torch.ops._c10d_functional.mark_varying(input, group_name)
 
 
 @torch.library.custom_op("_c10d_functional::all_reduce_invariant", mutates_args=())

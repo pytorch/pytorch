@@ -13,7 +13,6 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import Replicate
 from torch.utils._pytree import tree_map
-
 from . import _varying_collectives as vcols
 
 
@@ -109,7 +108,6 @@ class LTensor(torch.Tensor):
         r._variant_axes = variant_axes
         r._mesh = mesh
         r._local_tensor = local_tensor
-        assert r.grad_fn == local_tensor.grad_fn
         return r
 
     @staticmethod
@@ -169,8 +167,9 @@ class LTensor(torch.Tensor):
         func = _CUSTOM_OPERATOR_HANDLER_MAP.get(func, func)
 
         def unwrap_and_insert_mark_varying(t):
-            if isinstance(t, AsyncCollectiveTensor):
-                t = t.trigger_wait()
+            assert not isinstance(t, AsyncCollectiveTensor), (
+                f"AsyncCollectiveTensor: {t=}"
+            )
 
             if not isinstance(t, LTensor):
                 return t
@@ -194,6 +193,9 @@ class LTensor(torch.Tensor):
         result = func(*unwrapped_args, **unwrapped_kwargs)
 
         def wrap(t):
+            assert not isinstance(t, AsyncCollectiveTensor), (
+                f"AsyncCollectiveTensor: {t=}"
+            )
             if isinstance(t, torch.Tensor) and not isinstance(t, LTensor):
                 return LTensor(t, out_variant_axes, mesh)
             else:
