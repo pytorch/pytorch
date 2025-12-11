@@ -608,6 +608,14 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
+    from torch._library.opaque_object import is_opaque_type
+
+    if is_opaque_type(cls):
+        raise ValueError(
+            f"{cls} cannot be registered as a pytree as it has been "
+            "registered as an opaque object. Opaque objects must be pytree leaves."
+        )
+
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
             # TODO: change this warning to an error after OSS/internal stabilize
@@ -1564,7 +1572,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
