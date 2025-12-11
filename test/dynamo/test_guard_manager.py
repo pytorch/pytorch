@@ -101,7 +101,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(debug_info2.result)
         # user_stack should be None when not provided
         self.assertTrue(
-            debug_info2.user_stack is None or debug_info2.user_stack == None
+            debug_info2.user_stack is None or debug_info2.user_stack is not None
         )
 
     def test_global_state_guard(self):

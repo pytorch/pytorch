@@ -1989,7 +1989,7 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(
                 code, guard, recompile_hint=f"type {t.__qualname__}"
             ),
-            get_verbose_user_stack(guard)
+            get_verbose_user_stack(guard),
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
