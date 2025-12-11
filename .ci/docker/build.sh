@@ -83,10 +83,6 @@ fi
 
 _UCX_COMMIT=7836b165abdbe468a2f607e7254011c07d788152
 _UCC_COMMIT=430e241bf5d38cbc73fc7a6b89155397232e3f96
-if [[ "$image" == *rocm* ]]; then
-  _UCX_COMMIT=29831d319e6be55cb8c768ca61de335c934ca39e
-  _UCC_COMMIT=9f4b242cbbd8b1462cbc732eb29316cdfa124b77
-fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
 # If no tag (no colon in image name), use the image name itself
@@ -199,9 +195,9 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
+    # Note: PYTORCH_ROCM_ARCH is not set here - it will be determined at PyTorch build time
+    # based on BUILD_ENVIRONMENT to allow the same image to target different GPU architectures
+    # Note: UCC is not installed for ROCm images - it's only used for CUDA builds
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
@@ -417,7 +413,6 @@ docker buildx build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

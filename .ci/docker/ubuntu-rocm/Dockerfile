@@ -6,9 +6,8 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
-# Set AMD gpu targets to build for
-ARG PYTORCH_ROCM_ARCH
-ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+# Note: PYTORCH_ROCM_ARCH is not set here - it will be determined at PyTorch build time
+# based on BUILD_ENVIRONMENT to allow the same image to target different GPU architectures
 
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
@@ -76,17 +75,6 @@ ENV LC_ALL C.UTF-8
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
-
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
 
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl

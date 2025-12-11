@@ -160,9 +160,23 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx906"
+      # Detect GPU architecture from BUILD_ENVIRONMENT
+      # If a specific GPU is mentioned, build for that arch only (faster builds)
+      # Otherwise, build for all supported architectures (for shared/multi-GPU builds)
+      if [[ "$BUILD_ENVIRONMENT" == *"mi300"* ]]; then
+          export PYTORCH_ROCM_ARCH="gfx942"
+      elif [[ "$BUILD_ENVIRONMENT" == *"mi355"* ]] || [[ "$BUILD_ENVIRONMENT" == *"mi350"* ]]; then
+          export PYTORCH_ROCM_ARCH="gfx950"
+      elif [[ "$BUILD_ENVIRONMENT" == *"mi200"* ]]; then
+          export PYTORCH_ROCM_ARCH="gfx90a"
+      elif [[ "$BUILD_ENVIRONMENT" == *"navi31"* ]] || [[ "$BUILD_ENVIRONMENT" == *"gfx1100"* ]]; then
+          export PYTORCH_ROCM_ARCH="gfx1100"
+      else
+          # No specific GPU in BUILD_ENVIRONMENT - build for all supported architectures
+          # This is needed for shared builds that run on multiple GPU types
+          export PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
+      fi
+      echo "Setting PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} based on BUILD_ENVIRONMENT"
   fi
 
   # hipify sources
