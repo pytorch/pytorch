@@ -45,7 +45,8 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim  # pyrefly: ignore [unsupported-operation]
+    if not (dim >= 0 and dim < ndim):  # pyrefly: ignore [unsupported-operation]
+        raise AssertionError(f"dim {dim} out of range for ndim {ndim}")
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
@@ -92,9 +93,10 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(dims, (tuple, list)), (
-        f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
-    )
+    if not isinstance(dims, (tuple, list)):
+        raise AssertionError(
+            f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+        )
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -310,7 +312,8 @@ def jagged_unary_pointwise(func, *args, **kwargs):
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     a, b = args[0], args[1]
-    assert isinstance(a, NestedTensor) or isinstance(b, NestedTensor)
+    if not (isinstance(a, NestedTensor) or isinstance(b, NestedTensor)):
+        raise AssertionError("At least one of the arguments must be a NestedTensor")
 
     mismatch_error_msg = (
         "cannot call binary pointwise function {} with inputs of shapes {} and {}"
@@ -607,9 +610,10 @@ def clone_default(func, *args, **kwargs):
             from .nested_tensor import jagged_from_list
 
             # TODO: We probably want the output to have the same ragged structure / nested int.
-            assert inp._ragged_idx == 1, (
-                "NJT with ragged_idx != 1 not supported for contiguous clone"
-            )
+            if inp._ragged_idx != 1:
+                raise AssertionError(
+                    "NJT with ragged_idx != 1 not supported for contiguous clone"
+                )
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
 
@@ -1241,7 +1245,8 @@ def cat_default(func, *args, **kwargs):
 
     # Convert any non-nested to nested
     nested = [t for t in tensors if t.is_nested]
-    assert len(nested) > 0
+    if len(nested) == 0:
+        raise AssertionError("At least one tensor must be nested")
     first = nested[0]
     tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
 
@@ -1394,7 +1399,8 @@ def expand_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs["size"]
 
-    assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
+    if "implicit" in new_kwargs and new_kwargs.pop("implicit"):
+        raise AssertionError("implicit expand is not supported")
     if not raggedness_matches(inp, size):
         raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
@@ -1961,7 +1967,10 @@ def index_put_(func, *args, **kwargs):
 
     indices = new_kwargs.pop("indices")
 
-    assert len(indices) <= inp.dim()
+    if len(indices) > inp.dim():
+        raise AssertionError(
+            f"Too many indices: got {len(indices)} but tensor has {inp.dim()} dimensions"
+        )
 
     if len(indices) < inp._ragged_idx + 1:
         if not inp.is_contiguous():
@@ -2065,7 +2074,10 @@ def mean_dim(func, *args, **kwargs):
     )
 
     if reduce_on_ragged and not reduce_on_batch:
-        assert not reduce_on_non_batch
+        if reduce_on_non_batch:
+            raise AssertionError(
+                "Cannot reduce on both ragged and non-batch dimensions without also reducing on batch"
+            )
         # calculate an intermediate sum and leave the dim in for normalization purposes
         keepdim = new_kwargs["keepdim"]
         new_kwargs["keepdim"] = True

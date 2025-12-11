@@ -112,5 +112,8 @@ class NestedIntNode:
         return False
 
     def wrap_int(self, num: int) -> ConstantIntNode:
-        assert type(num) is int
+        if type(num) is not int:
+            raise AssertionError(
+                f"Expected num to be int, but got {type(num).__name__}"
+            )
         return ConstantIntNode(num)
