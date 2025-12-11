@@ -835,10 +835,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
         for name in ("resume_in_f4", "resume_in_f7"):
             self.assertTrue(
-                any(
-                    name in key
-                    for key in torch._dynamo.utils.counters["resumes"].keys()
-                )
+                any(name in key for key in torch._dynamo.utils.counters["resumes"])
             )
 
     def test_disable_nested_graph_breaks(self):
@@ -873,6 +870,52 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         # 2 frames from each of f5+f4, f3, f2, f1
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
+
+    def test_nested_store_attr_graph_break(self):
+        class Foo:
+            def __setattr__(self, name, value):
+                torch._dynamo.graph_break()
+                if not torch.compiler.is_compiling():
+                    raise RuntimeError("Expected this to be traced")
+                super().__setattr__(name, value + 1)
+
+        def fn(foo, x):
+            foo.attr = x + 2
+            return x + 4
+
+        foo = Foo()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        ref = opt_fn(foo, x)
+        self.assertEqual(ref, x + 4)
+        self.assertEqual(foo.attr, x + 3)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
+
+    def test_nested_store_subscr_graph_break(self):
+        class Foo:
+            def __setitem__(self, name, value):
+                torch._dynamo.graph_break()
+                if not torch.compiler.is_compiling():
+                    raise RuntimeError("Expected this to be traced")
+                super().__setattr__(name, value + 1)
+
+        def fn(foo, x):
+            foo["attr"] = x + 2
+            return x + 4
+
+        foo = Foo()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        ref = opt_fn(foo, x)
+        self.assertEqual(ref, x + 4)
+        self.assertEqual(foo.attr, x + 3)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_functorch_with_nested_graph_break(self):
         def f1(x):

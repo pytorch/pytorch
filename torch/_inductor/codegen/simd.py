@@ -1764,9 +1764,12 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # The workspace tensor is in torch.float, need a cast if the buffer is
+            # not.
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                final_reduce += f".to({buffer_dtype})"
+            V.graph.wrapper_code.writeline(final_reduce)
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
@@ -2289,11 +2292,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
-        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
-
-        # This is currently the only type supported by this method
-        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
@@ -2306,7 +2305,6 @@ class SIMDScheduling(BaseScheduling):
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
-                triton_kernel_cls=self.kernel_type,
             )
 
         partitions = ComboKernel.horizontal_partition(
@@ -2326,7 +2324,6 @@ class SIMDScheduling(BaseScheduling):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
-                triton_kernel_cls=self.kernel_type,
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )

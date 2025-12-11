@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Optional
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -50,14 +49,14 @@ class _Loss(Module):
 class _WeightedLoss(_Loss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
-        self.weight: Optional[Tensor]
+        self.weight: Tensor | None
 
 
 class L1Loss(_Loss):
@@ -241,7 +240,7 @@ class NLLLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -272,7 +271,7 @@ class NLLLoss(_WeightedLoss):
 class NLLLoss2d(NLLLoss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -817,17 +816,17 @@ class BCEWithLogitsLoss(_Loss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-        pos_weight: Optional[Tensor] = None,
+        pos_weight: Tensor | None = None,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
-        self.weight: Optional[Tensor]
-        self.pos_weight: Optional[Tensor]
+        self.weight: Tensor | None
+        self.pos_weight: Tensor | None
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -888,6 +887,14 @@ class HingeEmbeddingLoss(_Loss):
           operates over all the elements.
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
+
+    Examples:
+
+        >>> loss = nn.HingeEmbeddingLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["margin", "reduction"]
@@ -1043,6 +1050,14 @@ class SmoothL1Loss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.SmoothL1Loss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1107,6 +1122,14 @@ class HuberLoss(_Loss):
         - Input: :math:`(*)` where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.HuberLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction", "delta"]
@@ -1151,6 +1174,13 @@ class SoftMarginLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
+    Examples:
+
+        >>> loss = nn.SoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1347,7 +1377,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -1407,6 +1437,14 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples:
+
+        >>> loss = nn.MultiLabelSoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.empty(3, 5).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1626,7 +1664,7 @@ class MultiMarginLoss(_WeightedLoss):
         self,
         p: int = 1,
         margin: float = 1.0,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
@@ -1869,7 +1907,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(
         self,
         *,
-        distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+        distance_function: Callable[[Tensor, Tensor], Tensor] | None = None,
         margin: float = 1.0,
         swap: bool = False,
         reduction: str = "mean",
@@ -1879,7 +1917,7 @@ class TripletMarginWithDistanceLoss(_Loss):
             raise ValueError(
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
-        self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = (
+        self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin
