@@ -237,7 +237,10 @@ class PallasKernelOverrides(OpOverrides):
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
 
-        idx_str = V.kernel.kexpr(V.kernel.prepare_indexing(expr))
+        # Prepare and rename indexing to register size symbols as kernel args
+        prepared = V.kernel.prepare_indexing(expr)
+        renamed = V.kernel.rename_indexing(prepared)
+        idx_str = V.kernel.kexpr(renamed)
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
