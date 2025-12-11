@@ -1,8 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import itertools
 import math
-import copy
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, Optional
@@ -346,8 +344,6 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
-    # import fbvscode
-    # fbvscode.set_trace()
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
@@ -521,7 +517,10 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 def _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
     tensor_dim = placements[mesh_dim].dim
-    return not any(isinstance(p, (Shard, _StridedShard)) and p.dim >= tensor_dim for p in placements[mesh_dim + 1:])
+    return not any(
+        isinstance(p, (Shard, _StridedShard)) and p.dim >= tensor_dim
+        for p in placements[mesh_dim + 1 :]
+    )
 
 
 def propagate_shape_and_sharding(
@@ -568,6 +567,30 @@ def propagate_shape_and_sharding(
     def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim, ith_shard: Optional[int] = None
     ) -> tuple[Optional[int], Optional[Shard]]:
+        num_shard_placements = 0
+        for mesh_dim, placement in enumerate(input_src_placements):
+            if isinstance(placement, Shard):
+                num_shard_placements += 1
+                if placement.dim == input_dim.input_dim:
+                    if ith_shard is None:
+                        return mesh_dim, placement
+                    elif (num_shard_placements - 1) == ith_shard:
+                        return mesh_dim, placement
+        return None, None
+
+    def maybe_get_shard_mesh_dim_and_placement_split(
+        current_dim: int, processed_dims: Iterable[int], placements
+    ) -> tuple[Optional[int], Optional[Shard]]:
+        processed_dims = set(processed_dims)
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, (Shard, _StridedShard)):
+                continue
+            if placement.dim in processed_dims:
+                processed_dims.remove(placement.dim)
+            elif placement.dim == current_dim:
+                return mesh_dim, placement
+        return None, None
+
         num_shard_placements = 0
         for mesh_dim, placement in enumerate(input_src_placements):
             if isinstance(placement, Shard):
@@ -634,29 +657,24 @@ def propagate_shape_and_sharding(
                     )
                 return cmd.input_dims[0]
         elif isinstance(cmd, Split):
-            in_dim = get_in_dim_to_shard(cmd.input_dim, input_dim_to_output_dims, input_src_placements)
+            in_dim = get_in_dim_to_shard(
+                cmd.input_dim, input_dim_to_output_dims, input_src_placements
+            )
             out_size = cmd.group_shape[cmd.split_id]
             if in_dim is not None:
-                num_of_shard_placements = len(
-                    list(
-                        itertools.chain.from_iterable(input_dim_to_output_dims.values())
-                    )
-                )
                 shard_mesh_dim, input_src_placement = (
-                    maybe_get_shard_mesh_dim_and_placement(
-                        in_dim,
-                        num_of_shard_placements,
+                    maybe_get_shard_mesh_dim_and_placement_split(
+                        in_dim.input_dim,
+                        input_dim_to_output_dims.keys(),
+                        input_src_placements,
                     )
                 )
                 if isinstance(input_src_placement, _StridedShard):
-                    split_factor = math.prod(
-                        [1] + list(cmd.group_shape[0 : cmd.split_id])
-                    )
-
+                    # calculate the expected split_factor
+                    split_factor = math.prod(cmd.group_shape[0 : cmd.split_id])
                     split_factor = split_factor // math.prod(
-                        [1] + list(mesh_sizes[0:num_of_shard_placements])
+                        mesh_sizes[0:shard_mesh_dim]
                     )
-
                     if input_src_placement.split_factor != split_factor:
                         return None
                     else:
@@ -673,14 +691,14 @@ def propagate_shape_and_sharding(
 
                 # 1. is this dimension shardable on each individual mesh dim?
                 shardable_dims[in_dim.input_dim] = [
-                    out_size % mesh_dim_size == 0 or _is_last_shard_on_tensor_dim_plus(mesh_dim, input_src_placements) for (mesh_dim, mesh_dim_size) in enumerate(mesh_sizes)
+                    out_size % mesh_dim_size == 0
+                    or _is_last_shard_on_tensor_dim_plus(mesh_dim, input_src_placements)
+                    for (mesh_dim, mesh_dim_size) in enumerate(mesh_sizes)
                 ]
 
                 shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
                 if strict_view and shard_mesh_dim is not None:
                     if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
-                        import fbvscode
-                        fbvscode.set_trace()
                         raise RuntimeError(
                             f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",
@@ -699,7 +717,9 @@ def propagate_shape_and_sharding(
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
         elif isinstance(cmd, Repeat):
-            in_dim = get_in_dim_to_shard(cmd.input_dim, input_dim_to_output_dims, input_src_placements)
+            in_dim = get_in_dim_to_shard(
+                cmd.input_dim, input_dim_to_output_dims, input_src_placements
+            )
             if in_dim is not None:
                 shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
             return None
@@ -709,9 +729,9 @@ def propagate_shape_and_sharding(
     # for each output dim, find the corresponding input dim in terms of sharding prop
     input_dim_to_output_dims = {}
     for output_dim, cmd in enumerate(rule):
-        import fbvscode
-        fbvscode.set_trace()
-        in_dims = get_in_dim_to_shard(cmd, input_dim_to_output_dims, input_src_placements)
+        in_dims = get_in_dim_to_shard(
+            cmd, input_dim_to_output_dims, input_src_placements
+        )
         if isinstance(in_dims, list) and len(in_dims) > 0:
             for in_dim in in_dims:
                 if in_dim is not None:
@@ -731,10 +751,9 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
-    
-
-
-    def _rewrite_shard_dim(p: Shard, mesh, local_tensor_shapes, rule, mesh_dim, placements):
+    def _rewrite_shard_dim(
+        p: Shard, mesh, local_tensor_shapes, rule, mesh_dim, placements
+    ):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -750,7 +769,7 @@ def propagate_shape_and_sharding(
             it's certain that ``placements`` won't change except the
             inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
         """
-        
+
         if isinstance(p, _StridedShard):
             tgt_shard_dims = input_dim_to_output_dims[p.dim]
             tgt_shard_dim = tgt_shard_dims.pop(0)
@@ -779,22 +798,32 @@ def propagate_shape_and_sharding(
                 if p.dim == input_start_idx:
                     output_placement = Shard(tgt_shard_dim)
                 else:
-                    split_factor = math.prod(local_tensor_shapes[input_start_idx:p.dim])
-                    output_placement = _StridedShard(tgt_shard_dim, split_factor=split_factor)
+                    split_factor = math.prod(
+                        local_tensor_shapes[input_start_idx : p.dim]
+                    )
+                    output_placement = _StridedShard(
+                        tgt_shard_dim, split_factor=split_factor
+                    )
 
-            if local_tensor_shapes[p.dim] % mesh.size(mesh_dim) != 0 and not _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
+            if local_tensor_shapes[p.dim] % mesh.size(
+                mesh_dim
+            ) != 0 and not _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
                 raise RuntimeError("cannot further shard on uneven sharded dims")
             else:
-                local_tensor_shapes[p.dim] = local_tensor_shapes[p.dim] // mesh.size(mesh_dim)
+                local_tensor_shapes[p.dim] = local_tensor_shapes[p.dim] // mesh.size(
+                    mesh_dim
+                )
             return output_placement
 
     local_tensor_shapes = list(input_src_spec.shape)
     output_placements = [
-        _rewrite_shard_dim(p, mesh, local_tensor_shapes, rule, mesh_dim, input_tgt_placements) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(
+            p, mesh, local_tensor_shapes, rule, mesh_dim, input_tgt_placements
+        )
+        if isinstance(p, Shard)
+        else p
         for mesh_dim, p in enumerate(input_tgt_placements)
     ]
-
-    
 
     return input_tgt_placements, output_placements
 

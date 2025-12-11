@@ -993,16 +993,15 @@ class TestViewOps(DTensorTestBase):
     def test_dtensor_unflatten_1d(self):
         mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
 
-
-        self._test_dtensor_unflatten_1d_shard(
-            (13, 13, 11),
-            (13, 13, 6),
-            (13, 143),
-            1,
-            (Shard(2), ),
-            mesh,
-        )
-        return
+        # self._test_dtensor_unflatten_1d_shard(
+        #     (13, 13, 11),
+        #     (13, 13, 6),
+        #     (13, 143),
+        #     1,
+        #     (Shard(2), ),
+        #     mesh,
+        # )
+        # return
 
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
@@ -1015,21 +1014,15 @@ class TestViewOps(DTensorTestBase):
                                 0
                             ) != 0 and shard_dim != (flatten_end - 1):
                                 ctx = self.assertRaises(RuntimeError)
-                            try:
-                                with ctx:
-                                    self._test_dtensor_unflatten_1d_shard(
-                                        tensor_dims_unflatten,
-                                        local_tensor_dims_unflatten,
-                                        tensor_dims_flatten,
-                                        flatten_start,
-                                        expected_placements,
-                                        mesh,
-                                    )
-                            except:
-                                import traceback
-                                print(traceback.format_exc(), flush=True)
-                                import fbvscode
-                                fbvscode.set_trace()
+                            with ctx:
+                                self._test_dtensor_unflatten_1d_shard(
+                                    tensor_dims_unflatten,
+                                    local_tensor_dims_unflatten,
+                                    tensor_dims_flatten,
+                                    flatten_start,
+                                    expected_placements,
+                                    mesh,
+                                )
 
     def _test_dtensor_unflatten_1d_shard(self, tensor_dims_unflatten, local_tensor_dims_unflatten, tensor_dims_flatten, flatten_start, expected_placements, mesh):
         shard_dim = expected_placements[0].dim
