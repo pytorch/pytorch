@@ -4595,10 +4595,13 @@ class CommonTemplate:
             return torch.unsafe_chunk(x, chunks=chunks, dim=0)
 
         x = torch.zeros(0)
-        self.common(fn, (x, 4))
+        result = torch.compile(fn)(x, 4)
+        self.assertEqual(len(result), 4)
+        for chunk in result:
+            self.assertEqual(chunk.shape, torch.Size([0]))
 
+        self.common(fn, (torch.zeros(0), 4))
         self.common(fn, (torch.zeros(0), 2))
-
         self.common(fn, (torch.zeros(0, dtype=torch.float32), 3))
 
     @parametrize("dilation", (1, 2))
