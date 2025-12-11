@@ -33,4 +33,3 @@ jobs:
       build-environment: linux-noble-rocm-nightly-py3.12-gfx942
       docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
     secrets: inherit
-
