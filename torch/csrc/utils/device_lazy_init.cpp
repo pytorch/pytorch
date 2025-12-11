@@ -17,6 +17,22 @@ std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
 std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     at_fork_once_flags{};
 
+// Template function: each device index gets its own instantiation
+template <int N>
+void device_fork_handler() {
+  constexpr at::DeviceType device_type = static_cast<at::DeviceType>(N);
+  set_device_in_bad_fork(device_type, true);
+  if (is_device_lazy_init_supported(device_type)) {
+    set_requires_device_init(device_type, true);
+  }
+}
+
+// Generate array of function pointers at compile time using an IIFE
+constexpr auto fork_handlers =
+    []<std::size_t... Is>(std::index_sequence<Is...>) {
+      return std::array<void (*)(), sizeof...(Is)>{device_fork_handler<Is>...};
+    }(std::make_index_sequence<at::COMPILE_TIME_MAX_DEVICE_TYPES>{});
+
 } // anonymous namespace
 
 bool is_device_initialized(at::DeviceType device_type) {
@@ -79,13 +95,8 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
 #ifndef WIN32
   auto& flag = at_fork_once_flags[static_cast<int>(device_type)];
   c10::call_once(flag, [device_type]() {
-    static at::DeviceType at_fork_device_type = device_type;
-    pthread_atfork(nullptr, nullptr, []() {
-      set_device_in_bad_fork(at_fork_device_type, true);
-      if (is_device_lazy_init_supported(at_fork_device_type)) {
-        set_requires_device_init(at_fork_device_type, true);
-      }
-    });
+    pthread_atfork(
+        nullptr, nullptr, fork_handlers[static_cast<int>(device_type)]);
   });
 #endif
 }
