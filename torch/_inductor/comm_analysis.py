@@ -180,9 +180,9 @@ llMaxBws = [
     ],
     # Hopper-N1/AMD-N2/AMD-N4
     [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
+        141.0,
+        45.0,  # avg of ring & tree
+        35.0,
     ],
     # Blackwell-N1/AMD-N2/AMD-N4
     [
