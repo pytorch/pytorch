@@ -66,7 +66,7 @@ function install_ucc() {
     for arch in $amdgpu_targets; do
       HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
     done
-    HIP_OFFLOAD="$HIP_OFFLOAD --rocm-path=${ROCM_PATH} --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}"
+    HIP_OFFLOAD="$HIP_OFFLOAD --rocm-path=${ROCM_PATH}"
   else
     HIP_OFFLOAD="all-arch-no-native"
   fi
@@ -77,10 +77,6 @@ function install_ucc() {
     --with-nvcc-gencode="${NVCC_GENCODE}" \
     --with-rocm=$with_rocm                \
     --with-rocm-arch="${HIP_OFFLOAD}"
-
-  if [[ -n "$ROCM_VERSION" ]]; then
-    export HIP_DEVICE_LIB_PATH="${ROCM_DEVICE_LIB_PATH}"
-  fi
   time make -j
   sudo make install
 
