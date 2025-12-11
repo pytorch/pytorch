@@ -7627,12 +7627,12 @@ metadata incorrectly.
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M()
+            m = M().cuda()
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True)
+                return torch.randn(B, T, E, requires_grad=True, device="cuda")
 
             x = _inp()
             y = m(x)
