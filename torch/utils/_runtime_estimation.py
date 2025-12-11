@@ -1,6 +1,10 @@
 import torch
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
-from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    has_hint,
+    hint_int,
+    statically_known_true,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .flop_counter import flop_registry
