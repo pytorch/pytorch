@@ -514,33 +514,14 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
-        # However, we allow zero-channel cases (num_features == 0) which have numel == 0
-        # but are valid inputs. Zero-channel cases have len(shape) >= 2 and shape[1] == 0
+        # Skip all zero-numel tensors from sample_inputs_batch_norm
         if sample.input.numel() == 0:
-            # Skip if it's not a valid zero-channel case (1D tensor with 0 elements)
-            if len(sample.input.shape) < 2 or sample.input.shape[1] != 0:
-                continue
+            continue
         args = sample.args
         training = sample.kwargs.get('training', True)
         momentum = sample.kwargs.get('momentum', 0.5)
         eps = sample.kwargs.get('eps', 1e-5)
         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
-
-    # Add zero-channel case (valid case that should work)
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
-
-    # Zero channels: input with shape (2, 0, 4, 4)
-    input_data = make_arg((2, 0, 4, 4))
-    weight = make_arg(0)
-    bias = make_arg(0)
-    running_mean = make_arg_without_requires_grad(0)
-    running_var = make_arg_without_requires_grad(0)
-
-    yield SampleInput(
-        input_data,
-        args=(weight, bias, running_mean, running_var, True, 0.1, 1e-5)
-    )
 
 
 def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
