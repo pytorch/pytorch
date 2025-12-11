@@ -66,6 +66,14 @@ struct sha1 {
     }
   }
 
+  sha1(void const* buffer, std::size_t byte_count) {
+    TORCH_CHECK(buffer != nullptr, "Passed nullptr to sha1");
+    if (byte_count != 0) {
+      reset();
+      process_bytes(buffer, byte_count);
+    }
+  }
+
   void reset() {
     h_[0] = 0x67452301;
     h_[1] = 0xEFCDAB89;
