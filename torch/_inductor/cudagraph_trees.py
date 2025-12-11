@@ -116,6 +116,21 @@ else:
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
+def format_inputs_log(inputs: list[Any]) -> str:
+    parts = []
+    for i, inp in enumerate(inputs):
+        if isinstance(inp, torch.Tensor):
+            parts.append(
+                f"[{i}]: Tensor(size={list(inp.size())}, stride={inp.stride()}, "
+                f"dtype={inp.dtype}, data_ptr=0x{inp.data_ptr():X})"
+            )
+        elif inp is None:
+            parts.append(f"[{i}]: None")
+        else:
+            parts.append(f"[{i}]: {type(inp).__name__}({inp})")
+    return ", ".join(parts) if parts else "[]"
+
+
 from . import config
 
 
@@ -388,9 +403,9 @@ def cudagraphify_impl(
             return fn(inputs)
 
         if int_key is None:
-            log.info("recording cudagraph tree for graph without symints")
+            log.info("Recording cudagraph tree for graph without symints")
         else:
-            log.info("recording cudagraph tree for symint key %s", int_key)
+            log.info("Recording cudagraph tree for symint key %s", int_key)
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -2246,9 +2261,11 @@ class CUDAGraphTreeManager:
         ):
             graph_id = self.new_graph_id()
             log.debug(
-                "Recording function %d of graph recording id %d",
+                "Recording function %d (%s) of graph recording id %d, inputs: %s",
                 function_id.id,
+                self.get_func_name(function_id),
                 graph_id.id,
+                format_inputs_log(new_inputs),
             )
             torch.cuda.synchronize()
             node = CUDAGraphNode(
@@ -2287,12 +2304,14 @@ class CUDAGraphTreeManager:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         already_warm = function_id in self.warmed_up_functions
+        func_name = self.get_func_name(function_id)
         if not already_warm:
-            log.debug("Running warmup of function %d", function_id.id)
+            log.debug("Running warmup of function %d (%s)", function_id.id, func_name)
         else:
             log.debug(
-                "Running eager of function %d because ancestor needed to warm up",
+                "Running eager of function %d (%s) because ancestor needed to warm up",
                 function_id.id,
+                func_name,
             )
         self.warmed_up_functions.add(function_id)
         node = CUDAWarmupNode(
@@ -2316,6 +2335,9 @@ class CUDAGraphTreeManager:
 
     def new_func_id(self) -> FunctionID:
         return FunctionID(next(self.func_counter))
+
+    def get_func_name(self, function_id: FunctionID) -> str:
+        return getattr(self.ids_to_funcs[function_id].model, "__name__", "unknown")
 
     def add_function(
         self,
