@@ -553,7 +553,7 @@ else:
             ``mesh_dim_names``
 
             Args:
-                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh_dim_names (Union[str, tuple[str, ...]]): the name or the tuple of names of the
                 mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
@@ -925,7 +925,7 @@ else:
                 mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
                     integer tensor describing the layout of devices, where the IDs are global IDs
                     of the default process group. Default is None.
-                mesh_dim_names (tuple[str], optional): A tuple of mesh dimension names to assign
+                mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign
                     to each dimension of the multi-dimensional array describing the layout of devices.
                     Its length must match the length of `mesh_shape`. Each string in `mesh_dim_names`
                     must be unique. Default is None.
@@ -1304,7 +1304,7 @@ else:
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
-            mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
+            mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign to each dimension
                 of the multi-dimensional array describing the layout of devices. Its length must match the length
                 of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
             backend_override (Dict[int | str, tuple[str, Options] | str | Options], optional): Overrides for some or all of
