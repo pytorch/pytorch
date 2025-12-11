@@ -1281,6 +1281,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_tensor_call_obj_hasattr_view(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output3 = getattr(x, "view", None)(10)
+            return output3
+
+        x = torch.randn(10)
+        self.assertEqual(x.view(10), fn(x))
+
     def test_mro_type_tensor_no_source(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -6424,9 +6433,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = (
-                "map doesn't work unless it is captured completely with torch.compile"
-            )
+            error_message = r"Higher Order Operator: torch\.ops\.higher_order\.map_impl"
         else:
             error_message = "Can't inplace modify module params/buffers"
 

@@ -81,7 +81,11 @@ class PhiloxState:
         self.offset_advanced_alteast_once = False
 
     def validate_state(self):
-        assert self.seed.numel() != 0 and self.base_offset.numel() != 0
+        if self.seed.numel() == 0 or self.base_offset.numel() == 0:
+            raise AssertionError(
+                f"seed and base_offset must not be empty, got "
+                f"seed.numel()={self.seed.numel()}, base_offset.numel()={self.base_offset.numel()}"
+            )
 
     def advance_offset(self, consumed_offset):
         self.offset_advanced_alteast_once = True
@@ -153,7 +157,8 @@ class PhiloxStateTracker:
             cls.fwd_state.set_state(seed, offset)
             cls.mark_beginning_of_forward()
         else:
-            assert mode == "backward"
+            if mode != "backward":
+                raise AssertionError(f"mode must be 'backward', got {mode}")
             cls.bwd_state.set_state(seed, offset)
 
     @classmethod
@@ -259,7 +264,8 @@ def bernoulli_(self, p=0.5):
 def bernoulli_p(self, p=0.5, *, generator=None):
     if self.device == torch.device("cpu"):
         return NotImplemented
-    assert generator is None
+    if generator is not None:
+        raise AssertionError(f"generator must be None, got {generator}")
     return torch.rand_like(self, dtype=torch.float32) < p
 
 

@@ -222,7 +222,7 @@ struct CUDACachingHostAllocatorImpl
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
         ((start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
+    for (uintptr_t p = alignedStart; p < end; p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }

@@ -41,7 +41,6 @@ import torch._refs
 import torch.fx
 import torch.nn
 from torch._guards import TracingContext
-from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -87,7 +86,6 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
-from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -869,6 +867,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -878,6 +879,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_pow)
         def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
@@ -1514,27 +1518,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             ],
                         )
             return self.call_tensor_method(tx, args, kwargs)
-
-        intermediate_opaques = [
-            type(x.value)
-            for x in args
-            if x.source is None
-            and isinstance(x, UserDefinedObjectVariable)
-            and is_opaque_type(type(x.value))
-        ]
-        if len(intermediate_opaques) > 0:
-            unimplemented(
-                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
-                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
-                explanation=(
-                    "Opaque objects cannot be created inside the torch.compile region. "
-                    "They must be created before entering the compiled function."
-                ),
-                hints=[
-                    "Please create the opaque object before calling torch.compile "
-                    "and pass it in as an argument or as a global variable."
-                ],
-            )
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
