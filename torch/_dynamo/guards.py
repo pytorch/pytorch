@@ -1000,7 +1000,6 @@ class GuardBuilder(GuardBuilderBase):
         guard_filter_fn: Optional[
             Callable[[list[GuardFilterEntry]], list[bool]]
         ] = None,
-        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.f_code = f_code
@@ -1013,7 +1012,6 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.runtime_global_scope = runtime_global_scope or global_scope
         self.source_get_cache = source_get_cache or {}
-        self.tensor_values = tensor_values or {}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -2842,20 +2840,10 @@ class GuardBuilder(GuardBuilderBase):
         if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
-            if (
-                value is None
-                and self.tensor_values
-                and guard.name in self.tensor_values
-            ):
-                value = self.tensor_values[guard.name]
-            else:
-                if isinstance(value, TensorWeakRef):
-                    value = value()
+            if isinstance(value, TensorWeakRef):
+                value = value()
 
-                value = value if value is not None else self.get(guard)
-
-            if self.save_guards:
-                self.tensor_values[guard.name] = value
+            value = value if value is not None else self.get(guard)
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
@@ -3224,7 +3212,6 @@ class GuardsState:
     output_graph: OutputGraphGuardsState
     shape_code_parts: Optional[ShapeCodeParts]
     source_get_cache: Optional[dict[str, Any]] = None
-    tensor_values: Optional[dict[str, Any]] = None
 
 
 class _Missing:
@@ -3617,7 +3604,6 @@ class CheckFunctionManager:
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
         strict_error: bool = False,
-        tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ):
         guards = output_graph.guards if output_graph else None
@@ -3688,7 +3674,6 @@ class CheckFunctionManager:
                 f_code,
                 output_graph,
                 False,
-                tensor_values=tensor_values,
                 source_get_cache=source_get_cache,
             )
 
@@ -3739,7 +3724,6 @@ class CheckFunctionManager:
             output_graph,
             save_guards,
             guard_filter_fn=guard_filter_fn,
-            tensor_values=tensor_values,
             source_get_cache=source_get_cache,
         )
 
@@ -4014,7 +3998,6 @@ class CheckFunctionManager:
             save_guards,
             runtime_global_scope=self.runtime_global_scope,
             guard_filter_fn=guard_filter_fn,
-            tensor_values=tensor_values,
             source_get_cache=source_get_cache,
         )
 
