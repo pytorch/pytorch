@@ -2648,24 +2648,25 @@ def pointwise(
             ]
             # Additional configs appended for ROCm builds
             if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            4096,  # wrt: better than the max_block for some kernel
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            2048,
-                            num_warps=8,
-                            num_stages=2,
-                            waves_per_eu=1,  # 20% improvement
-                        ),
-                    ]
-                )
+                if inductor_meta.get("max_autotune_pointwise"):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                4096,  # wrt: better than the max_block for some kernel
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                2048,
+                                num_warps=8,
+                                num_stages=2,
+                                waves_per_eu=1,  # 20% improvement
+                            ),
+                        ]
+                    )
                 if inductor_meta.get("atomic_add_found"):
                     configs.extend(
                         [
@@ -2717,7 +2718,7 @@ def pointwise(
                     ]
                 )
     if len(size_hints) == 3:
-        if not inductor_meta.get("autotune_pointwise", True):
+        if not inductor_meta.get("max_autotune_pointwise"):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -3414,7 +3415,12 @@ def persistent_reduction(
             c.kwargs["XBLOCK"] = x_block
 
             num_iters = rsplit_size // x_block
-            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), 3)
+
+            # With large rnumel, we have higher chance of out-of-shared memory
+            # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
+            # if rnumel is large
+            MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
 
             if rnumel_hint <= 1024:
                 c.num_warps //= 2

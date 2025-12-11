@@ -9,8 +9,6 @@ from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
 
-import psutil
-
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.distributed import PrefixStore, TCPStore
@@ -307,10 +305,6 @@ class _AsyncCheckpointProcess:
                 )
 
                 try:
-                    process = psutil.Process()
-                    mem_bytes = process.memory_info().rss
-                    logger.info(f"Current memory is {mem_bytes / (1024 * 1024):.2f} MB")  # noqa: G004
-
                     response = _AsyncCheckpointProcess._execute_save(
                         obj.staged_state_dict,
                         checkpoint_request_id=obj.checkpoint_request_id,
@@ -330,21 +324,11 @@ class _AsyncCheckpointProcess:
                         and not pg_init_info.disable_manual_gc
                     ):
                         del obj
-                        # Measure memory before garbage collection
-                        process = psutil.Process()
-                        mem_before_bytes = process.memory_info().rss
 
                         collected_objects = gc.collect()
 
-                        # Measure memory after garbage collection and calculate freed memory
-                        mem_after_bytes = process.memory_info().rss
-                        mem_freed_mb = (mem_before_bytes - mem_after_bytes) / (
-                            1024 * 1024
-                        )
-
                         logger.info(
-                            f"Manual garbage collection completed - collected {collected_objects} objects, "  # noqa: G004
-                            f"freed {mem_freed_mb:.2f} MB"  # noqa: G004
+                            f"Manual garbage collection completed - collected {collected_objects} objects."  # noqa: G004
                         )
                         if first_request:
                             # Freeze GC to not check GC for large checkpoint save plans
