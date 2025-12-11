@@ -1089,9 +1089,13 @@ def _context_parallel_buffers(
     sharded_buffer: torch.Tensor | BlockMask
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
-            # TODO: the load balance doesn't perform error handling.
-
             # NOTE: assuming batch dim is 0
+
+            if len(buffer.shape) > 2:
+                raise ValueError(
+                    "context_parallel_shard currently only supports tensors "
+                    "with shape (seq_len,) or (batch_size, seq_len)."
+                )
 
             if load_balance_indices is not None:
                 # TODO: we should expclitly ask users to unsqueeze the batch dim.
@@ -1117,12 +1121,10 @@ def _context_parallel_buffers(
                         size = [data_batch_size] + list(indices.size())[1:]
                         indices = indices.expand(*size)
 
-                    for i in range(data_batch_size):
-                        buffer[i] = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=indices[i]
-                        )
+                    buffer = torch.gather(buffer, dim=seq_dim, index=indices)
 
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+            # use DTensor to shard the buffer on sequence dimension,
+            # retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
