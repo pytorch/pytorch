@@ -2726,6 +2726,26 @@ class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+        # setup re-used ThreadPoolExecutor for pre-compile;
+        # creating and initializing the ThreadPoolExecutor's
+        # worker threads is suprisingly expensive, reaching
+        # upwards of 500ms per-submit for a fresh executor.
+        # we can minimize the overall cost by not-refreshing
+        # the executor per call to pre-compile
+        self.executor: ThreadPoolExecutor | None = None
+        # given how expensive `get_template_configs` already is,
+        # usually 500ms < T < 1000ms, and assuming that each
+        # pre-compile thread finishes relatively quickly, let's
+        # say in the ballpark of 2s per execution, then we'd
+        # be able to say that generally 4x sets of configs are
+        # pre-compiling at any given time. since ~30 is a good
+        # estimate of the current # of configs per lowering, we'll
+        # set the maximum number of worker threads to 30 * 4 = 120,
+        # and then doubled to 240 for wiggle room if our calculations
+        # are slightly off
+        if (num_workers := get_num_workers()) > 0:
+            self.executor = ThreadPoolExecutor(max_workers=num_workers)
+
         # the autotuning will get occur in the scheduler, so there is
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
@@ -2742,6 +2762,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
+
+    def __del__(self) -> None:
+        # atexit can be problematic since we actually want to delete this
+        # when compile is finished, not just when the program terminates
+        if self.executor:
+            self.executor.shutdown(wait=True)
 
     def _register_default_preprocessing_fns(self):
         """Register default preprocessing functions."""
@@ -3235,18 +3261,8 @@ class AlgorithmSelectorCache(PersistentCache):
         ):
             log.debug("Precompilation timeout is None or <= 0, returning no_op")
             return no_op
-
-        num_workers = min(get_num_workers(), len(choices))
-
-        if num_workers <= 0:
-            return no_op
-
-        # https://github.com/python/cpython/issues/106905
-        if (
-            sys.version_info.major == 3
-            and sys.version_info.minor == 11
-            and sys.version_info.micro <= 8
-        ):
+        elif self.executor is None:
+            log.debug("ThreadPoolExecutor does not exist (max # of workers is 0), returning no_op")
             return no_op
 
         # check local and global cache before precompiling
@@ -3271,7 +3287,7 @@ class AlgorithmSelectorCache(PersistentCache):
         log.info(
             "Multithreaded precompilation for %d choices using %d worker threads",
             len(choices),
-            num_workers,
+            len(choices),
         )
 
         # In rare circumstances, because python threads inherit global state,
@@ -3300,7 +3316,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        executor = ThreadPoolExecutor(max_workers=num_workers)
         async_compile = torch._inductor.async_compile.AsyncCompile()
 
         futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
@@ -3329,7 +3344,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
                 else:
-                    future = executor.submit(precompile_with_captured_stdout, c)
+                    future = self.executor.submit(precompile_with_captured_stdout, c)
                     log.debug("Submitted precompile for choice: %s", c)
 
                 future.add_done_callback(on_complete)
@@ -3393,8 +3408,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     exceptions.append((choice, timeout_exc))
             if exceptions:
                 _log_autotune_exceptions(exceptions)
-
-            executor.shutdown(wait=True)
 
         self.precompile_cache[precompile_key] = wait_on_futures
 
