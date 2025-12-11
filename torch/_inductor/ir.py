@@ -7435,6 +7435,8 @@ class IndexPutFallback(ExternKernel):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+        x_device = x.get_device()
+        assert x_device is not None
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -7442,13 +7444,15 @@ class DeviceCopy(ExternKernelOut):
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
+            if V.graph.cpp_wrapper:
+                # Even if x is promoted to be a device constant, we still need to
+                # register device info to construct the correct CppWrapper class later
+                V.graph.add_device_info(device)
+                V.graph.add_device_info(x_device)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
-        x_device = x.get_device()
-        assert x_device is not None
         V.graph.add_device_info(x_device)
-
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
         # Device Copy should keep the same layout as input
