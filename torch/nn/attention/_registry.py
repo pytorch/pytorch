@@ -79,7 +79,7 @@ def activate_flash_attention_impl(
     """
     global _FLASH_ATTENTION_ACTIVE, _PREVIOUS_FLASH_ATTENTIONS
 
-    restore_flash_attention_impl()
+    restore_flash_attention_impl() # first restore any prev overrides (if any) to default
 
     register_fn = _FLASH_ATTENTION_IMPLS.get(impl)
     if register_fn is None:

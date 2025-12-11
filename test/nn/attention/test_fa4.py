@@ -12,6 +12,8 @@ from torch.backends.cuda import SDPBackend
 from torch.nn.attention import (
     activate_flash_attention_impl,
     restore_flash_attention_impl,
+    register_flash_attention_impl,
+    current_flash_attention_impl,
     sdpa_kernel,
 )
 from torch.profiler import profile, ProfilerActivity
@@ -118,6 +120,14 @@ def flash_vs_math(test_case, q, k, v, is_causal=False, rtol=2):
     )
 
     return out_flash, out_math_low, out_math_fp32
+
+class DummyHandle:
+    def __init__(self, name):
+        self.name = name
+        self.removed = False
+
+    def remove(self):
+        self.removed = True
 
 
 class TestFlashAttentionFA4(TestCase):
@@ -228,6 +238,7 @@ class TestFlashAttentionFA4(TestCase):
             test_backward=test_backward,
         )
 
+
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_fa4_kernel_called(self, device, dtype):
@@ -268,6 +279,38 @@ class TestFlashAttentionFA4(TestCase):
             )
         finally:
             activate_flash_attention_impl("FA4")  # reset for next test
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    def test_multiple_activate(self):
+        try:
+            handles = {}
+            def make_dummy_impl(name):
+                def impl():
+                    handle = DummyHandle(name)
+                    handles[name] = handle
+                    return handle
+                return impl
+
+            restore_flash_attention_impl() # back to default
+
+            register_flash_attention_impl("dummy_impl_1", register_fn=make_dummy_impl("dummy_impl_1"))
+            register_flash_attention_impl("dummy_impl_2", register_fn=make_dummy_impl("dummy_impl_2"))
+
+            self.assertIsNone(current_flash_attention_impl())
+
+            activate_flash_attention_impl("dummy_impl_1")
+            self.assertEqual(current_flash_attention_impl(), "dummy_impl_1")
+            self.assertIn("dummy_impl_1", handles)
+
+            activate_flash_attention_impl("dummy_impl_2")
+            self.assertEqual(current_flash_attention_impl(), "dummy_impl_2")
+            self.assertIn("dummy_impl_2", handles)
+
+            # with every subsequent activate() call, the previously registered custom impl should be removed
+            self.assertTrue(handles["dummy_impl_1"].removed, "dummy_impl_1 should be removed")
+        finally:
+            activate_flash_attention_impl("FA4") # reset for next test
+
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
