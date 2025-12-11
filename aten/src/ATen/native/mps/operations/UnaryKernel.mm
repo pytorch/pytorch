@@ -26,6 +26,10 @@ static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 }
 
 static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
+  if (exp_scalar.to<int>() == 2) {
+    return lib.exec_unary_kernel(iter, "sqr");
+  }
+  lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::Float);
 }
 
 

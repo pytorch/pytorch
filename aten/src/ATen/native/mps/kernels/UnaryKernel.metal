@@ -462,6 +462,13 @@ struct sqrt_functor {
   }
 };
 
+struct sqr_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return c10::metal::mul(x, x);
+  }
+};
+
 struct rsqrt_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -513,6 +520,13 @@ struct round_decimals_functor {
   }
 };
 
+struct pow_scalar_functor {
+  template <typename T>
+  inline T operator()(const T x, const float y) {
+    return static_cast<T>(::metal::pow(static_cast<float>(x), y));
+  }
+};
+
 struct round_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -543,6 +557,14 @@ REGISTER_UNARY_OP(round, char, char);
 REGISTER_UNARY_OP(round, uchar, uchar);
 REGISTER_UNARY_OP(round, float, float);
 REGISTER_UNARY_OP(round, half, half);
+
+REGISTER_UNARY_OP(sqr, int, int);
+REGISTER_UNARY_OP(sqr, long, long);
+REGISTER_UNARY_OP(sqr, float, float);
+REGISTER_UNARY_OP(sqr, half, half);
+REGISTER_UNARY_OP(sqr, short, short);
+REGISTER_UNARY_OP(sqr, float2, float2);
+REGISTER_UNARY_OP(sqr, half2, half2);
 
 REGISTER_UNARY_OP(bitwise_not, int, int);
 REGISTER_UNARY_OP(bitwise_not, long, long);
@@ -630,3 +652,7 @@ INSTANTIATE_UNARY_KERNELS_VEC2(float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
+
+REGISTER_UNARY_ALPHA_OP(pow_scalar, float, float, float);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, half, float, half);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, bfloat, float, bfloat);
