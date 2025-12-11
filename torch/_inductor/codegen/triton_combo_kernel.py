@@ -547,7 +547,14 @@ class ComboKernel(Kernel):
                 size_hints["x"] = min(128, size_hints["x"])
             return heuristics, size_hints_list[i], self.sub_kernels[i]
         else:
-            return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
+            # find persistent_reduction with maximum rnumel
+            i, _ = max(
+                enumerate(size_hints_list),
+                key=lambda x: max(
+                    (v for k, v in x[1].items() if prefix_is_reduction(k))
+                ),
+            )
+            return heuristics_list[i], size_hints_list[i], self.sub_kernels[i]
 
     def get_mutated_args_sub_kernels(self) -> list[str]:
         mutated_args: OrderedSet[str] = OrderedSet()

@@ -2885,7 +2885,7 @@ class NegativeTesting(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
+            r"Higher Order Operator: torch\.ops\.higher_order\.invoke_subgraph",
         ):
             torch.compile(fn, backend="eager")(x)
 
