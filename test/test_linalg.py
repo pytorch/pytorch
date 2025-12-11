@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
-     runOnRocmArch, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -2827,6 +2827,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "must be different", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
+    @skipIfRocmArch(MI200_ARCH)
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
