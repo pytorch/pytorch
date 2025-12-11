@@ -197,6 +197,14 @@ struct cublasCommonArgs {
     }
   }
 
+  bool can_use_bias_epilogue() const {
+    return bias.has_value() && !bias_ld.has_value();
+  }
+
+  bool must_copy_bias_into_result() const {
+    return !bias.has_value();
+  }
+
   // Matrix members
   char transa, transb;
   int64_t m, n, k;

@@ -299,16 +299,13 @@ template <typename scalar_t, typename res_scalar_t = scalar_t>
 bool launchGemmAndBiasCublasLt(
     // args contains result which is modified
     cublasCommonArgs& args,
-    const std::optional<Tensor>& self,
     const Scalar& alpha,
+    const Scalar& beta,
     Activation activation = Activation::None
 ) {
-  // We apply bias in the epilogue only when it is 1D,
-  // or when it can be squeezed to 1D.
-  // self_ptr == nullptr implies ignore bias epilogue
-  // and use standard gemm-like API.
-  const auto* self_ptr = self.has_value() ? self.value().const_data_ptr<scalar_t>() : static_cast<const scalar_t*>(nullptr);
-
+  const auto* self_ptr = args.can_use_bias_epilogue()
+    ? (*args.bias)->const_data_ptr<scalar_t>()
+    : static_cast<const scalar_t*>(nullptr);
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
@@ -343,7 +340,7 @@ bool launchGemmAndBiasCublasLt(
     args.lda,
     args.matb->const_data_ptr<scalar_t>(),
     args.ldb,
-    /*beta*/ static_cast<at::opmath_type<scalar_t>>(1), // 1 for now
+    beta.to<at::opmath_type<scalar_t>>(),
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
     self_ptr,
@@ -477,7 +474,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t, float>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndBiasCublasLt<scalar_t, float>(args, alpha, beta, activation);
         }
       );
       #endif
@@ -489,7 +486,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, alpha, beta, activation);
         }
       );
     } // end is_float_output_with_half_input
