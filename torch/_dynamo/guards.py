@@ -997,7 +997,9 @@ class GuardBuilder(GuardBuilderBase):
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
         runtime_global_scope: Optional[dict[str, object]] = None,
-        guard_filter_fn: Optional[Callable[[Guard], bool]] = None,
+        guard_filter_fn: Optional[
+            Callable[[list[GuardFilterEntry]], list[bool]]
+        ] = None,
         tensor_values: Optional[dict[str, Any]] = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
