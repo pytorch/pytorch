@@ -158,6 +158,10 @@ def get_redistribute_planner(
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
+    if _are_we_tracing():
+        return DTensorRedistributePlanner(
+            device_mesh, dtensor_meta, reduce_memory_overhead
+        )
     # Use the underlying shape (torch.Size) from TensorMeta for the cache key
     cache_key = (weakref.ref(device_mesh), dtensor_meta, reduce_memory_overhead)
 
