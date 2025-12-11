@@ -28,6 +28,8 @@
 #include <ATen/ops/grid_sampler_3d_native.h>
 #include <ATen/ops/grid_sampler_native.h>
 #include <ATen/ops/zeros_like.h>
+
+#include <algorithm>
 #endif
 
 namespace at::native {
@@ -991,10 +993,10 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     const auto grid_sW = grid.strides()[2];
     // NOTE: Gather offsets are only used for the height and width dimensions
     auto max_gather_offset = std::max(
-      std::max(
+      {
         (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
-        (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
-      grid_sW * (vec::Vectorized<float>::size() - 1));
+        (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3],
+      grid_sW * (vec::Vectorized<float>::size() - 1)});
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback_backward(

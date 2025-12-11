@@ -159,7 +159,7 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // on various object types, but we want it to work with all types.
   try {
     return toTypeInferredIValue(input);
-  } catch (const c10::Error& e) {
+  } catch (const c10::Error&) {
     return std::nullopt;
   }
 }
@@ -1863,35 +1863,6 @@ void initJITBindings(PyObject* module) {
       py::arg("schema"),
       py::arg("allow_typevars") = true);
   m.def(
-      "_make_opaque_object",
-      [](py::object payload) {
-        auto obj = c10::make_intrusive<OpaqueObject>(payload);
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        return torch::jit::toPyObject(c10::IValue(std::move(obj)));
-      },
-      R"doc(Creates an opaque object which stores the given Python object.)doc");
-  m.def(
-      "_get_opaque_object_payload",
-      [](py::object obj) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        return customObj->getPayload();
-      },
-      R"doc(Returns the Python object stored on the given opaque object.)doc");
-  m.def(
-      "_set_opaque_object_payload",
-      [](py::object obj, py::object payload) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        customObj->setPayload(std::move(payload));
-      },
-      R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
-  m.def(
       "_register_opaque_type",
       [](const std::string& type_name) {
         torch::jit::registerOpaqueType(type_name);
@@ -2138,7 +2109,7 @@ void initJITBindings(PyObject* module) {
   m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(symbol);
+    const auto& operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
