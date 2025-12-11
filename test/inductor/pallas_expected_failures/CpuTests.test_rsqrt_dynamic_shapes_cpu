@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpzuhwovq1/jh/cjhw5kd2kzizgdl6qzdhl5kdmuamwhqrbuqoscsgzwacjv7gm6p2.py", line 11, in pallas_8c87b6e6_kernel
-    tmp1 = s98
-           ^^^
-NameError: name 's98' is not defined
