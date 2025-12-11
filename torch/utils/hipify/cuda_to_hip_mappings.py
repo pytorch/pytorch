@@ -9166,6 +9166,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
         ),
         (
+            "cuda::CUDACachingAllocator::setNoSplit",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setNoSplit",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
+        ),
+        (
             "cuda::CUDACachingAllocator::getPoolUseCount",
             ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getPoolUseCount", API_PYTORCH),
         ),
