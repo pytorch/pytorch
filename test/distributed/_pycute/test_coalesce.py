@@ -65,15 +65,15 @@ class TestCoalesce(TestCase):
         self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout(1, 1)
-        expected_coalesced_layout = Layout(1, 1)
+        expected_coalesced_layout = Layout(1, 0)
         self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((1, 1), (42, 3))
-        expected_coalesced_layout = Layout(1, 1)
+        expected_coalesced_layout = Layout(1, 0)
         self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((1, 1, 1), (17, 4, 3))
-        expected_coalesced_layout = Layout(1, 1)
+        expected_coalesced_layout = Layout(1, 0)
         self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4))

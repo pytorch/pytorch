@@ -177,7 +177,7 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
     for shape, stride in zip(
         reversed(flatten(layout.shape)), reversed(flatten(layout.stride))
     ):
-        # skip their shape-1s unless the stride is explicitly set to 0
+        # skip their shape-1s
         if shape == 1:
             continue
         # replace our shape-1 with anything

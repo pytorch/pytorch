@@ -1,4 +1,3 @@
-from torch._jit_internal import is_list
 """
 Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and functions to manipulate them
 """
