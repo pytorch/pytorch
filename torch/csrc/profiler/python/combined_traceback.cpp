@@ -3,8 +3,59 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+
+// Include Python's internal frame headers for interleaving support
+// These provide access to _PyInterpreterFrame structure
+#if IS_PYTHON_3_11_PLUS
+#include <internal/pycore_frame.h>
+#endif
+
 namespace py = pybind11;
+
+// Helper function to extract is_entry flag from Python frames
+// This enables py-spy style interleaving of Python and C++ stack traces
+#if IS_PYTHON_3_12_PLUS
+// Python 3.12+ uses owner field to determine frame ownership
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  if (!frame) return true;
+
+  // Access the internal interpreter frame
+  // In Python 3.12+, PyFrameObject has f_frame field pointing to _PyInterpreterFrame
+  struct _frame* frame_struct = reinterpret_cast<struct _frame*>(frame);
+  _PyInterpreterFrame* iframe = frame_struct->f_frame;
+
+  if (!iframe) return true;
+
+  // Frames owned by the C stack are entry frames
+  // These mark the boundary where Python was called from native code
+  return iframe->owner == FRAME_OWNED_BY_CSTACK;
+}
+
+#elif IS_PYTHON_3_11_PLUS
+// Python 3.11 has explicit is_entry field
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  if (!frame) return true;
+
+  // Access the internal interpreter frame
+  struct _frame* frame_struct = reinterpret_cast<struct _frame*>(frame);
+  _PyInterpreterFrame* iframe = frame_struct->f_frame;
+
+  if (!iframe) return true;
+
+  // Use the is_entry field directly
+  return iframe->is_entry;
+}
+
+#else
+// Python < 3.11: No interleaving support, treat all frames as entry frames
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  return true;
+}
+
+#endif
+
 
 namespace torch {
 // Locking:
@@ -40,8 +91,15 @@ struct PythonTraceback : public CapturedTraceback::Python {
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
     while (f) {
+      // Extract is_entry flag for py-spy style interleaving
+      bool is_entry = get_is_entry_from_frame(f);
+
       frames.emplace_back(
-          CapturedTraceback::PyFrame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+          CapturedTraceback::PyFrame{
+              PyFrame_GetCode(f),
+              PyFrame_GetLasti(f),
+              is_entry});
+
       auto f_back = PyFrame_GetBack(f);
       Py_XDECREF(f);
       f = f_back;
