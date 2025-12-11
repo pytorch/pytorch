@@ -52,7 +52,7 @@ install_ubuntu() {
 
       export THEROCK_NIGHTLY_INDEX_URL
       echo "TheRock Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
-      
+
       python3 -m pip install \
         --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
         "rocm[libraries,devel]"
