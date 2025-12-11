@@ -765,9 +765,6 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
 
-# Check if NCCL is available as a backend for symmetric memory.
-def _is_nccl_symmem_available() -> bool: ...
-
 class _SymmetricMemory:
     @staticmethod
     def set_group_info(
