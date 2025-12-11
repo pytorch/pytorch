@@ -9,11 +9,8 @@
 
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/functorch/BatchedFallback.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
 namespace at::functorch {
@@ -109,7 +106,7 @@ std::tuple<Tensor, std::optional<int64_t>> repeat_batch_rule(
   SymDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
   sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  while (self_.dim() < (int64_t)sizes_with_bdim.size()) {
+  while (self_.dim() < static_cast<int64_t>(sizes_with_bdim.size())) {
     self_ = self_.unsqueeze(1);
   }
   return std::make_tuple(self_.repeat_symint(sizes_with_bdim), 0);
@@ -534,20 +531,20 @@ Tensor trace_decomp(const Tensor& tensor) {
 std::tuple<Tensor, std::optional<int64_t>> tril_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
-    int64_t diagonal = 0) {
+    c10::SymInt diagonal = 0) {
   TORCH_CHECK(self.dim() >= 2, "tril: The input tensor must have at least 2 dimensions.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::tril(self_, diagonal);
+  auto result = at::tril_symint(self_, std::move(diagonal));
   return std::make_tuple(std::move(result), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> triu_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
-    int64_t diagonal = 0) {
+    c10::SymInt diagonal = 0) {
   TORCH_CHECK(self.dim() >= 2, "triu: The input tensor must have at least 2 dimensions.");
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::triu(self_, diagonal);
+  auto result = at::triu_symint(self_, std::move(diagonal));
   return std::make_tuple(std::move(result), 0);
 }
 

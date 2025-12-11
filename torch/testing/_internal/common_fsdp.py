@@ -209,7 +209,7 @@ def _broadcast_state_dict(rank, state_dict):
     dist.broadcast_object_list(olist)
     state_dict = cast(dict[str, torch.Tensor], olist[0])
     # Ensure that the state is on DEVICE
-    for param_name in state_dict.keys():
+    for param_name in state_dict:
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
     return state_dict
 
@@ -1551,7 +1551,9 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
             original_fully_shard: Any = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
-                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    warnings.warn(
+                        "Inductor on GPU needs Triton and recent GPU arch", stacklevel=2
+                    )
                     continue
                 # barrier to ensure thread reading the same value
                 original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks

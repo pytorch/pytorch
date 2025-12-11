@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <fmt/format.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
@@ -507,8 +506,7 @@ std::vector<at::IValue> readWrappedPayload(
       " but additional payload size is ",
       additionalPayloadSize);
   auto wrappedPayloadBegin =
-      static_cast<const char*>(message.payload().data()) + payload.size() -
-      additionalPayloadSize;
+      message.payload().data() + payload.size() - additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
       wrappedPayloadBegin,

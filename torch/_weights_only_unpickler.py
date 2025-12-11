@@ -69,7 +69,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
@@ -84,15 +84,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
+_marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
 
 
-def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+def _get_safe_globals() -> list[Callable | tuple[Callable, str]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -103,14 +103,14 @@ def _clear_safe_globals():
 
 
 def _remove_safe_globals(
-    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+    globals_to_remove: list[Callable | tuple[Callable, str]],
 ):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+    def __init__(self, safe_globals: list[Callable | tuple[Callable, str]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -187,7 +187,7 @@ def _get_allowed_globals():
     }
 
     # dtype
-    for t in torch.storage._dtype_to_storage_type_map().keys():
+    for t in torch.storage._dtype_to_storage_type_map():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t
@@ -419,6 +419,7 @@ class Unpickler:
                 inst = self.stack[-1]
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
+                    # pyrefly: ignore [not-iterable]
                     inst.set_(*state)
                 elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
@@ -554,7 +555,8 @@ class Unpickler:
                         f"Detected pickle protocol {self.proto} in the checkpoint, which was "
                         "not the default pickle protocol used by `torch.load` (2). The weights_only "
                         "Unpickler might not support all instructions implemented by this protocol, "
-                        "please file an issue for adding support if you encounter this."
+                        "please file an issue for adding support if you encounter this.",
+                        stacklevel=2,
                     )
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()

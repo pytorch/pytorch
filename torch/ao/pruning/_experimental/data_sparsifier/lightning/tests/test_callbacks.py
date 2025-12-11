@@ -74,6 +74,7 @@ class StepSLScheduler(BaseDataScheduler):
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
+                stacklevel=2,
             )
         data_groups = self.data_sparsifier.data_groups
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):

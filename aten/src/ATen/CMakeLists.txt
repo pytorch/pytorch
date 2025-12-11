@@ -38,7 +38,7 @@ set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
-# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+# At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
 if(USE_CUDA OR USE_ROCM)
   configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 endif()
@@ -171,6 +171,7 @@ file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
 file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
 file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
 file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
+file(GLOB native_transformers_xpu_cpp "native/transformers/xpu/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
@@ -260,7 +261,7 @@ IF(USE_FBGEMM_GENAI)
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
-    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
+    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*(mx8mx8bf16_grouped|f4f4bf16_grouped|f4f4bf16).*")
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
@@ -291,6 +292,7 @@ IF(USE_FBGEMM_GENAI)
 
     set(fbgemm_genai_cuh
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/f4f4bf16_grouped/"
       "${FBGEMM_GENAI_SRCS}/"
     )
 
@@ -315,12 +317,13 @@ IF(USE_FBGEMM_GENAI)
     # Add additional HIPCC compiler flags for performance
     set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
       -mllvm
-      -amdgpu-coerce-illegal-types=1
-      -mllvm
       -enable-post-misched=0
       -mllvm
       -greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
+    if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
+        list(PREPEND FBGEMM_GENAI_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+      endif()
 
     # Only compile for gfx942 for now.
     # This is rather hacky, I could not figure out a clean solution :(
@@ -353,6 +356,9 @@ IF(USE_FBGEMM_GENAI)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
   endif()
+
+  # Ensure torch_cpu is built before fbgemm_genai to avoid race conditions
+  add_dependencies(fbgemm_genai torch_cpu)
 endif()
 
 # XNNPACK
@@ -412,6 +418,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
