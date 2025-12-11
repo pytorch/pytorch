@@ -492,7 +492,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
-            fw_only=None,
             maybe_subclass_meta=self.maybe_subclass_meta,
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
@@ -509,9 +508,12 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         compiled_fw_func = FunctionalizedRngRuntimeWrapper(
             return_new_outs=return_new_outs
         ).post_compile(
-            compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+            compiled_fw_func,
+            aot_config,
+            runtime_metadata=self.runtime_metadata,
+            fwd_output_strides=None,
         )
-        compiled_fw_func._boxed_call = True
+        compiled_fw_func._boxed_call = True  # type: ignore[missing-attribute]
         disable_amp = torch._C._is_any_autocast_enabled()
 
         if needs_autograd:
