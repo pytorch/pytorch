@@ -1911,7 +1911,7 @@ class TestPatternMatcher(TestCase):
                     count += 1
             return count
 
-        device = "cuda" if HAS_GPU else "cpu"
+        device = GPU_TYPE if HAS_GPU else "cpu"
         input_tensor = torch.randn(8, 16, device=device)
 
         with inductor_config.patch(remove_pre_grad_passes=None):

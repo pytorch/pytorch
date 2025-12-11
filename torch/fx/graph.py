@@ -6,6 +6,7 @@ import enum
 import functools
 import inspect
 import keyword
+import logging
 import math
 import os
 import pprint
@@ -22,6 +23,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._library.opaque_object import is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
@@ -29,6 +31,8 @@ from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -567,6 +571,10 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
+            elif is_opaque_value_type(type(arg)):
+                arg_type = type(arg)
+                add_global(arg_type.__name__, arg_type)
+                return repr(arg)
             else:
                 return blue(repr(arg))
 
@@ -2100,11 +2108,15 @@ class Graph:
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
-        changed = False
+        removed_nodes = set()
         for node in reversed(self.nodes):
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
-                changed = True
+                removed_nodes.add(node.name)
+
+        changed = len(removed_nodes) > 0
+        if changed:
+            log.info("The following nodes were dead code eliminated: %s", removed_nodes)
 
         # Call DCE on the subgraphs
         if self.owning_module is not None:
