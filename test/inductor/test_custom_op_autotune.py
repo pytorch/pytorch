@@ -454,7 +454,7 @@ class TestCustomOpAutoTune(TestCase):
         )
 
     @skipIfXpu
-    def test_dynamic_range_tuning(self):
+    def test_range_based_autotuning(self):
         """Test dynamic input range-based autotuning.
 
         Example: If ranges [1,64], [129,256], [513,inf] all choose impl_medium,
@@ -496,8 +496,8 @@ class TestCustomOpAutoTune(TestCase):
                 CustomOpConfig(impl_medium),
                 CustomOpConfig(impl_large),
             ],
-            dispatch_on=("x", 1),
-            split_points=[64, 128, 256, 512],  # Creates 5 ranges
+            dispatch_on={"tensor": "x", "dim": 1},  # Dispatch based on x.shape[1]
+            split_points=[64, 128, 256, 512],
             input_gen_fns={
                 "x": lambda fake: torch.randn_like(fake, device=self.device),
                 "weight": lambda fake: torch.randn_like(fake, device=self.device),
@@ -557,15 +557,8 @@ class TestCustomOpAutoTune(TestCase):
                 compiled_result = test_model(test_x, test_weight)
 
                 self.assertEqual(
-                    compiled_result.shape,
-                    expected.shape,
-                    f"RangeMerge_{seq_len} shape mismatch",
-                )
-                torch.testing.assert_close(
                     compiled_result,
                     expected,
-                    rtol=1e-2,
-                    atol=1e-2,
                     msg=f"RangeMerge_{seq_len} numerical mismatch",
                 )
 

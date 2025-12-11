@@ -746,8 +746,21 @@ def _range_based_lowering_fn(
             return_choice=True,
         )
 
-        winning_impl = winning_choice.decomposition
-        winning_kwargs = winning_choice.decomposition_kwargs
+        if (
+            hasattr(winning_choice, "decomposition")
+            and winning_choice.decomposition is not None
+        ):
+            winning_impl = winning_choice.decomposition
+            winning_kwargs = winning_choice.decomposition_kwargs
+        else:
+            # Fallback was selected (ExternKernelCaller)
+            winning_impl = default_impl
+            winning_kwargs = non_tensor_args[0] if non_tensor_args else {}
+            log.info(
+                "   Range [%s, %s]: Fallback (default_impl) selected",
+                range_start,
+                range_end if range_end != float("inf") else "inf",
+            )
 
         # Create dataclass instances for cleaner code
         range_bounds = RangeBounds(range_start, range_end)
@@ -933,7 +946,7 @@ def register_custom_op_autotuning(
     ] = None,
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
-    dispatch_on: Optional[tuple[str, int]] = None,
+    dispatch_on: Optional[dict[str, Any]] = None,
     split_points: Optional[list[int]] = None,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
@@ -988,7 +1001,7 @@ def register_custom_op_autotuning(
         register_custom_op_autotuning(
             my_op,
             configs=[CustomOpConfig(impl1), CustomOpConfig(impl2), CustomOpConfig(impl3)],
-            dispatch_on=("x", 1),  # Dispatch on x[1]
+            dispatch_on={"tensor": "x", "dim": 1},  # Dispatch based on x.shape[1]
             split_points=[512, 2048],  # Creates ranges: [1,512], [513,2048], [2049,inf]
         )
     """
@@ -1036,13 +1049,33 @@ def register_custom_op_autotuning(
 
     # Validate range-based parameters
     is_range_based = dispatch_on is not None or split_points is not None
+    dispatch_on_tuple: Optional[tuple[str, int]] = None
     if is_range_based:
         if dispatch_on is None or split_points is None:
             raise ValueError(
                 "Both dispatch_on and split_points must be specified for range-based autotuning"
             )
-        if not isinstance(dispatch_on, tuple) or len(dispatch_on) != 2:
-            raise ValueError("dispatch_on must be a tuple of (tensor_name, dim_index)")
+        if not isinstance(dispatch_on, dict):
+            raise ValueError(
+                "dispatch_on must be a dict with 'tensor' and 'dim' keys, "
+                f"e.g., {{'tensor': 'x', 'dim': 1}}. Got: {type(dispatch_on)}"
+            )
+        if "tensor" not in dispatch_on or "dim" not in dispatch_on:
+            raise ValueError(
+                "dispatch_on must contain 'tensor' and 'dim' keys, "
+                f"e.g., {{'tensor': 'x', 'dim': 1}}. Got keys: {list(dispatch_on.keys())}"
+            )
+        if not isinstance(dispatch_on["tensor"], str):
+            raise ValueError(
+                f"dispatch_on['tensor'] must be a string (tensor parameter name), "
+                f"got {type(dispatch_on['tensor'])}"
+            )
+        if not isinstance(dispatch_on["dim"], int):
+            raise ValueError(
+                f"dispatch_on['dim'] must be an integer (dimension index), "
+                f"got {type(dispatch_on['dim'])}"
+            )
+        dispatch_on_tuple = (dispatch_on["tensor"], dispatch_on["dim"])
         if not isinstance(split_points, list) or len(split_points) == 0:
             raise ValueError("split_points must be a non-empty list of integers")
         if sorted(split_points) != split_points:
@@ -1058,7 +1091,7 @@ def register_custom_op_autotuning(
         input_gen_fns=input_gen_fns,
         is_range_based=is_range_based,
         config_generator=config_generator,
-        dispatch_on=dispatch_on,
+        dispatch_on=dispatch_on_tuple,
         split_points=split_points,
     )
 
