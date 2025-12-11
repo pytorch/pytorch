@@ -516,9 +516,7 @@ class CompiledFxGraph(OutputCode):
         cudagraph_info = None
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
-            # Note: when graph_partition is enabled, we ignore disabled_cudagraphs_reason
-            # and let cudagraph_partition_post_compile handle partitioning around unsafe ops.
-            if self.disabled_cudagraphs_reason and not config.graph_partition:
+            if self.disabled_cudagraphs_reason:
                 if "cuda" in self.device_types:
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
@@ -672,9 +670,7 @@ class CompiledFxGraph(OutputCode):
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
-            # Note: when graph_partition is enabled, we ignore disabled_cudagraphs_reason
-            # and let cudagraph_partition_post_compile handle partitioning around unsafe ops.
-            if self.disabled_cudagraphs_reason and not config.graph_partition:
+            if self.disabled_cudagraphs_reason:
                 if "cuda" in self.device_types:
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"

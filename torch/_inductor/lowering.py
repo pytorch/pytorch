@@ -3906,8 +3906,13 @@ def index_put_fallback(self, indices, values, accumulate):
 
     # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
     # because boolean indices trigger .nonzero() during CUDA graph capture
+    # When graph_partition is enabled, skip - partitioning handles this
     fx_node = V.graph.current_node
-    if fx_node is not None and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node):
+    if (
+        not config.graph_partition
+        and fx_node is not None
+        and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
+    ):
         msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
         if stack_trace := fx_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
@@ -7272,7 +7277,11 @@ def triton_kernel_wrap_(
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(pred, true_fn, false_fn, operands):
-    if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
+    # When graph_partition is enabled, skip - partitioning handles control flow
+    if (
+        not config.graph_partition
+        and any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands])
+    ):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
@@ -7284,7 +7293,8 @@ def cond(pred, true_fn, false_fn, operands):
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    if any(
+    # When graph_partition is enabled, skip - partitioning handles control flow
+    if not config.graph_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
