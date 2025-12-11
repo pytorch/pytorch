@@ -3341,6 +3341,10 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
 
 
 def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    # use float64 for dtype mismatch test if current dtype is float32, otherwise use float32
+    mismatched_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+    make_input = partial(make_tensor, device=device, dtype=mismatched_dtype, requires_grad=requires_grad)
+
     samples = [
         ErrorModuleInput(
             ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
@@ -3353,6 +3357,17 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
+        ),
+        # Test dtype mismatch error message
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 5),
+                forward_input=FunctionInput(make_input((2, 4, 3))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex=(r"RNN input dtype .* does not match weight dtype .* "
+                         r"Convert input: input\.to\(.*\), or convert model: model\.to\(.*\)")
         ),
         # Test bias parameter type validation
         ErrorModuleInput(
