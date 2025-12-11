@@ -3361,7 +3361,7 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
         # Test dtype mismatch error message
         ErrorModuleInput(
             ModuleInput(
-                constructor_input=FunctionInput(3, 5),
+                constructor_input=FunctionInput(3, 5, dtype=dtype, device=device),
                 forward_input=FunctionInput(make_input((2, 4, 3))),
             ),
             error_on=ModuleErrorEnum.FORWARD_ERROR,
