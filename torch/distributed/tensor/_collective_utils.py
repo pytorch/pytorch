@@ -373,9 +373,15 @@ def redistribute_cost(
             # this redistribute
             return float("inf")
         elif current.is_replicate() and target.is_partial():
-            # ban replicate -> partial: Partial is not a state you can
-            # redistribute into, only out of
-            return float("inf")
+            # Replicate -> Partial is a local operation (no communication)
+            # For sum: divide by world_size, for avg/max/min: no-op
+            # Only supported for sum, avg, max, min
+            if target.reduce_op in ("sum", "avg", "max", "min"):
+                # No communication cost, just local compute
+                pass
+            else:
+                # product and others not supported
+                return float("inf")
         elif current.is_partial() and target.is_partial():
             # ban partial(A) -> partial(B) where A != B: can't transform
             # one reduction type to another (current == target case handled above)

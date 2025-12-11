@@ -676,6 +676,61 @@ class RedistributeTest(DTensorTestBase):
                 out = dt.redistribute(mesh, dst)
                 self.assertEqual(out.placements, dst)
 
+    @with_comms
+    @parametrize("reduce_op", ["sum", "avg", "max", "min"])
+    def test_replicate_to_partial_all_reduce_ops(self, reduce_op):
+        # Test Replicate -> Partial redistribution for all supported reduce ops
+        # - sum: each rank's value should be divided by world_size
+        # - avg/max/min: each rank keeps the same value (no-op)
+        from torch.distributed.tensor._redistribute import Redistribute
+
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # Create a replicated tensor
+        full_tensor = torch.ones(4, 4, device=self.device_type) * 12.0
+        replicate_dt = distribute_tensor(full_tensor.clone(), device_mesh, [Replicate()])
+
+        # Use internal Redistribute.apply to bypass public API check
+        with comm_mode:
+            partial_dt = Redistribute.apply(
+                replicate_dt, device_mesh, (Partial(reduce_op),), False, None, None
+            )
+
+        # No communication should happen for the redistribute itself
+        self.assertEqual(
+            comm_mode.get_total_counts(), 0,
+            f"Replicate -> Partial({reduce_op}) should not require communication"
+        )
+
+        # Check local value after redistribution
+        if reduce_op == "sum":
+            # For sum, each rank should have value / world_size
+            expected_local = full_tensor / self.world_size
+        else:
+            # For avg/max/min, each rank keeps the same value (no-op)
+            expected_local = full_tensor
+        self.assertEqual(partial_dt.to_local(), expected_local)
+
+        # When we call full_tensor(), it should reduce back to original
+        self.assertEqual(partial_dt.full_tensor(), full_tensor)
+
+    @with_comms
+    def test_replicate_to_partial_product_unsupported(self):
+        # Test that Replicate -> Partial("product") is not supported
+        # (there's no simple SPMD operation for the inverse of product)
+        from torch.distributed.tensor._redistribute import Redistribute
+
+        device_mesh = self.build_device_mesh()
+
+        full_tensor = torch.ones(4, 4, device=self.device_type) * 2.0
+        replicate_dt = distribute_tensor(full_tensor.clone(), device_mesh, [Replicate()])
+
+        with self.assertRaisesRegex(ValueError, "product.*not supported"):
+            Redistribute.apply(
+                replicate_dt, device_mesh, (Partial("product"),), False, None, None
+            )
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
