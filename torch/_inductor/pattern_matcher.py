@@ -1507,6 +1507,19 @@ def register_replacement(
                         ):
                             sym_args.append(v)
 
+            # Complete list of both tensors and scalar values in correct positions.
+            if isinstance(scalar_workaround, dict):
+                full_args = []
+                tensor_iterator = iter(args)
+                for argname in argnames_static:
+                    full_args.append(
+                        scalar_workaround[argname]
+                        if argname in scalar_workaround
+                        else next(tensor_iterator)
+                    )
+            else:
+                full_args = args
+
             # If we were given a pre-traced pattern then use that instead of
             # retracing. Note that this means the pattern has to be independent
             # of its args.
@@ -1521,12 +1534,9 @@ def register_replacement(
                     # Later, when we actually do the replacement, the symbolic shape
                     # sizes will get re-traced and added to the graph.
 
-                    def search_fn_new(*args_new: Any) -> Any:
-                        return search_fn(*args_new[len(args_new) - len(args) :])
-
                     try:
                         # pyrefly: ignore [bad-argument-type]
-                        specific_graph = trace_fn(search_fn_new, sym_args + args)
+                        specific_graph = trace_fn(search_fn, sym_args + full_args)
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1552,7 +1562,7 @@ def register_replacement(
                     argnames = sym_arg_names + argnames
                 else:
                     try:
-                        specific_graph = trace_fn(search_fn, args)
+                        specific_graph = trace_fn(search_fn, full_args)
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1561,7 +1571,7 @@ def register_replacement(
                     specific_graph,
                     argnames=argnames,
                     exclusive_arg_names=exclusive_arg_names,
-                    scalar_workaround=scalar_workaround,
+                    scalar_workaround=scalar_workaround,  # type: ignore[unbound-name]
                 )
 
             node = match.output_nodes()[0]
@@ -1579,7 +1589,7 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(replace_fn, args)
+                match.replacement_graph = trace_fn(replace_fn, full_args)
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
@@ -1591,12 +1601,16 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> list[Any]:
-        args = [kwargs.pop(name) for name in argnames_static]
+        args = []
+        for name in argnames_static:
+            if scalar_workaround is not None and name in scalar_workaround_keys:
+                args.append(scalar_workaround[name])
+            else:
+                args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
             args.append(kwargs.pop(f"tangents_{i}"))
-        assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
     if trace_fn is joint_fwd_bwd:

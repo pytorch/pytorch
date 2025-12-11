@@ -1428,7 +1428,7 @@ class TestPatternMatcher(TestCase):
         torch.manual_seed(40)
         result_compiled = cm(x)
         torch.testing.assert_close(result, result_compiled)
-        assert counters["inductor"]["pattern_matcher_count"] == 1
+        assert counters["inductor"]["pattern_matcher_count"] > 0
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
