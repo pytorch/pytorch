@@ -94,7 +94,7 @@ void PythonRpcHandler::init() {
   }
 }
 
-PythonRpcHandler::PythonRpcHandler() : initialized_(false) {}
+PythonRpcHandler::PythonRpcHandler() = default;
 
 void PythonRpcHandler::cleanup() {
   std::lock_guard<std::mutex> guard(init_lock_);
