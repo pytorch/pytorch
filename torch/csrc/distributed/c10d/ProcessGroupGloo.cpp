@@ -384,7 +384,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
           std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
-      srcRank_(-1),
+
       seq_(seq) {}
 
 uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
@@ -424,7 +424,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout) {}
 
 namespace {
 
@@ -580,8 +580,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      stop_(false),
-      collectiveCounter_(0),
+
       local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
