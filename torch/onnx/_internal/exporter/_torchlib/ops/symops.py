@@ -2,11 +2,11 @@
 
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # pyrefly: ignore-errors
-# ruff: noqa: TCH001,TCH002
+# ruff: noqa: TCH001,TCH002,TC003
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from onnxscript.onnx_opset import opset18 as op
 
