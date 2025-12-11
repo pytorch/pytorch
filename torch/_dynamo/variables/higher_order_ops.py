@@ -4945,7 +4945,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
             body_graph_output_vts,
         ) = self.create_wrapped_node(
-            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+            tx,
+            user_func,
+            user_args,
+            kwargs,
+            self.value._name,
+            subgraph_name="subgraph",
+            set_subgraph_inputs="flatten_automatic",
         )
 
         # Step 4: Validate traced graph signature still matches placement information
