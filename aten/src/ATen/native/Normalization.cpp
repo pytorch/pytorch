@@ -760,13 +760,16 @@ Tensor instance_norm(
                             use_input_stats, momentum, eps, cudnn_enabled);
 
   // we alias running_mean and running_var because they are const but we want to modify their data
-  if (running_mean.defined()) {
-    auto updated_mean = running_mean_.view_symint({ b, c }).mean(0, false);
-    at::alias(running_mean).copy_(updated_mean.to(running_mean.scalar_type()));
-  }
-  if (running_var.defined()) {
-    auto updated_var = running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false);
-    at::alias(running_var).copy_(updated_var.to(running_var.scalar_type()));
+  // only update running stats when in training mode (use_input_stats=True)
+  if (use_input_stats) {
+    if (running_mean.defined()) {
+      auto updated_mean = running_mean_.view_symint({ b, c }).mean(0, false);
+      at::alias(running_mean).copy_(updated_mean.to(running_mean.scalar_type()));
+    }
+    if (running_var.defined()) {
+      auto updated_var = running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false);
+      at::alias(running_var).copy_(updated_var.to(running_var.scalar_type()));
+    }
   }
 
   return out.view_symint(input.sym_sizes());
