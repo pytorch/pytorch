@@ -183,36 +183,34 @@ class ProcessContext:
 
         # The file will only be created if the process crashed.
         failed_process = self.processes[error_index]
+        msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
+        flag = False
         with contextlib.suppress(FileNotFoundError, IOError):
-            msg = (
-                f"\n\n-- Process {error_index:d} terminated with the following error:\n"
-            )
             with open(self.__error_files[error_index], "rb") as fh:
                 original_trace = pickle.load(fh)
                 msg += original_trace
-            with contextlib.suppress(FileNotFoundError, IOError):
-                os.remove(self.__error_files[error_index])
-            raise ProcessRaisedException(msg, error_index, failed_process.pid)
+            flag = True
+            os.remove(self.__error_files[error_index])
+        if flag:
+            raise ProcessRaisedException(
+                msg, error_index=error_index, error_pid=failed_process.pid
+            )
         exitcode = self.processes[error_index].exitcode
+        msg = f"process {error_index:d} terminated with exit code {exitcode:d}"
         if exitcode < 0:
-            try:
-                name = signal.Signals(-exitcode).name
-            except ValueError:
-                name = f"<Unknown signal {-exitcode}>"
-            raise ProcessExitedException(
-                f"process {error_index:d} terminated with signal {name}",
-                error_index=error_index,
-                error_pid=failed_process.pid,
-                exit_code=exitcode,
-                signal_name=name,
+            sig = -exitcode
+            name = (
+                f"<Unknown signal {sig}>"
+                if sig not in signal.valid_signals()
+                else signal.Signals(sig).name
             )
-        else:
-            raise ProcessExitedException(
-                f"process {error_index:d} terminated with exit code {exitcode:d}",
-                error_index=error_index,
-                error_pid=failed_process.pid,
-                exit_code=exitcode,
-            )
+            msg = f"process {error_index:d} terminated with signal {name}"
+        raise ProcessExitedException(
+            msg,
+            error_index=error_index,
+            error_pid=failed_process.pid,
+            exit_code=exitcode,
+        )
 
 
 class SpawnContext(ProcessContext):
