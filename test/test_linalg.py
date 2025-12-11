@@ -2087,13 +2087,16 @@ class TestLinalg(TestCase):
         self.assertEqual(result, expected)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @parametrize('backend', ['default', 'cusolver', 'magma'])
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
-    def test_eig_numpy(self, device, dtype):
-        def run_test(shape, *, symmetric=False):
+    def test_eig_numpy(self, device, backend, dtype):
+        def run_test(backend, shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
+
+            torch.backends.cuda.preferred_linalg_library(backend)
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -2126,21 +2129,24 @@ class TestLinalg(TestCase):
             self.assertEqual(expected[0], sorted_actual[0], exact_dtype=False)
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]), exact_dtype=False)
 
+            torch.backends.cuda.preferred_linalg_library('default')
+
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
                   (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
                   (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
-            run_test(shape)
-            run_test(shape, symmetric=True)
+            run_test(backend, shape)
+            run_test(backend, shape, symmetric=True)
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
+    @parametrize('backend', ['default', 'cusolver', 'magma'])
+    @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(*floating_and_complex_types())
-    def test_eig_compare_backends(self, device, dtype):
+    def test_eig_compare_backends(self, device, backend, dtype):
 
-        def run_test(shape, *, symmetric=False):
+        def run_test(backend, shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
@@ -2158,33 +2164,24 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            # select available backends
-            backends = ["default"]
-            if torch.device(device).type == 'cuda':
-                if torch.cuda.has_magma:
-                    backends.append("magma")
-                if has_cusolver():
-                    backends.append("cusolver")
+            torch.backends.cuda.preferred_linalg_library(backend)
 
-            for backend in backends:
+            # compare eigenvalues with CPU
+            expected = torch.linalg.eig(a.to(complementary_device))
+            actual = torch.linalg.eig(a)
+            self.assertEqual(expected[0], actual[0])
 
-                torch.backends.cuda.preferred_linalg_library(backend)
+            # check correctness using eigendecomposition identity
+            w, v = actual
+            a = a.to(v.dtype)
 
-                # compare eigenvalues with CPU
-                expected = torch.linalg.eig(a.to(complementary_device))
-                actual = torch.linalg.eig(a)
-                self.assertEqual(expected[0], actual[0])
+            if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
+                pass
+            elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
+                raise RuntimeError("eig returned empty tensors unexpectedly")
 
-                # check correctness using eigendecomposition identity
-                w, v = actual
-                a = a.to(v.dtype)
+            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
-                if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
-                    pass
-                elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
-                    raise RuntimeError("eig returned empty tensors unexpectedly")
-
-                self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
             torch.backends.cuda.preferred_linalg_library('default')
 
 
@@ -2194,8 +2191,8 @@ class TestLinalg(TestCase):
                   (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
-            run_test(shape)
-            run_test(shape, symmetric=True)
+            run_test(backend, shape)
+            run_test(backend, shape, symmetric=True)
 
     @slowTest
     @onlyCUDA
@@ -2210,9 +2207,13 @@ class TestLinalg(TestCase):
         self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @parametrize('backend', ['default', 'cusolver', 'magma'])
     @dtypes(torch.float32, torch.float64)
-    def test_eig_cuda_complex_eigenvectors(self, device, dtype):
+    def test_eig_cuda_complex_eigenvectors(self, device, backend, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
+
+        torch.backends.cuda.preferred_linalg_library(backend)
 
         # Test 1: Rotation matrix (complex eigenvalues - conjugate pairs)
         theta = math.pi / 4
@@ -2294,6 +2295,8 @@ class TestLinalg(TestCase):
         rhs = vals_batch.unsqueeze(-2) * vecs_batch
         self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
 
+        torch.backends.cuda.preferred_linalg_library("default")
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -2369,13 +2372,16 @@ class TestLinalg(TestCase):
                     torch.linalg.eig(a)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @parametrize('backend', ['default', 'cusolver', 'magma'])
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
-    def test_eigvals_numpy(self, device, dtype):
-        def run_test(shape, *, symmetric=False):
+    def test_eigvals_numpy(self, device, backend, dtype):
+        def run_test(backend, shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
+
+            torch.backends.cuda.preferred_linalg_library(backend)
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -2405,20 +2411,23 @@ class TestLinalg(TestCase):
 
             self.assertEqual(expected, sorted_actual, exact_dtype=False)
 
+            torch.backends.cuda.preferred_linalg_library('default')
+
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
                   (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
                   (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
-            run_test(shape)
-            run_test(shape, symmetric=True)
+            run_test(backend, shape)
+            run_test(backend, shape, symmetric=True)
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @parametrize('backend', ['default', 'cusolver', 'magma'])
     @dtypes(*floating_and_complex_types())
-    def test_eigvals_compare_backends(self, device, dtype):
-        def run_test(shape, *, symmetric=False):
+    def test_eigvals_compare_backends(self, device, backend, dtype):
+        def run_test(backend, shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
@@ -2431,36 +2440,28 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            backends = ["default"]
-            if torch.device(device).type == 'cuda':
-                if torch.cuda.has_magma:
-                    backends.append("magma")
-                if has_cusolver():
-                    backends.append("cusolver")
+            torch.backends.cuda.preferred_linalg_library(backend)
 
-            for backend in backends:
-                torch.backends.cuda.preferred_linalg_library(backend)
+            # compare with CPU
+            expected = torch.linalg.eigvals(a.to(complementary_device))
+            self.assertEqual(expected, actual)
 
-                # compare with CPU
-                expected = torch.linalg.eigvals(a.to(complementary_device))
-                self.assertEqual(expected, actual)
+            # check out= variant
+            complex_dtype = dtype
+            if not dtype.is_complex:
+                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+            out = torch.empty(0, dtype=complex_dtype, device=device)
+            ans = torch.linalg.eigvals(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(expected.to(complex_dtype), out)
 
-                # check out= variant
-                complex_dtype = dtype
-                if not dtype.is_complex:
-                    complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
-                out = torch.empty(0, dtype=complex_dtype, device=device)
+            # check non-contiguous out
+            if a.numel() > 0:
+                out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                self.assertFalse(out.is_contiguous())
                 ans = torch.linalg.eigvals(a, out=out)
                 self.assertEqual(ans, out)
                 self.assertEqual(expected.to(complex_dtype), out)
-
-                # check non-contiguous out
-                if a.numel() > 0:
-                    out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                    self.assertFalse(out.is_contiguous())
-                    ans = torch.linalg.eigvals(a, out=out)
-                    self.assertEqual(ans, out)
-                    self.assertEqual(expected.to(complex_dtype), out)
 
             torch.backends.cuda.preferred_linalg_library('default')
 
@@ -2470,8 +2471,8 @@ class TestLinalg(TestCase):
                   (2, 5, 5),  # 3-dim tensors
                   (2, 1, 5, 5)]  # 4-dim tensors
         for shape in shapes:
-            run_test(shape)
-            run_test(shape, symmetric=True)
+            run_test(backend, shape)
+            run_test(backend, shape, symmetric=True)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
