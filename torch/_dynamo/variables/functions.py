@@ -926,7 +926,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self) -> Never:
-        raise NotImplementedError
+        raise NotImplementedError("get_function")
 
     def has_self(self) -> bool:
         return False
@@ -1579,6 +1579,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def as_python_constant(self):
+        return self.get_function()
+
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
@@ -1587,7 +1590,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            raise NotImplementedError
+            raise NotImplementedError("get_function")
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
