@@ -302,9 +302,7 @@ def overwrite_tensor_vt_proxy(graph_output_vts, flat_variable):
     # while still allowing `body_r` to contain arbitrary Python objects.
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
         if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
-            assert subgraph_vt.is_tensor() or isinstance(
-                subgraph_vt, SymNodeVariable
-            )
+            assert subgraph_vt.is_tensor() or isinstance(subgraph_vt, SymNodeVariable)
             orig_vt.proxy = subgraph_vt.proxy
 
 
@@ -4591,7 +4589,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     fwd_vt_to_bwd_node[fwd_vt] = bwd_input_nodes[bwd_idx]
                     bwd_idx += 1
         else:
-            if fwd_vt.is_tensor():
+            if fwd_out.is_tensor():
                 fwd_vt_to_bwd_node[fwd_out] = bwd_input_nodes[bwd_idx]
                 bwd_idx += 1
 
