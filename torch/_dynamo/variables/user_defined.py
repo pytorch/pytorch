@@ -2268,6 +2268,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, set_vt=None, **kwargs):
+        tx = kwargs.pop("tx", None)
         super().__init__(value, **kwargs)
         self._set_vt = set_vt
 
@@ -2285,7 +2286,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
             else:
                 init_args = kwargs.get("init_args", {})
-                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                if tx is None:
+                    tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
                 self._set_vt = variables.BuiltinVariable(python_type).call_function(
                     tx, init_args, {}
                 )
@@ -2398,6 +2400,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         self._tuple_vt = tuple_vt
         if self._tuple_vt is None:
@@ -2408,9 +2411,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            from torch._dynamo.symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
+            if tx is None:
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+                tx = InstructionTranslator.current_tx()
             elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()

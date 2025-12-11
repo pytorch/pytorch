@@ -942,12 +942,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
-            InstructionTranslator,
             save_and_restart_speculation_log,
             temporarely_allow_writes_to_output_graph,
         )
 
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         save = save_and_restart_speculation_log(tx)
         disallow = disallow_side_effects_in_generator(tx)
         temp = temporarely_allow_writes_to_output_graph(tx)
@@ -1732,9 +1731,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         # codegen attributes
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         if tx.output.side_effects.has_pending_mutation(self):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
