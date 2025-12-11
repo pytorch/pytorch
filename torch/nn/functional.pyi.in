@@ -727,7 +727,7 @@ def scaled_mm(
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Tensor | None = None,
     output_dtype: _dtype = ...,
-    contraction_dim: list[int] | tuple[int] = (),
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor: ...
 
