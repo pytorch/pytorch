@@ -35,6 +35,7 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
+    _get_torch_cuda_version,
     SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
@@ -3991,6 +3992,10 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() >= (13, 1),
+        "This test does not fail on CUDA 13.1 or newer",
+    )
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
