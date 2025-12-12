@@ -504,9 +504,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         )
 
         # In autograd case, functionalizedRngWrapper should not modify outs
-        return_new_outs = not needs_autograd
         compiled_fw_func = FunctionalizedRngRuntimeWrapper(
-            return_new_outs=return_new_outs
+            is_inference=not needs_autograd
         ).post_compile(
             compiled_fw_func,
             aot_config,

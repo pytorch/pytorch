@@ -2269,7 +2269,7 @@ def _aot_stage2b_compile_forward_or_inference(
     with grad_ctx(), autocast_ctx(), track_graph_compiling(aot_config, tracking_mode):
         inductor_wrappers: list[InductorWrapper] = [
             FakifiedOutWrapper(),
-            FunctionalizedRngRuntimeWrapper(return_new_outs=is_inference),
+            FunctionalizedRngRuntimeWrapper(is_inference=is_inference),
         ]
         pre_compile_inductor_wrappers(
             inductor_wrappers,
