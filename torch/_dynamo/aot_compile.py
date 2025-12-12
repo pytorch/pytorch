@@ -5,7 +5,7 @@ import io
 import logging
 import pickle
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
@@ -184,8 +184,8 @@ class AOTCompiledFunction:
 
 
 def default_guard_filter_fn(
-    guard_entries: list["GuardFilterEntry"],
-) -> list[bool]:
+    guard_entries: Sequence["GuardFilterEntry"],
+) -> Sequence[bool]:
     return [
         (
             g.guard_type in ("GLOBAL_STATE", "SHAPE_ENV")
