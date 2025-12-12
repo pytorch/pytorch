@@ -66,7 +66,7 @@ runs:
         docker images
         START_TIME=$(date +%s)
 
-        tmp_venv=$(mktemp -d)/venv
+        tmp_venv="$RUNNER_TEMP/build-external-packages-venv"
         uv venv -p 3.12 "$tmp_venv"
         uv pip install --python "$tmp_venv/bin/python" -e .ci/lumen_cli
 
@@ -81,8 +81,6 @@ runs:
           echo "Building external package: $target in directory $OUTPUT_DIR"
           "$tmp_venv/bin/python" -m cli.run build external "$target"
         done
-
-        rm -rf "$(dirname "$tmp_venv")"
 
         END_TIME=$(date +%s)
         {

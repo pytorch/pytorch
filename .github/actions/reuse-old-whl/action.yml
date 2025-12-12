@@ -45,11 +45,10 @@ runs:
         JOB_NAME: ${{ inputs.job-name }}
       run: |
         set -x
-        tmp_venv=$(mktemp -d)/venv
+        tmp_venv="$RUNNER_TEMP/reuse-old-whl-venv"
         uv venv -p 3.12 "$tmp_venv"
         uv pip install --python "$tmp_venv/bin/python" boto3==1.35.42
         "$tmp_venv/bin/python" ${GITHUB_ACTION_PATH}/reuse_old_whl.py \
           --build-environment "${{ inputs.build-environment }}" \
           --run-id "${{ inputs.run-id }}" \
           --github-ref "${{ github.ref }}"
-        rm -rf "$(dirname "$tmp_venv")"

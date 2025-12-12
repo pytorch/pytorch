@@ -38,7 +38,7 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          tmp_venv=$(mktemp -d)/venv
+          tmp_venv="$RUNNER_TEMP/pytest-cache-venv"
           uv venv -p 3.12 "$tmp_venv"
           uv pip install --python "$tmp_venv/bin/python" boto3==1.35.42
           echo "PYTEST_CACHE_VENV=$tmp_venv" >> "$GITHUB_ENV"
@@ -63,11 +63,3 @@ runs:
           --shard "$SHARD" \
           --repo "$REPO" \
           --temp_dir "$RUNNER_TEMP"
-
-    - name: Cleanup temp venv
-      if: always()
-      shell: bash
-      run: |
-        if [ -n "${PYTEST_CACHE_VENV:-}" ] && [ -d "$(dirname "$PYTEST_CACHE_VENV")" ]; then
-          rm -rf "$(dirname "$PYTEST_CACHE_VENV")"
-        fi

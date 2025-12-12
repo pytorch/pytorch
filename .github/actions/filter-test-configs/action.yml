@@ -73,7 +73,7 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          tmp_venv=$(mktemp -d)/venv
+          tmp_venv="$RUNNER_TEMP/filter-test-configs-venv"
           uv venv -p 3.12 "$tmp_venv"
           # PyYAML 6.0 doesn't work with MacOS x86 anymore
           # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
@@ -169,11 +169,3 @@ runs:
 
         echo
         echo "Reenabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
-
-    - name: Cleanup temp venv
-      if: always()
-      shell: bash
-      run: |
-        if [ -n "${FILTER_VENV:-}" ] && [ -d "$(dirname "$FILTER_VENV")" ]; then
-          rm -rf "$(dirname "$FILTER_VENV")"
-        fi
