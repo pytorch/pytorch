@@ -331,10 +331,28 @@ class LazyConstantVariable(LazyVariableTracker):
         LazyConstantVariable only wraps primitive types (int, float, bool, str)
         which always realize to ConstantVariable, so we can answer isinstance
         checks by checking if the target class is ConstantVariable or a parent.
+
+        However, when specialize_int=False or specialize_float=False, integers
+        and floats may realize to SymNodeVariable instead of ConstantVariable,
+        so we must fall back to full realization for those cases.
         """
-        self._ensure_type_guard()
+        # If already realized, delegate to the parent which does the regular check
+        if self.is_realized():
+            return super().lazy_isinstance(cls)
+
+        from .. import config
         from .constant import ConstantVariable
 
+        value_type = self.peek_type()
+
+        # When specialize_int/specialize_float is False, ints/floats may become
+        # SymNodeVariable. Fall back to full realization to get the correct answer.
+        if not config.specialize_int and value_type is int:
+            return super().lazy_isinstance(cls)
+        if not config.specialize_float and value_type is float:
+            return super().lazy_isinstance(cls)
+
+        self._ensure_type_guard()
         return issubclass(ConstantVariable, cls)
 
 
