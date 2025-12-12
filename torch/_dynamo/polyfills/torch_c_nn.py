@@ -3,6 +3,7 @@ Polyfills for torch._C._nn functions.
 """
 
 import torch
+from torch.overrides import _is_torch_function_mode_enabled, _pop_mode_temporarily
 
 from ..decorators import substitute_in_graph
 
@@ -21,6 +22,16 @@ def _parse_to_polyfill(*args, **kwargs):  # noqa: F821
     Returns:
         tuple: (device, dtype, non_blocking, memory_format)
     """
+    # Check for __torch_function__ mode and dispatch using handle_torch_function pattern
+    if _is_torch_function_mode_enabled():
+        with _pop_mode_temporarily() as mode:
+            result = mode.__torch_function__(
+                torch._C._nn._parse_to, tuple(), args, kwargs or {}
+            )
+        if result is not NotImplemented:
+            return result
+
+    # Default implementation
     device = None
     dtype = None
     non_blocking = False
@@ -73,9 +84,12 @@ def get_swap_module_params_on_conversion_polyfill() -> bool:
     """
     Polyfill for torch.__future__.get_swap_module_params_on_conversion.
 
-    Returns the default value False to allow tracing through nn.Module._apply().
+    Returns the actual value from the underlying global variable.
     """
-    return False
+    # Access the module's global variable directly to avoid recursion
+    import torch.__future__ as torch_future
+
+    return torch_future._swap_module_params_on_conversion
 
 
 @substitute_in_graph(torch._has_compatible_shallow_copy_type)

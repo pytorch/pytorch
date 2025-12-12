@@ -116,6 +116,15 @@ its type to `common_constant_types`.
     def is_python_constant(self) -> Literal[True]:
         return True
 
+    def is_symnode_like(self) -> bool:
+        return isinstance(self.value, (int, bool))
+
+    def is_constant_match(self, *values: Any) -> bool:
+        return self.value in values
+
+    def is_constant_none(self) -> bool:
+        return self.value is None
+
     @property
     def items(self) -> list[VariableTracker]:
         """
@@ -270,7 +279,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -312,10 +321,7 @@ its type to `common_constant_types`.
                 return map_fn.call_function(tx, [self, *rest], {})
             else:
                 for other in rest:
-                    if not (
-                        other.is_python_constant()
-                        and other.as_python_constant() is None
-                    ):
+                    if not other.is_constant_none():
                         return self._tree_map_fallback(
                             tx,
                             tree_map_fn,
@@ -371,7 +377,7 @@ class EnumVariable(VariableTracker):
     def create(
         cls, cls_type: Any, value_vt: VariableTracker, options: Any
     ) -> "EnumVariable":
-        if isinstance(value_vt, variables.ConstantVariable):
+        if value_vt.is_python_constant():
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)

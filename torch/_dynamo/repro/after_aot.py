@@ -803,6 +803,7 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
+    # pyrefly: ignore [bad-argument-type]
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     # pyrefly: ignore [bad-assignment]

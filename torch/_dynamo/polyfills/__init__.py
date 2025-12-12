@@ -143,14 +143,14 @@ def dict___eq__(d, other):
 
 
 def set_symmetric_difference(set1, set2, cls=set):
-    symmetric_difference_set = cls()
+    symmetric_difference_set = set()
     for x in set1:
         if x not in set2:
             symmetric_difference_set.add(x)
     for x in set2:
         if x not in set1:
             symmetric_difference_set.add(x)
-    return symmetric_difference_set
+    return cls(symmetric_difference_set)
 
 
 def set_symmetric_difference_update(set1, set2):
@@ -184,14 +184,14 @@ def set_intersection(set1, *others, cls=set):
             raise TypeError("unhashable type")
 
     # return a new set with elements common in all sets
-    intersection_set = cls()
+    intersection_set = set()
     for x in set1:
         for set2 in others:
             if not any(x == y for y in set2):
                 break
         else:
             intersection_set.add(x)
-    return intersection_set
+    return cls(intersection_set)
 
 
 def set_intersection_update(set1, *others):
@@ -244,14 +244,14 @@ def set_difference(set1, *others, cls=set):
         if any(not isinstance(x, Hashable) for x in s):
             raise TypeError("unhashable type")
 
-    difference_set = cls()
+    difference_set = set()
     for x in set1:
         for set2 in others:
             if x in set2:
                 break
         else:
             difference_set.add(x)
-    return difference_set
+    return cls(difference_set)
 
 
 def set_difference_update(set1, *others):
@@ -433,3 +433,59 @@ def cmp_ge(a, b):
     if isinstance(type(a).__ge__, types.FunctionType):
         return a.__ge__(b)
     return cmp_eq(a, b) or cmp_gt(a, b)
+
+
+def group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+    """Pure Python implementation of torch._C._group_tensors_by_device_and_dtype.
+
+    Groups tensors by their device and dtype. This is useful before sending
+    tensors off to a foreach implementation, which requires tensors to be on
+    one device and dtype.
+
+    Args:
+        tensorlistlist: A list of lists of tensors (tensors can be None).
+        with_indices: If True, track original indices in the output.
+
+    Returns:
+        A dict mapping (device, dtype) tuples to (grouped_tensorlistlist, indices).
+    """
+    # Result dict: (device, dtype) -> (list of lists, indices)
+    result: dict[tuple[torch.device, torch.dtype], tuple[list[list], list[int]]] = {}
+
+    if not tensorlistlist or not tensorlistlist[0]:
+        return result
+
+    num_lists = len(tensorlistlist)
+    num_tensors = len(tensorlistlist[0])
+
+    for idx in range(num_tensors):
+        # Find the first non-None tensor at this index to get device and dtype
+        first_tensor = None
+        for tlist in tensorlistlist:
+            if tlist is not None and idx < len(tlist) and tlist[idx] is not None:
+                first_tensor = tlist[idx]
+                break
+
+        if first_tensor is None:
+            # All tensors at this index are None, skip
+            continue
+
+        key = (first_tensor.device, first_tensor.dtype)
+
+        if key not in result:
+            # Initialize empty lists for each tensorlist
+            result[key] = ([[] for _ in range(num_lists)], [])
+
+        grouped_lists, indices = result[key]
+
+        # Add tensors from each list at this index
+        for list_idx, tlist in enumerate(tensorlistlist):
+            if tlist is not None and idx < len(tlist):
+                grouped_lists[list_idx].append(tlist[idx])
+            else:
+                grouped_lists[list_idx].append(None)
+
+        if with_indices:
+            indices.append(idx)
+
+    return result

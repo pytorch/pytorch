@@ -186,7 +186,6 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional
 
 import torch
 
@@ -305,7 +304,7 @@ def get_validators() -> tuple[str, str]:
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
-def read_file(filename: Optional[str] = None) -> bool:
+def read_file(filename: str | None = None) -> bool:
     r"""Read results from a TunableOp CSV file.
 
     If :attr:`filename` is not given, ``get_filename()`` is called.
@@ -436,7 +435,7 @@ def _create_matrices(
     transB: bool,
     dtypeA: torch.dtype,
     deviceid: str,
-    dtypeB: Optional[torch.dtype] = None,
+    dtypeB: torch.dtype | None = None,
     randn: bool = True,
     subMatrix: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:

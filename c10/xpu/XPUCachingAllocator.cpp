@@ -34,6 +34,7 @@ struct BlockPool {
 
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
 };
@@ -63,7 +64,6 @@ struct Block {
       void* ptr)
       : device(device),
         queue(queue),
-        stream_uses(),
         size(size),
         requested_size(0),
         pool(pool),
@@ -71,11 +71,7 @@ struct Block {
 
   // constructor for search key
   Block(DeviceIndex device, sycl::queue* queue, size_t size)
-      : device(device),
-        queue(queue),
-        stream_uses(),
-        size(size),
-        requested_size(0) {}
+      : device(device), queue(queue), size(size), requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -142,7 +138,8 @@ struct ExpandableSegment {
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
     constexpr float kVirtualMemOversubscriptFactor = 1.125f; // 1 + 1/8
-    max_handles_ = numSegments(device_total * kVirtualMemOversubscriptFactor);
+    max_handles_ = numSegments(static_cast<size_t>(
+        static_cast<float>(device_total) * kVirtualMemOversubscriptFactor));
     ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
         segment_size_ * max_handles_, xpu::get_device_context());
   }
@@ -168,15 +165,16 @@ struct ExpandableSegment {
     // Allocate and map physical memory for each segment.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
+      auto& handle = handles_.at(i);
       try {
         // Allocate physical memory for each segment. Construct the physical_mem
         // in-place to avoid copies.
-        handles_.at(i).emplace(
+        auto& mem = handle.emplace(
             xpu::get_raw_device(device_),
             xpu::get_device_context(),
             segment_size_);
         // Map the allocated physical memory into the virtual address space.
-        handles_.at(i).value().map(
+        mem.map(
             ptr_ + i * segment_size_,
             segment_size_,
             sycl::ext::oneapi::experimental::address_access_mode::read_write);
@@ -187,13 +185,14 @@ struct ExpandableSegment {
         // Note: constructing physical_mem may over-subscribe device memory but
         // not immediately trigger OOM. The actual OOM can occur during map().
         // Roll back all segments allocated or mapped in this operation.
-        handles_.at(i) = std::nullopt;
+        handle.reset();
         for (const auto j : c10::irange(begin, i)) {
           sycl::ext::oneapi::experimental::unmap(
+              // NOLINTNEXTLINE(performance-no-int-to-ptr)
               reinterpret_cast<void*>(ptr_ + segment_size_ * j),
               segment_size_,
               xpu::get_device_context());
-          handles_.at(j) = std::nullopt;
+          handles_.at(j).reset();
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
@@ -245,6 +244,7 @@ struct ExpandableSegment {
       // ranges. Users must explicitly call unmap on all ranges before
       // destroying the physical_mem object.
       sycl::ext::oneapi::experimental::unmap(
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(ptr_ + segment_size_ * i),
           segment_size_,
           xpu::get_device_context());
@@ -318,9 +318,9 @@ struct ExpandableSegment {
   size_t max_handles_{0};
   // Physical memory handles for the segments.
   std::vector<std::optional<sycl::ext::oneapi::experimental::physical_mem>>
-      handles_{};
+      handles_;
   // Peer devices on which this memory could be accessible, reserved.
-  std::vector<c10::DeviceIndex> peers_{};
+  std::vector<c10::DeviceIndex> peers_;
 };
 
 struct AllocParams {
@@ -330,10 +330,7 @@ struct AllocParams {
       sycl::queue* queue,
       BlockPool* pool,
       size_t alloc_size)
-      : search_key(device, queue, size),
-        pool(pool),
-        alloc_size(alloc_size),
-        block(nullptr) {}
+      : search_key(device, queue, size), pool(pool), alloc_size(alloc_size) {}
 
   DeviceIndex device() const {
     return search_key.device;
@@ -350,7 +347,7 @@ struct AllocParams {
   Block search_key;
   BlockPool* pool;
   size_t alloc_size;
-  Block* block;
+  Block* block{nullptr};
   StatTypes stat_types = {};
 };
 
@@ -987,7 +984,7 @@ class DeviceCachingAllocator {
   }
 
   Block* alloc_found_block(
-      AllocParams params,
+      const AllocParams& params,
       size_t orig_size,
       bool split_remainder) {
     auto size = params.size();
@@ -1151,7 +1148,7 @@ class DeviceCachingAllocator {
           " Please use `empty_cache` to release all unoccupied cached memory.");
     }
     bool split_remainder = should_split(params.block, params.size());
-    return alloc_found_block(std::move(params), orig_size, split_remainder);
+    return alloc_found_block(params, orig_size, split_remainder);
   }
 
   void free(Block* block) {
@@ -1254,7 +1251,8 @@ class DeviceCachingAllocator {
     const auto device_total =
         xpu::get_raw_device(device_index)
             .get_info<sycl::info::device::global_mem_size>();
-    allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
+    allowed_memory_maximum =
+        static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
   }
 
@@ -1353,7 +1351,7 @@ class NativeCachingAllocator : public XPUAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) {
+  void init(DeviceIndex device_count) override {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
@@ -1538,87 +1536,61 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 };
 
-static NativeCachingAllocator allocator;
+static NativeCachingAllocator native_allocator;
 
 void local_raw_delete(void* ptr) {
-  allocator.free(ptr);
+  native_allocator.free(ptr);
 }
 
-Allocator* get() {
-  return &allocator;
-}
+std::atomic<XPUAllocator*> allocator;
 
-void init(DeviceIndex device_count) {
-  return allocator.init(device_count);
-}
+struct NativeAllocatorStaticInitializer {
+  NativeAllocatorStaticInitializer() {
+    allocator.store(&native_allocator);
+    c10::SetAllocator(c10::kXPU, &native_allocator, 0);
+  }
+};
 
-void emptyCache(MempoolId_t mempool_id) {
-  return allocator.emptyCache(mempool_id);
-}
-
-void resetPeakStats(DeviceIndex device) {
-  return allocator.resetPeakStats(device);
-}
-
-void resetAccumulatedStats(DeviceIndex device) {
-  return allocator.resetAccumulatedStats(device);
-}
-
-DeviceStats getDeviceStats(DeviceIndex device) {
-  return allocator.getDeviceStats(device);
-}
-
-void* raw_alloc(size_t size) {
-  return allocator.raw_alloc(size);
-}
-
-void raw_delete(void* ptr) {
-  return allocator.raw_delete(ptr);
-}
-
-void recordStream(const DataPtr& dataPtr, XPUStream stream) {
-  return allocator.recordStream(dataPtr, stream);
-}
+static NativeAllocatorStaticInitializer native_allocator_static_initializer;
 
 void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
-  return allocator.enablePeerAccess(dev, dev_to_access);
+  return native_allocator.enablePeerAccess(dev, dev_to_access);
 }
 
 double getMemoryFraction(DeviceIndex device) {
-  return allocator.getMemoryFraction(device);
+  return native_allocator.getMemoryFraction(device);
 }
 
 void setMemoryFraction(double fraction, DeviceIndex device) {
-  return allocator.setMemoryFraction(fraction, device);
+  return native_allocator.setMemoryFraction(fraction, device);
 }
 
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
     XPUAllocator* allocator_ptr) {
-  return allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
+  return native_allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 
 void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
     std::function<bool(sycl::queue*)> filter) {
-  return allocator.beginAllocateToPool(device, mempool_id, std::move(filter));
+  return native_allocator.beginAllocateToPool(
+      device, mempool_id, std::move(filter));
 }
 
 void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.endAllocateToPool(device, mempool_id);
+  return native_allocator.endAllocateToPool(device, mempool_id);
 }
 
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.releasePool(device, mempool_id);
+  return native_allocator.releasePool(device, mempool_id);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return allocator.getPoolUseCount(device, mempool_id);
+  return native_allocator.getPoolUseCount(device, mempool_id);
 }
-
-REGISTER_ALLOCATOR(kXPU, &allocator)
 
 } // namespace c10::xpu::XPUCachingAllocator
 
