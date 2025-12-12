@@ -211,15 +211,19 @@ def tf32_enabled():
     """
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
+    Also sets sdp precision
     """
+    old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     try:
+        torch.backends.cuda.math_sdp.fp32_precision = "ieee"
         torch.backends.cuda.matmul.allow_tf32 = True
         with torch.backends.cudnn.flags(
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
             yield
     finally:
+        torch.backends.cuda.math_sdp.fp32_precision = old_math_sdp_fp32_precision
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
