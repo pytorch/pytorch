@@ -302,6 +302,11 @@ class CustomConstantType:
     def __repr__(self):
         return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
+    def __fx_repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})", {
+            "CustomConstantType": CustomConstantType
+        }
+
 
 torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
