@@ -27,6 +27,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 aten = torch.ops.aten
@@ -414,7 +415,10 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for p in output_strategy.output_spec.placements
+                    ):
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(

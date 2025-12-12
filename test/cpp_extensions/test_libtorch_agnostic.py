@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import torch
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -822,6 +823,112 @@ if not IS_WINDOWS:
             shape = libtorch_agnostic.ops.my_shape(t)
             self.assertEqual(shape, expected)
 
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_sum(t, [0])
+            expected = torch.sum(t, [0])
+            self.assertEqual(result, expected)
+
+            result_multi = libtorch_agnostic.ops.my_sum(t, [0, 2])
+            expected_multi = torch.sum(t, [0, 2])
+            self.assertEqual(result_multi, expected_multi)
+
+            result_keepdim = libtorch_agnostic.ops.my_sum(t, [1], True)
+            expected_keepdim = torch.sum(t, [1], keepdim=True)
+            self.assertEqual(result_keepdim, expected_keepdim)
+
+            result_dtype = libtorch_agnostic.ops.my_sum(t, [0], False, torch.float64)
+            expected_dtype = torch.sum(t, [0], dtype=torch.float64)
+            self.assertEqual(result_dtype, expected_dtype)
+
+            # Test sum without dim (sum all elements)
+            result_all = libtorch_agnostic.ops.my_sum(t)
+            expected_all = torch.sum(t)
+            self.assertEqual(result_all, expected_all)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum_out(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            out = torch.empty(4, 5, device=device)
+            result = libtorch_agnostic.ops.my_sum_out(out, t, [0])
+            expected = torch.sum(t, [0])
+            self.assertEqual(out, expected)
+            self.assertEqual(id(result), id(out))
+
+            out_keepdim = torch.empty(3, 1, 5, device=device)
+            libtorch_agnostic.ops.my_sum_out(out_keepdim, t, [1], True)
+            expected_keepdim = torch.sum(t, [1], keepdim=True)
+            self.assertEqual(out_keepdim, expected_keepdim)
+
+            out_dtype = torch.empty(4, 5, dtype=torch.float64, device=device)
+            libtorch_agnostic.ops.my_sum_out(out_dtype, t, [0], False, torch.float64)
+            expected_dtype = torch.sum(t, [0], dtype=torch.float64)
+            self.assertEqual(out_dtype, expected_dtype)
+
+            out_all = torch.empty([], device=device)
+            libtorch_agnostic.ops.my_sum_out(out_all, t)
+            expected_all = torch.sum(t)
+            self.assertEqual(out_all, expected_all)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum_all(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            # Test my_sum_all (sums all elements, returns scalar)
+            result = libtorch_agnostic.ops.my_sum_all(t)
+            expected = torch.sum(t)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([]))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum_dim1(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            # Test my_sum_dim1 (sums along dimension 1)
+            result = libtorch_agnostic.ops.my_sum_dim1(t)
+            expected = torch.sum(t, dim=1)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([3, 5]))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_full(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Test basic full with default parameters
+            result = libtorch_agnostic.ops.my_full([2, 3], 3.14)
+            expected = torch.full([2, 3], 3.14)
+            self.assertEqual(result, expected)
+
+            # Test with dtype
+            result_dtype = libtorch_agnostic.ops.my_full(
+                [3, 4], 42.0, dtype=torch.int64
+            )
+            expected_dtype = torch.full([3, 4], 42, dtype=torch.int64)
+            self.assertEqual(result_dtype, expected_dtype)
+
+            # Test with device
+            result_device = libtorch_agnostic.ops.my_full([2, 2], 1.5, device=device)
+            expected_device = torch.full([2, 2], 1.5, device=device)
+            self.assertEqual(result_device, expected_device, exact_device=True)
+
+            # Test with dtype and device
+            result_both = libtorch_agnostic.ops.my_full(
+                [4, 5], 2.5, dtype=torch.float64, device=device
+            )
+            expected_both = torch.full([4, 5], 2.5, dtype=torch.float64, device=device)
+            self.assertEqual(result_both, expected_both, exact_device=True)
+
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic_2_9 as libtorch_agnostic
 
@@ -1313,6 +1420,9 @@ except RuntimeError as e:
         @onlyCUDA
         @parametrize("show_cpp_stacktraces", [False, True])
         @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        @unittest.skipIf(
+            _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
+        )
         def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
             """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
 
@@ -1434,6 +1544,140 @@ except RuntimeError as e:
             )
             expected_both = t.new_zeros([4, 5], dtype=torch.int64, device="cpu")
             self.assertEqual(result_both, expected_both, exact_device=True)
+
+        def test_my_unsqueeze(self, device):
+            """Test unsqueeze op."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device)
+
+            # Test unsqueeze at dim 0
+            result = libtorch_agnostic.ops.my_unsqueeze(t, 0)
+            expected = torch.unsqueeze(t, 0)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([1, 3, 4]))
+
+            # Test unsqueeze at dim 1
+            result1 = libtorch_agnostic.ops.my_unsqueeze(t, 1)
+            expected1 = torch.unsqueeze(t, 1)
+            self.assertEqual(result1, expected1)
+            self.assertEqual(result1.shape, torch.Size([3, 1, 4]))
+
+            # Test unsqueeze at dim -1
+            result_neg = libtorch_agnostic.ops.my_unsqueeze(t, -1)
+            expected_neg = torch.unsqueeze(t, -1)
+            self.assertEqual(result_neg, expected_neg)
+            self.assertEqual(result_neg.shape, torch.Size([3, 4, 1]))
+
+        def test_my_squeeze(self, device):
+            """Test squeeze.dim op."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            t = torch.randn(3, 1, 4, device=device)
+
+            # Test squeeze at dim 1 (the dimension of size 1)
+            result = libtorch_agnostic.ops.my_squeeze(t, 1)
+            expected = torch.squeeze(t, 1)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([3, 4]))
+
+            # Test squeeze at dim 0 (not size 1, should be no-op)
+            result0 = libtorch_agnostic.ops.my_squeeze(t, 0)
+            expected0 = torch.squeeze(t, 0)
+            self.assertEqual(result0, expected0)
+            self.assertEqual(result0.shape, torch.Size([3, 1, 4]))
+
+            # Test squeeze at dim -2 (same as dim 1)
+            result_neg = libtorch_agnostic.ops.my_squeeze(t, -2)
+            expected_neg = torch.squeeze(t, -2)
+            self.assertEqual(result_neg, expected_neg)
+            self.assertEqual(result_neg.shape, torch.Size([3, 4]))
+
+        def test_my_select(self, device):
+            """Test select.int op."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            # Test select at dim 0, index 1
+            result = libtorch_agnostic.ops.my_select(t, 0, 1)
+            expected = torch.select(t, 0, 1)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([4, 5]))
+
+            # Test select at dim 1, index 2
+            result1 = libtorch_agnostic.ops.my_select(t, 1, 2)
+            expected1 = torch.select(t, 1, 2)
+            self.assertEqual(result1, expected1)
+            self.assertEqual(result1.shape, torch.Size([3, 5]))
+
+            # Test select at dim -1, index 0
+            result_neg = libtorch_agnostic.ops.my_select(t, -1, 0)
+            expected_neg = torch.select(t, -1, 0)
+            self.assertEqual(result_neg, expected_neg)
+            self.assertEqual(result_neg.shape, torch.Size([3, 4]))
+
+        def test_my_matmul(self, device):
+            """Test matmul op."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            # Test 2D x 2D matrix multiplication
+            a = torch.randn(3, 4, device=device)
+            b = torch.randn(4, 5, device=device)
+            result = libtorch_agnostic.ops.my_matmul(a, b)
+            expected = torch.matmul(a, b)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.shape, torch.Size([3, 5]))
+
+            # Test 1D x 2D (vector-matrix)
+            v = torch.randn(4, device=device)
+            m = torch.randn(4, 5, device=device)
+            result_vm = libtorch_agnostic.ops.my_matmul(v, m)
+            expected_vm = torch.matmul(v, m)
+            self.assertEqual(result_vm, expected_vm)
+
+            # Test 2D x 1D (matrix-vector)
+            m2 = torch.randn(3, 4, device=device)
+            v2 = torch.randn(4, device=device)
+            result_mv = libtorch_agnostic.ops.my_matmul(m2, v2)
+            expected_mv = torch.matmul(m2, v2)
+            self.assertEqual(result_mv, expected_mv)
+
+            # Test batched matmul
+            batch_a = torch.randn(2, 3, 4, device=device)
+            batch_b = torch.randn(2, 4, 5, device=device)
+            result_batch = libtorch_agnostic.ops.my_matmul(batch_a, batch_b)
+            expected_batch = torch.matmul(batch_a, batch_b)
+            self.assertEqual(result_batch, expected_batch)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_subtract(self, device):
+            """Test subtract.Tensor op."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            a = torch.randn(3, 4, device=device)
+            b = torch.randn(3, 4, device=device)
+
+            # Test basic subtraction (alpha=1.0)
+            result = libtorch_agnostic.ops.my_subtract(a, b)
+            expected = torch.subtract(a, b)
+            self.assertEqual(result, expected)
+
+            # Test subtraction with alpha=2.0
+            result_alpha = libtorch_agnostic.ops.my_subtract(a, b, alpha=2.0)
+            expected_alpha = torch.subtract(a, b, alpha=2.0)
+            self.assertEqual(result_alpha, expected_alpha)
+
+            # Test subtraction with alpha=0.5
+            result_half = libtorch_agnostic.ops.my_subtract(a, b, alpha=0.5)
+            expected_half = torch.subtract(a, b, alpha=0.5)
+            self.assertEqual(result_half, expected_half)
+
+            # Test subtraction with broadcasting
+            c = torch.randn(4, device=device)
+            result_broadcast = libtorch_agnostic.ops.my_subtract(a, c)
+            expected_broadcast = torch.subtract(a, c)
+            self.assertEqual(result_broadcast, expected_broadcast)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

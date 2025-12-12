@@ -231,11 +231,13 @@ def createResolutionCallbackFromEnv(lookup_base):
             return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
-        assert base is not None, f"Unresolvable type {expr[:i]}"
+        if base is None:
+            raise AssertionError(f"Unresolvable type {expr[:i]}")
         if i == len(expr) or expr[i] != "[":
             return base, i
 
-        assert expr[i] == "["
+        if expr[i] != "[":
+            raise AssertionError(f"expected '[' at position {i}, got {expr[i]!r}")
         parts = []
         while expr[i] != "]":
             part_len = 0
@@ -251,9 +253,10 @@ def createResolutionCallbackFromEnv(lookup_base):
     def parseExpr(expr, module):
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(expr), (
-                "whole expression was not parsed, falling back to c++ parser"
-            )
+            if len_parsed != len(expr):
+                raise AssertionError(
+                    "whole expression was not parsed, falling back to c++ parser"
+                )
             return value
         except Exception:
             """
@@ -299,11 +302,13 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     frame = inspect.currentframe()
     i = 0
     while i < frames_up + 1:
-        assert frame is not None
+        if frame is None:
+            raise AssertionError(f"frame is None at iteration {i}")
         frame = frame.f_back
         i += 1
 
-    assert frame is not None
+    if frame is None:
+        raise AssertionError("frame is None after traversing frames_up")
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
@@ -1044,13 +1049,13 @@ def get_class_name_lineno(method) -> tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
-    for _ in range(2):
-        assert (
-            current_frame is not None
-        )  # assert current frame is not an Optional[FrameType]
+    for i in range(2):
+        if current_frame is None:
+            raise AssertionError(f"current_frame is None at iteration {i}")
         current_frame = current_frame.f_back
 
-    assert current_frame is not None  # same here
+    if current_frame is None:
+        raise AssertionError("current_frame is None after traversing frames")
     class_name = current_frame.f_code.co_name
     line_no = current_frame.f_code.co_firstlineno
     return class_name, line_no
@@ -1242,7 +1247,10 @@ def _get_named_tuple_properties(
     if loc is None:
         loc = fake_range()
 
-    assert issubclass(obj, tuple) and hasattr(obj, "_fields")
+    if not issubclass(obj, tuple) or not hasattr(obj, "_fields"):
+        raise AssertionError(
+            f"expected namedtuple (tuple subclass with _fields), got {obj}"
+        )
     if hasattr(obj, "_field_defaults"):
         defaults = [
             obj._field_defaults[field]
