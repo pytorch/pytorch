@@ -272,10 +272,13 @@ def memory_snapshot(
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
-def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapshot:
-    """Save a snapshot of XPU memory state at the time it was called.
+def _snapshot(
+    device: _device_t = None, augment_with_fx_traces: bool = False
+) -> _Snapshot:
+    """
+    Capture a snapshot of the XPU memory state at the time this function is called.
 
-    The state is represented as a dictionary with the following structure.
+    The returned snapshot is a dictionary with the following structure.
 
     .. code-block:: python
 
@@ -285,14 +288,15 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
 
 
         class Segment(TypedDict):
-            # Segments are memory returned from a cudaMalloc call.
-            # The size of reserved memory is the sum of all Segments.
-            # Segments are cached and reused for future allocations.
-            # If the reuse is smaller than the segment, the segment
-            # is split into more then one Block.
-            # empty_cache() frees Segments that are entirely inactive.
+            # A Segment represents a contiguous memory region returned by the SYCL runtime.
+            #
+            # All reserved memory is composed of these segments. Segments are
+            # cached and reused by the allocator. When allocations are smaller
+            # than the segment, the segment may be split into multiple Blocks.
+            #
+            # Calling :func:`~torch.xpu.memory.empty_cache` releases segments that are entirely inactive.
             address: int
-            total_size: int  #  cudaMalloc'd size of segment
+            total_size: int  #  total size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
             allocated_size: int  # size of memory in use
@@ -301,18 +305,15 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
 
 
         class Block(TypedDict):
-            # A piece of memory returned from the allocator, or
-            # current cached but inactive.
+            # A sub-region of a Segment, either currently allocated or cached for reuse.
             size: int
-            requested_size: int  # size requested during malloc, may be smaller than
-            # size due to rounding
+            requested_size: int  # Original requested size (may be smaller than `size`)
             address: int
             state: Literal[
                 "active_allocated",  # used by a tensor
-                "active_awaiting_free",  # waiting for another stream to finish using
-                # this, then it will become free
-                "inactive",
-            ]  # free for reuse
+                "active_awaiting_free",  # waiting for another stream synchronization, then become free
+                "inactive",  # free for reuse
+            ]
             frames: List[Frame]  # stack trace from where the allocation occurred
 
 
@@ -320,46 +321,36 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
             filename: str
             line: int
             name: str
-            # Optional FX debug fields (present when augment_with_fx_traces=True
-            # and the frame corresponds to FX-generated code)
+            # Optional fields when `augment_with_fx_traces=True` and the frame
+            # corresponds to FX-generated code.
             fx_node_op: str  # FX node operation type (e.g., 'call_function', 'output')
             fx_node_name: str  # FX node name (e.g., 'linear', 'relu_1')
             fx_original_trace: str  # Original model source code stack trace
 
 
         class TraceEntry(TypedDict):
-            # When `torch.cuda.memory._record_memory_history()` is enabled,
-            # the snapshot will contain TraceEntry objects that record each
-            # action the allocator took.
+            # Trace entries are recorded only when :func:`~torch.xpu.memory._record_memory_history` is enabled.
             action: Literal[
                 "alloc"  # memory allocated
-                "free_requested",  # the allocated received a call to free memory
-                "free_completed",  # the memory that was requested to be freed is now
-                # able to be used in future allocation calls
-                "segment_alloc",  # the caching allocator ask cudaMalloc for more memory
-                # and added it as a segment in its cache
-                "segment_free",  # the caching allocator called cudaFree to return memory
-                # to cuda possibly trying free up memory to
-                # allocate more segments or because empty_caches was called
-                "oom",  # the allocator threw an OOM exception. 'size' is
-                # the requested number of bytes that did not succeed
-                "snapshot",  # the allocator generated a memory snapshot
-                # useful to coorelate a previously taken
-                # snapshot with this trace
+                "free_requested",  # received a call to free memory
+                "free_completed",  # memory reclaimed and reusable
+                "segment_alloc",  # ask SYCL runtime for more memory
+                "segment_free",  # called SYCL runtime to return memory to XPU
+                "oom",  # threw an OOM exception
+                "snapshot",  # snapshot taken
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
             size: int
             stream: int
-            device_free: int  # only present for OOM, the amount of
-            # memory cuda still reports to be free
+            device_free: int  # only present for OOM, the amount of free memory reported by the device
 
-    Args:
-        device: Device to capture snapshot for. If None, captures for current device.
-        augment_with_fx_traces: If True, augment stack trace frames with FX debug information
-                                that maps generated FX code back to original model source code.
-                                This adds fx_node_op, fx_node_name, fx_original_trace, and
-                                fx_node_info fields to Frame objects. Default: False.
+    Arguments:
+        device (torch.device or int or str, optional): selected device. It uses the current device,
+            given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
+        augment_with_fx_traces (bool): If True, augment stack trace frames with FX debug information
+            that maps generated FX code back to original model source code. This adds the FX-related
+            fields (fx_node_op, fx_node_name, fx_original_trace) to Frame objects. Default is False.
 
     Returns:
         The Snapshot dictionary object
@@ -383,7 +374,7 @@ def _dump_snapshot(
     with several KB per entry. These can easily be in the GB range for longer running
     workflows with large `max_entries`.
 
-    Args:
+    Arguments:
         filename (str): Name of the file to create. Defaults to "dump_snapshot.pickle".
         augment_with_fx_traces (bool): If True, augment the snapshot with FX debug information
             before dumping. This maps generated FX code stack traces back to original model
@@ -402,14 +393,14 @@ def _record_memory_history(
     max_entries: int = sys.maxsize,
     clear_history: bool = False,
 ) -> None:
-    """Enable recording of stack traces associated with memory
-    allocations, so you can tell what allocated any piece of memory in
-    :func:`torch.xpu.memory._snapshot()`.
+    """
+    Enable recording of stack traces associated with memory allocations, so you can
+    tell what allocated any piece of memory in :func:`~torch.xpu.memory._snapshot()`.
 
     In addition to keeping stack traces with each current allocation and free,
     this will also enable recording of a history of all alloc/free events.
 
-    Use :func:`torch.xpu.memory._snapshot()` to retrieve this information,
+    Use :func:`~torch.xpu.memory._snapshot()` to retrieve this information,
     and the tools in `_memory_viz.py` to visualize snapshots.
 
     Buffer behavior
@@ -422,22 +413,7 @@ def _record_memory_history(
 
     Longer running workflows or those with smaller `max_entries` values will only
     store the last accumulated `max_entries` entries, meaning new entries overwrite
-    older entries.
-
-    C++ implementation for reference to ring buffer implementation:
-
-    .. code-block:: cpp
-
-        if (record_history) {
-          if (alloc_trace->size() < alloc_trace_max_entries_) {
-            alloc_trace->emplace_back(te);
-          } else {
-            (*alloc_trace)[alloc_trace_next++] = te;
-            if (alloc_trace_next == alloc_trace_max_entries_) {
-              alloc_trace_next = 0;
-            }
-          }
-        }
+    older entries, reference to ring buffer behavior.
 
     Latency impact
     --------------
@@ -449,7 +425,7 @@ def _record_memory_history(
     C++ trace collection is also fast (~50ns/frame), which for many typical programs
     works out to ~2us per trace, but can vary depending on stack depth.
 
-    Args:
+    Arguments:
         enabled (Literal[None, "state", "all"], optional):
             `None`, disable recording memory history.
             `"state"`, keep information for currently allocated memory.
@@ -462,11 +438,12 @@ def _record_memory_history(
             `"all"`, additionally keep tracebacks for free calls.
             Defaults to "all".
         stacks (Literal["python", "all"], optional):
-            `"python"`, include Python, TorchScript, and inductor frames in tracebacks
-            `"all"`, additionally include C++ frames
+            `"python"`, include Python, TorchScript, and inductor frames in tracebacks.
+            `"all"`, additionally include C++ frames.
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        clear_history (bool, optional): Clear history when enabling, defaults to False.
     """
     torch._C._xpu_recordMemoryHistory(
         enabled, context, stacks, max_entries, clear_history

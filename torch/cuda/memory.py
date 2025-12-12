@@ -937,6 +937,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        clear_history (bool, optional): Clear history when enabling, defaults to False.
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
@@ -1063,6 +1064,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
     s = _C._cuda_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+    # pyrefly: ignore [bad-return]
     return s
 
 
