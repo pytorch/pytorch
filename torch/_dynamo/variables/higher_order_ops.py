@@ -5013,6 +5013,70 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
+    def get_fn_id(self, fn_vt):
+        if isinstance(fn_vt, UserFunctionVariable):
+            fn_id = id(fn_vt.get_function())
+        else:
+            assert isinstance(fn_vt, UnspecializedNNModuleVariable), type(fn_vt)
+            fn_id = id(fn_vt.value.forward.__func__)
+        return fn_id
+
+    def save_subgraph_output_types_assuming_pure(
+        self, tx, fn_vt, invoke_subgraph_cache, body_r
+    ):
+        out_type = self.validate_output_requirements_assuming_pure(tx, body_r)
+
+        fn_id = self.get_fn_id(fn_vt)
+
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_dynamo_installed_submodule_out_type(
+                fn_id, out_type
+            )
+
+    def reuse_cached_subgraph_assuming_pure(
+        self, tx, submodule_name, invoke_subgraph_cache, fn_id, args, kwargs
+    ):
+        mod = tx.output.nn_modules[submodule_name]
+        flat_example_value = self.get_fake_outputs_for_subgraph_assuming_pure(tx, mod)
+
+        subgraph_args = self.get_inputs_for_subgraph_assuming_pure(tx, args)
+        proxy_tensor_args = [x.as_proxy() for x in subgraph_args]
+        body_node = make_attr(tx, submodule_name)
+        p_args = (
+            body_node,
+            submodule_name,
+            *proxy_tensor_args,
+        )
+
+        from .builder import wrap_fx_proxy
+
+        # Store the invocation as a call
+        # Add markers for easy debugging
+        with torch.fx.traceback.preserve_node_meta():
+            with torch.fx.traceback.annotate(
+                {"cache_hit_with_is_pure": submodule_name}
+            ):
+                flat_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch._higher_order_ops.invoke_subgraph,
+                        args=p_args,
+                        kwargs={},
+                    ),
+                    example_value=flat_example_value,
+                )
+
+        # For is_pure, we will have to assume that flat_variable is same as body_r.
+        out_type = invoke_subgraph_cache.get_dynamo_installed_submodule_out_type(fn_id)
+        assert out_type is not None
+        if out_type == PureOutputType.TENSOR:
+            return flat_variable.items[0]
+        elif out_type == PureOutputType.TUPLE_OF_TENSORS:
+            return flat_variable
+        else:
+            raise NotImplementedError(f"Unknown output type {out_type}")
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -5032,12 +5096,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         if is_pure:
             set_subgraph_inputs = "flatten_automatic"
 
-        if isinstance(fn_vt, UserFunctionVariable):
-            fn_id = id(fn_vt.get_function())
-        else:
-            assert isinstance(fn_vt, UnspecializedNNModuleVariable)
-            fn_id = id(fn_vt.value.forward.__func__)
+        fn_id = self.get_fn_id(fn_vt)
+
         previously_installed_submodules = []
+
         if is_pure and invoke_subgraph_cache:
             """
             Remaining items
@@ -5052,50 +5114,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
             if previously_installed_submodules:
                 submodule_name = previously_installed_submodules[0]
-                mod = tx.output.nn_modules[submodule_name]
-                flat_example_value = self.get_fake_outputs_for_subgraph_assuming_pure(
-                    tx, mod
-                )
-
-                subgraph_args = self.get_inputs_for_subgraph_assuming_pure(tx, args)
-                proxy_tensor_args = [x.as_proxy() for x in subgraph_args]
-                body_node = make_attr(tx, submodule_name)
-                p_args = (
-                    body_node,
+                return self.reuse_cached_subgraph_assuming_pure(
+                    tx,
                     submodule_name,
-                    *proxy_tensor_args,
+                    invoke_subgraph_cache,
+                    fn_id,
+                    args,
+                    kwargs,
                 )
-
-                from .builder import wrap_fx_proxy
-
-                # Store the invocation as a call
-                # Add markers for easy debugging
-                with torch.fx.traceback.preserve_node_meta():
-                    with torch.fx.traceback.annotate(
-                        {"cache_hit_with_is_pure": submodule_name}
-                    ):
-                        flat_variable = wrap_fx_proxy(
-                            tx=tx,
-                            proxy=tx.output.create_proxy(
-                                "call_function",
-                                torch._higher_order_ops.invoke_subgraph,
-                                args=p_args,
-                                kwargs={},
-                            ),
-                            example_value=flat_example_value,
-                        )
-
-                # For is_pure, we will have to assume that flat_variable is same as body_r.
-                out_type = (
-                    invoke_subgraph_cache.get_dynamo_installed_submodule_out_type(fn_id)
-                )
-                assert out_type is not None
-                if out_type == PureOutputType.TENSOR:
-                    return flat_variable.items[0]
-                elif out_type == PureOutputType.TUPLE_OF_TENSORS:
-                    return flat_variable
-                else:
-                    raise NotImplementedError(f"Unknown output type {out_type}")
 
         # This flattens the kwargs into lifted args
         (
@@ -5126,11 +5152,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
 
         if is_pure:
-            out_type = self.validate_output_requirements_assuming_pure(tx, body_r)
-            if invoke_subgraph_cache:
-                invoke_subgraph_cache.add_dynamo_installed_submodule_out_type(
-                    fn_id, out_type
-                )
+            self.save_subgraph_output_types_assuming_pure(
+                tx, fn_vt, invoke_subgraph_cache, body_r
+            )
 
         p_args = (
             p_args[0],
