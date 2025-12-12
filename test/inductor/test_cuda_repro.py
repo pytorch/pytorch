@@ -40,12 +40,9 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    MI350_ARCH,
     parametrize,
-    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -223,7 +220,6 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
-    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -2301,7 +2297,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
