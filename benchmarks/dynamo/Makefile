@@ -30,9 +30,9 @@ build-deps: clone-deps
 	uv pip install numpy scipy ninja pyyaml six mkl mkl-include setuptools wheel cmake \
 		typing-extensions requests protobuf numba cython scikit-learn librosa
 	(cd ../../../torchvision && uv pip install -e . --no-build-isolation)
-	(cd ../../../torchdata && uv pip install -e .)
+	(cd ../../../torchdata && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchaudio && uv pip install -e . --no-build-isolation)
-	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation)
+	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation --config-settings=--global-option=--package-variant=$(command -v nvcc &>/dev/null && echo cuda || (command -v hipcc &>/dev/null && echo rocm || echo cpu)))
 	(cd ../../../torchrec && uv pip install -e .)
 	(cd ../../../detectron2 && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchbenchmark && python install.py --continue_on_fail $(if $(TORCHBENCH_MODELS),models $(TORCHBENCH_MODELS)))
