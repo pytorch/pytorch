@@ -9,6 +9,7 @@ import itertools
 import logging
 import operator
 import pathlib
+import sys
 import textwrap
 import traceback
 import typing
@@ -182,6 +183,9 @@ class TorchTensor(ir.Tensor):
         ).from_address(tensor.data_ptr())
 
     def tobytes(self) -> bytes:
+        # On big-endian machines, call the super's tobytes() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tobytes()
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
@@ -189,6 +193,9 @@ class TorchTensor(ir.Tensor):
         return bytes(data)
 
     def tofile(self, file) -> None:
+        # On big-endian machines, call the super's tofile() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tofile(file)
         _, data = self._get_cbytes()
         return file.write(data)
 
@@ -262,15 +269,10 @@ def _set_shape_type(
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
-            if complex_to_float:
-                if meta_val.dtype == torch.complex64:
-                    value.dtype = ir.DataType.FLOAT
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
-                elif meta_val.dtype == torch.complex128:
-                    value.dtype = ir.DataType.DOUBLE
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
+            if complex_to_float and meta_val.dtype.is_complex:
+                value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
+                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -1245,12 +1247,19 @@ def _exported_program_to_onnx_program(
                 f"Tensor '{name}' should be a torch.Tensor. Actual type is '{type(torch_tensor)}': {torch_tensor!r}. "
                 "This is unexpected and not yet supported."
             )
+
+        # Turn complex tensors into float tensors when converting to ONNX
+        complex_to_float = lower != "none"
+        if complex_to_float:
+            if torch_tensor.dtype.is_complex:
+                torch_tensor = torch.view_as_real(torch_tensor)
+
         ir_tensor = TorchTensor(torch_tensor, name=name)
         initializer.const_value = ir_tensor
         _set_shape_type(
             initializer,
             torch_tensor,
-            complex_to_float=lower != "none",
+            complex_to_float=complex_to_float,
         )
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs

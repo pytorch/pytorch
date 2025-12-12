@@ -65,10 +65,8 @@ using cusparseDnVecDescr = std::remove_pointer_t<hipsparseDnVecDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpGEMMDescr = std::remove_pointer_t<hipsparseSpGEMMDescr_t>;
-#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 using bsrsv2Info = std::remove_pointer_t<bsrsv2Info_t>;
 using bsrsm2Info = std::remove_pointer_t<bsrsm2Info_t>;
-#endif
 #endif
 
 // NOTE: This is only needed for CUDA 11 and earlier, since CUDA 12 introduced
@@ -97,7 +95,6 @@ class TORCH_CUDA_CPP_API CuSparseMatDescriptor
   }
 };
 
-#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 
 class TORCH_CUDA_CPP_API CuSparseBsrsv2Info
     : public CuSparseDescriptor<bsrsv2Info, &cusparseDestroyBsrsv2Info> {
@@ -119,7 +116,6 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
   }
 };
 
-#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 

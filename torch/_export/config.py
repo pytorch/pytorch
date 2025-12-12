@@ -33,6 +33,9 @@ error_on_lifted_constant_tensors = True
 # being ready to handle auto_functionalized_v2.
 enable_auto_functionalized_v2_for_export = not is_fbcode()
 
+use_legacy_dynamo_graph_capture = True
+
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

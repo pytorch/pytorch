@@ -536,9 +536,14 @@ class StorageWeakRefWrapper:
         if self.extra_ref_check is not None and not self.extra_ref_check():
             return False
 
-        # if extra_ref_check is not None we expect an additional reference
         stor_count = torch._C._storage_Use_Count(self.ref.cdata)
-        return (stor_count - (self.extra_ref_check is not None)) == 0
+        if self.extra_ref_check is not None:
+            # if extra_ref_check is not None we expect two additional references:
+            #  - one from the Python storage object
+            #  - one from the cached Tensor
+            stor_count -= 2
+        assert stor_count >= 0
+        return stor_count == 0
 
     def __repr__(self) -> str:
         if self.ref is None or self.ref.expired():
@@ -758,7 +763,7 @@ LevelList = list  # levels (distance from root of tree)
 
 
 class OutputAliasInfo:
-    pass
+    __slots__ = []
 
 
 class _UnaliasedStorage(OutputAliasInfo):
@@ -1439,7 +1444,15 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
-                return self_loc.get_output_refcount(i) == 2
+                refcount = self_loc.get_output_refcount(i)
+                # pyrefly: ignore
+                if self_loc.cached_tensor_outputs[i]._use_count() > 1:
+                    # c10::Tensor may also holds one reference count
+                    assert refcount >= 3
+                    return refcount == 3
+                else:
+                    assert refcount >= 2
+                    return refcount == 2
 
             check = functools.partial(check_refcount, i=i)
 
@@ -1840,7 +1853,10 @@ def check_memory_pool(
 
     torch._check(
         len(unique_storages) == 0,
-        lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
+        lambda: (
+            f"These storage data ptrs are not allocated in pool {pool_id} but should be: {unique_storages}. "
+            f"This could be a bug in inductor aliasing tracking or in a custom op's meta function. Please file an issue."
+        ),
     )
 
     if len(allocated_not_in_live_storages) != 0:
@@ -1850,9 +1866,20 @@ def check_memory_pool(
             # pyrefly: ignore [bad-argument-type]
             formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
         formatted_s = "\n".join(formatted)
+
+        history_hint = ""
+        if not config.triton.cudagraph_trees_history_recording:
+            history_hint = "- Set torch._inductor.config.triton.cudagraph_trees_history_recording = True for allocation origins\n"
+
+        dangling_addrs = OrderedSet(allocated_not_in_live_storages.keys())
         msg = (
-            f"These live storage data ptrs are in the cudagraph pool but not "
-            f"accounted for as an output of cudagraph trees: \n\n{formatted_s}"
+            f"Detected {len(allocated_not_in_live_storages)} tensor(s) in the cudagraph pool not tracked as outputs. "
+            f"All live allocations must be tracked for correctness.\n"
+            f"Debugging:\n"
+            f"{history_hint}"
+            f"- Search gc.get_objects() for tensors with data_ptr() in {dangling_addrs}\n"
+            f"- Use refcycle to find what is preventing cleanup\n"
+            f"Allocations:\n{formatted_s}"
         )
         raise RuntimeError(msg)
 

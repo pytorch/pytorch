@@ -502,8 +502,8 @@ In Nightly builds we have following configuration:
 * XPU wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton-xpu/
 
 However for release we have following :
-* Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
 * Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+* ROCm wheel builds, depend on : https://download.pytorch.org/whl/test/triton-rocm/ for test and https://download.pytorch.org/whl/triton-rocm/ for release
+* XPU wheel builds, depend on : https://download.pytorch.org/whl/test/triton-xpu/ for test and https://download.pytorch.org/whl/triton-xpu/ for release
 
 Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .

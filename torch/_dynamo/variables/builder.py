@@ -58,6 +58,7 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -231,20 +232,20 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    ConstantLikeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
+    IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
     NumpyDTypeVariable,
-    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
@@ -256,7 +257,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
-from .script_object import TorchScriptObjectVariable
+from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
@@ -359,6 +360,13 @@ class GraphArg:
     # stash a strong reference too.
     example_strong_ref: Optional[torch.Tensor] = None
 
+    def __setattr__(self, name, value):
+        # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
+        # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
+        # GraphArg creation can be traced, and with replay_side_effects=False,
+        # normal STORE_ATTR bytecode only records mutations without applying them.
+        object.__setattr__(self, name, value)
+
     @property
     def example(self):
         if isinstance(self._example, TensorWeakRef):
@@ -381,7 +389,7 @@ class GraphArg:
         self.example_strong_ref = None
 
     def __eq__(self, other):
-        return self.source.name() == other.source.name()
+        return self.source.name == other.source.name
 
 
 class BackwardStateGraphArg(GraphArg):
@@ -436,7 +444,7 @@ class VariableBuilder:
         super().__init__()
         self.tx = tx
         self.source = source
-        self.name = source.name()
+        self.name = source.name
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -556,7 +564,7 @@ class VariableBuilder:
     def wrap_regex_pattern(self, value: re.Pattern):
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
-        return RegexPatternVariable(value)
+        return ConstantLikeVariable(value)
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -864,6 +872,12 @@ class VariableBuilder:
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
+        elif callable(value) and any(
+            value is fn for fn in torch._dynamo.config.ignore_logging_functions
+        ):
+            # Treat ignored functions as full no-ops
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return IgnoredFunctionVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
@@ -903,7 +917,11 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+            # Preserve cache_hash for SAC context_fn caching
+            original_cache_hash = getattr(value, "cache_hash", None)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original_cache_hash=original_cache_hash
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -943,7 +961,7 @@ class VariableBuilder:
                 install_guard(dt_source.make_guard(GuardBuilder.ID_MATCH))
             else:
                 self.install_guards(GuardBuilder.ID_MATCH)
-            return NumpyTypeInfoVariable(value, source=self.source)
+            return ConstantLikeVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
@@ -1415,6 +1433,12 @@ class VariableBuilder:
                 # ID_MATCH even if its a global variable.
                 self.install_guards(GuardBuilder.CLASS_MATCH)
 
+            if is_opaque_type(value):
+                return OpaqueObjectClassVariable(
+                    value,
+                    source=self.source,
+                )
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1445,27 +1469,43 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            # This exists to allow a smoother transition.
-            # The implications are:
-            # The script objects won't be tracked as proxies.
-            # Methods on these objects won't show up in the graph.
-            # The original script object might be mutated.
-            if not hasattr(value, "__obj_flatten__"):
-                return self.wrap_user_defined(value)
+            if is_opaque_type(type(value)):
+                # Check if this is a value-type opaque object (registered as both opaque type and constant)
+                if is_opaque_value_type(type(value)):
+                    # Value-type: guard on equality (will use __eq__)
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return TorchScriptObjectVariable.create(
+                        value,
+                        value,
+                        source=self.source,
+                    )
+                else:
+                    # Reference-type: guard only on type/identity
+                    self.install_guards(GuardBuilder.TYPE_MATCH)
 
-            # Install the guards on the fully qualified name of the script object
-            LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, ScriptObjectQualifiedNameSource(self.source))(
-                    value._type().qualified_name()  # type: ignore[attr-defined]
+            elif not hasattr(value, "__obj_flatten__"):
+                # This exists to allow a smoother transition.
+                # The implications are:
+                # The script objects won't be tracked as proxies.
+                # Methods on these objects won't show up in the graph.
+                # The original script object might be mutated.
+                return self.wrap_user_defined(value)
+            else:
+                # Install the guards on the fully qualified name of the script object
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(
+                        self.tx, ScriptObjectQualifiedNameSource(self.source)
+                    )(
+                        value._type().qualified_name()  # type: ignore[attr-defined]
+                    )
                 )
-            )
-            # Install the guards on the content of the script object by setting the source
-            # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
-            LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
-                    value.__obj_flatten__()
+                # Install the guards on the content of the script object by setting the source
+                # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                        value.__obj_flatten__()
+                    )
                 )
-            )
 
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
@@ -1632,7 +1672,7 @@ class VariableBuilder:
             elif value.dynamism.type == _DimHintType.DYNAMIC:
                 log.debug(
                     "%s marked %s via IntWrapper",
-                    self.source.name(),
+                    self.source.name,
                     DimDynamic.DYNAMIC,
                 )
                 return self.wrap_symint(
@@ -1645,7 +1685,7 @@ class VariableBuilder:
             elif value.dynamism.type == _DimHintType.AUTO:
                 log.debug(
                     "%s marked %s via IntWrapper",
-                    self.source.name(),
+                    self.source.name,
                     DimDynamic.DYNAMIC,
                 )
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
@@ -1686,7 +1726,7 @@ class VariableBuilder:
         if (
             istype(value, tuple)
             and all(ConstantVariable.is_literal(item) for item in value)
-            and self.source.guard_source().is_unspecialized_nn_module()
+            and self.source.guard_source.is_unspecialized_nn_module()
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
@@ -1818,7 +1858,7 @@ class VariableBuilder:
         from ..decorators import mark_static_address
 
         static_inputs_log.debug(
-            "Marking static input %s, id: %s)", self.source.name(), id(value)
+            "Marking static input %s, id: %s)", self.source.name, id(value)
         )
         mark_static_address(value, guard=guard)
 
@@ -1990,12 +2030,12 @@ class VariableBuilder:
     def wrap_literal(self, value):
         if type(value) is int:
             # allowlist has higher precedence over specialization control.
-            if is_dynamic_source(self.source.name()):
-                log.debug("%s marked dynamic via source whitelist", self.source.name())
+            if is_dynamic_source(self.source.name):
+                log.debug("%s marked dynamic via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
 
-            if is_unbacked_source(self.source.name()):
-                log.debug("%s marked unbacked via source whitelist", self.source.name())
+            if is_unbacked_source(self.source.name):
+                log.debug("%s marked unbacked via source whitelist", self.source.name)
                 return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
 
             if not config.specialize_int:
@@ -2004,8 +2044,8 @@ class VariableBuilder:
                 if is_int_specialization_case(value, self.source):
                     recompile_hint = None
                     if (
-                        self.source.guard_source().is_unspecialized_builtin_nn_module()
-                        or self.source.guard_source().is_unspecialized_nn_module()
+                        self.source.guard_source.is_unspecialized_builtin_nn_module()
+                        or self.source.guard_source.is_unspecialized_nn_module()
                     ):
                         # This means that it is an integer from a NN module.
                         # Dynamo considers nn module int attributes to be static
@@ -2021,9 +2061,9 @@ class VariableBuilder:
 
                     process_automatic_dynamic(
                         self.tx,
-                        self.source.name(),
+                        self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
-                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                        is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
                     self.install_guards(
                         functools.partial(
@@ -2065,7 +2105,7 @@ class VariableBuilder:
                 isinstance(value, torch.nn.Parameter)
                 # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
                 # compatible with previous behavior.
-                or (source and source.guard_source().is_unspecialized_nn_module())
+                or (source and source.guard_source.is_unspecialized_nn_module())
             )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
@@ -2088,8 +2128,8 @@ class VariableBuilder:
         )
 
         if should_install_free_tensor or (
-            (source.guard_source().is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source().is_fsdp_module()
+            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+            and not source.guard_source.is_fsdp_module()
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2427,20 +2467,20 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
 
-            name = self.source.name()
+            name = self.source.name
 
             frame_state_entry = process_automatic_dynamic(
                 self.tx,
                 name,
                 FrameStateSizeEntry.make_scalar(value),
-                is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
             )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            normalized_source_name = normalize_source_name(self.source.name())
+            normalized_source_name = normalize_source_name(self.source.name)
             base_source = self.source
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
@@ -2526,9 +2566,9 @@ class VariableBuilder:
 
         frame_state_entry = process_automatic_dynamic(
             self.tx,
-            self.source.name(),
+            self.source.name,
             FrameStateSizeEntry.make_scalar(value),
-            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+            is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
         )
 
         # NB: we specialize on nan input, because our guard modeling in
@@ -2690,9 +2730,9 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
             fake_tensor_value = None
-            if isinstance(unspec_var, ConstantVariable):
+            if unspec_var.is_python_constant():
                 # TODO: when can this happen?
-                example_value = unspec_var.value
+                example_value = unspec_var.as_python_constant()
             else:
                 example_value = unspec_var.proxy.node.meta["example_value"]
             assert is_fake(example_value)
@@ -3373,7 +3413,7 @@ def _automatic_dynamic(
             hints=[],
         )
 
-    name = source.name()
+    name = source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -3496,7 +3536,7 @@ def _automatic_dynamic(
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
 
-        normalized_source_name = normalize_source_name(source.name())
+        normalized_source_name = normalize_source_name(source.name)
         base_source = source
         if isinstance(base_source, ChainedSource):
             base_source = base_source.get_base()
@@ -3657,7 +3697,7 @@ def wrap_to_fake_tensor_and_record(
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
-            source.name(),
+            source.name,
             tuple(e.shape),
             symbolic_context,
             type(e),
@@ -3807,7 +3847,7 @@ class SourcelessBuilder:
         elif value is functools.wraps:
             return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
-            return RegexPatternVariable(value)
+            return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
         elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):

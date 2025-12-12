@@ -251,7 +251,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, skip_logging=True
+                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
@@ -766,26 +766,34 @@ class _TorchDynamoContext:
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
-                result = DynamoCache.load(fn)
+                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
                     try:
                         self._package.initialize(
-                            fn, result.dynamo, ignore_inlined_sources=False
+                            fn_key, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
 
         fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if torch._inductor.config.force_disable_caches:
+                raise RuntimeError(
+                    "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
+                )
 
             if not self.fullgraph:
                 raise RuntimeError(
@@ -796,6 +804,7 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
+
             return aot_compile_fullgraph(
                 fn,
                 example_inputs,
@@ -1316,8 +1325,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1707,13 +1716,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 
