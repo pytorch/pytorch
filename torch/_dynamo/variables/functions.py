@@ -2563,12 +2563,9 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
+            # TODO(guilhermeleobas): track tb as well
             tb = None
-            items = [
-                VariableTracker.build(tx, typ),
-                exn,
-                VariableTracker.build(tx, tb),
-            ]
+            items = [VariableTracker.build(tx, typ), exn, ConstantVariable.create(tb)]
         else:
             items = [
                 variables.ConstantVariable(None),
