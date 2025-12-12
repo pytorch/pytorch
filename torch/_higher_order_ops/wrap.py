@@ -226,7 +226,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("tag_activation_checkpoint", cacheable=False)
+        super().__init__("tag_activation_checkpoint", cacheable=True)
 
     @staticmethod
     def divide_kwargs(kwargs):
