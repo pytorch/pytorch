@@ -76,22 +76,33 @@ install_ubuntu() {
       ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
       ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
 
-      # Write environment to file that build.sh can source
+      # Write environment to file that can be sourced by CI scripts and users
       cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
 export ROCM_PATH="${ROCM_HOME}"
 export ROCM_HOME="${ROCM_HOME}"
 export ROCM_SOURCE_DIR="${ROCM_HOME}"
+export ROCM_BIN="${ROCM_BIN}"
+export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
 export PATH="${ROCM_BIN}:\${PATH}"
 export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+# Device library paths
 export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+# theRock system dependencies
+export ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS_INCLUDE}"
 export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
 export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
 export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
+export MAGMA_HOME="${ROCM_HOME}/magma"
 # Disable FBGEMM_GENAI for theRock nightly (not yet supported)
 export USE_FBGEMM_GENAI=0
 ROCM_ENV
+
+      # Append to bash.bashrc so interactive shells get the env vars
+      echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
       exit 0
@@ -182,6 +193,24 @@ EOF
     fi
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
+
+    # Write environment to file that can be sourced by CI scripts and users
+    cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
+export ROCM_PATH=/opt/rocm
+export ROCM_HOME=/opt/rocm
+export ROCM_SOURCE_DIR=/opt/rocm
+export ROCM_BIN=/opt/rocm/bin
+export ROCM_CMAKE=/opt/rocm
+export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
+# Device library paths
+export ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export MAGMA_HOME=/opt/rocm/magma
+ROCM_ENV
+
+    # Append to bash.bashrc so interactive shells get the env vars
+    echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
     # Cleanup
     apt-get autoclean && apt-get clean
