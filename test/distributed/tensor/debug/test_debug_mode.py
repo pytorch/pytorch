@@ -555,7 +555,6 @@ class TestDTensorDebugMode(TestCase):
       aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
       aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
-  [record function] backward._backward_impl (dynamo_timed)
     aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
     aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
     aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
