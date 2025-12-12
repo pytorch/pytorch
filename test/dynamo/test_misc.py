@@ -5912,21 +5912,58 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(z, 61)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
-    def test_foreach_addcmul_tensor_scalar(self):
+    def test_foreach_tensor_scalar(self):
         # Test that foreach ops with tensor scalar values can be traced fullgraph
         # when capture_scalar_outputs is enabled. The scalar's .item() creates an
         # unbacked symbol that should be properly ignored since it only affects
         # tensor values, not shapes.
-        def fn(a, b, c, val):
-            return torch._foreach_addcmul([a], [b], [c], value=val.item())
-
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
         c = torch.randn(4, 4)
         val = torch.tensor(0.5, dtype=torch.float64)
 
-        expected = fn(a, b, c, val)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(a, b, c, val)
+        # Test _foreach_addcmul with value arg
+        def fn_addcmul(a, b, c, val):
+            return torch._foreach_addcmul([a], [b], [c], value=val.item())
+
+        expected = fn_addcmul(a, b, c, val)
+        actual = torch.compile(fn_addcmul, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_addcdiv with value arg
+        def fn_addcdiv(a, b, c, val):
+            return torch._foreach_addcdiv([a], [b], [c], value=val.item())
+
+        expected = fn_addcdiv(a, b, c, val)
+        actual = torch.compile(fn_addcdiv, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_add with scalar arg
+        def fn_add(a, val):
+            return torch._foreach_add([a], val.item())
+
+        expected = fn_add(a, val)
+        actual = torch.compile(fn_add, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_mul with scalar arg
+        def fn_mul(a, val):
+            return torch._foreach_mul([a], val.item())
+
+        expected = fn_mul(a, val)
+        actual = torch.compile(fn_mul, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_pow with scalar exponent
+        def fn_pow(a, val):
+            return torch._foreach_pow([a.abs()], val.item())
+
+        expected = fn_pow(a, val)
+        actual = torch.compile(fn_pow, backend="eager", fullgraph=True)(a, val)
         self.assertEqual(expected, actual)
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
