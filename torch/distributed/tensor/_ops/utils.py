@@ -540,6 +540,38 @@ def _expand_single_dim_strategy_to_mesh(
                 )
         return OpStrategy(all_strategies)
 
+    def expanded_foreach_strategy(
+        op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+    ) -> StrategyType:
+        src_tuple_strategy_ids = []
+        src_tuple_strategies = []
+        for i, obj in enumerate(op_schema.args_schema):
+            if isinstance(obj, OpStrategy):
+                raise NotImplementedError("Didn't support hybrid foreach (List, tensor) ops yet")
+            elif isinstance(obj, TupleStrategy):
+                src_tuple_strategy_ids.append(i)
+                src_tuple_strategies.append(obj)
+        assert len(src_tuple_strategy_ids) > 0, "Must have at least one tuple input to a foreach op"
+        num_tensorlist_inputs = len(src_tuple_strategies)
+        tensorlist_len = len(src_tuple_strategies[0].children)
+        for tensorlist_i in range(tensorlist_len):
+            input_strategies = (src_tuple_strategies[arg_i] for arg_i in range(num_tensorlist_inputs))
+            # TODO: modify the args_schema here to swap lists of tensormeta with just the current tensorlist_i tensormeta
+            output_strategy = expanded_strategy(op, args_schema, kwargs_schema)
+            # TODO create one OpStrategy here and append it to a list for the final TupleStrategy
+
+        # TODO: create one TupleStrategy whose 'children' are the OpStrategies generated in the above loop
+
+
+    # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
+    # Also, i'm guessing that i'll need more info from the registration callsite
+    # about which inputs are expected to be lists vs tensors. But maybe I can just infer it all from the runtime
+    # inputs?
+    if "foreach" in str(op_schema.op):
+        return expanded_foreach_strategy
+
+
+
     return expanded_strategy
 
 

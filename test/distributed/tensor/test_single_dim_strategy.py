@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
-from itertools import permutations
-from itertools import chain
+from itertools import chain, permutations
 
 import torch
 import torch.distributed as dist
@@ -16,6 +15,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
+from torch.distributed.tensor._ops._pointwise_ops import single_mesh_dim_pointwise_strategy
 from torch.distributed.tensor._ops.utils import (
     _args_schema_with_tensor_meta,
     _expand_single_dim_strategy_to_mesh,
@@ -80,6 +80,78 @@ class TestExpandPlaceholder(TestCase):
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
+
+    def test_expand_foreach_add_to_3d_mesh(self):
+        mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
+
+        def _expand_foreach_add_list(
+            inputs_a: list[torch.Tensor],
+            inputs_b: list[torch.Tensor],
+            placements_a: list[tuple[Placement, ...]],
+            placements_b: list[tuple[Placement, ...]],
+        ) -> TupleStrategy:
+            specs_a = (
+                DTensorSpec(mesh, placement, TensorMeta(t.shape, t.stride(), t.dtype))
+                for placement, t in zip(placements_a, inputs_a)
+            )
+            specs_b = (
+                DTensorSpec(mesh, placement, TensorMeta(t.shape, t.stride(), t.dtype))
+                for placement, t in zip(placements_b, inputs_b)
+            )
+            op_schema = OpSchema(
+                op=torch.ops.aten._foreach_add.List,
+                args_schema=(
+                    TupleStrategy(
+                        tuple(OpStrategy([OpSpec(spec)]) for spec in specs_a)
+                    ),
+                    TupleStrategy(
+                        tuple(OpStrategy([OpSpec(spec)]) for spec in specs_b)
+                    ),
+                ),
+                kwargs_schema={},
+            )
+            expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                mesh, op_schema, single_mesh_dim_pointwise_strategy
+            )
+            args_schema, kwargs_schema = _args_schema_with_tensor_meta(
+                op_schema.args_schema, op_schema.kwargs_schema
+            )
+            strategy = expanded_strategy_fn(
+                torch.ops.aten._foreach_add.List, args_schema, kwargs_schema
+            )
+            assert isinstance(strategy, TupleStrategy)
+            return strategy
+
+        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
+        # (S0, S1, R, Psum, Pavg) ** 3 = 125
+        expected_num_strategies = (125, 125)
+        # Test Replicate + Shard gives Shard
+        inputs_a = [torch.empty((8, 8, 8))] * 2
+        placements_a = [
+            (Replicate(), Replicate(), Shard(1)),
+            (Partial("sum"), Partial("sum"), Partial("avg")),
+        ]
+        inputs_b = [torch.empty((8, 8, 8))] * 2
+        placements_b = [
+            (Shard(0), Replicate(), Replicate()),
+            (Replicate(), Partial("sum"), Partial("sum")),
+        ]
+        expected_output_placements = [
+            (Shard(0), Replicate(), Shard(1)),
+            (Replicate(), Partial("sum"), Replicate()),
+        ]
+        tuple_strategy = _expand_foreach_add_list(
+            inputs_a, inputs_b, placements_a, placements_b
+        )
+        self.assertEqual(len(tuple_strategy.children), 2)
+        for child_i, child in enumerate(tuple_strategy.children):
+            assert isinstance(child, OpStrategy)
+            self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
+            min_cost_strategy = _select_min_cost_strategy(child)
+            self.assertEqual(
+                min_cost_strategy.output_spec.placements,
+                expected_output_placements[child_i],
+            )
 
     def test_expand_cat_strategy_to_3d_mesh(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
