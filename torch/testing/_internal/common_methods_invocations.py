@@ -18118,6 +18118,17 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_promotes_int_to_float', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                     )),
+
+    OpInfo('linalg.qr_piv',
+           op=torch.linalg.qr_piv,
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+           ),
+
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
