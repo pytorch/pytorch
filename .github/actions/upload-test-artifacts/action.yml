@@ -45,16 +45,14 @@ runs:
                     if f.is_file():
                         z.write(f, os.path.relpath(f, d))
         '
-        tmp_venv="$RUNNER_TEMP/upload-artifacts-venv"
-        uv venv -p 3.12 "$tmp_venv"
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
-          "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+          uv run --no-project python -c "$ZIP_CMD" \
             test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
         fi
 

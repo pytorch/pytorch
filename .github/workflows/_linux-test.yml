@@ -212,10 +212,7 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          tmp_venv="$RUNNER_TEMP/monitor-script-venv"
-          uv venv -p 3.12 "$tmp_venv"
-          uv pip install --python "$tmp_venv/bin/python" psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
-          "$tmp_venv/bin/python" -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          uv run --no-project --with psutil==5.9.8 --with dataclasses_json==0.6.7 --with nvidia-ml-py==11.525.84 python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts

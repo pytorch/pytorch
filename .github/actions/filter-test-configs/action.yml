@@ -73,12 +73,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          tmp_venv="$RUNNER_TEMP/filter-test-configs-venv"
-          uv venv -p 3.12 "$tmp_venv"
-          # PyYAML 6.0 doesn't work with MacOS x86 anymore
-          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
-          uv pip install --python "$tmp_venv/bin/python" requests==2.27.1 pyyaml==6.0.2
-          echo "FILTER_VENV=$tmp_venv" >> "$GITHUB_ENV"
+          # Pre-fetch dependencies to cache them for later uv run calls
+          uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python -c "import requests, yaml; print('Dependencies ready')"
 
     - name: Parse ref
       id: parse-ref
@@ -88,7 +84,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        "$FILTER_VENV/bin/python" "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
@@ -141,7 +137,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        "$FILTER_VENV/bin/python" "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
