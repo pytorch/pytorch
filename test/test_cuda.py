@@ -6460,7 +6460,9 @@ class TestCudaOptims(TestCase):
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
 
-@unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green context not available, skipping tests")
+@unittest.skipIf(
+    not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green context not available, skipping tests"
+)
 class TestGreenContext(TestCase):
     def test_greencontext_restores_stream(self):
         # need to start on a side stream as we are comparing pointers and want to avoid
