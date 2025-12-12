@@ -1261,6 +1261,11 @@ class TestTiling(TestCase):
         When we have an access pattern like weights[indices[i]], the weight load
         uses an indirect index and should NOT be counted as coalesced since the
         access pattern is effectively random.
+
+        For w[idx] where idx is (4096,) and w is (1024, 256):
+        - Read of idx: coalesced (simple linear access)
+        - Read of w: uncoalesced (uses indirect index)
+        - Write to output: coalesced (contiguous)
         """
         from torch._inductor import tiling_utils
         from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -1271,15 +1276,28 @@ class TestTiling(TestCase):
             coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
             self.assertIsNotNone(coalesce_analysis)
 
-            # Check that any expression with INDIRECT symbols is in uncoalesced_addrs
-            found_indirect_uncoalesced = False
-            for expr in coalesce_analysis.uncoalesced_addrs:
-                if any(symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols):
-                    found_indirect_uncoalesced = True
+            # Should have exactly 1 uncoalesced access (the indirect weight read)
+            self.assertEqual(
+                len(coalesce_analysis.uncoalesced_addrs),
+                1,
+                f"Expected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+            )
 
-            self.assertTrue(
-                found_indirect_uncoalesced,
-                "Expected indirect accesses to be in uncoalesced_addrs",
+            # The uncoalesced access should have an INDIRECT symbol
+            for expr in coalesce_analysis.uncoalesced_addrs:
+                has_indirect = any(
+                    symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols
+                )
+                self.assertTrue(
+                    has_indirect,
+                    f"Expected uncoalesced expr {expr} to have INDIRECT symbol",
+                )
+
+            # Should have coalesced accesses (idx read + output write)
+            self.assertGreater(
+                len(coalesce_analysis.coalesced_by_var),
+                0,
+                "Expected at least one coalesced variable",
             )
 
             # Verify no INDIRECT symbols ended up as coalesced vars

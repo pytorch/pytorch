@@ -232,7 +232,7 @@ def find_indirect_broadcast_vars(
             continue
 
         index_expr = body.indexing_exprs[index_name]
-        expr_iter_vars = index_expr.free_symbols & set(iter_vars)
+        expr_iter_vars = index_expr.free_symbols & OrderedSet(iter_vars)
         indirect_index_vars |= expr_iter_vars
         loop_tiling_log.info(
             "Indirect var from index '%s' (%s) depends on vars: %s",
@@ -778,7 +778,6 @@ class CoalesceVarAnalysis:
     suggested_split: Optional[VarTiling] = None
 
 
-
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> Optional[CoalesceVarAnalysis]:
@@ -857,8 +856,8 @@ def analyze_memory_coalescing(
     if indirect_broadcast_vars:
         # The beneficial split is on the vars that indirect accesses depend on
         # (i.e., all iter vars except the broadcast vars)
-        all_iter_vars = set(norm_read_writes.index_vars)
-        indirect_index_vars = all_iter_vars - set(indirect_broadcast_vars)
+        all_iter_vars = OrderedSet(norm_read_writes.index_vars)
+        indirect_index_vars = all_iter_vars - OrderedSet(indirect_broadcast_vars)
 
         if indirect_index_vars:
             # Calculate a score for splitting on indirect index vars
@@ -874,7 +873,9 @@ def analyze_memory_coalescing(
             # Score = broadcast_size * num_indices * bytes_per_index
             # We use the full range of the split var as an approximation of num_indices
             for split_var in indirect_index_vars:
-                split_var_size = get_hint(var_ranges[split_var]) if split_var in var_ranges else 1
+                split_var_size = (
+                    get_hint(var_ranges[split_var]) if split_var in var_ranges else 1
+                )
                 # Redundant loads avoided = (broadcast_size - 1) * num_indices * 8 bytes
                 # We approximate this conservatively
                 indirect_score = (broadcast_size - 1) * split_var_size * 8
@@ -888,7 +889,6 @@ def analyze_memory_coalescing(
                     broadcast_size,
                     split_var_size,
                 )
-
 
     if not uncoalesced_addrs and not coalesced_by_var:
         return CoalesceVarAnalysis(

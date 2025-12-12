@@ -1829,7 +1829,7 @@ class SIMDScheduling(BaseScheduling):
                             broadcast_coalesced_score,
                         )
 
-            if should_swap:
+            if should_swap and isinstance(nodes[0], scheduler.SchedulerNode):
                 # Get the number of pointwise dimensions
                 pw_ranges, _ = nodes[0].get_ranges()
                 if len(pw_ranges) == 2:
