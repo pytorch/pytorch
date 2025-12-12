@@ -1590,6 +1590,8 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # but gcc doesn't like having /usr/include passed explicitly
         if cuda_home_include != '/usr/include':
             paths.append(cuda_home_include)
+            # cuda13 should add include/cccl
+            paths.append(_join_cuda_home(['include', 'cccl']))
 
         # Support CUDA_INC_PATH env variable supported by CMake files
         if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
