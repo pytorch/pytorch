@@ -30,6 +30,7 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     get_origin,
     List,
     Optional,
+    Protocol,
     Tuple,
     TypeVar,
     Union,
@@ -47,6 +48,10 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
+
+class HasGetattr(Protocol):
+    def __getattr__(self, key: str) -> Any: ...
 
 
 _P = ParamSpec("_P")
@@ -202,7 +207,7 @@ class SourceLoader:
 loader = SourceLoader()
 
 
-def createResolutionCallbackFromEnv(lookup_base):
+def createResolutionCallbackFromEnv(lookup_base: HasGetattr) -> Callable[[str], Any]:
     """
     Creates a resolution callback that will look up qualified names in an
     environment, starting with `lookup_base` for the base of any qualified
@@ -212,7 +217,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     createResolutionCallbackFrom* functions.
     """
 
-    def lookupInModule(qualified_name, module):
+    def lookupInModule(qualified_name: str, module: Any) -> Any:
         if "." in qualified_name:
             base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
@@ -220,7 +225,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
-    def parseNestedExpr(expr, module) -> tuple[Any, int]:
+    def parseNestedExpr(expr: str, module: Any) -> tuple[Any, int]:
         i = 0
         while i < len(expr) and expr[i] not in (",", "[", "]"):
             i += 1
@@ -250,7 +255,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return base[parts[0]], i + 1
 
-    def parseExpr(expr, module):
+    def parseExpr(expr: str, module: Any) -> Any:
         try:
             value, len_parsed = parseNestedExpr(expr, module)
             if len_parsed != len(expr):
@@ -270,7 +275,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     return lambda expr: parseExpr(expr, lookup_base)
 
 
-def createResolutionCallbackFromFrame(frames_up: int = 0):
+def createResolutionCallbackFromFrame(frames_up: int = 0) -> Callable[[str], Any]:
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -313,7 +318,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     f_globals = frame.f_globals
 
     class env:
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in f_locals:
                 return f_locals[key]
             elif key in f_globals:
@@ -382,7 +387,7 @@ def get_closure(fn):
 # This could be worked around by manually adding it to `global()` dictionary.
 
 
-def createResolutionCallbackFromClosure(fn):
+def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
@@ -392,7 +397,7 @@ def createResolutionCallbackFromClosure(fn):
     class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in closure:
                 return closure[key]
             elif hasattr(typing, key):
@@ -565,7 +570,7 @@ def get_type_hint_captures(fn):
     return annotation_to_type
 
 
-def createResolutionCallbackForClassMethods(cls):
+def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     """
     This looks at all the methods defined in a class and pulls their closed-over
     variables into a dictionary and uses that to resolve variables.
@@ -587,7 +592,7 @@ def createResolutionCallbackForClassMethods(cls):
         captures.update(get_closure(fn))
         captures.update(get_type_hint_captures(fn))
 
-    def lookup_in_class(key):
+    def lookup_in_class(key: str) -> Any:
         if key in captures:
             return captures[key]
         else:
