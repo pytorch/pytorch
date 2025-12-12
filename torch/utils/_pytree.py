@@ -471,6 +471,27 @@ def register_constant(cls: type[Any]) -> None:
         CONSTANT_NODES.add(cls)
 
 
+def deregister_constant(cls: type[Any]) -> None:
+    """Deregisters a type previously registered with :func:`register_constant`.
+
+    This is the inverse of :func:`register_constant`. After calling this function,
+    instances of `cls` will no longer be treated as constant pytree nodes.
+
+    Args:
+        cls: the type to deregister.
+
+    Raises:
+        ValueError: if `cls` was not previously registered with :func:`register_constant`.
+    """
+    with _NODE_REGISTRY_LOCK:
+        if cls not in CONSTANT_NODES:
+            raise ValueError(
+                f"{cls} is not registered as a constant. "
+                "Only types registered with register_constant can be deregistered with deregister_constant."
+            )
+        _deregister_pytree_node(cls)
+
+
 def is_constant_class(cls: type[Any]) -> bool:
     return isinstance(cls, type) and cls in CONSTANT_NODES
 

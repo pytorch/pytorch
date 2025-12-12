@@ -965,6 +965,63 @@ class BlockMask:
         )
         return tensors, context
 
+    def __eq__(self, other: object) -> bool:
+        """Check equality between two BlockMask instances.
+
+        Two BlockMasks are equal if all their tensor attributes are equal
+        (using torch.equal), their seq_lengths and BLOCK_SIZE match,
+        and their mask_mod functions are identical.
+        """
+        if not isinstance(other, BlockMask):
+            return False
+
+        # Compare non-tensor attributes
+        if self.seq_lengths != other.seq_lengths:
+            return False
+        if self.BLOCK_SIZE != other.BLOCK_SIZE:
+            return False
+        if self.mask_mod is not other.mask_mod:
+            return False
+
+        # Compare tensor attributes
+        for attr in self._TENSOR_ATTRS:
+            self_val = getattr(self, attr)
+            other_val = getattr(other, attr)
+            if self_val is None and other_val is None:
+                continue
+            if self_val is None or other_val is None:
+                return False
+            if not torch.equal(self_val, other_val):
+                return False
+
+        return True
+
+    def __hash__(self) -> int:
+        """Compute hash for BlockMask.
+
+        The hash is based on seq_lengths, BLOCK_SIZE, and tensor shapes.
+        Since tensors are mutable and unhashable by content, we use their
+        shapes for hashing. mask_mod is excluded from hash since callables
+        cannot be reliably hashed, but equal BlockMasks will still have
+        equal hashes since they share the same mask_mod identity.
+        """
+        # Hash non-tensor attributes (exclude mask_mod since callables aren't reliably hashable)
+        hash_components: list[Any] = [
+            self.seq_lengths,
+            self.BLOCK_SIZE,
+        ]
+
+        # Include tensor shapes in hash
+        # TODO may need better hash
+        for attr in self._TENSOR_ATTRS:
+            val = getattr(self, attr)
+            if val is not None:
+                hash_components.append((attr, tuple(val.shape)))
+            else:
+                hash_components.append((attr, None))
+
+        return hash(tuple(hash_components))
+
 
 def _broadcast_to_dim(x, dim):
     while x.dim() < dim:
