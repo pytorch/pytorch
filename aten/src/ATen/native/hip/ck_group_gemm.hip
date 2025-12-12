@@ -69,13 +69,11 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const size_t b_element_size = mat_b.element_size();
     const size_t out_element_size = out.element_size();
 
-    // On gfx90a only, Synchronize the stream to ensure all prior GPU ops
+    // Synchronize the stream to ensure all prior GPU ops
     // affecting host memory are done.
-    if (at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
-        hipError_t err = hipStreamSynchronize(c10::hip::getCurrentHIPStream());
-        if (err != hipSuccess) {
-            TORCH_CHECK(false, "CK Group GEMM: HIP stream synchronization error ");
-        }
+    hipError_t err = hipStreamSynchronize(c10::hip::getCurrentHIPStream());
+    if (err != hipSuccess) {
+        TORCH_CHECK(false, "CK Group GEMM: HIP stream synchronization error ");
     }
 
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
