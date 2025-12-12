@@ -44,9 +44,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
-    device_type
-)
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
