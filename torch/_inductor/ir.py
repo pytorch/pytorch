@@ -6,7 +6,6 @@ import functools
 import itertools
 import logging
 import operator
-import os
 import textwrap
 import traceback
 from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
@@ -50,7 +49,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -151,9 +149,6 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-
-autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
-autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -3115,14 +3110,14 @@ class SqueezeView(BaseView):
     @staticmethod
     def squeezer(
         size: Sequence[Expr],
-    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr, ...]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.S.Zero] * length
+            new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -5226,15 +5221,9 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
-        benchmark_configs = {
-            "warmup": autotune_warmup,
-            "rep": autotune_rep,
-        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]
-        return benchmarker.benchmark(
-            algo, args, {"out": out}, device=None, **benchmark_configs
-        )
+            return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
+        return benchmarker.benchmark(algo, args, {"out": out}, device=None)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -7436,6 +7425,8 @@ class IndexPutFallback(ExternKernel):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+        x_device = x.get_device()
+        assert x_device is not None
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -7443,13 +7434,15 @@ class DeviceCopy(ExternKernelOut):
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
+            if V.graph.cpp_wrapper:
+                # Even if x is promoted to be a device constant, we still need to
+                # register device info to construct the correct CppWrapper class later
+                V.graph.add_device_info(device)
+                V.graph.add_device_info(x_device)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
-        x_device = x.get_device()
-        assert x_device is not None
         V.graph.add_device_info(x_device)
-
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
         # Device Copy should keep the same layout as input
@@ -7868,7 +7861,9 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
-                FallbackKernel.find_device(None, x) for x in example_output
+                # pyrefly: ignore [bad-argument-type]
+                FallbackKernel.find_device(None, x)
+                for x in example_output
             )
             # Remove None
             devices = [device for device in device_set if device]
@@ -7882,9 +7877,11 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return False
-        return get_schema_info(self.op_overload).is_mutable()
+        from torch._library.utils import is_impure
+
+        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
+        # The check is done on the op_overload itself
+        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
@@ -8662,17 +8659,28 @@ class InvokeSubgraph(ExternKernel):
         fake_operands = None
         if eager_input_vals := current_node.meta.get("eager_input_vals"):
             # eager_input_vals is (args_values, kwargs_values). We need args for invoke_subgraph
-            fake_operands = eager_input_vals[0][2:]
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # Aruguments eagerly are (token, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 3
+            fake_operands = eager_input_vals[0][offset:]
         else:
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # with_effects args: (token, invoke_subgraph, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 4
+
             # For the partitioned backward graph, we do not have
             # eager_input_vals. Here, we rely on the recorded example values.
-            fx_operands = current_node.args[2:]
+            fx_operands = current_node.args[offset:]
             fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
-        # pyrefly: ignore [annotation-mismatch]
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         operands: list[IRNode] = [cls.realize_input(x) for x in operands]
         new_operands: list[IRNode] = []
 
@@ -8835,9 +8843,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
@@ -8857,6 +8869,7 @@ class Conditional(ExternKernel):
         outputs = [
             MultiOutput(
                 FixedLayout(
+                    # pyrefly: ignore [bad-argument-type]
                     device=output.get_device()
                     if output.get_device() is not None
                     else device,  # type: ignore[arg-type]
