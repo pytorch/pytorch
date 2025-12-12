@@ -51,12 +51,12 @@
 
     NUM_BLOCK_M = tl.cdiv(Q_LEN * G, BLOCK_M)
 
-    off_block_m = tl.program_id(0).to(INDEX_DTYPE) % NUM_BLOCK_M
+    off_block_m = tl.program_id(0).to(INDEX_DTYPE)
 
-    off_z = tl.program_id(0).to(INDEX_DTYPE) // (HKV * NUM_BLOCK_M)
+    off_z = tl.program_id(1).to(INDEX_DTYPE) // HKV
     off_zkv = off_z % ZKV
-    off_hkv = tl.program_id(0).to(INDEX_DTYPE) // NUM_BLOCK_M % HKV
-    off_t = tl.program_id(1).to(INDEX_DTYPE)
+    off_hkv = tl.program_id(1).to(INDEX_DTYPE) % HKV
+    off_t = tl.program_id(2).to(INDEX_DTYPE)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
     k_offset = off_zkv * stride_kz + off_hkv * stride_kh
