@@ -7633,6 +7633,36 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         finally:
             torch._C._dynamo.eval_frame._set_lru_cache(True)
 
+    def test_patch_track_step_called_skipped(self):
+        # Regression test for patch_track_step_called being ignored by dynamo
+        # We need to clear FORCE_SKIP_FILES to test that the function name check
+        # properly ignores patch_track_step_called even when lr_scheduler.py is not
+        # in FORCE_SKIP_FILES
+        import torch._dynamo.trace_rules as trace_rules
+
+        old_force_skip_files = trace_rules.FORCE_SKIP_FILES
+        try:
+            trace_rules.FORCE_SKIP_FILES = set()
+
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def fn(x, optimizer):
+                # Create an LR scheduler which internally calls patch_track_step_called
+                scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+                return x * 2, scheduler
+
+            model = torch.nn.Linear(10, 10)
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            x = torch.randn(10, 10)
+
+            result, _ = fn(x, optimizer)
+            expected = x * 2
+            self.assertEqual(result, expected)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            trace_rules.FORCE_SKIP_FILES = old_force_skip_files
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

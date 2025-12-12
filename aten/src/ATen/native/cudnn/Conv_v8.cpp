@@ -39,8 +39,7 @@ C10_DIAGNOSTIC_POP()
 #include <dlfcn.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1200,8 +1199,8 @@ void raw_cudnn_convolution_forward_out(
   if (output.numel() == 0) {
     return;
   }
-  for (auto it = dilation.begin(); it != dilation.end(); it++) {
-    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
+  for (long it : dilation) {
+    TORCH_CHECK_VALUE(it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(
@@ -1368,7 +1367,6 @@ void raw_cudnn_convolution_add_relu_out(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

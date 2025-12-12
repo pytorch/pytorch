@@ -6,7 +6,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -179,7 +179,7 @@ class _WeakRefInfo:
         st: torch.UntypedStorage,
         device: torch.device,
         reftype: _RefType,
-        callback: Optional[Callable[[Self, weakref.ref], Any]] = None,
+        callback: Callable[[Self, weakref.ref], Any] | None = None,
     ) -> tuple[Self, weakref.ref]:
         """
         Creates a new ``_WeakRefInfo`` instance and a weak reference to a ``torch.UntypedStorage`` object,
@@ -212,7 +212,7 @@ def _get_mem_divisor(units: str) -> int:
         )
 
 
-def _rounding_fn(value: int, divisor: int, precision: int) -> Union[float, int]:
+def _rounding_fn(value: int, divisor: int, precision: int) -> float | int:
     return value if divisor == 1 else round(value / divisor, precision)
 
 
@@ -377,9 +377,9 @@ class MemTracker(TorchDispatchMode):
         self._peak_mem: dict[torch.device, int] = {}
         self._peak_mem_snap: dict[torch.device, dict[str, int]] = {}
         self._param_to_grad_hook_handles = WeakIdKeyDictionary()
-        self._optimizer_hook_handles: Optional[
-            tuple[RemovableHandle, RemovableHandle]
-        ] = None
+        self._optimizer_hook_handles: tuple[RemovableHandle, RemovableHandle] | None = (
+            None
+        )
         # Dictionary to store the ``_WeakRefInfo`` instances corresponding to each tensor's storage.
         self._WINFO = WeakIdKeyDictionary()
         self._mod_tracker = ModTracker()
@@ -389,7 +389,7 @@ class MemTracker(TorchDispatchMode):
         self._in_opt: bool = False
         self._in_ac: bool = False
         # Weak references to the topmost AC module currently active
-        self._ac_mod: Optional[weakref.ref] = None
+        self._ac_mod: weakref.ref | None = None
         self._orig_resize = torch.UntypedStorage.resize_
         self._depth = 0
 
@@ -397,8 +397,8 @@ class MemTracker(TorchDispatchMode):
         self,
         u_type: _UpdateType,
         winfo: _WeakRefInfo,
-        old_mem_consumed: Optional[int] = None,
-        old_reftype: Optional[_RefType] = None,
+        old_mem_consumed: int | None = None,
+        old_reftype: _RefType | None = None,
     ) -> None:
         # Initialize a flag to track if the total memory might drop to zero after updates.
         maybe_zero = False
@@ -784,7 +784,7 @@ class MemTracker(TorchDispatchMode):
             self._optimizer_hook_handles = None
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """
         Track tensors and stateful objects like modules, optimizers etc. that are created outside the MemTracker.
@@ -850,7 +850,7 @@ class MemTracker(TorchDispatchMode):
             tabulate (bool, optional): Whether to display the snapshot in a tabular format. Defaults to False.
         """
 
-        def natural_sort_key(s: str) -> list[Union[int, str]]:
+        def natural_sort_key(s: str) -> list[int | str]:
             return [
                 int(text) if text.isdigit() else text.lower()
                 for text in re.split("([0-9]+)", s)
