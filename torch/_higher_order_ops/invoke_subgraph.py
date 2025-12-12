@@ -85,6 +85,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
         )
 
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
 
     # pyrefly: ignore [bad-override]

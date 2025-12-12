@@ -301,9 +301,15 @@ class PackageError(TorchDynamoException):
 
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, real_stack: Optional[StackSummary] = None, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
-        self.real_stack: StackSummary = torch._guards.TracingContext.extract_stack()
+        self.real_stack: StackSummary = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class ObservedUserStopIteration(ObservedException):
@@ -312,8 +318,10 @@ class ObservedUserStopIteration(ObservedException):
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__("unhandled `raise StopIteration`")
+    def __init__(
+        self, *args: Any, real_stack: Optional[StackSummary] = None, **kwargs: Any
+    ) -> None:
+        super().__init__("unhandled `raise StopIteration`", real_stack=real_stack)
         if len(args) > 0:
             self.value = args[0]
         else:
@@ -377,7 +385,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     return observed_exception_map[exc_type]
 
 
@@ -496,6 +504,11 @@ def format_graph_break_message(
 
   Developer debug context: {context}
 """
+    documentation_link = get_gbid_documentation_link(gb_type)
+
+    if documentation_link:
+        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
     return msg
 
 
@@ -572,11 +585,6 @@ def unimplemented(
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
-
-    documentation_link = get_gbid_documentation_link(gb_type)
-
-    if documentation_link:
-        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)

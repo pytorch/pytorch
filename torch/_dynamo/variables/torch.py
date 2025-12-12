@@ -74,6 +74,7 @@ from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
+    ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
@@ -411,12 +412,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
+        ):
+            return ProfilerRecordFunctionContextVariable.create(
+                func=self.value, record_args=args, record_kwargs=kwargs
+            )
+        elif self.value in (
+            torch.profiler.profile,
+            torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
