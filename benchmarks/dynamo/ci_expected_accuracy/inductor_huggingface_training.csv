@@ -74,10 +74,6 @@ Qwen/Qwen3-0.6B,eager_fail_to_run,0
 
 
 
-RobertaForCausalLM,pass,5
-
-
-
 T5ForConditionalGeneration,pass,5
 
 
@@ -103,10 +99,6 @@ YituTechConvBert,pass,5
 
 
 google/gemma-2-2b,eager_fail_to_run,0
-
-
-
-meta-llama/Llama-3.2-1B,eager_fail_to_run,0
 
 
 

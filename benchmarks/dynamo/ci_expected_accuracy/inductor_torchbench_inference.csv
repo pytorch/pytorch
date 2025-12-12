@@ -262,10 +262,6 @@ torch_multimodal_clip,pass,0
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
-
-
-
 tts_angular,pass,2
 
 
