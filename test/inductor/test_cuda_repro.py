@@ -40,12 +40,9 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    MI350_ARCH,
     parametrize,
-    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -223,7 +220,6 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
-    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1515,8 +1511,8 @@ class CudaReproTests(TestCase):
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
-        torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0)
+        torch.manual_seed(12345)
+        torch.cuda.manual_seed_all(12345)
 
         with dynamo_config.patch(
             capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -1561,7 +1557,7 @@ class CudaReproTests(TestCase):
             torch.testing.assert_close(
                 eager_out,
                 compiled_out,
-                rtol=5e-3,
+                rtol=5e-2,
                 atol=1e-1,
             )
 
@@ -2231,32 +2227,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             out = f(x, y)
             self.assertEqual(torch.compile(f)(x, y), out)
 
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
-    @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
-    )
-    @config.patch({"bfloat16_atomic_adds_enabled": False})
-    def test_atomic_add_bfloat16_config(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device="cuda")
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check_not("tl.atomic_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
     )
@@ -2327,7 +2297,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)

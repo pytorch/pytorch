@@ -1,5 +1,6 @@
 #include "OpenRegHooks.h"
 
+// LITERALINCLUDE START: OPENREG HOOK REGISTER
 namespace c10::openreg {
 
 static bool register_hook_flag [[maybe_unused]] = []() {
@@ -9,3 +10,4 @@ static bool register_hook_flag [[maybe_unused]] = []() {
 }();
 
 } // namespace c10::openreg
+// LITERALINCLUDE END: OPENREG HOOK REGISTER

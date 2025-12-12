@@ -264,13 +264,14 @@ def _run_pre_dispatch_passes(
                 f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
             )
 
-    # Remove noops at the end, which may be generated other passes.
-    pass_execution_and_save(
-        remove_noop_pass,
-        gm,
-        example_inputs,
-        "[Pre grad(predispatch IR)]Apply remove_noop pass",
-    )
+    if "remove_noop" not in remove_passes_list:
+        # Remove noops at the end, which may be generated other passes.
+        pass_execution_and_save(
+            remove_noop_pass,
+            gm,
+            example_inputs,
+            "[Pre grad(predispatch IR)]Apply remove_noop pass",
+        )
     shape_prop(gm)
 
 
@@ -341,6 +342,7 @@ def pre_grad_passes(
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
             config.pre_grad_custom_pass
         )
+
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up

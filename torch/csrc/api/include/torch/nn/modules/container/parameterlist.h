@@ -36,13 +36,13 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   void pretty_print(std::ostream& stream) const override {
     stream << "torch::nn::ParameterList(" << '\n';
     for (const auto& pair : parameters_) {
-      stream << "(" << pair.key() << ")"
-             << ": Parameter containing: [" << pair.value().scalar_type()
-             << " of size " << pair.value().sizes() << "]";
+      stream << '(' << pair.key() << ')' << ": Parameter containing: ["
+             << pair.value().scalar_type() << " of size "
+             << pair.value().sizes() << ']';
       ;
       stream << '\n';
     }
-    stream << ")";
+    stream << ')';
   }
 
   /// push the a given parameter at the end of the list

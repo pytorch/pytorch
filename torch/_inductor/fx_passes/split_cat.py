@@ -776,6 +776,7 @@ class SplitCatSimplifier:
         """
         merged_ranges = []
         cur_range = None
+        # pyrefly: ignore [bad-assignment]
         for input_ in inputs:
             if isinstance(input_, int):
                 if not cur_range:
@@ -869,6 +870,7 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
+                        # pyrefly: ignore [bad-index]
                         user_input[0] : user_input[1]
                         + 1  # type: ignore[index]
                     ]
@@ -994,6 +996,7 @@ class SplitCatSimplifier:
             to_stack, to_stack_meta = [], []
             stack_dim = None
             with graph.inserting_before(user_node):
+                # pyrefly: ignore [bad-assignment]
                 for user_input_new, transform_param in zip(
                     user_inputs_new, transform_params
                 ):
