@@ -58,7 +58,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = None
+    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -67,7 +67,7 @@ class GemmConfig(BaseConfig):
     Gemm configuration used for most backends (CPU, CUDA)
     """
 
-    group_m: int = 8
+    group_m: int = dataclasses.field(kw_only=True, default=8)
 
 
 ConvConfig = BaseConfig
@@ -251,7 +251,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
-            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
+            GemmConfig(
+                BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m=group_m
+            )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
@@ -1176,10 +1178,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_K,
                 num_stages,
                 num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                waves_per_eu,
-                kpack,
+                group_m=group_m,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
             )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
@@ -1278,7 +1280,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        return configs
+        # these cause AMD compile to crash
+        pruned_configs = [
+            c
+            for c in configs
+            if not (
+                getattr(c, "matrix_instr_nonkdim", 0) == 2
+                and getattr(c, "kpack", 0) == 2
+            )
+        ]
+        return pruned_configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1329,6 +1340,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
+            # AMD GPU crashes if group_m = 0
+            if group_m is not None and group_m <= 0:
+                group_m = 8
             if group_m is not None:
                 key += (group_m,)
 
