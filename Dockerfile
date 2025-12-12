@@ -21,14 +21,16 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         python3-pip \
         python3-dev && \
     rm -rf /var/lib/apt/lists/*
+# Remove PEP 668 restriction (safe in containers)
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 RUN /usr/sbin/update-ccache-symlinks
 RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 
 FROM dev-base as python-deps
 COPY requirements.txt requirements-build.txt .
 # Install Python packages to system Python
-RUN pip3 install --break-system-packages --upgrade pip setuptools wheel && \
-    pip3 install --break-system-packages cmake pyyaml numpy ipython -r requirements.txt
+RUN pip3 install --upgrade pip setuptools wheel && \
+    pip3 install cmake pyyaml numpy ipython -r requirements.txt
 
 FROM dev-base as submodule-update
 WORKDIR /opt/pytorch
@@ -43,10 +45,10 @@ ARG TARGETPLATFORM
 
 # INSTALL_CHANNEL whl - release, whl/nightly - nightly, whl/test - test channels
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  pip3 install --break-system-packages --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip3 install --break-system-packages --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
+         "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
+         *)              pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
     esac
-RUN pip3 install --break-system-packages torchelastic
+RUN pip3 install torchelastic
 RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
     echo "Is torch compiled with cuda: ${IS_CUDA}"; \
     if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
