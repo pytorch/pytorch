@@ -226,14 +226,14 @@ struct Block {
         requested_size(0),
         pool(pool),
         ptr(ptr) {
-          registration_counter = ++registration_counter_global;
-	}
+    registration_counter = ++registration_counter_global;
+  }
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
       : device(device), stream(stream), size(size), requested_size(0) {
-        registration_counter = ++registration_counter_global;
-      }
+    registration_counter = ++registration_counter_global;
+  }
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
