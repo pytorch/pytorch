@@ -40,9 +40,7 @@ __device__ void applyOp3(
 // Assume both dense and values are contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void sparseElementwiseKernel(
     Op op,
     TensorInfo<Real, IndexType> dense,
@@ -70,9 +68,7 @@ __global__ void sparseElementwiseKernel(
 // Assume dense is contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void sparseElementwiseKernelScalar(
     Op op,
     TensorInfo<Real, IndexType> dense,
@@ -94,9 +90,7 @@ __global__ void sparseElementwiseKernelScalar(
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void valueSparseUnionKernel(
     OpBoth opBoth,
     OpLeft opLeft,
@@ -141,9 +135,7 @@ __global__ void valueSparseUnionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void indexSparseUnionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,

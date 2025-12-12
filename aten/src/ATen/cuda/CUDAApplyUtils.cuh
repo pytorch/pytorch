@@ -269,9 +269,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
-#endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
                                       IndexType totalElements, const Op op) {
   for (IndexType linearIndex = (blockIdx.x * blockDim.x + threadIdx.x) * step;
@@ -355,9 +353,7 @@ template <typename Op,
           int step,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
-#endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,
