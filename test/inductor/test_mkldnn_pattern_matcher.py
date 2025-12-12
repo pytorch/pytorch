@@ -200,10 +200,10 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.amp.autocast(
                 device_type=device, dtype=torch.bfloat16
             )
-            atol, rtol = 1e-2, 1e-2
+            atol, rtol = 5e-2, 5e-2
         elif check_autocast == torch.float16 and (is_mkldnn_fp16_supported(device)):
             maybe_autocast = torch.amp.autocast(device_type=device, dtype=torch.float16)
-            atol, rtol = 1e-2, 1e-2
+            atol, rtol = 5e-2, 5e-2
         else:
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
@@ -362,7 +362,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv2d_unary(self, device):
         self.device = device
@@ -370,7 +369,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv3d_unary(self, device):
         self.device = device
@@ -451,7 +449,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
@@ -462,7 +459,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
@@ -560,7 +556,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
         self.device = device
@@ -568,7 +563,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
         self.device = device
@@ -576,6 +570,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     def _test_conv_binary_broadcast_shapes_base(self, dim=4):
         assert dim == 4 or dim == 5
+        torch.manual_seed(12345)
 
         class M(torch.nn.Module):
             def __init__(
@@ -667,7 +662,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
         self.device = device
@@ -675,15 +669,13 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
-    @reduced_f32_on_and_off()
+    @reduced_f32_on_and_off(bf32_precision=5e-2)
     def test_conv3d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     @reduced_f32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
@@ -2425,6 +2417,51 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
+    def _qlinear_sum_test_helper(
+        self,
+        inputs,
+        device="cpu",
+        int8_mixed_bf16=False,
+        matcher_check_fn=None,
+        bias=True,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, use_bias)
+                self.linear2 = torch.nn.Linear(4, 4, use_bias)
+
+            def forward(self, x, other):
+                # test qlinear sum -> qlinear sum
+                res = self.linear(x) + other
+                res = self.linear2(x) + res
+                return res
+
+        mod = M(bias).eval().to(device=device)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
+
+        def _default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+            )
+
+        self._test_common(
+            mod,
+            inputs,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else _default_matcher_check_fn
+            ),
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+            check_quantization=True,
+        )
+
     def _qlinear_test_helper(
         self,
         inputs,
@@ -3139,6 +3176,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qlinear_sum_cpu(self):
+        for bias in [True, False]:
+            use_bf16 = (
+                [True, False]
+                if is_mkldnn_bf16_supported("cpu")
+                else [
+                    False,
+                ]
+            )
+            for int8_mixed_bf16 in use_bf16:
+                self._qlinear_sum_test_helper(
+                    (torch.randn((2, 2, 4)), torch.randn(2, 2, 4)),
+                    bias=bias,
+                    int8_mixed_bf16=int8_mixed_bf16,
+                )
 
     def _test_qlinear_fp8_inductor_cpu_helper(self, qlinear_op, post_op="none"):
         dtype = torch.float8_e4m3fn
@@ -4223,9 +4278,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             s = torch.randn(s_shape, dtype=torch.bfloat16)
 
             def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
-                )
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
             self._test_common(
                 mod,

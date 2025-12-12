@@ -138,12 +138,20 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.default_device_old = torch.get_default_device()
+        try:
+            cls.default_device_old = torch.get_default_device()
+        except AttributeError:
+            cls.default_device_old = torch.device("cpu")
+        global_default_ctx = getattr(
+            getattr(torch, "_GLOBAL_DEVICE_CONTEXT", None), "device_context", None
+        )
+        cls._had_global_default_device = global_default_ctx is not None
         super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        torch.set_default_device(cls.default_device_old)
+        if cls._had_global_default_device:
+            torch.set_default_device(cls.default_device_old)
         super().tearDownClass()
 
     def setUp(self):
@@ -789,6 +797,23 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                         torch.ones(2, 2, 2, 2),
                     )
+
+
+class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
+    def test_default_device_restored_after_mode_tests(self):
+        case = TorchFunctionModeTests("test_stack_state_mutation_default_device")
+        TorchFunctionModeTests.setUpClass()
+        try:
+            case.setUp()
+            try:
+                case.test_stack_state_mutation_default_device()
+            finally:
+                case.tearDown()
+        finally:
+            TorchFunctionModeTests.tearDownClass()
+
+        stack = _get_current_function_mode_stack()
+        self.assertFalse(any(isinstance(mode, DeviceContext) for mode in stack))
 
 
 if __name__ == "__main__":

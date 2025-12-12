@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import os
 import re
 import sys
 import unittest
@@ -12,9 +13,18 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_PALLAS
-from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
+from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
+
+
+# Load pallas expected failures from sentinel files
+_pallas_expected_failures_dir = os.path.join(
+    os.path.dirname(__file__), "pallas_expected_failures"
+)
+if os.path.isdir(_pallas_expected_failures_dir):
+    PALLAS_EXPECTED_FAILURES = set(os.listdir(_pallas_expected_failures_dir))
+else:
+    PALLAS_EXPECTED_FAILURES = set()
 
 
 if IS_WINDOWS and IS_CI:
@@ -39,6 +49,17 @@ def make_pallas(cls):
     """Create a test class variant that uses Pallas backend."""
     suffix = "_pallas"
     cls_prefix = "Pallas"
+
+    # Mark tests as expected failures based on sentinel files
+    # Sentinel file format: TestClassName.test_method_name
+    # Must set attribute on the underlying function object in __dict__
+    for name in cls.__dict__:
+        if name.startswith("test_"):
+            fn = cls.__dict__[name]
+            if callable(fn):
+                key = f"{cls.__name__}.{name}"
+                if key in PALLAS_EXPECTED_FAILURES:
+                    fn._expected_failure_pallas = True
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -747,50 +768,91 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_arange_multi_output(self):
+        """Test arange with view and multiple outputs."""
 
-@unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
-class PallasTestsCUDA(PallasTestsMixin, TestCase):
-    DEVICE = "cuda"
+        def fn(x):
+            rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
+            rng2 = torch.arange(10, 18, device=x.device)
+            tmp = x * rng1
+            return tmp, tmp + rng2
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 8, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(len(result), len(expected))
+        for r, e in zip(result, expected):
+            self.assertEqual(r, e)
+
+    def test_dtype_bitcast(self):
+        """Test dtype bitcast (view tensor as different dtype)."""
+
+        def fn(x):
+            # View float32 tensor as int32 (same byte size)
+            return x.view(torch.int32)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float32)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_dtype_bitcast_float16_to_int16(self):
+        """Test dtype bitcast from float16 to int16."""
+
+        def fn(x):
+            return x.view(torch.int16)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float16)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
 
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
-class PallasTestsCPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
+if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
+    class PallasTestsCPU(PallasTestsMixin, TestCase):
+        DEVICE = "cpu"
 
-@unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
-@config.patch({"_debug_cpu_to_tpu_pallas": True})
-class PallasTestsTPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
-
-    @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
-    def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
-        def fn(a, b):
-            return a + b
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            (
-                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                "Please make sure that you have a TPU available and that JAX is configured correctly."
-            ),
-        ):
-            torch.compile(fn, backend="inductor", options={"cpu_backend": "pallas"})(
-                torch.randn(16), torch.randn(16)
-            )
-
-
-if test_torchinductor.HAS_CPU and HAS_PALLAS:
     make_pallas(test_torchinductor.SweepInputsCpuTest)
-    # make_pallas(test_torchinductor.CpuTests)
+    make_pallas(test_torchinductor.CpuTests)
 
 
-if test_torchinductor.HAS_GPU and HAS_PALLAS:
+if test_torchinductor.RUN_GPU and has_cuda_pallas():
+
+    class PallasTestsCUDA(PallasTestsMixin, TestCase):
+        DEVICE = "cuda"
+
     # make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
-    pass
+
+if test_torchinductor.RUN_TPU and has_tpu_pallas():
+
+    @config.patch({"_debug_cpu_to_tpu_pallas": True})
+    class PallasTestsTPU(PallasTestsMixin, TestCase):
+        DEVICE = "cpu"
+
+        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+            def fn(a, b):
+                return a + b
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                ),
+            ):
+                torch.compile(
+                    fn, backend="inductor", options={"cpu_backend": "pallas"}
+                )(torch.randn(16), torch.randn(16))
 
 
 if __name__ == "__main__":
-    if HAS_PALLAS:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")

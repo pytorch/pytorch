@@ -456,7 +456,7 @@ struct ConvParams {
       static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionRuntimeCuDNN() : -1;
       // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support, first broken in 9.11x
       if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
-        if (cudnn_version < 0 || cudnn_version > 91000) {
+        if (cudnn_version < 0 || (cudnn_version > 91000 && cudnn_version < 91500)) {
           return false;
         }
       }

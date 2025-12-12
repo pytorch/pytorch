@@ -62,6 +62,7 @@ class HintsWrapper(HigherOrderOperator):
                     f"value, got value {v} for key {k}."
                 )
 
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(body_fn, args, kwargs, hints)
 
 
