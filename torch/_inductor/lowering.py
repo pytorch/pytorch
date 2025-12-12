@@ -7302,9 +7302,7 @@ def triton_kernel_wrap_(
 def cond(pred, true_fn, false_fn, operands):
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
-    if any(
-        isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]
-    ):
+    if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"

@@ -320,10 +320,9 @@ if HAS_CUDA_AND_TRITON:
             with capture_stderr() as captured_output:
                 foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
 
-            FileCheck().check(
-                "skipping cudagraphs due to graph with symbolic shapes inputs"
-            ).check("x + y").run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            FileCheck().check("cudagraph partition due to dynamic shape ops").check(
+                "x + y"
+            ).run(captured_output[0])
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -2199,12 +2198,9 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
-            # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
-            # This should get fixed.
-            FileCheck().check(
-                " to incompatible op aten._local_scalar_dense.default"
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            FileCheck().check("cudagraph partition due to non gpu ops").run(
+                captured_output[0]
+            )
 
         @torch._dynamo.config.patch("compiled_autograd", True)
         def test_compiled_autograd_static_input_params(self):
@@ -2241,10 +2237,9 @@ if HAS_CUDA_AND_TRITON:
                     foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
                 )
 
-            FileCheck().check("incompatible op aten.nonzero.default").check("foo").run(
-                captured_output[0]
-            )
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            FileCheck().check("cudagraph partition due to unbacked binding ops").check(
+                "foo"
+            ).run(captured_output[0])
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_graph_breaks(self):
@@ -2257,7 +2252,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 2], device="cuda"))
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
+            self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_backend(self):
