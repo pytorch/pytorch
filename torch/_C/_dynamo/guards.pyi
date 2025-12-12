@@ -304,7 +304,7 @@ class GuardManager:
         strides: list[int],
         tensor_name: str,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
         ptype: Any,
         dispatch_keys: Any,
     ) -> None: ...
