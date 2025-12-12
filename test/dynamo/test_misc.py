@@ -7805,7 +7805,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], ""
         )
 
         def injected_bool(x: bool):

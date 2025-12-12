@@ -4151,7 +4151,10 @@ class DictGuardManager : public GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  void skip_adding_guard(const py::object& a, const py::object& b) {
+  void skip_adding_guard(
+      const py::object& a,
+      const py::object& b,
+      const py::object& c) {
     // The `add_leaf_guard` method in `DictGuardManager` is overridden to block
     // the addition of leaf guards. However, this is too strict. Python side of
     // guard management frequently adds TYPE_MATCH and DICT_LENGTH on
