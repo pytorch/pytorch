@@ -142,6 +142,9 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   // AOTriton 0.9+ supports head_dim up to 512
   const static auto max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -351,6 +354,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm121 = SMVersion<12, 1>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     // User explicitly set CK as the flash attention backend. Return true for now
     // TODO: Flesh out sanity checks
