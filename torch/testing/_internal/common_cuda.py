@@ -36,8 +36,9 @@ SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
 
-IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
-                  and torch.cuda.get_device_capability()[1] > 0)
+IS_THOR = LazyVal(lambda: torch.cuda.is_available() and
+                  ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
+                   (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
@@ -118,8 +119,6 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
-    if torch.xpu.is_available():
-        return True
     return False
 
 def evaluate_platform_supports_fp8_grouped_gemm():
@@ -368,6 +367,12 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM89PreCUDA13(func):
+    """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
+    if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+        return unittest.expectedFailure(func)
+    return func
 
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)

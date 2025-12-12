@@ -362,6 +362,7 @@ def parse_args(
                 # Catch a more specific exception instead.
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
+            # pyrefly: ignore [bad-assignment]
             args = [
                 _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)

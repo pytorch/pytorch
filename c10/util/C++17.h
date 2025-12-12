@@ -32,9 +32,7 @@
  * This header adds some polyfills with C++17 functionality
  */
 
-namespace c10 {
-
-namespace guts {
+namespace c10::guts {
 
 #if defined(__HIP__)
 
@@ -63,8 +61,6 @@ C10_HOST_DEVICE constexpr auto apply(F&& f, Tuple&& t) {
 
 #endif
 
-} // namespace guts
-
-} // namespace c10
+} // namespace c10::guts
 
 #endif // C10_UTIL_CPP17_H_

@@ -121,6 +121,9 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+      build-environment:
+        value: ${{ jobs.build.outputs.build-environment }}
+        description: Top-level label for what's being built/tested.
 
 jobs:
   build:
@@ -132,6 +135,7 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -155,13 +159,11 @@ jobs:
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+      - name: Login to ECR
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-build
-          aws-region: us-east-1
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
       - name: Get workflow job id
         id: get-job-id

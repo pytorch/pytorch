@@ -14,6 +14,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
 )
@@ -23,7 +24,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, xfailIf
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
     _quantize_rowwise,
@@ -812,6 +813,9 @@ class TestFP8Lowering(TestCase):
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
     @onlyCUDA
+    @xfailIf(
+        torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
+    )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
     @parametrize("shape", ((16, 256, 256), (1024, 512, 1024)))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
@@ -871,13 +875,28 @@ class TestFP8Lowering(TestCase):
             )
             return y
 
-        y_eager = linear(
-            x_fp8,
-            x_inverse_scale,
-            w_t_fp8,
-            w_inverse_scale,
-            bias,
-        )
+        # BlockWise1x128 and BlockWise128x128 scaling modes are not compatible with fast_accum
+        # Only take this branch on SM90 because other versions xfail everything
+        if use_fast_accum and IS_SM90:
+            with self.assertRaisesRegex(
+                RuntimeError, "scaled_gemm doesn't support fast accum"
+            ):
+                y_eager = linear(
+                    x_fp8,
+                    x_inverse_scale,
+                    w_t_fp8,
+                    w_inverse_scale,
+                    bias,
+                )
+        else:
+            y_eager = linear(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+
         with config.patch(
             {
                 "triton.enable_persistent_tma_matmul": True,
@@ -911,9 +930,10 @@ class TestFP8Lowering(TestCase):
             f"SCALE_RECIPE_B : tl.constexpr = {check_scale_recipe_b}"
         ).run(code[0])
 
-        self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+        if not use_fast_accum:
+            self.assertEqual(y_eager.dtype, dtype)
+            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu"])

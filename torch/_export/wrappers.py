@@ -30,6 +30,7 @@ class ExportTracepoint(HigherOrderOperator):
         super().__init__("_export_tracepoint")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 

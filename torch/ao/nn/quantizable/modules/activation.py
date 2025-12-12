@@ -95,6 +95,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        # pyrefly: ignore [bad-assignment]
         self.out_proj = nn.Linear(
             self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
         )  # type: ignore[assignment]
