@@ -14,12 +14,6 @@
 #include <fbgemm_gpu/torch_ops.h>
 #endif
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#endif
-
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
