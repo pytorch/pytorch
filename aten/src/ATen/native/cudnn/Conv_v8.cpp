@@ -143,7 +143,8 @@ void filterEngineConfigs(
     bool deterministic,
     bool allow_tf32,
     c10::ScalarType scalar_type) {
-  static bool rtc_enabled = c10::utils::check_env("TORCH_CUDNN_V8_API_RTC_ENABLED") == true;
+  static bool rtc_enabled =
+      c10::utils::check_env("TORCH_CUDNN_V8_API_RTC_ENABLED") == true;
   auto filter = [=](cudnnBackendDescriptor_t c) {
     if (!rtc_enabled) {
       if (cudnn_frontend::hasBehaviorNote<
