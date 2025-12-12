@@ -104,4 +104,3 @@ runs:
       shell: bash
       run: |
         echo "✓ Successfully logged into ECR (registry: 308535385114)"
-
