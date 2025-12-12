@@ -1057,7 +1057,6 @@ def f(x):
         which then call back into Python. The interleaving should properly
         show all Python frames even when C++ (PyEval_EvalFrame) frames are involved.
         """
-        import sys
 
         def compute_something(x):
             # Trigger a torch operation which may involve C++ code
