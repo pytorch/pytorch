@@ -24,8 +24,8 @@ from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops.registration import (
     register_op_strategy,
     register_prop_rule,
-    register_single_dim_strategy,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -37,7 +37,6 @@ from torch.distributed.tensor._ops.utils import (
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
-    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
@@ -806,7 +805,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+# @register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -834,7 +833,7 @@ def cat_single_dim_strategy(
     return single_dim_strategies
 
 
-# @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+@register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]

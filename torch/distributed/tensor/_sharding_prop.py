@@ -14,8 +14,6 @@ from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -26,16 +24,16 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.utils import (
-    _args_schema_with_tensor_meta,
+from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
+    _SingleDimStrategyFunc,
 )
+from torch.distributed.tensor._ops.utils import _args_schema_with_tensor_meta
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
 
 
 aten = torch.ops.aten
@@ -141,10 +139,7 @@ class ShardingPropagator:
         ] = {}
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
-            Callable[
-                [OpOverload, ArgsType, KwargsType],
-                list[list[Placement | _ShardingPlaceholder]],
-            ],
+            _SingleDimStrategyFunc,
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -189,10 +184,7 @@ class ShardingPropagator:
     def register_single_dim_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: Callable[
-            [OpOverload, ArgsType, KwargsType],
-            list[list[Placement | _ShardingPlaceholder]],
-        ],
+        strategy_func: _SingleDimStrategyFunc,
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
@@ -486,9 +478,6 @@ class ShardingPropagator:
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
             single_dim_expand_fully = True
             if single_dim_expand_fully:
-                # TODO: this codepath was mainly for initial testing, it would be removed once the lowest-cost path
-                # is validated
-
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
@@ -509,7 +498,6 @@ class ShardingPropagator:
             # for sanity for now
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
             output_strategy = _select_min_cost_strategy(strategy, op_schema)
-
             # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
             # but with a lot of special cases elided.  We'll see if this can be kept simple, or else
             # refactor to share code.

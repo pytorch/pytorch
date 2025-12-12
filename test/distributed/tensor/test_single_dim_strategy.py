@@ -15,11 +15,11 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
-from torch.distributed.tensor._ops.utils import (
-    _args_schema_with_tensor_meta,
+from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
 )
+from torch.distributed.tensor._ops.utils import _args_schema_with_tensor_meta
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import (
     _ShardingPlaceholder,

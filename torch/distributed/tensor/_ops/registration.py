@@ -5,14 +5,12 @@ from typing import Optional, TypeAlias, TypeVar, Union
 import torch
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
     OpSchema,
     OutputSharding,
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
+from torch.distributed.tensor._ops.single_dim_strategy import _SingleDimStrategyFunc
 
 
 # convenient wrapper to register sharding propagation rules
@@ -86,22 +84,10 @@ def register_op_strategy(
     return wrapper
 
 
-# TODO once schema for single-dim-strategy is decided, set up the typevars
 def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [
-        Callable[
-            [torch._ops.OpOverload, ArgsType, KwargsType],
-            list[list[Placement | _ShardingPlaceholder]],
-        ]
-    ],
-    Callable[
-        [torch._ops.OpOverload, ArgsType, KwargsType],
-        list[list[Placement | _ShardingPlaceholder]],
-    ],
-]:
+) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
 
@@ -132,7 +118,7 @@ def register_single_dim_strategy(
     ]
 
     # TODO refactor the common code out into a util
-    def wrapper(impl):
+    def wrapper(impl: _SingleDimStrategyFunc) -> _SingleDimStrategyFunc:
         if isinstance(op, list):
             overloads = op
         else:
