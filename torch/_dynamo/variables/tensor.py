@@ -25,7 +25,7 @@ import traceback
 import types
 from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -1523,6 +1523,15 @@ class SymNodeVariable(VariableTracker):
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """SymNodeVariable is not a constant - it represents a symbolic value.
+
+        Operations on SymNodeVariable should go through the graph, not be
+        constant-folded. Returning (False, ...) ensures we don't try to
+        constant-fold through symbolic values.
+        """
+        return (False, False, None)
 
     def call_method(
         self,

@@ -409,6 +409,21 @@ class LazyConstantVariable(LazyVariableTracker):
         self._ensure_type_guard()
         return issubclass(ConstantVariable, cls)
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the constant value without triggering realization.
+
+        LazyConstantVariable wraps primitive constants, so we can always peek
+        at the underlying value without installing guards.
+
+        Note: If already realized, the realized variable might be a SymNodeVariable
+        (when specialize_int=False), which is not a constant. In that case, we
+        delegate to the realized variable's try_peek_constant.
+        """
+        if self.is_realized():
+            realized = self.realize()
+            return realized.try_peek_constant()
+        return (True, True, self.peek_value())
+
 
 class ComputedLazyConstantVariable(LazyVariableTracker):
     """
@@ -506,6 +521,16 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
     def is_python_constant(self) -> bool:
         return True
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the constant value without triggering realization.
+
+        ComputedLazyConstantVariable stores its computed value eagerly,
+        so we can always peek without installing guards.
+        """
+        if self.is_realized():
+            return (True, False, self._cache.vt.as_python_constant())
+        return (True, True, self._cache.value)
 
     def original_source(self) -> Any:
         # ComputedLazyConstantVariable has no source

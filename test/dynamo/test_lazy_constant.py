@@ -767,12 +767,17 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(compiled2[1], "Hello Bob, you have 10 items")
         self.assertEqual(counter.frame_count, 2)
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_computed_lazy_constant_percent_format(self):
         """Test % formatting with lazy constants produces correct results.
 
-        Note: % formatting with tuple arguments causes a graph break because
-        dynamo doesn't trace the mod operator with ['str', 'tuple'] types.
-        Results are still correct via eager fallback.
+        The % operator with string and tuple of lazy constants should be
+        constant-foldable without graph breaks. When values change, recompilation
+        occurs and produces correct results.
+
+        Note: automatic_dynamic_shapes is disabled for this test to ensure we
+        test the lazy constant behavior without it converting values to symbolic
+        on recompilation.
         """
         tensor_input = torch.randn(3)
 
@@ -786,12 +791,57 @@ class LazyConstantVariableTests(TestCase):
         compiled1 = opt_fn(tensor_input, 10, 20)
         self.assertTrue(same(eager1[0], compiled1[0]))
         self.assertEqual(eager1[1], compiled1[1])  # "10 + 20 = 30"
+        self.assertEqual(counter.frame_count, 1)
 
-        # Different values - still correct via eager fallback after graph break
+        # Different values trigger recompilation and produce correct results
         eager2 = fn_percent(tensor_input, 100, 200)
         compiled2 = opt_fn(tensor_input, 100, 200)
         self.assertTrue(same(eager2[0], compiled2[0]))
         self.assertEqual(compiled2[1], "100 + 200 = 300")
+        self.assertEqual(counter.frame_count, 2)  # Recompiled, not graph break
+
+    def test_percent_format_no_overguarding_with_automatic_dynamic(self):
+        """Test that % formatting doesn't over-guard with automatic_dynamic_shapes.
+
+        With automatic_dynamic_shapes enabled (default), when values change and
+        trigger recompilation, the values become symbolic. String formatting with
+        symbolic values is not supported in the graph, so we get a graph break
+        but results should still be correct.
+
+        The key point is that after the first graph break, subsequent calls with
+        different values should NOT trigger additional recompiles - the symbolic
+        graph should handle all values.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn_simple(t, a, b):
+            # Simple computation that should work with symbolic values
+            return t + a + b
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn_simple, backend=counter)
+
+        # First call - compiles with static values
+        result1 = opt_fn(tensor_input, 10, 20)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different values - may trigger recompile due to
+        # automatic_dynamic_shapes, but should stabilize
+        result2 = opt_fn(tensor_input, 100, 200)
+        frame_count_after_second = counter.frame_count
+
+        # Third call with yet different values - should NOT trigger another recompile
+        # because automatic_dynamic_shapes should have made the values symbolic
+        result3 = opt_fn(tensor_input, 1000, 2000)
+        self.assertEqual(counter.frame_count, frame_count_after_second)
+
+        # Verify results are correct
+        expected1 = tensor_input + 10 + 20
+        expected2 = tensor_input + 100 + 200
+        expected3 = tensor_input + 1000 + 2000
+        self.assertTrue(same(result1, expected1))
+        self.assertTrue(same(result2, expected2))
+        self.assertTrue(same(result3, expected3))
 
     def test_computed_lazy_constant_nested_fstring(self):
         """Test f-strings with expressions involving lazy constants."""

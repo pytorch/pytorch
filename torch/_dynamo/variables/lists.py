@@ -104,6 +104,24 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Peek at the constant value without triggering realization.
+
+        For container types, we recursively peek at all items. If any item
+        cannot be peeked, we return (False, False, None). If any item is
+        unrealized (lazy), we return (True, True, value).
+        """
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, None)
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        return (True, any_unrealized, self.python_type()(values))
+
     def as_proxy(self) -> Any:
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())

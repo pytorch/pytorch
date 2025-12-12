@@ -2101,10 +2101,19 @@ class VariableBuilder:
         value: Union[int, float, bool, str],
         wrap_fn: Optional[Callable[[Union[int, float]], VariableTracker]] = None,
     ) -> VariableTracker:
-        """Wrap a primitive constant, deferring guard installation if allowed."""
+        """Wrap a primitive constant, deferring guard installation if allowed.
+
+        If wrap_fn is provided, this value should become a SymNodeVariable
+        (e.g., when specialize_int/float is False). In that case, we should NOT
+        use LazyConstantVariable because:
+        1. SymNodeVariable is not a constant - operations should go through the graph
+        2. LazyConstantVariable would install CONSTANT_MATCH guards on realization,
+           causing unnecessary recompiles
+        """
+        if wrap_fn is not None:
+            # This will become a SymNodeVariable - don't use LazyConstantVariable
+            return wrap_fn(value)
         if not self.allow_lazy_constant:
-            if wrap_fn is not None:
-                return wrap_fn(value)
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
         return LazyConstantVariable.create(value, source=self.source)

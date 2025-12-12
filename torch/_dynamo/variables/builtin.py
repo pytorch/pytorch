@@ -1237,7 +1237,82 @@ class BuiltinVariable(VariableTracker):
                     args: Sequence[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
-                    # path with a runtime check
+                    # First try to peek at all args as constants without realizing
+                    # This allows us to constant-fold through lazy constants
+                    peeked_args = []
+                    any_unrealized = False
+                    all_can_peek = True
+
+                    for arg in args:
+                        can_peek, is_unrealized, value = arg.try_peek_constant()
+                        if not can_peek:
+                            all_can_peek = False
+                            break
+                        peeked_args.append(value)
+                        if is_unrealized:
+                            any_unrealized = True
+
+                    peeked_kwargs = {}
+                    if all_can_peek:
+                        for k, v in kwargs.items():
+                            can_peek, is_unrealized, value = v.try_peek_constant()
+                            if not can_peek:
+                                all_can_peek = False
+                                break
+                            peeked_kwargs[k] = value
+                            if is_unrealized:
+                                any_unrealized = True
+
+                    if all_can_peek:
+                        try:
+                            res = fn(*peeked_args, **peeked_kwargs)
+                        except Exception as exc:
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=list(map(ConstantVariable.create, exc.args)),
+                            )
+
+                        if any_unrealized:
+                            # We have unrealized lazy constants - need to realize them
+                            # to install guards, then return the computed result
+                            from .lazy import (
+                                ComputedLazyConstantVariable,
+                                LazyConstantVariable,
+                            )
+
+                            from .lists import BaseListVariable
+
+                            # Collect all LazyConstantVariables from args
+                            def collect_lazy_vars(
+                                arg: VariableTracker,
+                            ) -> list[LazyConstantVariable]:
+                                lazy_vars: list[LazyConstantVariable] = []
+                                if isinstance(arg, LazyConstantVariable):
+                                    lazy_vars.append(arg)
+                                elif isinstance(arg, ComputedLazyConstantVariable):
+                                    # pyrefly: ignore[missing-attribute]
+                                    lazy_vars.extend(arg._cache.lazy_vars)
+                                elif isinstance(arg, BaseListVariable):
+                                    # Container type (TupleVariable, ListVariable, etc.)
+                                    for item in arg.items:
+                                        lazy_vars.extend(collect_lazy_vars(item))
+                                return lazy_vars
+
+                            lazy_vars: list[LazyConstantVariable] = []
+                            for arg in args:
+                                lazy_vars.extend(collect_lazy_vars(arg))
+                            for v in kwargs.values():
+                                lazy_vars.extend(collect_lazy_vars(v))
+
+                            # Realize all lazy vars to install guards
+                            for lazy_var in lazy_vars:
+                                lazy_var.realize()
+
+                        # pyrefly: ignore [unbound-name]
+                        return VariableTracker.build(tx, res)
+
+                    # Fall back to the original check for UnspecializedPythonVariable
                     if check_unspec_or_constant_args(args, kwargs):
                         try:
                             res = fn(
