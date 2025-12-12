@@ -17,6 +17,32 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+def register_argminmax_handler():
+    def impl(
+        op_call: torch._ops.OpOverload,
+        args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
+        kwargs: dict[str, object],
+    ):
+        # create a new handler every time this is called
+        handler = ArgMinMaxHandler()
+        return handler(op_call, args, kwargs)
+
+    return impl
+
+
+def register_minmax_handler():
+    def impl(
+        op_call: torch._ops.OpOverload,
+        args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
+        kwargs: dict[str, object],
+    ):
+        # create a new handler
+        handler = MinMaxDimHandler()
+        return handler(op_call, args, kwargs)
+
+    return impl
+
+
 class NonLinearReductionsBase(ABC):
     def __init__(self):
         self._dim: Optional[int] = None
