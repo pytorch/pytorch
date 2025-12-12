@@ -132,7 +132,7 @@ jobs:
         id: setup-tpu-flags
         if: steps.check-tpu.outputs.has_tpu == 'true'
         shell: bash
-        run: echo "TPU_DOCKER_FLAGS=--privileged --network=host -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES" >> "$GITHUB_ENV"
+        run: echo "TPU_DOCKER_FLAGS=--privileged --network=host -e PJRT_DEVICE=TPU -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES" >> "$GITHUB_ENV"
 
       - name: Login to ECR
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
