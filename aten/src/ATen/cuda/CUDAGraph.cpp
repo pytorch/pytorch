@@ -119,7 +119,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 void CUDAGraph::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  TORCH_CHECK(stream == capture_stream_,
+  TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
