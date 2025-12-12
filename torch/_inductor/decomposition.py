@@ -35,6 +35,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
+from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
@@ -118,6 +119,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
+    aten.native_layer_norm,  # we fall back on mtia
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -157,6 +159,20 @@ def _embedding_dense_backward(
     return decomp_embedding_dense_backward(
         grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
     )
+
+
+@register_decomposition(aten.native_layer_norm)
+def _native_layer_norm(
+    input: torch.Tensor,
+    normalized_shape: utils.ShapeType,
+    weight: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if input.is_mtia:
+        return NotImplemented
+    # We can write a util function to update decomp table if we have more ops to fallback.
+    return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
@@ -224,10 +240,15 @@ def empty_permuted(
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
-    perm = [0] * len(size)
-    for p, l in enumerate(physical_layout):
-        perm[l] = p
-    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    is_identity = list(physical_layout) == list(range(len(physical_layout)))
+
+    if is_identity:
+        return torch.empty(size, **kwargs)
+    else:
+        perm = [0] * len(size)
+        for p, l in enumerate(physical_layout):
+            perm[l] = p
+        return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])
@@ -1010,6 +1031,7 @@ def index_reduce(
     ):
         return NotImplemented
 
+    # pyrefly: ignore [missing-attribute]
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))

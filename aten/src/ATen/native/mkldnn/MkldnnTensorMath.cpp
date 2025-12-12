@@ -27,8 +27,8 @@ Tensor& mkldnn_zero_(Tensor& self) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
   using Vec = vec::Vectorized<float>;
@@ -48,7 +48,7 @@ Tensor& mkldnn_zero_(Tensor& self) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #endif // AT_MKLDNN_ENABLED

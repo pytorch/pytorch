@@ -19,6 +19,7 @@ import numpy as np
 import yaml
 
 import torch._custom_ops as custom_ops
+import torch.distributed
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
@@ -34,7 +35,6 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
-from torch._library.opaque_object import make_opaque, OpaqueType
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -893,6 +893,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [True]
         if typ is str:
             return ["foo"]
+        if torch.distributed.is_available():
+            from torch.distributed.distributed_c10d import GroupName
+
+            if typ is GroupName:
+                return ["group"]
         if typ is torch.dtype:
             return [torch.float32]
         if typ is torch.device:
@@ -903,8 +908,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.tensor(3)]
         if typ == Optional[torch.types.Number]:
             return [None, 2.718]
-        if typ == OpaqueType:
-            return [make_opaque("moo")]
         origin = typing.get_origin(typ)
         if origin is Union:
             args = typing.get_args(typ)
@@ -2975,6 +2978,33 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    def test_mutated_no_warning(self):
+        # Run in subprocess since the warning is emitted only once
+        script = """\
+import warnings
+import torch
+from torch import Tensor
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    torch.set_warn_always(True)
+
+    @torch.library.custom_op("mylib::func", mutates_args=("x",))
+    def func(x: Tensor) -> None:
+        x.add_(1)
+
+    if len(w) > 0:
+        raise AssertionError(f"Unexpected warning: {w[0].message}")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
 
     def test_mutated_unknown(self):
         @torch.library.custom_op(
