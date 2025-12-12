@@ -63,7 +63,7 @@ runs:
           set -eu
           tmp_venv="$RUNNER_TEMP/upload-utilization-stats-venv"
           uv venv -p 3.12 "$tmp_venv"
-          uv pip install --python "$tmp_venv/bin/python" python-dateutil==2.8.2 boto3==1.35.42 pandas==2.1.3 dataclasses_json==0.6.7
+          uv pip install --python "$tmp_venv/bin/python" python-dateutil==2.8.2 boto3==1.35.42 pandas==2.1.3 dataclasses_json==0.6.7 requests==2.32.3
           echo "UTIL_STATS_VENV=$tmp_venv" >> "$GITHUB_ENV"
     - name: Upload utilizatoin stats to s3
       shell: bash
