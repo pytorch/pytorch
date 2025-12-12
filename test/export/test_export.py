@@ -1098,6 +1098,52 @@ def forward(self, x):
         exported_out = exported_mod(x)
         self.assertEqual(exported_out, eager_out)
 
+    @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
+    @testing.expectedFailureSerDer  # register_constant needs to handle serialization
+    def test_block_mask_as_pytree_constant(self):
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128, device="cpu")
+
+        block_mask2 = create_block_mask(causal_mask, 1, 1, 128, 128, device="cpu")
+        self.assertEqual(block_mask, block_mask2)
+        self.assertEqual(hash(block_mask), hash(block_mask2))
+
+        # Temporarily register BlockMask as a pytree constant
+        pytree.register_constant(BlockMask)
+
+        try:
+
+            class ReturnBlockMask(torch.nn.Module):
+                def __init__(self, mask):
+                    super().__init__()
+                    self.mask = mask
+
+                def forward(self, x):
+                    # Return both a tensor computation and the BlockMask
+                    return x + 1, self.mask
+
+            model = ReturnBlockMask(block_mask)
+            x = torch.randn(2, 2)
+
+            # Export should work with BlockMask as constant
+            ep = export(model, (x,), strict=False)
+
+            # Verify we can run the exported module
+            out_tensor, out_mask = ep.module()(x)
+            expected_tensor, expected_mask = model(x)
+
+            self.assertEqual(out_tensor, expected_tensor)
+            self.assertEqual(out_mask, expected_mask)
+            mask_set = {out_mask, expected_mask}
+            self.assertEqual(len(mask_set), 1)
+
+        finally:
+            pytree.deregister_constant(BlockMask)
+
     def test_inductor_backend_inside_nonstrict(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
