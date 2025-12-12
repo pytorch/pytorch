@@ -114,6 +114,9 @@
 
     # Make sure each split is a multiple of BLOCK_N
     if HAS_FULL_BLOCKS:
+        # TODO do the a optimization as partial blocks once vllm is
+        # able to pass in full blocks:
+        # https://github.com/vllm-project/vllm/blob/61249b177de1566027fc74e9b51b45a4c973eb47/vllm/v1/attention/backends/flex_attention.py#L615-L616
         TILE_KV_OG = tl.cdiv(KV_LEN, SPLIT_KV)
     else:
         TILE_KV_OG = tl.cdiv(kv_num_blocks * SPARSE_KV_BLOCK_SIZE, SPLIT_KV)
