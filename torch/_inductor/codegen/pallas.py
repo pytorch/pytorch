@@ -757,6 +757,55 @@ class PallasKernelOverrides(OpOverrides):
     def right_shift(a: str, b: str) -> str:
         return f"jnp.right_shift({a}, {b})"
 
+    # Random number generation operations
+    @staticmethod
+    def load_seed(name: str, offset: str) -> str:
+        """Load the random seed value from a buffer."""
+        # Load the seed from the buffer and add offset for uniqueness
+        seed_offset = V.kernel.args.seed_offset("load_seed_offset", offset)
+        return f"({V.kernel.args.input(name)}[0] + {seed_offset})"
+
+    @staticmethod
+    def rand(seed: str, offset: str) -> str:
+        """Generate uniform random numbers in [0, 1).
+
+        Uses JAX's threefry2x32 PRNG directly for vectorized random generation.
+        The seed provides the base key, offset provides per-element uniqueness.
+        """
+        # For vectorized random, we use jax.random.uniform with shape from offset
+        # Create a base key from seed, then use fold_in with vmap for per-element keys
+        # Use float32 dtype to match PyTorch's default
+        return (
+            f"jax.vmap(lambda o: jax.random.uniform("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
+    @staticmethod
+    def randn(seed: str, offset: str) -> str:
+        """Generate standard normal random numbers.
+
+        Uses JAX's threefry2x32 PRNG directly for vectorized random generation.
+        The seed provides the base key, offset provides per-element uniqueness.
+        """
+        # For vectorized random, use vmap to fold in each offset value
+        # Use float32 dtype to match PyTorch's default
+        return (
+            f"jax.vmap(lambda o: jax.random.normal("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
+    @staticmethod
+    def randint64(seed: str, offset: str, low: str, high: str) -> str:
+        """Generate random int64 values in [low, high)."""
+        # For vectorized random, use vmap to fold in each offset value
+        return (
+            f"jax.vmap(lambda o: jax.random.randint("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), {low}, {high}, dtype=jnp.int64))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
 
 class PallasKernel(SIMDKernel):
     """
@@ -1840,12 +1889,15 @@ class PallasKernel(SIMDKernel):
         code = IndentedBuffer()
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
-        arg_defs, _, _, _ = self.args.python_argdefs()
+        arg_defs, call_args, _, _ = self.args.python_argdefs()
         kernel_params = [a.name for a in arg_defs]
         pure_out_params = [p for p in kernel_params if p.startswith("out_ptr")]
         output_params = [
             p for p in kernel_params if p.startswith(("out_ptr", "in_out_ptr"))
         ]
+        # Identify size variable parameters (scalars like load_seed_offset)
+        size_var_names = OrderedSet(self.args.sizevars.values())
+        size_var_params = [p for p in kernel_params if p in size_var_names]
         if not output_params:
             raise RuntimeError("Pallas backend requires at least one output buffer")
 
@@ -2076,21 +2128,28 @@ class PallasKernel(SIMDKernel):
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
+        # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
+        base_offset = 2 + len(size_var_params)
         for idx, name in enumerate(kernel_input_params):
             if (name in alias_params) or name.startswith("in_out_ptr"):
-                donate_indices.append(idx + 2)
+                donate_indices.append(idx + base_offset)
         if donate_indices:
             donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
         else:
             donate_literal = "()"
+        # Size variables are static args (after out_shapes and out_dtypes)
+        static_argnums = list(range(2 + len(size_var_params)))
+        static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
         code.writeline(
             "@functools.partial("
-            "jax.jit, static_argnums=(0, 1), donate_argnums="
+            f"jax.jit, static_argnums={static_argnums_literal}, donate_argnums="
             f"{donate_literal})"
         )
-        code.writeline(
-            f"def {jit_wrapper_name}(out_shapes, out_dtypes, {', '.join(kernel_input_params)}):"
+        # Include size_var_params in wrapper signature
+        wrapper_params = (
+            ["out_shapes", "out_dtypes"] + size_var_params + kernel_input_params
         )
+        code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
             code.writeline("out_specs = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
@@ -2127,12 +2186,18 @@ class PallasKernel(SIMDKernel):
                     alias_pairs.append((input_idx, out_idx))
             alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
 
-            # For masked ops, wrap kernel with functools.partial to pass block_size
-            kernel_arg = (
-                f"functools.partial({kernel_name}_kernel, block_size=block_size),"
-                if self.use_masked_ops
-                else f"{kernel_name}_kernel,"
-            )
+            # Wrap kernel with functools.partial to pass scalar arguments
+            # (size variables and block_size for masked ops)
+            partial_args = []
+            for sv_param in size_var_params:
+                partial_args.append(f"{sv_param}={sv_param}")
+            if self.use_masked_ops:
+                partial_args.append("block_size=block_size")
+
+            if partial_args:
+                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
+            else:
+                kernel_arg = f"{kernel_name}_kernel,"
             code.writeline("return pl.pallas_call(")
             code.writeline("    " + kernel_arg)
 
@@ -2216,15 +2281,13 @@ class PallasKernel(SIMDKernel):
             for ptr in pointer_tail:
                 arg_name_map[ptr] = f"{ptr}_jax"
 
-            if kernel_input_params:
-                alias_args_str = ", ".join(
-                    arg_name_map[name] for name in kernel_input_params
-                )
-                code.writeline(
-                    f"res = {jit_wrapper_name}(out_shapes, out_dtypes, {alias_args_str})"
-                )
-            else:
-                code.writeline(f"res = {jit_wrapper_name}(out_shapes, out_dtypes)")
+            # Build the jit_wrapper call with size vars and tensor args
+            wrapper_call_args = ["out_shapes", "out_dtypes"]
+            # Add size variable params (they're already available as locals in main)
+            wrapper_call_args.extend(size_var_params)
+            # Add tensor args (with _jax suffix)
+            wrapper_call_args.extend(arg_name_map[name] for name in kernel_input_params)
+            code.writeline(f"res = {jit_wrapper_name}({', '.join(wrapper_call_args)})")
             if copy_output_indices:
                 code.writeline(
                     "result_values = res if isinstance(res, tuple) else (res,)"
