@@ -1129,7 +1129,7 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   std::sort(
       snapshot.segments.begin(),
       snapshot.segments.end(),
-      [](const SegmentInfo &a, const SegmentInfo &b) {
+      [](const SegmentInfo& a, const SegmentInfo& b) {
         return a.registration_counter < b.registration_counter;
       });
   for (const auto& segmentInfo : snapshot.segments) {
