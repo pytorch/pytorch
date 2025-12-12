@@ -367,6 +367,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+    # pyrefly: ignore [bad-return]
     return s
 
 

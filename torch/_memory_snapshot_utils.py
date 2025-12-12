@@ -1,6 +1,6 @@
+import os
 import pickle
 import re
-import os
 from typing import cast, TypedDict
 from typing_extensions import NotRequired
 
@@ -60,15 +60,18 @@ class _Snapshot(TypedDict):
 
 def _augment_frames(frames: list[_Frame]) -> int:
     """
-    Augment a list of frames with FX debug information.
+    Augment a list of frames with FX debug information. For each frame corresponding
+    to an FX-generated Python file, this function attaches additional FX node
+    metadata (op, name, target, and original trace).
 
     Args:
         frames (list[_Frame]): List of frame dictionaries to augment
 
     Returns:
-        The count of frames that were augmented.
+        int: The count of frames that were augmented.
     """
     from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+    from torch.fx.traceback import _FX_METADATA_REGISTRY
 
     # Regex pattern to match FX generated files
     _FX_GENERATED_PATTERN = re.compile(
@@ -76,49 +79,45 @@ def _augment_frames(frames: list[_Frame]) -> int:
     )
 
     count = 0
-    if not frames:
-        return count
 
     for frame in frames:
-        if "filename" in frame and "line" in frame:
-            filename = frame["filename"]
-            lineno = frame["line"]
+        filename = frame.get("filename")
+        lineno = frame.get("line")
+        if not filename or not lineno:
+            continue
 
-            # Check if this looks like an FX generated file
-            if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
-                continue
+        # Check if this looks like an FX generated file
+        if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+            continue
 
-            # Look up metadata from the global registry
-            from torch.fx.traceback import _FX_METADATA_REGISTRY
+        metadata = _FX_METADATA_REGISTRY.get(filename)
+        if metadata is None:
+            continue
 
-            metadata = _FX_METADATA_REGISTRY.get(filename)
-            if metadata is None:
-                continue
+        lineno_map = metadata.get("lineno_map", {})
+        node_metadata = metadata.get("node_metadata", {})
+        prologue_start = metadata.get("prologue_start", 0)
 
-            lineno_map = metadata.get("lineno_map", {})
-            node_metadata = metadata.get("node_metadata", {})
-            prologue_start = metadata.get("prologue_start", 0)
+        # Get the node index for this line
+        node_idx = lineno_map.get(lineno - prologue_start)
+        if node_idx is None:
+            continue
 
-            # Get the node index for this line
-            node_idx = lineno_map.get(lineno - prologue_start)
+        node_info = node_metadata.get(node_idx)
+        if node_info is None:
+            continue
 
-            if node_idx is not None and node_idx in node_metadata:
-                node_info = node_metadata[node_idx]
-                original_trace = node_info.get("stack_trace")
-                node_op = node_info.get("op")
-                node_name = node_info.get("name")
-                node_target = node_info.get("target")
+        # Populate FX metadata fields
+        frame["fx_node_op"] = node_info.get("op")
+        frame["fx_node_name"] = node_info.get("name")
+        frame["fx_node_target"] = str(node_info.get("target"))
 
-                # Always add node metadata
-                frame["fx_node_op"] = node_op
-                frame["fx_node_name"] = node_name
-                frame["fx_node_target"] = str(node_target)
+        # Attach original stack trace if available
+        original_trace = node_info.get("stack_trace")
+        if original_trace:
+            frame["fx_original_trace"] = original_trace
 
-                # Add original trace if available
-                if original_trace:
-                    frame["fx_original_trace"] = original_trace
-
-                count += 1
+        count += 1
 
     return count
 
@@ -135,10 +134,10 @@ def _augment_memory_snapshot_stack_traces(
     snapshots loaded from disk in a different process.
 
     Args:
-        snapshot: Either a memory snapshot dict or path to a snapshot pickle file
+        snapshot (str, _Snapshot): Either a memory snapshot dict or path to a snapshot pickle file
 
     Returns:
-        The augmented snapshot dictionary with fx_node_op, fx_node_name,
+        _Snapshot: The augmented snapshot dictionary with fx_node_op, fx_node_name,
         fx_original_trace, and fx_node_info fields added to frames
     """
 

@@ -796,7 +796,7 @@ if __name__ == "__main__":
 
                 thealloc()
                 thefree()
-                ss = json.dumps(torch._C._xpu_memorySnapshot(None))
+                ss = json.dumps(torch.cuda.memory._snapshot())
                 self.assertEqual(("thefree" in ss), (context == "all"))
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
@@ -834,26 +834,26 @@ if __name__ == "__main__":
         fx_frames = []
 
         # Check device traces for FX debug fields
-        if collect_device_traces and "device_traces" in augmented_snapshot:
-            for trace_list in augmented_snapshot["device_traces"]:
+        if collect_device_traces:
+            for trace_list in augmented_snapshot.get("device_traces", []):
                 for trace_entry in trace_list:
-                    if isinstance(trace_entry, dict) and "frames" in trace_entry:
-                        for frame in trace_entry["frames"]:
-                            if isinstance(frame, dict):
-                                # Check for FX debug fields
-                                if "fx_node_op" in frame or "fx_node_name" in frame:
-                                    fx_frames.append(frame)
+                    if not isinstance(trace_entry, dict):
+                        continue
+                    for frame in trace_entry.get("frames", []):
+                        if not isinstance(frame, dict):
+                            continue
+                        if "fx_node_op" in frame or "fx_node_name" in frame:
+                            fx_frames.append(frame)
 
         # Check segments/blocks for FX debug fields
-        if collect_segments and "segments" in augmented_snapshot:
-            for segment in augmented_snapshot["segments"]:
-                if "blocks" in segment:
-                    for block in segment["blocks"]:
-                        if "frames" in block:
-                            for frame in block["frames"]:
-                                if isinstance(frame, dict):
-                                    if "fx_node_op" in frame or "fx_node_name" in frame:
-                                        fx_frames.append(frame)
+        if collect_segments:
+            for segment in augmented_snapshot.get("segments", []):
+                for block in segment.get("blocks", []):
+                    for frame in block.get("frames", []):
+                        if not isinstance(frame, dict):
+                            continue
+                        if "fx_node_op" in frame or "fx_node_name" in frame:
+                            fx_frames.append(frame)
         return fx_frames
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -861,12 +861,12 @@ if __name__ == "__main__":
         """Test that memory snapshots are augmented with FX debug information."""
 
         class MLPModule(torch.nn.Module):
-            def __init__(self, device):
+            def __init__(self):
                 super().__init__()
                 torch.manual_seed(5)
-                self.net1 = torch.nn.Linear(10, 16, bias=True, device=device)
+                self.net1 = torch.nn.Linear(10, 16, bias=True, device="xpu")
                 self.relu = torch.nn.ReLU()
-                self.net2 = torch.nn.Linear(16, 10, bias=True, device=device)
+                self.net2 = torch.nn.Linear(16, 10, bias=True, device="xpu")
 
             def forward(self, x):
                 a = self.net1(x)
@@ -875,12 +875,12 @@ if __name__ == "__main__":
                 return c
 
         class MLPModule2(torch.nn.Module):
-            def __init__(self, device):
+            def __init__(self):
                 super().__init__()
                 torch.manual_seed(5)
-                self.net1 = torch.nn.Linear(10, 16, bias=True, device=device)
+                self.net1 = torch.nn.Linear(10, 16, bias=True, device="xpu")
                 self.relu = torch.nn.ReLU()
-                self.net2 = torch.nn.Linear(16, 10, bias=True, device=device)
+                self.net2 = torch.nn.Linear(16, 10, bias=True, device="xpu")
 
             def forward(self, x):
                 d = self.net1(x)
@@ -888,15 +888,15 @@ if __name__ == "__main__":
                 f = self.net2(e)
                 return f
 
-        device = "xpu"
-        mod = MLPModule(device)
-        # reset cache to start fresh
+        mod = MLPModule()
+        gc.collect()
         torch.xpu.memory.empty_cache()
         torch.xpu.memory._record_memory_history()
         compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
-        result = compiled(torch.randn(10, 10, device=device))
+        result = compiled(torch.randn(10, 10, device="xpu"))
         augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
         torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
+        gc.collect()
         torch.xpu.empty_cache()
 
         fx_frames = self.collect_frames(augmented_snapshot)
@@ -920,10 +920,10 @@ if __name__ == "__main__":
 
         # Test that when we have two graphs with the same src_code, they're not hashed
         # to the same metadata
-        mod = MLPModule2(device)
+        mod = MLPModule2()
         torch.xpu.memory._record_memory_history()
         compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
-        result = compiled(torch.randn(10, 10, device=device))
+        result = compiled(torch.randn(10, 10, device="xpu"))
         augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
         torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
 
