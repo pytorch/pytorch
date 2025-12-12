@@ -37,9 +37,9 @@ from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    MI200_ARCH,
     requires_gpu,
     requires_triton,
-    MI200_ARCH,
 )
 
 
