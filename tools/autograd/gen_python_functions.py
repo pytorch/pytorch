@@ -136,6 +136,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_cholesky.*",
     "_triangular_solve.*",
     "_qr.*",
+    "_qr_piv.*",
     "_svd.*",
     "slice",
     "item",
