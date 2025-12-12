@@ -1630,6 +1630,27 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
         # since they only affect tensor values, not shapes.
         ops_consuming_unbacked_scalars = {
+            # foreach ops with scalar/alpha arguments
+            torch._foreach_add,
+            torch._foreach_add_,
+            torch._foreach_sub,
+            torch._foreach_sub_,
+            torch._foreach_mul,
+            torch._foreach_mul_,
+            torch._foreach_div,
+            torch._foreach_div_,
+            torch._foreach_clamp_max,
+            torch._foreach_clamp_max_,
+            torch._foreach_clamp_min,
+            torch._foreach_clamp_min_,
+            torch._foreach_maximum,
+            torch._foreach_maximum_,
+            torch._foreach_minimum,
+            torch._foreach_minimum_,
+            torch._foreach_pow,
+            torch._foreach_pow_,
+            torch._foreach_lerp,
+            torch._foreach_lerp_,
             torch._foreach_addcmul,
             torch._foreach_addcmul_,
             torch._foreach_addcdiv,
