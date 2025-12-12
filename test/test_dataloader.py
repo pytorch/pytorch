@@ -3694,6 +3694,7 @@ class TestOutOfOrderDataLoader(TestCase):
 import torch.utils.data._utils.pin_memory as pm
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
 class TestPinMemory(TestCase):
     def test_pin_memory_on_tensor(self):
         x = torch.randn(2, 3)
