@@ -501,7 +501,7 @@ class MixOrderReductionTest(TestBase):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
-        if dtype is torch.bfloat16 and runOnRocmArch(MI200_ARCH):
+        if dtype is torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
             self.skipTest("Currently failing on rocm mi200") 
 
         def f(xs, w, eps):
