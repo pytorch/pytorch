@@ -51,8 +51,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 
 // TODO: descriptor checking
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -187,7 +186,6 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   return std::tuple<Tensor, Tensor>{grad_input_t, grad_grid_t};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif
