@@ -64,6 +64,7 @@ runs:
           echo "pip3 is already installed."
         else
           echo "pip3 not found, installing..."
+          uv python install 3.12
           uv pip install --system pip==25.3
         fi
 
