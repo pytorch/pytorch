@@ -1013,11 +1013,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # rid of these workarounds here and in `GetAttrVariable`.
         self.attrs_directly_modifed_on_dict = set()
 
+        # Cache inspect.getattr_static outputs for the same name. This is fine
+        # because if there is a mutation for the name, we use side-effects infra
+        # to early return the mutated value.
+        self._looked_up_attrs: dict[str, object] = {}
+
+        # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
+        self._subobj_from_class: dict[str, object] = {}
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
         if pytree.is_constant_class(self.value_type) and self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+        self._object_has_getattribute = object_has_getattribute(self.value)
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -1334,13 +1344,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
 
     def _getattr_static(self, name):
+        if name in self._looked_up_attrs:
+            return self._looked_up_attrs[name]
+
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         # NOTE we assume the following descriptors are side-effect-free as far
         # as Dynamo tracing is concerned.
-        if not object_has_getattribute(self.value) and (
+        if not self._object_has_getattribute and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
             or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
@@ -1349,7 +1362,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = type(self.value).__getattribute__(self.value, name)
-        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+        elif self._object_has_getattribute and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
             # call getattr_static only when the __getattribute__ tracing fails
@@ -1357,6 +1370,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # AttributeError.
             raise AttributeError
 
+        self._looked_up_attrs[name] = subobj
         return subobj
 
     def should_skip_descriptor_setter(self, attr_name):
@@ -1442,7 +1456,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         source = AttrSource(self.source, name) if self.source else None
 
-        if object_has_getattribute(self.value):
+        if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
@@ -1540,9 +1554,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if subobj is torch.nn.Module.__init__:
             subobj = unpatched_nn_module_init
 
-        subobj_from_class = inspect.getattr_static(
-            self.value.__class__, name, NO_SUCH_SUBOBJ
-        )
+        # Check if its already saved, avoids inspect getattr_static call
+        if name in self._subobj_from_class:
+            subobj_from_class = self._subobj_from_class[name]
+        else:
+            subobj_from_class = inspect.getattr_static(
+                self.value.__class__, name, NO_SUCH_SUBOBJ
+            )
+            self._subobj_from_class[name] = subobj_from_class
+
         is_accessible_from_type_mro = (
             subobj_from_class is subobj
             and self.cls_source is not None
@@ -2103,6 +2123,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @property
     def exc_type(self):
         return self.exc_vt.exc_type
+
+    @property
+    def python_stack(self):
+        return self.exc_vt.python_stack
+
+    @python_stack.setter
+    def python_stack(self, value):
+        self.exc_vt.python_stack = value
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
