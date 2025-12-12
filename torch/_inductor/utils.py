@@ -314,19 +314,21 @@ def _do_bench_using_profiling(
 
         may_ban_benchmarking()
 
+    device_type = get_gpu_type()
+    device_interface = get_interface_for_device(device_type)
     fn()
-    torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    device_interface.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
 
     # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = device_interface.Event(enable_timing=True)
+    end_event = device_interface.Event(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
         fn()
     end_event.record()
-    torch.cuda.synchronize()
+    device_interface.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / 5
 
     # compute number of warmup and repeat
@@ -337,11 +339,10 @@ def _do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
-    torch.cuda.synchronize()
-
+    device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            torch.profiler.ProfilerActivity.CUDA,
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
         ]
     ) as p:
         # Benchmark
@@ -351,7 +352,7 @@ def _do_bench_using_profiling(
             # record time of `fn`
             fn()
         # Record clocks
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
@@ -366,7 +367,8 @@ def _do_bench_using_profiling(
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
             "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
+            "#%s events: %d, #repeats: %s",
+            device_type,
             len(filtered_events),
             n_repeat,
         )
