@@ -85,6 +85,14 @@ runs:
           echo "✓ Using OIDC for authentication"
         fi
 
+    - name: Set AWS region for instance profile auth
+      if: steps.check_env.outputs.has_profile == 'true'
+      shell: bash
+      run: |
+        echo "Setting AWS_REGION=${{ inputs.aws-region }} for instance profile auth"
+        echo "AWS_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
+        echo "AWS_DEFAULT_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
+
     # Primary ECR login - works with both OIDC and instance profile credentials
     - name: Log in to ECR
       id: ecr-login
