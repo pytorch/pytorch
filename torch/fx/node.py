@@ -47,18 +47,17 @@ BaseArgumentTypes = Union[
 ]
 base_types = typing.get_args(BaseArgumentTypes)
 
-Target: TypeAlias = Union[Callable[..., Any], str]
+Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[
-    Union[
-        tuple["Argument", ...],
-        Sequence["Argument"],
-        Mapping[str, "Argument"],
-        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-        range,
-        "Node",
-        BaseArgumentTypes,
-    ]
+Argument = Union[
+    tuple["Argument", ...],
+    Sequence["Argument"],
+    Mapping[str, "Argument"],
+    slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
+    "Node",
+    BaseArgumentTypes,
+    None,
 ]
 # pyrefly: ignore [invalid-annotation]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
