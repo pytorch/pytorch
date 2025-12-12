@@ -1206,6 +1206,13 @@ class PallasKernel(SIMDKernel):
                     has_iter_vars = self._has_iteration_vars(index)
                     if not has_iter_vars:
                         needs_flatten = True
+                    elif "::" in index_str:
+                        # For multi-dim buffers with strided slice patterns (like "::2"),
+                        # the slice applies to the first dimension only, which doesn't
+                        # match the semantics of the index expression (which operates on
+                        # the flattened buffer). Use flattened indexing instead.
+                        index_str = self._generate_strided_index(index)
+                        needs_flatten = True
             except Exception:
                 pass
 
