@@ -25,6 +25,33 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
+// Struct containing info of an allocation block
+struct BlockInfo {
+  size_t size = 0;
+  size_t requested_size = 0;
+  int32_t gc_counter = 0;
+  bool allocated = false;
+  bool active = false;
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
+// Struct containing info of a memory segment (i.e. one contiguous device memory
+// allocation).
+struct SegmentInfo {
+  c10::DeviceIndex device = 0;
+  size_t address = 0;
+  size_t total_size = 0;
+  size_t requested_size = 0; // unrounded, actually requested size
+  size_t allocated_size = 0;
+  size_t active_size = 0;
+  sycl::queue* queue = nullptr;
+  bool is_large = false;
+  bool is_expandable = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
+  std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
 union trace_time_ {
   time_t t_;
   approx_time_t approx_t_;
@@ -71,6 +98,17 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
+};
+
+struct AllocatorConfigInfo {
+  bool expandable_segments;
+  std::string last_allocator_settings;
+};
+
+struct SnapshotInfo {
+  std::vector<SegmentInfo> segments;
+  std::vector<std::vector<TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
 };
 
 inline XPUAllocator* get() {
@@ -124,6 +162,8 @@ C10_XPU_API void recordHistory(
     size_t alloc_trace_max_entries,
     RecordContext when,
     bool clearHistory);
+
+C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
