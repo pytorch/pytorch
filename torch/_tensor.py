@@ -109,6 +109,7 @@ def _dtype_to_typestr(dtype):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _is_param: bool
+    # pyrefly: ignore [missing-attribute]
     __dlpack_c_exchange_api__: object = torch._C._dlpack_exchange_api()
 
     def _clear_non_serializable_cached_data(self):

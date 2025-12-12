@@ -99,6 +99,7 @@ class _KeyPathTrie:
 
     def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
         node = self.root
+        # pyrefly: ignore [bad-assignment]
         while not isinstance(node, Source):
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
@@ -1108,7 +1109,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)

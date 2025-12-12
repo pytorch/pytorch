@@ -279,7 +279,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:

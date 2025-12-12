@@ -56,6 +56,7 @@ class ExpRelaxedCategorical(Distribution):
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
