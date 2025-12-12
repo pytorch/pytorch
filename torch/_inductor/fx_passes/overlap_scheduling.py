@@ -65,8 +65,15 @@ class WhyNoOverlap:
             )
 
 
+# Cache for group names to avoid repeated normalize_function calls
+_group_name_cache: dict[fx.Node, str] = {}
+
+
 def get_group_name(n: fx.Node) -> str:
     """Extract the group name from a collective operation node."""
+    if n in _group_name_cache:
+        return _group_name_cache[n]
+
     opt_args_kwargs = normalize_function(
         n.target,  # type: ignore[arg-type]
         args=n.args,
@@ -75,7 +82,9 @@ def get_group_name(n: fx.Node) -> str:
     )
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    return kwargs["group_name"]
+    result = kwargs["group_name"]
+    _group_name_cache[n] = result
+    return result
 
 
 def get_custom_estimation(
@@ -1120,12 +1129,26 @@ class OverlapScheduler:
     def _find_schedulable_path(
         self, target: fx.Node, curr_overlap_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
-        """Find path to target by collecting unscheduled dependencies."""
-        # Get unscheduled ancestors
-        unscheduled_ancestors = self.node_ancestors[target] - self.scheduled
+        """Find path to target by collecting unscheduled dependencies.
 
-        # only schedule non distributed, non compute nodes
-        for node in unscheduled_ancestors:
+        Uses backward traversal from target, stopping at scheduled nodes since
+        all ancestors of a scheduled node are also scheduled.
+        """
+        unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
+        stack = list(target.all_input_nodes)
+        visited = set()
+
+        while stack:
+            node = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+
+            # If scheduled, skip - all its ancestors are also scheduled
+            if node in self.scheduled:
+                continue
+
+            # Validate node before adding to path
             if is_compute_node(node):
                 why("path blocked by compute node %s", node.name)
                 return None
@@ -1142,15 +1165,14 @@ class OverlapScheduler:
             if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
                 # Allow if fully hidden by other nodes
-                if not info.is_exposed and curr_overlap_node not in info.hiding_nodes:
-                    continue
-
-                why(
-                    "path blocked by wait node %s (exposed=%s, hiding_nodes=%s)",
-                    node.name,
-                    info.is_exposed,
-                    curr_overlap_node in info.hiding_nodes,
-                )
+                if info.is_exposed or curr_overlap_node in info.hiding_nodes:
+                    why(
+                        "path blocked by wait node %s (exposed=%s, hiding_nodes=%s)",
+                        node.name,
+                        info.is_exposed,
+                        curr_overlap_node in info.hiding_nodes,
+                    )
+                    return None
 
             # Skip c10 ops and dtensor shard ops - they should be scheduled via main loop
             target_str = str(node.target)
@@ -1160,6 +1182,9 @@ class OverlapScheduler:
                     node.name,
                 )
                 return None
+
+            unscheduled_ancestors.add(node)
+            stack.extend(node.all_input_nodes)
 
         return unscheduled_ancestors
 
