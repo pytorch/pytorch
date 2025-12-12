@@ -522,6 +522,91 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 }
 
 /*
+  The geqp3 function computes the QR decomposition with column pivoting of
+  matrices stored in `input`. As in geqrf, it does not explicitly construct the
+  Q matrix; instead, it generates a sequence of elementary reflectors that may
+  later be applied to form Q using, for example, the orgqr or ormqr routines.
+
+  In addition to the QR factors, geqp3 computes a pivot array describing the
+  permutation of columns chosen to improve numerical stability.
+
+  Args:
+  * `input` - [in]  Input tensor for QR decomposition with column pivoting
+              [out] On exit, contains:
+                      i)   The elements of R on and above the diagonal.
+                      ii)  The vectors defining the elementary reflectors below the diagonal,
+                           implicitly encoding Q.
+              The contents of this tensor will be overwritten with the result.
+
+  * `tau`   - [out] Tensor that will contain the magnitudes of the Householder
+                    reflectors that implicitly define Q.
+
+  * `P`     - [out] Tensor that will contain the pivot indices describing the
+                    column permutation applied during factorization. These indices
+                    correspond to the permutation matrix P such that A*P = Q*R.
+
+  For further details, please see the LAPACK documentation for GEQP3.
+*/
+template <typename scalar_t>
+void apply_geqp3(const at::Tensor& input, const at::Tensor& tau, const at::Tensor& P) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(false, "Calling torch.geqp3 on a CPU tensor requires compiling ",
+    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+    auto input_data = input.data_ptr<scalar_t>();
+    auto tau_data   = tau.data_ptr<scalar_t>();
+    auto P_data  = P.data_ptr<int>();
+
+    auto m = input.size(-2);
+    auto n = input.size(-1);
+    auto lda = std::max<int64_t>(1, m);
+    auto batch_size = batchCount(input);
+    auto input_matrix_stride = matrixStride(input);
+    auto tau_stride = tau.size(-1);
+
+    int info = 0;
+    int lwork = -1;
+    scalar_t wkopt;
+
+    using value_t = typename c10::scalar_value_type<scalar_t>::type;
+    at::Tensor rwork;
+    value_t* rwork_ptr = nullptr;
+
+    if constexpr ( std::is_same_v<scalar_t, c10::complex<double>> || std::is_same_v<scalar_t, c10::complex<float>> ) {
+        rwork = at::empty({2 * n}, input.options().dtype(c10::toRealValueType(input.scalar_type())));
+        rwork_ptr = rwork.mutable_data_ptr<value_t>();
+        lapackGeqp3<scalar_t>( m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, rwork_ptr, &info );
+    } else {  // double and float
+        lapackGeqp3<scalar_t>( m, n, input_data, lda, P_data, tau_data, &wkopt, lwork, &info );
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+
+    lwork = lapack_work_to_int(wkopt);
+    at::Tensor work = at::empty({lwork}, input.options());
+    scalar_t* work_ptr = work.data_ptr<scalar_t>();
+
+    for (int64_t b = 0; b < batch_size; b++) {
+        scalar_t* input_working_ptr = &input_data[b * input_matrix_stride];
+        scalar_t* tau_working_ptr = &tau_data[b * tau_stride];
+        int* p_working_ptr = &P_data[b * n];
+        if constexpr ( std::is_same_v<scalar_t, c10::complex<double>> || std::is_same_v<scalar_t, c10::complex<float>> ) {
+            lapackGeqp3<scalar_t>(m, n, input_working_ptr, lda, p_working_ptr, tau_working_ptr, work_ptr, lwork, rwork_ptr, &info);
+        } else {  // double and float
+            lapackGeqp3<scalar_t>(m, n, input_working_ptr, lda, p_working_ptr, tau_working_ptr, work_ptr, lwork, &info);
+        }
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+    }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_geqp3'
+void geqp3_kernel(const at::Tensor& input, const at::Tensor& tau, const at::Tensor& P) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES( input.scalar_type(), "geqp3_cpu", [&] {
+        apply_geqp3<scalar_t>(input, tau, P);
+    });
+}
+
+/*
   Solves a least squares problem. That is minimizing ||B - A X||.
 
   Input args:
@@ -1254,6 +1339,13 @@ REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_ZVECTOR_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_SVE256_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
+
+REGISTER_ARCH_DISPATCH(geqp3_stub, DEFAULT, &geqp3_kernel)
+REGISTER_AVX512_DISPATCH(geqp3_stub, &geqp3_kernel)
+REGISTER_AVX2_DISPATCH(geqp3_stub, &geqp3_kernel)
+REGISTER_VSX_DISPATCH(geqp3_stub, &geqp3_kernel)
+REGISTER_ZVECTOR_DISPATCH(geqp3_stub, &geqp3_kernel)
+REGISTER_SVE256_DISPATCH(geqp3_stub, &geqp3_kernel)
 
 REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel)
 REGISTER_AVX512_DISPATCH(ormqr_stub, &ormqr_kernel)

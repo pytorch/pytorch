@@ -1408,6 +1408,11 @@
   A: linalg_qr_backward(grad_Q, grad_R, Q, R, mode)
   Q, R: linalg_qr_jvp(A_t, Q, R, mode)
 
+- name: linalg_qr_piv(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R, Tensor P)
+  A: linalg_qr_piv_backward(grad_Q, grad_R, Q, R, P, mode)
+  Q, R: linalg_qr_piv_jvp(A_t, Q, R, P, mode)
+  output_differentiability: [True, True, False]
+
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
   result: auto_element_wise

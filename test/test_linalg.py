@@ -4069,6 +4069,53 @@ class TestLinalg(TestCase):
         for tensor_dims, some in itertools.product(tensor_dims_list, [True, False]):
             run_test(tensor_dims, some)
 
+    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_qr_piv(self, device, dtype):
+        def run_test(tensor_dims, mode):
+            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
+            Q, R, P = torch.linalg.qr_piv(A, mode=mode)
+
+            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
+            m, n = tensor_dims[-2:]
+            n_columns = m if (mode != 'reduced') and m > n else min(m, n)
+            self.assertEqual(Q.size(-2), m)
+            self.assertEqual(R.size(-1), n)
+            self.assertEqual(Q.size(-1), n_columns)
+
+            # Check1: A[...,P] = QR
+            P_idx = P.unsqueeze(-2).expand(*A.shape[:-1], A.size(-1))
+            AP = A.gather(-1, P_idx)  # in the matrix case this is equivalent to AP = A[:,P]
+            self.assertEqual(AP, Q @ R)
+
+            # Check2: A[...,P] = QR (with out)
+            Q_out, R_out, P_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan), torch.full_like(P, 0)
+            torch.linalg.qr_piv(A, mode=mode, out=(Q_out, R_out, P_out))
+            P_idx = P_out.unsqueeze(-2).expand(*A.shape[:-1], A.size(-1))
+            AP = A.gather(-1, P_idx)
+            self.assertEqual(AP, Q_out @ R_out)
+
+            # Check3: Q == Q_out, R == R_out, P == P_out
+            self.assertEqual(Q, Q_out)
+            self.assertEqual(R, R_out)
+            self.assertEqual(P, P_out)
+
+            # Check4: Q^{T}Q = I, triu(R) = R
+            Q_ = Q.cpu().numpy()
+            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
+            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
+            self.assertEqual(R.triu(), R)
+
+        tensor_dims_list = [(0, 5), (0, 0), (5, 0),  # Empty Tensors
+                            (2, 1, 0, 5), (2, 1, 0, 0), (2, 1, 5, 0), (2, 0, 5, 5),  # Batched empty Tensors
+                            (3, 5), (5, 5), (5, 3),  # Single matrix
+                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
+                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
+        for tensor_dims, some in itertools.product(tensor_dims_list, ['reduced', 'complete']):
+            run_test(tensor_dims, some)
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -4103,6 +4150,46 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_piv_vs_scipy(self, device, dtype):
+        """
+        test torch.linalg.qr_piv vs scipy.linalg.qr
+        """
+        from scipy.linalg import qr
+        sizes_to_test = [
+            (7, 5),    # tall
+            (5, 7),    # wide
+            (5, 5),    # square
+            (5, 0),    # empty
+            (0, 5),    # empty
+        ]
+        torch_to_scipy_mode = {'reduced': 'economic', 'complete': 'full'}
+        for size in sizes_to_test:
+            t = torch.randn(size, device=device, dtype=dtype)
+            np_t = t.cpu().numpy()
+            for mode in ['reduced', 'complete']:
+                q_ref, r_ref, p_ref = qr(np_t, mode=torch_to_scipy_mode[mode], pivoting=True)
+                q, r, p = torch.linalg.qr_piv(t, mode=mode)
+                self.assertEqual(q, q_ref)
+                self.assertEqual(r, r_ref)
+                self.assertEqual(p.to(torch.int32), p_ref)
+
+            # for mode='r' we need a special logic because scipy returns only r
+            r_ref, p_ref = qr(np_t, mode='r', pivoting=True)
+            q, r, p = torch.linalg.qr_piv(t, mode='r')
+            # check that q is empty
+            self.assertEqual(q.shape, (0,))
+            self.assertEqual(q.dtype, t.dtype)
+            self.assertEqual(q.device, t.device)
+            # to check r, note that r_ref has has dimensions (m,n) as in mode 'full',
+            # so we need to truncate the number of rows to (k,n) with k=min(m,n) for the comparison
+            k = min(np_t.shape)
+            self.assertEqual(r, r_ref[0:k, :])
+            self.assertEqual(p.to(torch.int32), p_ref)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_linalg_qr_autograd(self, device, dtype):
         # Check differentiability for modes as specified in the docs.
@@ -4129,6 +4216,38 @@ class TestLinalg(TestCase):
                     self.assertEqual(q.shape, (0,))  # empty tensor
                     with self.assertRaisesRegex(RuntimeError,
                                                 "The derivative of linalg.qr depends on Q"):
+                        b.backward()
+                else:
+                    b.backward()
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_linalg_qr_piv_autograd(self, device, dtype):
+        # Check differentiability for modes as specified in the docs.
+        # Differentiability in all cases is only guaranteed if first k = min(m, n) columns are linearly independent.
+        # Mode 'reduced' is always differentiable.
+        # Mode 'r' is never differentiable.
+        # Mode 'complete' is differentiable for m <= n.
+        for mode in 'complete', 'reduced', 'r':
+            for m, n in [(5, 7), (7, 5)]:
+                # Random matrix inputs will effectively satisfy rank requirement of k = min(m, n) columns linearly
+                # independent.
+                inp = torch.randn((m, n), device=device, dtype=dtype, requires_grad=True)
+                q, r, p = torch.linalg.qr_piv(inp, mode=mode)
+                b = torch.sum(r)
+                if mode == 'complete' and m > n:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "The pivoted QR decomposition is not differentiable when mode='complete' and "
+                                                "nrows > ncols"):
+                        b.backward()
+                elif mode == 'r':
+                    # torch.linalg.qr_piv(mode='r') returns only 'r' and 'p' and discards 'q', but
+                    # without 'q' you cannot compute the backward pass. Check that
+                    # linalg_qr_piv_backward complains cleanly in that case.
+                    self.assertEqual(q.shape, (0,))  # empty tensor
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "The derivative of linalg.qr_piv depends on Q"):
                         b.backward()
                 else:
                     b.backward()
@@ -4177,6 +4296,64 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_piv_batched(self, device, dtype):
+        """
+        test test torch.linalg.qr_piv vs scipy.linalg.qr. We need some special logic
+        because scipy does not support batched qr
+        """
+        from scipy.linalg import qr
+        if dtype in [torch.float, torch.cfloat]:
+            atol = 1e-5
+        else:
+            atol = 1e-10
+
+        def scipy_qr_batched(a, mode, pivoting=True):
+            """poor's man batched version of scipy.linalg.qr"""
+            all_q = []
+            all_r = []
+            all_p = []
+            for matrix in a:
+                result = qr(matrix, mode=mode, pivoting=pivoting)
+                if mode == 'r':
+                    r, p = result
+                    all_r.append(r)
+                    all_p.append(p)
+                else:
+                    q, r, p = result
+                    all_q.append(q)
+                    all_r.append(r)
+                    all_p.append(p)
+            if mode == 'r':
+                return np.array(all_r), np.array(all_p)
+            else:
+                return np.array(all_q), np.array(all_r), np.array(all_p)
+
+        t = torch.randn((3, 7, 5), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        torch_to_scipy_mode = {'reduced': 'economic', 'complete': 'full'}
+        for mode in ['reduced', 'complete']:
+            q_ref, r_ref, p_ref = scipy_qr_batched(np_t, mode=torch_to_scipy_mode[mode])
+            q, r, p = torch.linalg.qr_piv(t, mode=mode)
+            self.assertEqual(q, q_ref)
+            self.assertEqual(r, r_ref)
+            self.assertEqual(p.to(torch.int32), p_ref)
+        # for mode='r' we need a special logic because scipy returns only r and p
+        r_ref, p_ref = scipy_qr_batched(np_t, mode='r')
+        q, r, p = torch.linalg.qr_piv(t, mode='r')
+        # check that q is empty
+        self.assertEqual(q.shape, (0,))
+        self.assertEqual(q.dtype, t.dtype)
+        self.assertEqual(q.device, t.device)
+        # to check r, note that r_ref has has dimensions (m,n) as in mode 'full',
+        # so we need to truncate the number of rows to (k,n) with k=min(m,n) for the comparison
+        k = min(np_t.shape[1:])
+        self.assertEqual(r, r_ref[:, 0:k, :])
+        self.assertEqual(p.to(torch.int32), p_ref)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_qr_error_cases(self, device, dtype):
         t1 = torch.randn(5, device=device, dtype=dtype)
@@ -4185,6 +4362,17 @@ class TestLinalg(TestCase):
         t2 = torch.randn((5, 7), device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_qr_piv_error_cases(self, device, dtype):
+        t1 = torch.randn(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'linalg.qr_piv: The input tensor A must have at least 2 dimensions.'):
+            torch.linalg.qr_piv(t1)
+        t2 = torch.randn((5, 7), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "qr_piv received unrecognized mode 'hello'"):
+            torch.linalg.qr_piv(t2, mode='hello')
 
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:

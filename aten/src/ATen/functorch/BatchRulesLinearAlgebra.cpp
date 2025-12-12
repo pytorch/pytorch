@@ -735,6 +735,7 @@ LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex)
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_qr_piv, linalg.qr_piv)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet)
 LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular)
 

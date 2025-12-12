@@ -14628,6 +14628,18 @@
   dispatch:
     CPU, CUDA: linalg_qr_out
 
+- func: linalg_qr_piv(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R, Tensor P)
+  python_module: linalg
+  variants: function
+  structured_delegate: linalg_qr_piv.out
+
+- func: linalg_qr_piv.out(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R, Tensor(c!) P) -> (Tensor(a!) Q, Tensor(b!) R, Tensor(c!) P)
+  python_module: linalg
+  variants: function
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_qr_piv_out
+
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
 

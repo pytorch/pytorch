@@ -449,6 +449,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(adaptive_max_pool3d, fp32)
   KERNEL_CPU(multilabel_margin_loss_forward, fp32)
   KERNEL_CPU(linalg_qr, fp32)
+  KERNEL_CPU(linalg_qr_piv, fp32)
   KERNEL_CPU(linalg_cholesky_ex, fp32)
   KERNEL_CPU(linalg_svd, fp32)
   KERNEL_CPU(linalg_eig, fp32)

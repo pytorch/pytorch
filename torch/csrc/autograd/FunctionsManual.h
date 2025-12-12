@@ -713,6 +713,19 @@ Tensor linalg_qr_backward(
     const Tensor& Q,
     const Tensor& R,
     const std::string_view mode);
+Tensor linalg_qr_piv_backward(
+    const Tensor& gQ,
+    const Tensor& gR,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode);
+std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
+    const Tensor& dA,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode);
 Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
