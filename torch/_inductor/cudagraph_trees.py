@@ -1471,6 +1471,7 @@ class CUDAGraphNode:
     def _path_to_root(self) -> Generator[CUDAGraphNode, None, None]:
         "Returns all nodes in the path starting at self and ending at root"
         node = self
+        # pyrefly: ignore [bad-assignment]
         while node:
             yield node
             node = node.parent  # type: ignore[assignment]

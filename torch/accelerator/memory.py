@@ -233,4 +233,5 @@ def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
             The second value is the device's total hardware memory capacity.
     """
     device_index = _get_device_index(device_index, optional=True)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getMemoryInfo(device_index)

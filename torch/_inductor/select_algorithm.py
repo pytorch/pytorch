@@ -1235,6 +1235,7 @@ class TritonTemplateKernel(TritonKernel):
                         # after the remapping.
                         # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
+                    # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
                 else:
                     mask_vars: list[str] = []
@@ -3601,7 +3602,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timeout_seconds = config.collective_benchmark_timeout
 
         nruns = config.collective_benchmark_nruns
-        nwarmup = ir.autotune_warmup
+        nwarmup = config.inductor_default_autotune_warmup
 
         # Use default process group (None = all ranks)
         process_group = None
@@ -3873,8 +3874,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cutlass.cutlass_prescreening
-            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [

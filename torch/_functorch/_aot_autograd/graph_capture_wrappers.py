@@ -961,6 +961,7 @@ def create_functionalized_fn(
                 if f_args_mutation_counters_after_forward is not None:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                        # pyrefly: ignore [no-matching-overload]
                         zip(
                             f_args_after_forward,  # type: ignore[arg-type]
                             primals_before,  # type: ignore[arg-type]
