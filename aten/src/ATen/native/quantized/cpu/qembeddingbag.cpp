@@ -190,7 +190,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   return output;
 }
 
-#ifdef __aarch64__
+#if defined(__aarch64__) && !defined(__APPLE__)
 static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
