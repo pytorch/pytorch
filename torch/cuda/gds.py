@@ -1,6 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
+from typing import Optional
 
 import torch
 from torch.types import Storage
@@ -106,7 +107,7 @@ class GdsFile:
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)  # type: ignore[attr-defined]
-        self.handle: int | None = None
+        self.handle: Optional[int] = None
         self.register_handle()
 
     def __del__(self) -> None:
