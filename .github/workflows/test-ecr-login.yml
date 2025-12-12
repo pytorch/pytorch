@@ -1,0 +1,124 @@
+name: test-ecr-login
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-ecr-login.yml
+      - .github/actions/ecr-login/**
+  workflow_dispatch:
+
+jobs:
+  # Test on standard EC2 runner (should have IAM instance profile)
+  test-ec2-linux-2xlarge:
+    runs-on: linux.2xlarge
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: ./.github/actions/ecr-login
+
+      - name: Verify auth method
+        run: |
+          echo "Runner: linux.2xlarge"
+          echo "Auth method used: ${{ steps.ecr-login.outputs.auth-method }}"
+          # On EC2, we expect instance-profile
+          if [[ "${{ steps.ecr-login.outputs.auth-method }}" != "instance-profile" ]]; then
+            echo "WARNING: Expected instance-profile auth on EC2 runner, got: ${{ steps.ecr-login.outputs.auth-method }}"
+          else
+            echo "✓ Using IAM instance profile as expected"
+          fi
+
+      - name: Verify docker credentials
+        run: |
+          echo "Checking docker config for ECR credentials..."
+          if grep -q "308535385114" ~/.docker/config.json 2>/dev/null; then
+            echo "✓ ECR credentials found in docker config"
+          else
+            echo "✗ ECR credentials NOT found in docker config"
+            cat ~/.docker/config.json 2>/dev/null || echo "No docker config file"
+            exit 1
+          fi
+
+  # Test on LF runner (Linux Foundation)
+  test-lf-runner:
+    runs-on: lf.linux.2xlarge
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: ./.github/actions/ecr-login
+
+      - name: Verify auth method
+        run: |
+          echo "Runner: lf.linux.2xlarge"
+          echo "Auth method used: ${{ steps.ecr-login.outputs.auth-method }}"
+          # On LF EC2, we expect instance-profile
+          if [[ "${{ steps.ecr-login.outputs.auth-method }}" != "instance-profile" ]]; then
+            echo "WARNING: Expected instance-profile auth on LF runner, got: ${{ steps.ecr-login.outputs.auth-method }}"
+          else
+            echo "✓ Using IAM instance profile as expected"
+          fi
+
+      - name: Verify docker credentials
+        run: |
+          echo "Checking docker config for ECR credentials..."
+          if grep -q "308535385114" ~/.docker/config.json 2>/dev/null; then
+            echo "✓ ECR credentials found in docker config"
+          else
+            echo "✗ ECR credentials NOT found in docker config"
+            cat ~/.docker/config.json 2>/dev/null || echo "No docker config file"
+            exit 1
+          fi
+
+  # Test on GCP runner (should use OIDC, no instance profile)
+  test-gcp-runner:
+    runs-on: linux.google.tpuv7x.1
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: ./.github/actions/ecr-login
+
+      - name: Verify auth method
+        run: |
+          echo "Runner: linux.google.tpuv7x.1"
+          echo "Auth method used: ${{ steps.ecr-login.outputs.auth-method }}"
+          # On GCP, we expect OIDC since there's no AWS IAM profile
+          if [[ "${{ steps.ecr-login.outputs.auth-method }}" != "oidc" ]]; then
+            echo "WARNING: Expected OIDC auth on GCP runner, got: ${{ steps.ecr-login.outputs.auth-method }}"
+          fi
+
+      - name: Verify docker credentials
+        run: |
+          echo "Checking docker config for ECR credentials..."
+          if grep -q "308535385114" ~/.docker/config.json 2>/dev/null; then
+            echo "✓ ECR credentials found in docker config"
+          else
+            echo "✗ ECR credentials NOT found in docker config"
+            cat ~/.docker/config.json 2>/dev/null || echo "No docker config file"
+            exit 1
+          fi
