@@ -3,7 +3,14 @@
 # Common setup for all Jenkins scripts
 # shellcheck source=./common_utils.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
 set -ex -o pipefail
+
+# Source ROCm environment for theRock nightly builds
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+  # shellcheck disable=SC1091
+  source /etc/rocm_env.sh
+fi
 
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
