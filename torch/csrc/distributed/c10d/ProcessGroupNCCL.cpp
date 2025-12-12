@@ -1126,12 +1126,15 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
-  std::sort(snapshot.segments.begin(), snapshot.segments.end(), [](const SegmentInfo &a, const SegmentInfo &b)
-  {
-      return a.registration_counter < b.registration_counter;
-  });
+  std::sort(
+      snapshot.segments.begin(),
+      snapshot.segments.end(),
+      [](const SegmentInfo &a, const SegmentInfo &b) {
+        return a.registration_counter < b.registration_counter;
+      });
   for (const auto& segmentInfo : snapshot.segments) {
-    TORCH_INTERNAL_ASSERT(segmentInfo.registration_counter >= 0,
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.registration_counter >= 0,
         "SegmentInfo has uninitialized registration counter");
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
