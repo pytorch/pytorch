@@ -135,8 +135,15 @@ class FxGraphRunnableTest(TestCase):
         with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
+            timeout = 30
+            if GPU_TYPE == "xpu":
+                # Low CPU frequency of XPU CI machine.
+                timeout = 60
             res = subprocess.run(
-                [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
+                [sys.executable, tmp.name],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
 
             self.assertEqual(
