@@ -900,10 +900,9 @@ class TestExport(TestCase):
 
                 # Use flex_attention with torch.compile - during export, compile should be skipped
                 backend = "inductor" if self.use_inductor else "eager"
-                # out = torch.compile(flex_attention, backend=backend)(
-                #     q, k, v, block_mask=block_mask
-                # )
-                out = flex_attention(q, k, v, block_mask=block_mask)
+                out = torch.compile(flex_attention, backend=backend)(
+                    q, k, v, block_mask=block_mask
+                )
 
                 return out
 
@@ -912,7 +911,11 @@ class TestExport(TestCase):
         # Inductor doesn't work in eager mode flex attention
         eager_out = model(x)
         model.use_inductor = True
-        exported_mod = torch.export.export(model, (x,), strict=False).module()
+        with self.assertWarnsRegex(
+            UserWarning,
+            "torch.compile is ignored when called inside torch.export region",
+        ):
+            exported_mod = torch.export.export(model, (x,), strict=False).module()
         self.assertExpectedInline(
             str(exported_mod.code).strip(),
             """\
