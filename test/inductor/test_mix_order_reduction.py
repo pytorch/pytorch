@@ -8,10 +8,10 @@ from torch._inductor import metrics, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    MI200_ARCH,
     instantiate_parametrized_tests,
     isRocmArchAnyOf,
     parametrize,
-    MI200_ARCH,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
