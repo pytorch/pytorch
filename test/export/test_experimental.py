@@ -5,7 +5,7 @@ import types
 import unittest
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch._dynamo
@@ -17,9 +17,44 @@ from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TEST_CUDA
+from torch.utils import _pytree as pytree
 
 
 GLOBAL_LIST = []
+
+
+class GlobalContext:
+    def __init__(self) -> None:
+        self._summaries: dict[str, MetricValue] = {}
+        self._tensors: dict[str, Tensor] = {}
+
+    def __flatten__(self):
+        """Flattens into (leaves, ctx)."""
+        summary_leaves, summary_spec = pytree.tree_flatten(self._summaries)
+        tensor_leaves, tensor_spec = pytree.tree_flatten(self._tensors)
+        leaves = (*summary_leaves, *tensor_leaves)
+        ctx = (summary_spec, tensor_spec)
+        return leaves, ctx
+
+    @classmethod
+    def __unflatten__(cls, leaves, ctx: tuple[pytree.TreeSpec, pytree.TreeSpec]):
+        """Reconstructs from (leaves, ctx)."""
+        output = cls()
+        summary_spec, tensor_spec = ctx
+        assert len(leaves) == summary_spec.num_leaves + tensor_spec.num_leaves
+        output._summaries = pytree.tree_unflatten(
+            leaves[: summary_spec.num_leaves], summary_spec
+        )
+        output._tensors = pytree.tree_unflatten(
+            leaves[summary_spec.num_leaves :], tensor_spec
+        )
+        return output
+
+    def __enter__(self) -> "GlobalContext":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
@@ -582,6 +617,33 @@ def forward(self, args_0):
         self.assertIsNotNone(gm.meta["tracing_context"].fake_mode)
         self.assertEqual(len(gm.meta["tracing_context"].tensor_to_context), 1)
 
+    def test_dynamo_graph_capture_ctx_return(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                with GlobalContext() as ctx:
+                    z = x + 1
+                    ctx._tensors["6"] = x + 2
+                return z, ctx
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        try:
+            pytree.register_pytree_node(
+                GlobalContext,
+                lambda x: x.__flatten__(),
+                GlobalContext.__unflatten__,
+            )
+            mod = Module()
+
+            gm = dynamo_graph_capture_for_export(mod)(*make_inputs())
+            test_inputs = make_inputs()
+            actual_outputs = pytree.tree_leaves(gm(*test_inputs))
+            expected_outputs = pytree.tree_leaves(mod(*test_inputs))
+            self.assertEqual(actual_outputs, expected_outputs)
+        finally:
+            pytree._deregister_pytree_node(GlobalContext)
+
     def test_dynamo_graph_capture_dict_keys_getitem(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -614,9 +676,9 @@ def forward(self, args_0):
     _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
     L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1;  add = None
+    add = l_args_0_ + 1
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul), self._out_spec)""",
+    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
@@ -652,7 +714,10 @@ def forward(self, args_0):
             return (torch.randn(2, 3),)
 
         trace_inputs = make_inputs()
-        with warnings.catch_warnings(record=True) as w:
+        with (
+            torch._dynamo.config.patch(replay_side_effects=False),
+            warnings.catch_warnings(record=True) as w,
+        ):
             gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
             cnt = 0
             for entry in w:

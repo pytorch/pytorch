@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
@@ -8,7 +7,6 @@
 
 #include <ATen/ScalarOps.h>
 
-#include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -383,7 +381,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       try {
         auto script_dict = py::cast<ScriptDict>(obj);
         return script_dict.dict_;
-      } catch (py::cast_error& e) {
+      } catch (py::cast_error&) {
       }
 
       // If not (i.e. it is a regular Python dictionary), make a new

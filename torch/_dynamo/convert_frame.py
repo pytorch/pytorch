@@ -26,6 +26,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import cProfile
+import dataclasses
 import dis
 import functools
 import gc
@@ -99,6 +100,7 @@ from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    innermost_fn,
     skip_code,
     TorchPatcher,
 )
@@ -474,12 +476,13 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         )
         prof = cProfile.Profile()
         try:
-            prof.enable()
             start_ts = time.time()
+            # runcall calls prof.enable() and prof.disable(), so do NOT call
+            # enable outside. This leads to issues like
+            # ValueError: Another profiling tool is already active
             # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
-            prof.disable()
         except ValueError:
             log.exception("failed to enable cProfile")
             profile_latency = 0
@@ -498,7 +501,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
-            gprof2dot_process = subprocess.Popen(
+            with subprocess.Popen(
                 [
                     "gprof2dot",
                     "-f",
@@ -509,12 +512,12 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                     str(profile_path),
                 ],
                 stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            log.warning("Generated SVG from profile at %s", svg_path)
+            ) as gprof2dot_process:
+                subprocess.check_call(
+                    ["dot", "-Tsvg", "-o", str(svg_path)],
+                    stdin=gprof2dot_process.stdout,
+                )
+                log.warning("Generated SVG from profile at %s", svg_path)
         except FileNotFoundError:
             log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
@@ -931,9 +934,14 @@ class GraphRuntimeEnv:
     used_globals: dict[str, Any]
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
-        self, backend_id: str, compiled_fn: Callable[..., Any]
+        self,
+        backend_id: str,
+        compiled_fn: Callable[..., Any],
+        *,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -942,14 +950,31 @@ class GraphRuntimeEnv:
         f_globals = {
             **import_sources,
             **self.used_globals,
+            **(extra_globals or {}),
             backend_id: compiled_fn,
         }
+
+        # check that all external references are available
+        self._check_external_refs(f_globals)
+
         return types.FunctionType(
             self.bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
         )
+
+    def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
+        missing_refs = []
+        for ref in self.external_refs:
+            if ref not in f_globals:
+                missing_refs.append(ref)
+
+        if missing_refs:
+            raise RuntimeError(
+                f"Missing required external references: {missing_refs}. "
+                "Please load AOT compiled function with `f_globals=<enclosing global scope>`"
+            )
 
 
 @dataclass
@@ -997,13 +1022,36 @@ class GraphCaptureOutput:
             if global_name in self.f_globals:
                 used_globals[global_name] = self.f_globals[global_name]
 
+        # Scan bytecode for all external references
+        external_refs = self._get_external_refs(self.bytecode)
+
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
             import_sources=self.import_sources,
             used_globals=used_globals,
             closure=self.closure,
             argdefs=self.argdefs,
+            external_refs=external_refs,
         )
+
+    @staticmethod
+    def _get_external_refs(bytecode: types.CodeType) -> set[str]:
+        import dis
+
+        external_refs: set[str] = set()
+
+        # Get all instructions from the bytecode
+        for instruction in dis.get_instructions(bytecode):
+            # LOAD_GLOBAL loads a global variable or a builtin
+            if instruction.opname == "LOAD_GLOBAL":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+            # LOAD_NAME loads a name (used in module-level code, less common in functions)
+            elif instruction.opname == "LOAD_NAME":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+
+        return external_refs
 
 
 @dataclass
@@ -1026,13 +1074,16 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Optional[Callable[..., Any]] = None,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
         # pyrefly: ignore [not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
-        return runtime_env.forward_callable(backend_id, compiled_fn)
+        return runtime_env.forward_callable(
+            backend_id, compiled_fn, extra_globals=extra_globals
+        )
 
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
@@ -1566,7 +1617,9 @@ def _compile(
         # Check recompilations
         recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
-            reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
+            reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, innermost_fn(compiler_fn)
+            )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
@@ -1574,7 +1627,7 @@ def _compile(
         inline_inbuilt_nn_modules_candidate = False
         if not config.inline_inbuilt_nn_modules and frame:
             inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, skip_logging=True
+                cache_entry, frame, innermost_fn(compiler_fn), skip_logging=True
             )
             inbuilt_nn_recompile_reason = (
                 None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]

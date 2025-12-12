@@ -601,7 +601,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -660,7 +660,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -688,7 +688,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -720,7 +720,7 @@ terrible spacing
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -1947,6 +1947,21 @@ class TestModule(torch.nn.Module):
             args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
+
+    def test_normalize_args_with_python_keyword(self):
+        aten: torch._ops._OpNamespace = torch.ops.aten
+        for target in [
+            aten.uniform_.default,
+            aten.uniform.default,
+            getattr(aten.random_, "from"),
+        ]:
+            inp_args, inp_kwargs = (torch.rand(4), -2, 2), {"generator": None}
+            args, kwargs = normalize_function(
+                target, inp_args, inp_kwargs, normalize_to_only_use_kwargs=True
+            )
+            self.assertEqual(args, inp_args[:2])
+            expected_kwargs = {"to": inp_args[-1], **inp_kwargs}
+            self.assertEqual(kwargs, expected_kwargs)
 
 
 if TEST_Z3:
