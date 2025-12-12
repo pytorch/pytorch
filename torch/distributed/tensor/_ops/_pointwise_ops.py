@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from typing import cast, Optional
 
 import torch
+from torch._ops import OpOverload
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
@@ -495,7 +496,10 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def single_mesh_dim_pointwise_strategy(
-    args_schema: ArgsType, kwargs_schema: KwargsType, linearity: int = -1
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+    linearity: int = -1,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
 
