@@ -893,7 +893,7 @@ if __name__ == "__main__":
         torch.xpu.memory.empty_cache()
         torch.xpu.memory._record_memory_history()
         compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
-        result = compiled(torch.randn(10, 10, device="xpu"))
+        _ = compiled(torch.randn(10, 10, device="xpu"))
         augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
         torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
         gc.collect()
@@ -923,7 +923,7 @@ if __name__ == "__main__":
         mod = MLPModule2()
         torch.xpu.memory._record_memory_history()
         compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
-        result = compiled(torch.randn(10, 10, device="xpu"))
+        _ = compiled(torch.randn(10, 10, device="xpu"))
         augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
         torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
 
