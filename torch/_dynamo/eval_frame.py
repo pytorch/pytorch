@@ -207,6 +207,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
+            # pyrefly: ignore [bad-argument-type]
             callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
@@ -313,6 +314,7 @@ def _create_delayed_compile_callback(
                 )
             elif stance == "aot_eager_then_compile":
                 aot_eager_fn = get_compiler_fn("aot_eager")
+                # pyrefly: ignore [bad-argument-type]
                 return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
         dynamism = track_dynamism_across_examples(example_inputs)
@@ -398,6 +400,7 @@ class OptimizedModule(torch.nn.Module):
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
+        # pyrefly: ignore [invalid-argument]
         if isinstance(self._orig_mod, Sized):
             return len(self._orig_mod)
         # Mimic python's default behavior for objects without a length
@@ -407,6 +410,7 @@ class OptimizedModule(torch.nn.Module):
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
@@ -418,6 +422,7 @@ class OptimizedModule(torch.nn.Module):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
@@ -766,21 +771,24 @@ class _TorchDynamoContext:
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
-                result = DynamoCache.load(fn)
+                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
                     try:
                         self._package.initialize(
-                            fn, result.dynamo, ignore_inlined_sources=False
+                            fn_key, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
 
         fn = innermost_fn(fn)
 
@@ -1467,6 +1475,7 @@ def _optimize(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             hooks,
             package=package,
@@ -2348,6 +2357,7 @@ def _optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             export=export,
             export_constraints=export_constraints,
