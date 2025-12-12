@@ -30,6 +30,39 @@ jobs:
           fi
           echo "SUCCESS: TPU detected as expected"
 
+  test-ecr-login:
+    runs-on: linux.google.tpuv7x.1
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: pytorch-linux-jammy-py3.12-gcc11
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Verify image was pulled
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        run: |
+          echo "Successfully pulled: $DOCKER_IMAGE"
+          docker images | grep -E "308535385114|pytorch"
+
   test-tpu-docker-flags:
     runs-on: linux.google.tpuv7x.1
     steps:
