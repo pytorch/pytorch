@@ -16,12 +16,21 @@ runs:
       run: |
         set +e  # Don't exit on error - TPU detection may fail on non-TPU runners
 
+        # Create a temporary venv to avoid uv run's overhead
+        tmp_venv=$(mktemp -d)/venv
+        uv venv "$tmp_venv" --quiet
+        uv pip install --quiet --python "$tmp_venv/bin/python" tpu-info
+
         # get_local_chips() returns Tuple[Optional[TpuChip], int] where:
         #   - First element is the chip type (None if no TPU)
         #   - Second element is the count of chips
         # We check if count > 0 to determine TPU presence
-        result=$(uv run --with tpu-info python -c "from tpu_info import device; chip, count = device.get_local_chips(); print('true' if count > 0 else 'false')" 2>/dev/null)
+        result=$("$tmp_venv/bin/python" -c "from tpu_info import device; chip, count = device.get_local_chips(); print('true' if count > 0 else 'false')" 2>/dev/null)
         exit_code=$?
+
+        # Cleanup
+        rm -rf "$(dirname "$tmp_venv")"
+
         set -e
 
         if [[ $exit_code -ne 0 ]]; then
