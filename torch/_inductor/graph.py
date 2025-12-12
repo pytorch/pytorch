@@ -390,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
+        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -410,6 +411,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.named_buffers: dict[str, torch.Tensor] = (
             const_module.named_buffers if const_module else {}
+        )
+        self.mutated_named_buffers: OrderedSet[torch.Tensor] = gm.meta.get(
+            "mutated_named_buffers", OrderedSet()
         )
         self.named_parameters: dict[str, torch.Tensor] = (
             const_module.named_parameters if const_module else {}
@@ -1408,6 +1412,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
+            or target in self.mutated_named_buffers
         ):
             return self.add_tensor_constant(value, target)
 
