@@ -24,6 +24,8 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   struct PyFrame {
     void* code; // PyCodeObject*, but python headers not present
     int lasti;
+    bool is_entry; // true if this frame is an entry point from native code
+                   // (Python 3.11+)
   };
 
   static std::shared_ptr<CapturedTraceback> gather(
