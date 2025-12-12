@@ -28,7 +28,6 @@ if(NOT __AOTRITON_INCLUDED)
       "662fc06239c8091f57e13793a4fac0e783241c9f5e86b1701bbb2ba308ef4279"  # rocm6.3
       "367062cba487492e58b38bb54720fb239e65b8717d0e11084f8059f2c5748af0"  # rocm6.4
       "deb8046e9ef976c2739fd0563b50239e12dc002d7d4f97c1c4a1874acb65abc4"  # rocm7.0
-      "c1613ed9e9eecc7359f04a1624bb528e54f5e6369e682dd446eaa936d9452358"  # rocm7.1
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
