@@ -35,7 +35,6 @@ def get_extension():
     extra_compile_args = {
         "cxx": [
             "-fdiagnostics-color=always",
-            "-DTORCH_STABLE_ONLY",
             "-DTORCH_TARGET_VERSION=0x020a000000000000",
         ],
     }

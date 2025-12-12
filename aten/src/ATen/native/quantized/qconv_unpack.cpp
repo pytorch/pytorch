@@ -82,28 +82,32 @@ class QConv1dUnpackWeightsInt8 final {
   static std::tuple<at::Tensor, std::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight) {
     auto& ctx = at::globalContext();
+    at::Tensor weight;
+    std::optional<at::Tensor> bias;
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
-      auto result = packed_weight->unpack();
-      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return result;
+      std::tie(weight, bias) = packed_weight->unpack();
+      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(weight, bias);
     }
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      auto result = packed_weight->unpack();
-      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return result;
+      std::tie(weight, bias) = packed_weight->unpack();
+      at::Tensor new_weight = weight.clone();
+      new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
 
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
-      auto result = packed_weight->unpack();
-      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return result;
+      std::tie(weight, bias) = packed_weight->unpack();
+      at::Tensor new_weight = weight.clone();
+      new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
     }
 #endif
 
