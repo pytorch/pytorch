@@ -52,7 +52,6 @@ from .descriptors import (
     ViewBaseAOTInput,
 )
 from .functional_utils import gen_alias_from_base
-from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
@@ -650,31 +649,8 @@ class FakifiedOutWrapper(InductorWrapper):
 @dataclass
 class AOTDispatchSubclassWrapper(CompilerWrapper):
     trace_joint: bool
-    fw_only: Optional[Callable]  # Not cached, only used in pre_compile
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
-
-    def pre_compile(
-        self,
-        flat_fn: TraceFn,
-        flat_args: list[FxValue],
-        flat_args_descs: list[AOTInput],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-    ):
-        (new_flat_fn, new_flat_args, new_flat_args_descs, subclass_meta) = (
-            aot_dispatch_subclass(
-                flat_fn,
-                flat_args,
-                flat_args_descs,
-                is_joint_structure=self.trace_joint,
-                meta=fw_metadata,
-                fw_only=self.fw_only,  # type: ignore[arg-type]
-            )
-        )
-        self.maybe_subclass_meta = subclass_meta
-        return new_flat_fn, new_flat_args, new_flat_args_descs, fw_metadata
 
     def post_compile(
         self,
