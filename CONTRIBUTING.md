@@ -290,11 +290,11 @@ Currently, we support the following tasks with Spin:
 Spin helps with linting by making sure that lintrunner is installed correctly
 and by isolating the lintrunner environment from the general development
 environment using uv.
+You can pass additional arguments to lintrunner by adding them after a
+separating double dash (`--`), for example `spin quicklint -- --take CLANGTIDY`.
 
 |command||
 |-|-|
-|`setup-lint`|update lintrunner and perform a fresh setup|
-|`lazy-setup-lint`|only perform setup if the lint configuration has changed|
 |`lint`|perform default lint (see below)|
 |`quicklint`|perform lint on all files changed in the latest commit and the working directory|
 |`quickfix`|autofix issues on all files changed in the latest commit and the working directory|

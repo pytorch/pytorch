@@ -23,7 +23,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
@@ -572,9 +572,10 @@ class CodeGen:
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             elif is_opaque_value_type(type(arg)):
-                arg_type = type(arg)
-                add_global(arg_type.__name__, arg_type)
-                return repr(arg)
+                obj_repr, opaque_types = get_opaque_obj_repr(arg)
+                for n, t in opaque_types.items():
+                    add_global(n, t)
+                return obj_repr
             else:
                 return blue(repr(arg))
 
