@@ -848,47 +848,27 @@ def analyze_memory_coalescing(
         else:
             uncoalesced_addrs[memory_expr] += total_score
 
-    # If we have indirect broadcast vars, the non-broadcast vars are good split candidates.
-    # Splitting on them allows sharing the indirect index loads within a block.
-    # We add these vars to coalesced_by_var so they get considered for splitting.
+    # For indirect indexing patterns, the non-broadcast vars are good split candidates
+    # since splitting allows sharing index loads within a block.
     indirect_broadcast_vars = norm_read_writes.indirect_broadcast_vars
+    indirect_index_vars = (
+        OrderedSet(norm_read_writes.index_vars) - indirect_broadcast_vars
+    )
 
-    if indirect_broadcast_vars:
-        # The beneficial split is on the vars that indirect accesses depend on
-        # (i.e., all iter vars except the broadcast vars)
-        all_iter_vars = OrderedSet(norm_read_writes.index_vars)
-        indirect_index_vars = all_iter_vars - OrderedSet(indirect_broadcast_vars)
+    if indirect_broadcast_vars and indirect_index_vars:
+        broadcast_size = sympy_product(
+            [var_ranges[v] for v in indirect_broadcast_vars if v in var_ranges]
+        )
+        broadcast_size = get_hint(broadcast_size) if broadcast_size != 1 else 1
 
-        if indirect_index_vars:
-            # Calculate a score for splitting on indirect index vars
-            # The benefit is proportional to the size of the broadcast dimension
-            broadcast_size = 1
-            for v in indirect_broadcast_vars:
-                if v in var_ranges:
-                    broadcast_size *= get_hint(var_ranges[v])
-
-            # The score represents the memory savings from sharing index loads
-            # Each index load is shared across broadcast_size threads instead of being
-            # loaded broadcast_size times. This is a significant savings.
-            # Score = broadcast_size * num_indices * bytes_per_index
-            # We use the full range of the split var as an approximation of num_indices
-            for split_var in indirect_index_vars:
-                split_var_size = (
-                    get_hint(var_ranges[split_var]) if split_var in var_ranges else 1
-                )
-                # Redundant loads avoided = (broadcast_size - 1) * num_indices * 8 bytes
-                # We approximate this conservatively
-                indirect_score = (broadcast_size - 1) * split_var_size * 8
-                # Add to coalesced_by_var so the var gets considered for splitting
-                coalesced_by_var[split_var] += indirect_score
-                loop_tiling_log.info(
-                    "Indirect tiling: adding split_var=%s to coalesced_by_var with score=%s "
-                    "(broadcast_size=%s, split_var_size=%s)",
-                    split_var,
-                    indirect_score,
-                    broadcast_size,
-                    split_var_size,
-                )
+        for split_var in indirect_index_vars:
+            split_var_size = get_hint(var_ranges.get(split_var, 1))
+            # Score = redundant loads avoided * bytes per index
+            indirect_score = (broadcast_size - 1) * split_var_size * 8
+            coalesced_by_var[split_var] += indirect_score
+            loop_tiling_log.info(
+                "Indirect tiling: split_var=%s score=%s", split_var, indirect_score
+            )
 
     if not uncoalesced_addrs and not coalesced_by_var:
         return CoalesceVarAnalysis(
