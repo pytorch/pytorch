@@ -1320,7 +1320,14 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     args, kwargs = args_kwargs_fn()
     from torch._inductor.runtime.benchmarking import benchmarker
 
-    ms = benchmarker.benchmark(bench_fn, args, kwargs)  # type: ignore[arg-type]
+    ms = benchmarker.benchmark(
+        bench_fn,
+        args,  # pyrefly: ignore[bad-argument-type]
+        kwargs,
+        memory_warmup_iters=5,
+        benchmark_iters=10,
+        max_benchmark_duration=10,
+    )  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
