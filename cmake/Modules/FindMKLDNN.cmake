@@ -161,6 +161,23 @@ IF(NOT MKLDNN_FOUND)
     SET(DNNL_GRAPH_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
     SET(DNNL_GRAPH_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
     
+    # Handle ARM Compute Library (ACL) for AARCH64
+    # Note: DNNL_AARCH64_USE_ACL may be set by ComputeLibrary.cmake before this file is included
+    SET(CPU_DNNL_USE_ACL OFF)
+    IF(DNNL_AARCH64_USE_ACL)
+      SET(CPU_DNNL_USE_ACL ON)
+      MESSAGE(STATUS "ARM Compute Library support enabled for oneDNN")
+      
+      # Find ACL libraries to link later
+      find_package(ACL QUIET)
+      IF(ACL_FOUND)
+        SET(CPU_MKLDNN_ACL_LIBRARIES ${ACL_LIBRARIES})
+        MESSAGE(STATUS "Found ACL libraries: ${ACL_LIBRARIES}")
+      ELSE()
+        MESSAGE(WARNING "DNNL_AARCH64_USE_ACL is ON but ACL libraries not found. oneDNN build may fail.")
+      ENDIF()
+    ENDIF()
+    
     IF(MKLDNN_USE_NATIVE_ARCH)
       SET(CPU_DNNL_ARCH_OPT_FLAGS "HostOpts")
       SET(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING "" FORCE)
@@ -212,6 +229,7 @@ IF(NOT MKLDNN_FOUND)
         -DDNNL_EXPERIMENTAL_UKERNEL=${CPU_DNNL_EXPERIMENTAL_UKERNEL}
         -DDNNL_GRAPH_CPU_RUNTIME=${MKLDNN_CPU_RUNTIME}
         -DDNNL_GRAPH_LIBRARY_TYPE=STATIC
+        -DDNNL_AARCH64_USE_ACL=${CPU_DNNL_USE_ACL}
       BUILD_COMMAND ${CPU_DNNL_MAKE_COMMAND}
       BUILD_BYPRODUCTS "${MKLDNN_BUILD_DIR}/cpu_mkldnn/src/cpu_mkldnn_proj-build/src/${CPU_DNNL_LIB_NAME}"
       INSTALL_COMMAND ""
@@ -232,6 +250,13 @@ IF(NOT MKLDNN_FOUND)
     add_library(cpu_mkldnn INTERFACE)
     add_dependencies(cpu_mkldnn cpu_mkldnn_proj)
     target_link_libraries(cpu_mkldnn INTERFACE ${CPU_MKLDNN_LIBRARIES})
+    
+    # Link ACL libraries if using AARCH64 with ACL
+    if(CPU_DNNL_USE_ACL AND CPU_MKLDNN_ACL_LIBRARIES)
+      target_link_libraries(cpu_mkldnn INTERFACE ${CPU_MKLDNN_ACL_LIBRARIES})
+      MESSAGE(STATUS "Linking ACL libraries to cpu_mkldnn: ${CPU_MKLDNN_ACL_LIBRARIES}")
+    endif()
+    
     # Use absolute paths directly, no need for BUILD_INTERFACE generator expression
     # since these are already absolute paths
     foreach(include_dir ${CPU_MKLDNN_INCLUDE})
