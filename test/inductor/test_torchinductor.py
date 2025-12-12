@@ -658,6 +658,7 @@ def check_model(
 
     torch._dynamo.reset()
 
+
 @skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
