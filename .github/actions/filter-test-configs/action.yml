@@ -57,14 +57,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install pip if needed
-      shell: bash
-      run: |
-        if ! python3 -m pip --version &> /dev/null; then
-          echo "Installing pip..."
-          curl -sS https://bootstrap.pypa.io/get-pip.py | python3
-        fi
-
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       env:
