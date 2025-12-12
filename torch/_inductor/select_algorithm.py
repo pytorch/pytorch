@@ -2376,12 +2376,18 @@ class ExternKernelCaller(ChoiceCaller):
 
         self.input_tensor_meta: Union[list[TensorMeta], TensorMeta]
         self.output_tensor_meta: Union[list[TensorMeta], TensorMeta]
+        self.input_tensor_meta, self.output_tensor_meta = [], []
         if device.type == "cpu":
-            self.input_tensor_meta, self.output_tensor_meta = [], []
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
-            self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
-            self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            try:
+                self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+                self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            except Exception:
+                log.warning(
+                    "Constructing input/output tensor meta failed for Extern Choice"
+                )
+
             benchmark_cls = ExternKernelGPUBenchmarkRequest
 
         self.bmreq: ExternKernelBenchmarkRequest = benchmark_cls(
@@ -3595,7 +3601,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timeout_seconds = config.collective_benchmark_timeout
 
         nruns = config.collective_benchmark_nruns
-        nwarmup = ir.autotune_warmup
+        nwarmup = config.inductor_default_autotune_warmup
 
         # Use default process group (None = all ranks)
         process_group = None
@@ -3867,8 +3873,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cutlass.cutlass_prescreening
-            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
