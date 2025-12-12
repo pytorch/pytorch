@@ -135,7 +135,8 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ must be kept sorted")
 
 ################################################################################
 # Load the extension module
@@ -304,7 +305,8 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
 def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
-    assert platform.system() == "Linux", "Should only be called on Linux"
+    if platform.system() != "Linux":
+        raise AssertionError(f"Should only be called on Linux, got {platform.system()}")
 
     lib_path = None
     for path in sys.path:
@@ -893,8 +895,10 @@ def sym_max(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))  # type: ignore[call-overload]
     else:
@@ -930,8 +934,10 @@ def sym_min(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))  # type: ignore[call-overload]
     else:
@@ -1005,7 +1011,10 @@ def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
+    if not isinstance(b, (SymBool, builtins.bool)):
+        raise AssertionError(f"expected SymBool or bool, got {type(b)}")
+    if type(t) is not type(f):
+        raise AssertionError(f"type mismatch: {type(t)} vs {type(f)}")
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -1696,7 +1705,10 @@ def _check_with(
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
-    assert issubclass(error_type, Exception) and not issubclass(error_type, Warning)
+    if not issubclass(error_type, Exception) or issubclass(error_type, Warning):
+        raise AssertionError(
+            f"error_type must be a subclass of Exception but not Warning, got {error_type}"
+        )
 
     if message is None:
         message_evaluated = (
@@ -2225,7 +2237,8 @@ def _assert(condition, message):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )
-    assert condition, message
+    if not condition:
+        raise AssertionError(message)
 
 
 ################################################################################
