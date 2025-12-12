@@ -651,9 +651,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
-            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                sm_available = int(props.shared_memory_per_block_optin)
+            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                sm_available = int(props.shared_memory_per_block)
+            else:
                 return None
-            sm_available = int(props.shared_memory_per_block_optin)
+
         except Exception:
             # If CUDA is not available or properties cannot be queried, return None
             return None
