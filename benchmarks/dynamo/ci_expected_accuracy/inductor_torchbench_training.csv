@@ -182,10 +182,6 @@ torch_multimodal_clip,pass,7
 
 
 
-torchrec_dlrm,pass,6
-
-
-
 tts_angular,pass,9
 
 
