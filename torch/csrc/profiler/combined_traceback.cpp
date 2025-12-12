@@ -139,7 +139,8 @@ SymbolizedTracebacks symbolize(
     // Lambda to consume multiple Python frames until we hit an entry boundary
     // This implements py-spy style interleaving
     auto append_python_frames_until_entry = [&]() {
-      if (py_it == py_end) return;
+      if (py_it == py_end)
+        return;
 
       // Consume Python frames until we hit an entry frame
       // This allows multiple Python function calls within one PyEval_EvalFrame
@@ -149,7 +150,8 @@ SymbolizedTracebacks symbolize(
         append_python(frame);
         ++py_it;
 
-        // Stop at entry frames - these mark boundaries where Python was called from native
+        // Stop at entry frames - these mark boundaries where Python was called
+        // from native
         if (frame.is_entry) {
           break;
         }
@@ -182,8 +184,8 @@ SymbolizedTracebacks symbolize(
       uint64_t cpp_frame = ip_to_frame_offset.at(f);
       const unwind::Frame& uf = r.all_frames.at(cpp_frame);
       if (uf.funcname.find("PyEval_EvalFrame") != std::string::npos) {
-        // When we hit PyEval_EvalFrame, consume Python frames until entry boundary
-        // This implements py-spy style interleaving
+        // When we hit PyEval_EvalFrame, consume Python frames until entry
+        // boundary This implements py-spy style interleaving
         append_python_frames_until_entry();
       } else if (
           uf.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=

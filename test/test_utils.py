@@ -1028,15 +1028,26 @@ def f(x):
         if sys.version_info >= (3, 11):
             # Count how many times our function names appear
             # (should be at least 5: innermost, middle2, middle1, outer, test function)
-            python_frame_count = sum([
-                formatted.count(name) for name in
-                ["innermost", "middle2", "middle1", "outer", "test_captured_traceback_interleaving"]
-            ])
+            python_frame_count = sum(
+                [
+                    formatted.count(name)
+                    for name in [
+                        "innermost",
+                        "middle2",
+                        "middle1",
+                        "outer",
+                        "test_captured_traceback_interleaving",
+                    ]
+                ]
+            )
 
             # The interleaving should show all these frames
             # even though they may be within a single or few PyEval_EvalFrame calls
-            self.assertGreaterEqual(python_frame_count, 5,
-                "Expected at least 5 Python frames to demonstrate interleaving")
+            self.assertGreaterEqual(
+                python_frame_count,
+                5,
+                "Expected at least 5 Python frames to demonstrate interleaving",
+            )
 
     def test_captured_traceback_interleaving_with_torch_ops(self):
         """
@@ -1050,7 +1061,7 @@ def f(x):
 
         def compute_something(x):
             # Trigger a torch operation which may involve C++ code
-            result = x + 1
+            x + 1
             # Capture at this point
             return CapturedTraceback.extract(cpp=True)
 
@@ -1078,12 +1089,16 @@ def f(x):
             # This validates that multiple Python frames within the same
             # PyEval_EvalFrame are being captured
             self.assertGreaterEqual(
-                len([n for n in function_names if n in ["compute_something", "process_data", "main_function"]]),
+                len(
+                    [
+                        n
+                        for n in function_names
+                        if n in ["compute_something", "process_data", "main_function"]
+                    ]
+                ),
                 3,
-                "All Python frames should be visible with interleaving"
+                "All Python frames should be visible with interleaving",
             )
-
-
 
 
 class TestTryImport(TestCase):
