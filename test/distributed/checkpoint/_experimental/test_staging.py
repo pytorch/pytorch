@@ -25,7 +25,7 @@ class TestDefaultStager(TestCase):
             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
         }
 
-    @skipIf(not TEST_ACCELERATOR)
+    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
     def test_sync_staging(self) -> None:
         """Test synchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -48,7 +48,7 @@ class TestDefaultStager(TestCase):
         # Clean up
         stager.close()
 
-    @skipIf(not TEST_ACCELERATOR)
+    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
     def test_async_staging(self) -> None:
         """Test asynchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=True)
@@ -144,7 +144,7 @@ class TestDefaultStager(TestCase):
 
                 stager.close()
 
-    @skipIf(not TEST_ACCELERATOR)
+    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
     def test_cuda_tensors_staging(self) -> None:
         """Test staging with CUDA tensors."""
         # Create state dict with CUDA tensors
@@ -171,7 +171,7 @@ class TestDefaultStager(TestCase):
 
         stager.close()
 
-    @skipIf(not TEST_ACCELERATOR)
+    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
     def test_resource_cleanup(self) -> None:
         """Test that resources are properly cleaned up."""
         options = CheckpointStagerConfig(use_async_staging=False)
