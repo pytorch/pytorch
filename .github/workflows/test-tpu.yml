@@ -1,0 +1,63 @@
+name: test-tpu
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-tpu.yml
+      - .github/actions/check-tpu/**
+  workflow_dispatch:
+
+jobs:
+  test-check-tpu-action:
+    runs-on: linux.google.tpuv7x.1
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Check TPU Availability
+        id: check-tpu
+        uses: ./.github/actions/check-tpu
+
+      - name: Verify TPU was detected
+        run: |
+          echo "has_tpu output: ${{ steps.check-tpu.outputs.has_tpu }}"
+          if [[ "${{ steps.check-tpu.outputs.has_tpu }}" != "true" ]]; then
+            echo "ERROR: TPU should have been detected on this runner!"
+            exit 1
+          fi
+          echo "SUCCESS: TPU detected as expected"
+
+  test-tpu-docker-flags:
+    runs-on: linux.google.tpuv7x.1
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Check TPU Availability
+        id: check-tpu
+        uses: ./.github/actions/check-tpu
+
+      - name: Setup TPU docker flags
+        if: steps.check-tpu.outputs.has_tpu == 'true'
+        run: echo "TPU_DOCKER_FLAGS=--privileged --network=host -e PJRT_DEVICE=TPU -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES" >> "$GITHUB_ENV"
+
+      - name: Pull uv docker image
+        run: docker pull ghcr.io/astral-sh/uv:python3.12-bookworm
+
+      - name: Test JAX TPU in Docker
+        run: |
+          set -x
+          # shellcheck disable=SC2086
+          docker run --rm \
+            ${TPU_DOCKER_FLAGS:-} \
+            ghcr.io/astral-sh/uv:python3.12-bookworm \
+            sh -c 'uv pip install --system "jax[tpu]" && uv run python -c "import jax; print(\"JAX devices:\", jax.devices())"'
+
+      - name: Verify output
+        run: echo "If we got here, JAX successfully detected TPU devices!"
