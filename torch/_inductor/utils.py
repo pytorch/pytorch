@@ -340,10 +340,9 @@ def _do_bench_using_profiling(
         fn()
 
     device_interface.synchronize()
-
     with torch.profiler.profile(
         activities=[
-            device_interface.profilerActivity,
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
         ]
     ) as p:
         # Benchmark
@@ -368,7 +367,8 @@ def _do_bench_using_profiling(
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
             "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
+            "#%s events: %d, #repeats: %s",
+            device_type,
             len(filtered_events),
             n_repeat,
         )
