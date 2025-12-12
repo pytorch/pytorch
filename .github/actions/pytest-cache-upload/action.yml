@@ -33,7 +33,10 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install boto3==1.35.42
+          tmp_venv=$(mktemp -d)/venv
+          uv venv -p 3.12 "$tmp_venv"
+          uv pip install --python "$tmp_venv/bin/python" boto3==1.35.42
+          echo "PYTEST_CACHE_VENV=$tmp_venv" >> "$GITHUB_ENV"
 
     - name: Upload the cache
       shell: bash
@@ -45,7 +48,7 @@ runs:
         SHARD: ${{ inputs.shard }}
         REPO: ${{ github.repository }}
       run: |
-        python3 .github/scripts/pytest_cache.py \
+        "$PYTEST_CACHE_VENV/bin/python" .github/scripts/pytest_cache.py \
           --upload \
           --cache_dir "$GITHUB_WORKSPACE/$CACHE_DIR" \
           --pr_identifier "$GITHUB_REF" \
@@ -54,4 +57,12 @@ runs:
           --test_config "$TEST_CONFIG" \
           --shard "$SHARD" \
           --repo "$REPO" \
-          --temp_dir "$RUNNER_TEMP" \
+          --temp_dir "$RUNNER_TEMP"
+
+    - name: Cleanup temp venv
+      if: always()
+      shell: bash
+      run: |
+        if [ -n "${PYTEST_CACHE_VENV:-}" ] && [ -d "$(dirname "$PYTEST_CACHE_VENV")" ]; then
+          rm -rf "$(dirname "$PYTEST_CACHE_VENV")"
+        fi

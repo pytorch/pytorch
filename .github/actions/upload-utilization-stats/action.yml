@@ -38,10 +38,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.10'
     - name: Print Inputs
       shell: bash
       run: |
@@ -51,7 +47,6 @@ runs:
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
         echo "artifact_prefix: ${{inputs.artifact_prefix}}"
-        python3 --version
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
@@ -61,11 +56,14 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install python-dateutil==2.8.2 boto3==1.35.42 pandas==2.1.3 dataclasses_json==0.6.7
+          tmp_venv=$(mktemp -d)/venv
+          uv venv -p 3.12 "$tmp_venv"
+          uv pip install --python "$tmp_venv/bin/python" python-dateutil==2.8.2 boto3==1.35.42 pandas==2.1.3 dataclasses_json==0.6.7
+          echo "UTIL_STATS_VENV=$tmp_venv" >> "$GITHUB_ENV"
     - name: Upload utilizatoin stats to s3
       shell: bash
       run: |
-        python3 -m tools.stats.upload_utilization_stats.upload_utilization_stats \
+        "$UTIL_STATS_VENV/bin/python" -m tools.stats.upload_utilization_stats.upload_utilization_stats \
           --workflow-run-id "${{inputs.workflow_run_id}}" \
           --workflow-name "${{inputs.workflow_name}}" \
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
@@ -73,3 +71,10 @@ runs:
           --job-name "${{inputs.job_name}}" \
           --local-path "${{inputs.local_path}}" \
           --artifact-prefix "${{inputs.artifact_prefix}}"
+    - name: Cleanup temp venv
+      if: always()
+      shell: bash
+      run: |
+        if [ -n "${UTIL_STATS_VENV:-}" ] && [ -d "$(dirname "$UTIL_STATS_VENV")" ]; then
+          rm -rf "$(dirname "$UTIL_STATS_VENV")"
+        fi

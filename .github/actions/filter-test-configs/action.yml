@@ -68,9 +68,12 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
+          tmp_venv=$(mktemp -d)/venv
+          uv venv -p 3.12 "$tmp_venv"
           # PyYAML 6.0 doesn't work with MacOS x86 anymore
           # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
-          python3 -m pip install requests==2.27.1 pyyaml==6.0.2
+          uv pip install --python "$tmp_venv/bin/python" requests==2.27.1 pyyaml==6.0.2
+          echo "FILTER_VENV=$tmp_venv" >> "$GITHUB_ENV"
 
     - name: Parse ref
       id: parse-ref
@@ -80,7 +83,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+        "$FILTER_VENV/bin/python" "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
@@ -133,7 +136,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+        "$FILTER_VENV/bin/python" "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
@@ -161,3 +164,11 @@ runs:
 
         echo
         echo "Reenabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
+
+    - name: Cleanup temp venv
+      if: always()
+      shell: bash
+      run: |
+        if [ -n "${FILTER_VENV:-}" ] && [ -d "$(dirname "$FILTER_VENV")" ]; then
+          rm -rf "$(dirname "$FILTER_VENV")"
+        fi

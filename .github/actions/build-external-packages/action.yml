@@ -58,13 +58,13 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python3 --version
         docker images
         START_TIME=$(date +%s)
-        (
-          cd .ci/lumen_cli
-          python3 -m pip install -e .
-        )
+
+        tmp_venv=$(mktemp -d)/venv
+        uv venv -p 3.12 "$tmp_venv"
+        uv pip install --python "$tmp_venv/bin/python" -e .ci/lumen_cli
+
         MAX_JOBS="$(nproc --ignore=10)"
         export MAX_JOBS
 
@@ -74,8 +74,10 @@ runs:
           OUTPUT_DIR="$PARENT_OUTPUT_DIR/$target"
           export OUTPUT_DIR
           echo "Building external package: $target in directory $OUTPUT_DIR"
-          python3 -m cli.run build external "$target"
+          "$tmp_venv/bin/python" -m cli.run build external "$target"
         done
+
+        rm -rf "$(dirname "$tmp_venv")"
 
         END_TIME=$(date +%s)
         {
