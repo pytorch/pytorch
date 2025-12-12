@@ -18,7 +18,6 @@ LINTER_CODE = "NO_DATA_PTR"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_PTR_PATTERN = re.compile(r"(?<![A-Za-z0-9_])data_ptr\s*(?:<[^>]*>)?\s*\(")
 HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
-MERGE_BASE_ENV_KEYS = set()
 
 
 class LintSeverity(str, Enum):
