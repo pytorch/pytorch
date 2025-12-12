@@ -8,11 +8,7 @@ else
   with_cuda=no
 fi
 
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh" ]; then
-  source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
-else
-  ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-fi
+source /etc/rocm_env.sh
 
 if [[ -d "${ROCM_PATH}" ]]; then
   with_rocm="${ROCM_PATH}"

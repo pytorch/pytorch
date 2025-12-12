@@ -2,11 +2,7 @@
 
 set -ex
 
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh" ]; then
-  source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
-else
-  ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-fi
+source /etc/rocm_env.sh
 
 # For theRock nightly, amd_smi may already be installed or in a different location
 if [ -d "${ROCM_PATH}/share/amd_smi" ]; then

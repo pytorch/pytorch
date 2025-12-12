@@ -103,11 +103,7 @@ if [ -n "$ROCM_VERSION" ]; then
   if [ "$ROCM_VERSION" = "nightly" ]; then
     echo "Skipping sccache wrapping for theRock nightly ROCm"
   else
-    if [ -f "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh" ]; then
-      source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
-    else
-      ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-    fi
+    source /etc/rocm_env.sh
 
     # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
     # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,

@@ -73,10 +73,9 @@ ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
 # Install amdsmi
-COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
-RUN rm install_amdsmi.sh detect_rocm_path.sh
+RUN rm install_amdsmi.sh
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -85,10 +84,9 @@ ENV UCX_COMMIT $UCX_COMMIT
 ENV UCC_COMMIT $UCC_COMMIT
 ENV UCX_HOME /usr
 ENV UCC_HOME /usr
-COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 ADD ./common/install_ucc.sh install_ucc.sh
 RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh detect_rocm_path.sh
+RUN rm install_ucc.sh
 
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
@@ -124,10 +122,9 @@ RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/detect_rocm_path.sh detect_rocm_path.sh
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-RUN bash ./install_cache.sh && rm install_cache.sh detect_rocm_path.sh
+RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Install Open MPI for ROCm
 COPY ./common/install_openmpi.sh install_openmpi.sh
