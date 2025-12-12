@@ -5924,7 +5924,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # Test _foreach_addcmul with value arg
         def fn_addcmul(a, b, c, val):
-            return torch._foreach_addcmul([a], [b], [c], value=val.item())
+            return torch._foreach_addcmul([a], [b], [c], value=1 - val)
 
         expected = fn_addcmul(a, b, c, val)
         actual = torch.compile(fn_addcmul, backend="eager", fullgraph=True)(
@@ -5934,7 +5934,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # Test _foreach_addcdiv with value arg
         def fn_addcdiv(a, b, c, val):
-            return torch._foreach_addcdiv([a], [b], [c], value=val.item())
+            return torch._foreach_addcdiv([a], [b], [c], value=1 - val)
 
         expected = fn_addcdiv(a, b, c, val)
         actual = torch.compile(fn_addcdiv, backend="eager", fullgraph=True)(
@@ -5944,7 +5944,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # Test _foreach_add with scalar arg
         def fn_add(a, val):
-            return torch._foreach_add([a], val.item())
+            return torch._foreach_add([a], 1 - val)
 
         expected = fn_add(a, val)
         actual = torch.compile(fn_add, backend="eager", fullgraph=True)(a, val)
@@ -5952,7 +5952,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # Test _foreach_mul with scalar arg
         def fn_mul(a, val):
-            return torch._foreach_mul([a], val.item())
+            return torch._foreach_mul([a], 1 - val)
 
         expected = fn_mul(a, val)
         actual = torch.compile(fn_mul, backend="eager", fullgraph=True)(a, val)
@@ -5960,7 +5960,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # Test _foreach_pow with scalar exponent
         def fn_pow(a, val):
-            return torch._foreach_pow([a.abs()], val.item())
+            return torch._foreach_pow([a.abs()], 1 - val.item())
 
         expected = fn_pow(a, val)
         actual = torch.compile(fn_pow, backend="eager", fullgraph=True)(a, val)
