@@ -3892,6 +3892,7 @@ class CheckFunctionManager:
         }
         global_scope_state[builtins_dict_name] = {
             k: v
+            # pyrefly: ignore [missing-attribute]
             for k, v in output_graph_guards_state.global_scope[
                 builtins_dict_name
             ].items()  # type: ignore[attr-defined]
