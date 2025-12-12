@@ -55,6 +55,7 @@ class StrictMode(HigherOrderOperator):
         super().__init__("strict_mode")
 
     def __call__(self, callable, operands):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(callable, operands)
 
 

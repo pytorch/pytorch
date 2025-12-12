@@ -1694,9 +1694,27 @@ class OutputGraph(OutputGraphCommon):
                                 vt.as_python_constant(),
                             )
                         else:
-                            assert f"Encountered unrecognized type {vt} at output {idx}"  # noqa: PLW0129
-
-                    self.export_metadata.out_spec = out_spec.as_python_constant()
+                            raise AssertionError(
+                                f"Encountered unrecognized type {vt} at output {idx}"
+                            )
+                    try:
+                        self.export_metadata.out_spec = out_spec.as_python_constant()
+                    except NotImplementedError as e:
+                        if e.args and e.args[0] == "get_function":
+                            unimplemented(
+                                gb_type="nested function with closure in output",
+                                context="as_python_constant for out_spec",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo cannot reconstruct the function."
+                                ),
+                                hints=[
+                                    "Define the function at module scope instead of inside another function"
+                                ],
+                                from_exc=e,
+                            )
+                        else:
+                            raise
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -2791,6 +2809,9 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    # output_graph_for_cleanup is set even when there's an error, to allow
+    # cleanup of graph nodes to break reference cycles
+    output_graph_for_cleanup: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
     f_globals: dict[str, Any]
 
@@ -2801,10 +2822,23 @@ class DynamoTracerOutput:
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
         self.f_globals = tracer.f_globals
+        self.output_graph_for_cleanup = tracer.output
         if error:
             self.output_graph = None
         else:
             self.output_graph = tracer.output
+
+    def _cleanup_output_graph(self) -> None:
+        output_graph = self.output_graph_for_cleanup
+        if output_graph:
+            for tracer in output_graph.tracers:
+                tracer.graph._clear_nodes()
+            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+            if (
+                output_graph.tracing_context.fake_mode
+                and output_graph.tracing_context.fake_mode.shape_env
+            ):
+                output_graph.tracing_context.fake_mode.shape_env.tracked_fakes = None
 
 
 err_epilogue = (
