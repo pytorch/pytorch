@@ -1083,7 +1083,7 @@ class CompilerWrapper:
 
     def pre_compile(
         self,
-        flat_fn,
+        flat_fn: Callable,
         flat_args: list[FxValue],
         flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
@@ -1100,7 +1100,13 @@ class CompilerWrapper:
         """
         return flat_fn, flat_args, flat_args_descs, fw_metadata
 
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+    def post_compile(
+        self,
+        compiled_fn: Callable,
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
@@ -1155,13 +1161,24 @@ class InductorWrapper:
         """
         return
 
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+    def post_compile(
+        self,
+        compiled_fn: Callable,
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+        fwd_output_strides: list[tuple[int, ...] | None] | None,
+    ) -> Callable:
         """
         Given an output of the compiler, wrap it with information received from prologue.
+
         Args:
         compiled_fn: Callable after calling compiler_fn
         aot_config: AOTConfig after calling prologue
         runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        fwd_output_strides: list of tuples of strides for output tensors, as produced by
+            TracingContext.report_output_strides().
+
         Example:
 
         def wrapped_compiled_fn(args):
