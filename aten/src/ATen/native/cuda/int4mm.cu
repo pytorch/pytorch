@@ -270,13 +270,8 @@ inline __device__ bf16x2x4 convert_i4x8_to_bf16x2x4(uint32_t source) {
 
   // This is the BF16 {-136, -136} represented as an integer.
 #if defined(USE_ROCM)
-#if ROCM_VERSION >= 60200
   auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
   auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
-#else
-  auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16{0xC308});
-  auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16{0x3F80});
-#endif
 #else
   static constexpr uint32_t BF16_BIAS = 0xC308C308;
   static constexpr uint32_t BF16_ONE = 0x3F803F80;
