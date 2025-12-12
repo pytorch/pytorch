@@ -847,24 +847,24 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[10, 10]", L_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_: "f32[10, 10]", L_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_: "f32[10]"):
+    def forward(self, L_x_: "f32[10, 10]", L_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_: "f32[10, 10]", L_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_: "f32[10]"):
         l_x_ = L_x_
-        l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_ = L_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_
-        l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_ = L_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_
+        l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_ = L_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_
+        l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_ = L_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_
 
         subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_);  subgraph_0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_);  subgraph_0 = None
         getitem: "f32[10, 10]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_);  subgraph_1 = l_x_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_ = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_);  subgraph_1 = l_x_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_ = None
         getitem_1: "f32[10, 10]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
         add: "f32[10, 10]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, l_x_: "f32[10, 10]", l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_: "f32[10, 10]", l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_: "f32[10]"):
-            linear: "f32[10, 10]" = torch._C._nn.linear(l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_);  l_x_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_weight_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_modules_mod_parameters_bias_ = None
+        def forward(self, l_x_: "f32[10, 10]", l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_: "f32[10, 10]", l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_: "f32[10]"):
+            linear: "f32[10, 10]" = torch._C._nn.linear(l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_);  l_x_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_ = None
             return (linear,)
 """,
             )
