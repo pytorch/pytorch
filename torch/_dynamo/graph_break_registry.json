@@ -650,6 +650,26 @@
   ],
   "GB0067": [
     {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a ",
+        "side effect in forward method. Eager activation checkpointing replays that side-effect while ",
+        "recomputing the forward in the backward. If you are ok with side-effect not replayed in the ",
+        "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing, try setting ",
+        "`torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
       "Gb_type": "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
       "Context": "",
       "Explanation": "This is not supported.",
@@ -1129,6 +1149,16 @@
       ]
     }
   ],
+  "GB4778": [
+    {
+      "Gb_type": "nested function with closure in output",
+      "Context": "as_python_constant for out_spec",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -1234,6 +1264,16 @@
       "Context": "call_method {self} resize_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_()`.",
       "Hints": []
+    }
+  ],
+  "GB9528": [
+    {
+      "Gb_type": "Attempted to reconstruct a nested function with closure which is not supported",
+      "Context": "str(self.fn_name)",
+      "Explanation": "Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
+      "Hints": [
+        "Define the function at module level"
+      ]
     }
   ],
   "GB0127": [
@@ -3525,6 +3565,12 @@
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(fn)",
+      "Explanation": "Expected {method_name} to be a function or method.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
       "Explanation": "Expected forward function to be a function or method.",
       "Hints": []
@@ -3756,6 +3802,16 @@
       "Gb_type": "Frozen dataclass with missing field",
       "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
       "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0370": [
+    {
+      "Gb_type": "record_function escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
