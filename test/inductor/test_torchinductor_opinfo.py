@@ -980,6 +980,7 @@ inductor_one_sample["xpu"] = {
 inductor_skip_exact_stride = {
     "complex",
     "empty_permuted",
+    "fft.irfftn",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",

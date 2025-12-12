@@ -71,7 +71,6 @@ inductor_decompositions = get_decompositions(
         aten.clamp_min_,
         aten.dist,
         aten.elu,
-        aten.empty_like,
         aten.flip,
         aten.gelu,
         aten.hardtanh,
