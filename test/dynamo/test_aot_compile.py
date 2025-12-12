@@ -8,6 +8,7 @@ import os
 import pickle
 import tempfile
 import unittest
+from collections import namedtuple
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -571,6 +572,27 @@ from user code:
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_aot_compile_portable_guards_unsafe(self):
+        def fn(xy):
+            return xy[0] + xy[1]
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"guard_filter_fn": torch.compiler.keep_portable_guards_unsafe},
+        ).aot_compile((((torch.randn(3, 4), torch.randn(3, 4)),), {}))
+        Tup = namedtuple("Tup", ["x", "y"])
+
+        inputs = Tup(torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(inputs)
+        actual = compiled_fn(inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(inputs)
+        self.assertEqual(expected, actual)
 
     def test_aot_module_simplified_serializable_inference(self):
         def fn(x):

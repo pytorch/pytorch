@@ -3574,7 +3574,7 @@ def pickle_guards_state(
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
-    if guard_filter_fn is torch._dynamo.aot_compile.default_guard_filter_fn:
+    if guard_filter_fn is torch.compiler.keep_portable_guards_unsafe:
         # Prune more values in AOT precompile when complex pickling structure is not needed.
         state.output_graph.global_scope.clear()
         # state.output_graph.local_scope.clear()
