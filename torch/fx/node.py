@@ -4,6 +4,7 @@ import inspect
 import logging
 import operator
 import types
+import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
@@ -28,35 +29,36 @@ __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
 log = logging.getLogger(__name__)
 
-BaseArgumentTypes = (
-    str
-    | int
-    | float
-    | bool
-    | complex
-    | torch.dtype
-    | torch.Tensor
-    | torch.device
-    | torch.memory_format
-    | torch.layout
-    | torch._ops.OpOverload
-    | torch.SymInt
-    | torch.SymBool
-    | torch.SymFloat
-)
-base_types = BaseArgumentTypes.__args__  # pyrefly: ignore [missing-attribute]
+BaseArgumentTypes = Union[
+    str,
+    int,
+    float,
+    bool,
+    complex,
+    torch.dtype,
+    torch.Tensor,
+    torch.device,
+    torch.memory_format,
+    torch.layout,
+    torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymBool,
+    torch.SymFloat,
+]
+base_types = typing.get_args(BaseArgumentTypes)
 
-Target: TypeAlias = Callable[..., Any] | str
+Target: TypeAlias = Union[Callable[..., Any], str]
 
-Argument = Union[
-    tuple["Argument", ...],
-    Sequence["Argument"],
-    Mapping[str, "Argument"],
-    slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-    range,
-    "Node",
-    BaseArgumentTypes,
-    None,
+Argument = Optional[
+    Union[
+        tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
+        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+        range,
+        "Node",
+        BaseArgumentTypes,
+    ]
 ]
 # pyrefly: ignore [invalid-annotation]
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
@@ -103,8 +105,11 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter.default,
     _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_enter_new.default,
     _ops.profiler._record_function_exit,
+    _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
     *_side_effectful_need_to_be_preserved_pre_dispatch,

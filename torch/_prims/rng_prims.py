@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -84,7 +84,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[tuple[int, ...]],
+        stride: tuple[int, ...] | None,
         device: _device,
         dtype: _dtype,
     ):
@@ -101,7 +101,7 @@ def register_philox_rand():
         shape: torch.Size,
         seed: torch.Tensor,
         offset: torch.Tensor,
-        stride: Optional[tuple[int, ...]],
+        stride: tuple[int, ...] | None,
         device: _device,
         dtype: _dtype,
     ):
@@ -153,7 +153,7 @@ def get_device(args, kwargs):
 def register_run_and_save_rng_state_op():
     class RunAndSaveRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_and_save_rng_state")
+            super().__init__("run_and_save_rng_state", cacheable=True)
 
         def __call__(self, op, *args, **kwargs):
             return super().__call__(op, *args, **kwargs)
@@ -217,7 +217,7 @@ def register_run_and_save_rng_state_op():
 def register_run_with_rng_state_op():
     class RunWithRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_with_rng_state")
+            super().__init__("run_with_rng_state", cacheable=True)
 
         def __call__(self, rng_state, op, *args, **kwargs):
             return super().__call__(rng_state, op, *args, **kwargs)

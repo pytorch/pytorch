@@ -106,6 +106,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -1962,7 +1963,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
-            obj_id, get_verbose_code_parts(code, guard)
+            obj_id,
+            get_verbose_code_parts(
+                code, guard, recompile_hint=f"type {t.__qualname__}"
+            ),
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
@@ -2260,9 +2264,11 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
-            f"Unexpected type {type(val)}"
-        )
+        assert (
+            isinstance(val, ok_types)
+            or pytree.is_constant_class(type(val))
+            or is_opaque_value_type(type(val))
+        ), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -2439,6 +2445,11 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        if is_from_skip_guard_source(
+            guard.originating_source
+        ) or is_from_skip_guard_source(source_b):
+            return
+
         if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
@@ -2542,9 +2553,11 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
-        self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
-        )
+        code = [
+            f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
+        ]
+
+        self.guard_manager.root.add_global_state_guard(global_state, code)
 
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
         assert self.check_fn_manager.torch_function_mode_stack is not None
@@ -3893,7 +3906,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                {
+                OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3901,7 +3914,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                }
+                )
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
