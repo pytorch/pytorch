@@ -1113,9 +1113,7 @@ class ForeachTests(TestCase):
             return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - value)
 
         def fn_tensor_scalar(a0, a1, b0, b1, c0, c1, val):
-            return torch._foreach_addcmul(
-                [a0, a1], [b0, b1], [c0, c1], value=1 - val.item()
-            )
+            return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - val)
 
         # Use specific values that are sensitive to fp32/fp64 precision differences
         inputs = (
