@@ -492,7 +492,7 @@ def add(x, y):
             compiled_fn(*args)
 
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
-        self._save_and_reload(expected_backends=7, expected_dynamo=1)
+        self._save_and_reload(expected_backends=8, expected_dynamo=1)
 
         compiled_fn = torch._dynamo.optimize(
             backend="inductor", guard_filter_fn=guard_filter_fn

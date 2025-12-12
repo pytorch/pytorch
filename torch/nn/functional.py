@@ -3590,8 +3590,9 @@ def binary_cross_entropy_with_logits(
     Args:
         input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
         target: Tensor of the same shape as input with values between 0 and 1
-        weight (Tensor, optional): a manual rescaling weight
-            if provided it's repeated to match input tensor shape
+        weight (Tensor, optional): a manual rescaling weight. If provided, the dimension
+           of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+           with respect to the input (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         reduce (bool, optional): Deprecated (see :attr:`reduction`).
         reduction (str, optional): Specifies the reduction to apply to the output:
