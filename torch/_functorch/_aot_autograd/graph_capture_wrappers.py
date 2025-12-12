@@ -1353,13 +1353,13 @@ def create_functional_call(
 
         # Dynamo should not see the `maybe_disable_thunkify` call - it is not
         # relevant during tracing.
-        disable_thunkify = maybe_disable_thunkify
+        maybe_disable_thunkify_ctx_mgr = maybe_disable_thunkify
         if torch._dynamo.is_compiling():
-            disable_thunkify = nullcontext
+            maybe_disable_thunkify_ctx_mgr = nullcontext
 
         with (
             stateless._reparametrize_module(mod, params),
-            disable_thunkify(),
+            maybe_disable_thunkify_ctx_mgr(),
         ):
             if isinstance(mod, torch.fx.GraphModule):
                 if kwargs:
