@@ -1933,6 +1933,7 @@ class NestedGraphBreakLoggingTests(
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
+
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
   Hint: Move the offending context manager(s) to outside the compiled region.
