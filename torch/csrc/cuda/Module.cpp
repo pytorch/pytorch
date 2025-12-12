@@ -771,6 +771,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
@@ -954,6 +955,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
+
+    // Add forward frames if available
+    auto* tb = to_gather_frames.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      py::list forward_list;
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.append(py::str(frame_str));
+      }
+      to_gather_dest.at(i)[forward_frames_s] = forward_list;
+    }
   }
 
   return result.release().ptr();
@@ -1093,6 +1105,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
+#if USE_ROCM
+      // ROCm: expose shared_memory_per_block for shared memory based pruning
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+#endif
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
@@ -1131,7 +1148,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool)>(
+      static_cast<void (*)(
+          bool,
+          bool,
+          int64_t,
+          bool,
+          bool,
+          bool,
+          bool,
+          bool,
+          const std::vector<std::string>&)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1143,7 +1169,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           size_t,
           bool,
           bool,
-          bool)>(torch::cuda::_record_memory_history));
+          bool,
+          const std::vector<std::string>&)>(
+          torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1488,7 +1516,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
-          freed_pointer_set.insert((ptr));
+          freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
         // so even those this will error, so too will the allocator

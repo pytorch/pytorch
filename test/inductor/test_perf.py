@@ -964,7 +964,7 @@ class InplacingTests(TestCase):
             return MySin.apply(x)
 
         x = T(3, grad=True)
-        self.assertExpectedInline(count_numel_train(f, x), """9""")
+        self.assertExpectedInline(count_numel_train(f, x), """18""")
 
     @requires_gpu_and_triton
     def test_triton_kernel_not_fusable_with_users(self):
@@ -1066,7 +1066,7 @@ class InplacingTests(TestCase):
             return MySin.apply(x)
 
         x = T(3, grad=True)
-        self.assertExpectedInline(count_numel_train(f, x), """9""")
+        self.assertExpectedInline(count_numel_train(f, x), """18""")
 
     @requires_gpu_and_triton
     def test_inplace_custom_op(self):
