@@ -29,6 +29,7 @@
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
