@@ -1263,26 +1263,33 @@ class TestTiling(TestCase):
         access pattern is effectively random.
         """
         from torch._inductor import tiling_utils
-        from torch._inductor.codegen import simd as simd_module
-        from torch.utils._sympy.symbol import SymT, symbol_is_type
+        from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-        # Track whether analyze_memory_coalescing treats indirect access correctly
-        indirect_in_uncoalesced = []
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
 
-        original_analyze = tiling_utils.analyze_memory_coalescing
+            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            self.assertIsNotNone(coalesce_analysis)
 
-        def check_analyze(node):
-            result = original_analyze(node)
-            if result:
-                # Check that any expression with INDIRECT symbols is in uncoalesced_addrs
-                for expr in result.uncoalesced_addrs:
-                    if any(symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols):
-                        indirect_in_uncoalesced.append(True)
-                # Verify no INDIRECT symbols in coalesced_by_var keys
-                for var in result.coalesced_by_var:
-                    if symbol_is_type(var, SymT.INDIRECT):
-                        indirect_in_uncoalesced.append(False)  # Should never happen
-            return result
+            # Check that any expression with INDIRECT symbols is in uncoalesced_addrs
+            found_indirect_uncoalesced = False
+            for expr in coalesce_analysis.uncoalesced_addrs:
+                if any(symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols):
+                    found_indirect_uncoalesced = True
+
+            self.assertTrue(
+                found_indirect_uncoalesced,
+                "Expected indirect accesses to be in uncoalesced_addrs",
+            )
+
+            # Verify no INDIRECT symbols ended up as coalesced vars
+            for var in coalesce_analysis.coalesced_by_var:
+                self.assertFalse(
+                    symbol_is_type(var, SymT.INDIRECT),
+                    f"INDIRECT symbol {var} should not be in coalesced_by_var",
+                )
+
+            return nodes
 
         V, D = 1024, 256
         indices = torch.randint(0, V, (4096,), device=GPU_TYPE)
@@ -1291,22 +1298,12 @@ class TestTiling(TestCase):
         def embedding_1d(idx, w):
             return w[idx]
 
-        # Patch in simd module where it's actually called
-        with unittest.mock.patch.object(
-            simd_module, "analyze_memory_coalescing", check_analyze
-        ):
-            compiled = torch.compile(embedding_1d)
-            out = compiled(indices, weights)
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn):
+            out = torch.compile(embedding_1d)(indices, weights)
 
         # Verify correctness
         expected = embedding_1d(indices, weights)
         self.assertEqual(out, expected)
-
-        # Verify that indirect accesses were found and treated as uncoalesced
-        self.assertTrue(
-            any(indirect_in_uncoalesced),
-            "Expected indirect accesses to be treated as uncoalesced",
-        )
 
 
 class TestIndexInversion(TestCase):
