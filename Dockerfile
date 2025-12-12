@@ -76,7 +76,7 @@ ENV PATH /opt/pytorch-venv/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+ENV PATH /opt/pytorch-venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 

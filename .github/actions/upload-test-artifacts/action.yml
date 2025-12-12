@@ -30,17 +30,19 @@ runs:
         ZIP_CMD="import sys, zipfile, os; from pathlib import Path; d=Path(sys.argv[1]); o=Path(sys.argv[2]); p=sys.argv[3:]; \
         with zipfile.ZipFile(o, 'w', zipfile.ZIP_DEFLATED) as z: \
           [z.write(f, os.path.relpath(f,d)) for pat in p for f in d.glob(pat) if f.is_file()]"
-        uv venv -p 3.12
-        uv run python -c "$ZIP_CMD" \
+        tmp_venv=$(mktemp -d)/venv
+        uv venv -p 3.12 "$tmp_venv"
+        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
           test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
-        uv run python -c "$ZIP_CMD" \
+        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
           . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
-        uv run python -c "$ZIP_CMD" \
+        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
           . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
-          uv run python -c "$ZIP_CMD" \
+          "$tmp_venv/bin/python" -c "$ZIP_CMD" \
             test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
         fi
+        rm -rf "$(dirname "$tmp_venv")"
 
     # Windows zip
     - name: Zip JSONs for upload
