@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
