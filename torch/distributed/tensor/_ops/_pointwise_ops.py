@@ -548,7 +548,7 @@ def common_pointwise_strategy(
                     placement.is_partial("sum") or placement.is_partial("avg")
                 ) and safe_avoid_redistribution
                 if linearity >= 0 and partial_supports_linearity:
-                    # propagate partial placement
+                    # propagate the partial placement
                     out_placements.append(placement)
                 else:
                     # clear the partial placement if op does not support linearity
