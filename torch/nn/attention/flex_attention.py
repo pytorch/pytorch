@@ -1012,9 +1012,13 @@ def _convert_mask_to_block_mask(
     )
     B, H, Q, KV = mask.shape
     if Q % Q_BLOCK_SIZE != 0:
-        raise AssertionError(f"Q ({Q}) must be divisible by Q_BLOCK_SIZE ({Q_BLOCK_SIZE})")
+        raise AssertionError(
+            f"Q ({Q}) must be divisible by Q_BLOCK_SIZE ({Q_BLOCK_SIZE})"
+        )
     if KV % KV_BLOCK_SIZE != 0:
-        raise AssertionError(f"KV ({KV}) must be divisible by KV_BLOCK_SIZE ({KV_BLOCK_SIZE})")
+        raise AssertionError(
+            f"KV ({KV}) must be divisible by KV_BLOCK_SIZE ({KV_BLOCK_SIZE})"
+        )
     mask = mask.view(
         B, H, Q // Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV // KV_BLOCK_SIZE, KV_BLOCK_SIZE
     )  # [B, H, Q//Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV//KV_BLOCK_SIZE, KV_BLOCK_SIZE]

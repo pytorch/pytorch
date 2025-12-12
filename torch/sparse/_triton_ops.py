@@ -2475,10 +2475,22 @@ if has_triton():
         SPLIT_N: tl.constexpr,
     ):
         # left/right_alpha tensors are originally (* + 1)-dimensional
-        assert left_alpha_tiled_col_stride == 0
-        assert left_alpha_col_block_stride == 0
-        assert right_alpha_tiled_row_stride == 0
-        assert right_alpha_row_block_stride == 0
+        if left_alpha_tiled_col_stride != 0:
+            raise AssertionError(
+                f"left_alpha_tiled_col_stride must be 0, got {left_alpha_tiled_col_stride}"
+            )
+        if left_alpha_col_block_stride != 0:
+            raise AssertionError(
+                f"left_alpha_col_block_stride must be 0, got {left_alpha_col_block_stride}"
+            )
+        if right_alpha_tiled_row_stride != 0:
+            raise AssertionError(
+                f"right_alpha_tiled_row_stride must be 0, got {right_alpha_tiled_row_stride}"
+            )
+        if right_alpha_row_block_stride != 0:
+            raise AssertionError(
+                f"right_alpha_row_block_stride must be 0, got {right_alpha_row_block_stride}"
+            )
 
         batch_pid = tl.program_id(axis=2)
         row_block_pid = tl.program_id(axis=0)
