@@ -3873,8 +3873,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cutlass.cutlass_prescreening
-            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
