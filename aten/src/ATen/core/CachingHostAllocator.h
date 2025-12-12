@@ -288,7 +288,12 @@ struct CachingHostAllocatorImpl {
 
     // If we are using background threads, we can process events in the
     // background.
-    if (!pinned_use_background_threads()) {
+    // In the case of a non-default pool, we never use the background
+    // thread. Since allocations happen only during stream capture
+    // time and there are no events to process anyway, speeding up
+    // event processing with a helper thread is not helpful.
+    if (!(pinned_use_background_threads() &&
+          mempool_id.first == 0 && mempool_id.second == 0)) {
       process_events(pool);
     }
 
@@ -305,7 +310,7 @@ struct CachingHostAllocatorImpl {
 
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
-    if (pinned_use_background_threads() && mempool_id.first == 0 && mempool_id.second == 0) {
+    if (pinned_use_background_threads()) {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         active_ = true;
@@ -933,7 +938,7 @@ struct CachingHostAllocatorImpl {
   // more here:
   // https://github.com/pytorch/pytorch/pull/167507#discussion_r2586418965
   // It is important to use only "relaxed" loads and stores.
-  std::atomic<bool> captures_underway_empty_;
+  std::atomic<bool> captures_underway_empty_{true};
 
   // Private pools for captures
   ska::flat_hash_map<c10::MempoolId_t, std::unique_ptr<PrivatePool>, c10::MempoolIdHash>
