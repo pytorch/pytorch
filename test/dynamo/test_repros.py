@@ -8570,10 +8570,16 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             # Move back to cuda and check that there is no recompile
             linear.to(device)
-            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
             linear(torch.randn(1, 2, device=device))
-            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
-            assert new_frame_count == prev_frame_count, "linear() call caused a recompile"
+            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
+            assert new_frame_count == prev_frame_count, (
+                "linear() call caused a recompile"
+            )
 
 
 instantiate_parametrized_tests(ReproTests)
