@@ -459,6 +459,7 @@ class OptimizedModule(torch.nn.Module):
                 stacklevel=2,
             )
         with _set_in_compiled_region():
+            # TODO(pianpwk): subsume this flag with better is_compiling() coverage
             return super().__call__(*args, **kwargs)
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
