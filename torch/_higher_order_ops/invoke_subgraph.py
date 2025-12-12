@@ -163,6 +163,12 @@ def mark_compile_region(fn=None, is_pure=False):
 
     Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
     region. For PyTorch eager, this is a no-op.
+
+    is_pure=True indicates that the function is pure (has no side effects and
+    produces the same output for the same inputs). This allows the compiler to
+    apply additional tracing optimizations in the compiler frontend
+    (specifically TorchDynamo) to assume that a single traced graph is sound to
+    be reused again.
     """
 
     def wrap(func):

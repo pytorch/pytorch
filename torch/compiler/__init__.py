@@ -644,8 +644,8 @@ def nested_compile_region(fn=None, is_pure=False):
 
     During **``torch.compile``** tracing, the compiler applies *hierarchical
     compilation* with ``nested_compile_region``: it emits optimized code for the
-    marked region the first time it is encountered and re-emits (or “stamps
-    out”) the previously compiled code on every subsequent invocation.  This can
+    marked region the first time it is encountered and re-emits (or "stamps
+    out") the previously compiled code on every subsequent invocation.  This can
     substantially reduce overall compile time for deeply-stacked,
     structurally-identical components such as the transformer layers of a
     large-language-model (LLM).
@@ -659,6 +659,15 @@ def nested_compile_region(fn=None, is_pure=False):
     to reuse, it will transparently re-compile the region.  Using it is
     therefore *safe*: correctness is always preserved, and you pay the extra
     compilation cost only when required.
+
+    Args:
+        fn: The function to be marked as a nested compile region. Can be None
+            when used as a decorator.
+        is_pure: If True, indicates that the function is pure (has no side effects
+            and produces the same output for the same inputs). This allows the
+            compiler to apply additional tracing optimizations in the compiler
+            frontend (specifically TorchDynamo) to assume that a single traced
+            graph is sound to be reused again.
     """
 
     from torch._higher_order_ops.invoke_subgraph import (
