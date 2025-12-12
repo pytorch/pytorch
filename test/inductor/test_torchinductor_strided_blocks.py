@@ -1458,6 +1458,7 @@ test_torchinductor.copy_tests(
 
 
 class TestTilingExtra(InductorTestCase):
+    @requires_gpu()
     def test_tiling_split_valid(self):
         import torch.nn.functional as F
 
@@ -1557,7 +1558,7 @@ class TestTilingExtra(InductorTestCase):
                 sym_sum_1 = floordiv - 1
 
                 # Create position ids
-                arange = torch.arange(sym_sum_1, device=torch.device("cuda", index=0))
+                arange = torch.arange(sym_sum_1, device=GPU_TYPE)
                 unsqueeze = arange.unsqueeze(0)
 
                 # Rotary embedding computation
@@ -1596,9 +1597,9 @@ class TestTilingExtra(InductorTestCase):
 
                 # Create attention mask
                 cache_position = torch.arange(
-                    sym_sum_1, device=torch.device("cuda", index=0), dtype=torch.int64
+                    sym_sum_1, device=GPU_TYPE, dtype=torch.int64
                 )
-                arange_4 = torch.arange(sym_sum_1, device=torch.device("cuda", index=0))
+                arange_4 = torch.arange(sym_sum_1, device=GPU_TYPE)
 
                 q_indices = cache_position[(None, None, slice(None, None, None), None)]
                 attention_mask = q_indices >= 0
