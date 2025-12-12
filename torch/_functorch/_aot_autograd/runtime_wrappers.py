@@ -484,7 +484,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
     # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
     # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
     # of those two indices incorrect.
-    return_new_outs: bool = True
+    is_inference: bool = True
 
     def pre_compile(
         self,
@@ -495,7 +495,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         fw_metadata: ViewAndMutationMeta,
     ) -> None:
         # Add RNG states for forward mode only.
-        if not self.return_new_outs and fw_metadata.num_graphsafe_rng_states > 0:
+        if not self.is_inference and fw_metadata.num_graphsafe_rng_states > 0:
             index = fw_metadata.graphsafe_rng_state_index
             assert index is not None
             rng_states = [
@@ -553,7 +553,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
             assert metadata.num_outputs_rng_offset == 1
             new_rng_offset = outs[offset_index]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
-            if self.return_new_outs:
+            if self.is_inference:
                 user_outs = outs[:offset_index] + outs[offset_index + 1 :]
                 return user_outs
             else:
