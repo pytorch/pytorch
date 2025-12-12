@@ -31,7 +31,6 @@ from contextlib import contextmanager
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
-from torch import Tensor
 from torch._dynamo.utils import (
     CompileEventLogger,
     detect_fake_mode,
@@ -2094,12 +2093,9 @@ def _aot_stage2c_make_autograd_function(
         compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
 
     if config.debug_assert:
-        flat_requires_grad: list[Optional[bool]] = [
-            a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
-        ]
-        compiled_fn = DebugAssertWrapper(
-            flat_requires_grad=flat_requires_grad
-        ).post_compile(compiled_fn, aot_config, runtime_metadata=fw_metadata)
+        compiled_fn = DebugAssertWrapper().post_compile(
+            compiled_fn, aot_config, runtime_metadata=fw_metadata
+        )
 
     compiled_fn = post_compile(
         wrappers,
