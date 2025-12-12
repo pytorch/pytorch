@@ -871,10 +871,10 @@ class TestConvolutionNN(NNTestCase):
     @tf32_on_and_off(0.001)
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
-        if TEST_CUDA or TEST_XPU:
-            dev_dtypes += [(device_type, torch.float), (device_type, torch.half)]
+        if TEST_CUDA:
+            dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
         if AMPERE_OR_ROCM:
-            dev_dtypes += [(device_type, torch.bfloat16)]
+            dev_dtypes += [("cuda", torch.bfloat16)]
         for device, dtype in dev_dtypes:
             m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).to(device, dtype)
             i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
@@ -3216,7 +3216,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
         inp = torch.randn(0, 4, 4, 4, device=device)
         _test_module_empty_input(self, mod, inp, check_size=False)
-        if self.device_type == device_type and self.has_cudnn():
+        if self.device_type == "cuda" and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
@@ -3226,7 +3226,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
         _test_module_empty_input(self, mod, inp, check_size=False)
-        if self.device_type == device_type and self.has_cudnn():
+        if self.device_type == "cuda" and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
