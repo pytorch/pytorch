@@ -27,9 +27,18 @@ runs:
       run: |
         set -euo pipefail
         rm -f test-jsons-*.zip test-reports-*.zip logs-*.zip debug-*.zip
-        ZIP_CMD="import sys, zipfile, os; from pathlib import Path; d=Path(sys.argv[1]); o=Path(sys.argv[2]); p=sys.argv[3:]; \
-        with zipfile.ZipFile(o, 'w', zipfile.ZIP_DEFLATED) as z: \
-          [z.write(f, os.path.relpath(f,d)) for pat in p for f in d.glob(pat) if f.is_file()]"
+        ZIP_CMD='
+        import sys, zipfile, os
+        from pathlib import Path
+        d = Path(sys.argv[1])
+        o = Path(sys.argv[2])
+        p = sys.argv[3:]
+        with zipfile.ZipFile(o, "w", zipfile.ZIP_DEFLATED) as z:
+            for pat in p:
+                for f in d.glob(pat):
+                    if f.is_file():
+                        z.write(f, os.path.relpath(f, d))
+        '
         tmp_venv=$(mktemp -d)/venv
         uv venv -p 3.12 "$tmp_venv"
         "$tmp_venv/bin/python" -c "$ZIP_CMD" \
