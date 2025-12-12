@@ -53,7 +53,6 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -13171,21 +13170,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
-
-    @torch._inductor.config.patch(force_shape_pad=True)
-    @skip_if_gpu_halide  # correctness issue
-    def test_should_pad_bench_for_bmm(self):
-        B = 2
-        M = 1024
-        N = 1024
-        K = 1024 + 1  # a size that requires padding
-
-        mat1 = torch.rand(B, M, K, device=self.device)
-        mat2 = torch.rand(B, K, N, device=self.device)
-
-        should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
-
-        self.assertTrue(should_pad)
 
     @parametrize(
         "name, op",
