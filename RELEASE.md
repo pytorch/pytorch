@@ -496,10 +496,10 @@ An example of this process can be found here:
 
 In nightly builds for conda and wheels, PyTorch depends on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
 
-In Nightly builds we have the following configuration:
-* Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
-* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+In Nightly builds we have following configuration:
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/
+* ROCm wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton-rocm/
+* XPU wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton-xpu/
 
 However for release we have following :
 * Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
