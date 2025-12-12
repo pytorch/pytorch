@@ -233,69 +233,69 @@ class GuardManager:
         self,
         id_val: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_equals_match_guard(
         self,
         equals_val: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_global_state_guard(
         self,
         initial_state: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_torch_function_mode_stack_guard(
         self,
         initial_stack: list[Any],
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_mapping_keys_guard(
         self,
         value: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_dict_length_check_guard(
         self,
         value: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_length_check_guard(
         self,
         value: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_false_match_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_none_match_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_not_none_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_dispatch_key_set_guard(
         self,
         dispatch_key: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_tensor_match_guard(
         self,
@@ -312,62 +312,62 @@ class GuardManager:
         self,
         value: set[Any],
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_no_hasattr_guard(
         self,
         attr_name: str,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_dict_contains_guard(
         self,
         contains: bool,
         key: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_type_match_guard(
         self,
         value: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_dict_version_guard(
         self,
         value: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_set_contains_guard(
         self,
         contains: bool,
         item: Any,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_dual_level_match_guard(
         self,
         level: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_tuple_iterator_length_guard(
         self,
         length: int,
         type_id: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_range_iterator_match_guard(
         self,
@@ -376,12 +376,12 @@ class GuardManager:
         step: int,
         type_id: int,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def add_default_device_guard(
         self,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def mark_tag_safe(self) -> None: ...
     def mark_tag_safe_root(self) -> None: ...
@@ -392,7 +392,7 @@ class RootGuardManager(GuardManager):
         self,
         guard: LeafGuard,
         verbose_code_parts: list[str],
-        user_stack: Optional[Union[traceback.StackSummary, str]]
+        user_stack: Optional[Union[traceback.StackSummary, str]],
     ) -> None: ...
     def clone_manager(
         self, clone_filter_fn: Callable[[GuardManager], bool]
@@ -438,19 +438,19 @@ def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
     verbose_code_parts: list[str],
-    user_stack: Optional[Union[traceback.StackSummary, str]]
+    user_stack: Optional[Union[traceback.StackSummary, str]],
 ) -> None: ...
 def install_no_tensor_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
     verbose_code_parts: list[str],
-    user_stack: Optional[Union[traceback.StackSummary, str]]
+    user_stack: Optional[Union[traceback.StackSummary, str]],
 ) -> None: ...
 def install_storage_overlapping_guard(
     overlapping_guard_managers: list[GuardManager],
     non_overlapping_guard_managers: list[GuardManager],
     verbose_code_parts: list[str],
-    user_stack: Optional[Union[traceback.StackSummary, str]]
+    user_stack: Optional[Union[traceback.StackSummary, str]],
 ) -> None: ...
 def install_symbolic_shape_guard(
     guard_managers: list[GuardManager],
@@ -459,7 +459,7 @@ def install_symbolic_shape_guard(
     py_addr: int,
     py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
-    user_stack: Optional[Union[traceback.StackSummary, str]]
+    user_stack: Optional[Union[traceback.StackSummary, str]],
 ) -> None: ...
 def profile_guard_manager(
     guard_manager: GuardManager,
