@@ -1690,9 +1690,27 @@ class OutputGraph(OutputGraphCommon):
                                 vt.as_python_constant(),
                             )
                         else:
-                            assert f"Encountered unrecognized type {vt} at output {idx}"  # noqa: PLW0129
-
-                    self.export_metadata.out_spec = out_spec.as_python_constant()
+                            raise AssertionError(
+                                f"Encountered unrecognized type {vt} at output {idx}"
+                            )
+                    try:
+                        self.export_metadata.out_spec = out_spec.as_python_constant()
+                    except NotImplementedError as e:
+                        if e.args and e.args[0] == "get_function":
+                            unimplemented(
+                                gb_type="nested function with closure in output",
+                                context="as_python_constant for out_spec",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo cannot reconstruct the function."
+                                ),
+                                hints=[
+                                    "Define the function at module scope instead of inside another function"
+                                ],
+                                from_exc=e,
+                            )
+                        else:
+                            raise
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
