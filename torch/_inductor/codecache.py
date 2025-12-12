@@ -2986,6 +2986,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <Python.h>
         #include <sstream>
         #include <cstdlib>
+        #include <cerrno>
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
@@ -3057,9 +3058,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
                 return nullptr;
             }}
-            std::istringstream iss(str_addr);
-            uintptr_t addr = 0;
-            iss >> addr;
+
+            char* endptr = nullptr;
+            errno = 0;
+            uintptr_t addr = std::strtoull(str_addr, &endptr, 10);
+            if(errno != 0 || endptr == str_addr || addr == 0) {{
+                PyErr_SetString(PyExc_RuntimeError, "Failed to parse _TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+                return nullptr;
+            }}
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             PyObject* module = PyModule_Create(&py_module);
@@ -3628,7 +3634,8 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
 
 def touch(filename: str) -> None:
-    open(filename, "a").close()
+    with open(filename, "a"):
+        pass
 
 
 @clear_on_fresh_cache

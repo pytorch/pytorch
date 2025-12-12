@@ -89,6 +89,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
+    raise_on_overridden_hash,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
@@ -284,7 +285,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"type object '{self.value.__name__}' has no attribute '{name}'",
+                    args=[
+                        f"type object '{self.value.__name__}' has no attribute '{name}'"
+                    ],
                 )
             else:
                 # Cannot reason about classes with a custom metaclass
@@ -800,7 +803,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 and len(args) == 1
                 and isinstance(args[0], variables.ListVariable)
                 and len(args[0].items) > 1
-                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+                and all(x.is_tensor() for x in args[0].items)
             ):
                 # Stack FakeTensor
                 stacked = wrap_fx_proxy(
@@ -881,8 +884,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif self.value is random.Random:
-            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
-                seed = args[0].value
+            if len(args) == 1 and args[0].is_python_constant():
+                seed = args[0].as_python_constant()
             else:
                 seed = None
             random_object = random.Random(seed)
@@ -926,6 +929,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return (
+            isinstance(other, variables.UserDefinedClassVariable)
+            and self.value is other.value
+        )
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
@@ -998,11 +1013,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # rid of these workarounds here and in `GetAttrVariable`.
         self.attrs_directly_modifed_on_dict = set()
 
+        # Cache inspect.getattr_static outputs for the same name. This is fine
+        # because if there is a mutation for the name, we use side-effects infra
+        # to early return the mutated value.
+        self._looked_up_attrs: dict[str, object] = {}
+
+        # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
+        self._subobj_from_class: dict[str, object] = {}
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
         if pytree.is_constant_class(self.value_type) and self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+        self._object_has_getattribute = object_has_getattribute(self.value)
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -1319,13 +1344,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
 
     def _getattr_static(self, name):
+        if name in self._looked_up_attrs:
+            return self._looked_up_attrs[name]
+
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         # NOTE we assume the following descriptors are side-effect-free as far
         # as Dynamo tracing is concerned.
-        if not object_has_getattribute(self.value) and (
+        if not self._object_has_getattribute and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
             or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
@@ -1334,7 +1362,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = type(self.value).__getattribute__(self.value, name)
-        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+        elif self._object_has_getattribute and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
             # call getattr_static only when the __getattribute__ tracing fails
@@ -1342,6 +1370,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # AttributeError.
             raise AttributeError
 
+        self._looked_up_attrs[name] = subobj
         return subobj
 
     def should_skip_descriptor_setter(self, attr_name):
@@ -1427,7 +1456,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         source = AttrSource(self.source, name) if self.source else None
 
-        if object_has_getattribute(self.value):
+        if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
@@ -1447,7 +1476,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                    ],
                 )
             return result
 
@@ -1523,9 +1554,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if subobj is torch.nn.Module.__init__:
             subobj = unpatched_nn_module_init
 
-        subobj_from_class = inspect.getattr_static(
-            self.value.__class__, name, NO_SUCH_SUBOBJ
-        )
+        # Check if its already saved, avoids inspect getattr_static call
+        if name in self._subobj_from_class:
+            subobj_from_class = self._subobj_from_class[name]
+        else:
+            subobj_from_class = inspect.getattr_static(
+                self.value.__class__, name, NO_SUCH_SUBOBJ
+            )
+            self._subobj_from_class[name] = subobj_from_class
+
         is_accessible_from_type_mro = (
             subobj_from_class is subobj
             and self.cls_source is not None
@@ -1723,7 +1760,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(
             AttributeError,
             tx,
-            msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
     def call_obj_hasattr(
@@ -1743,26 +1780,106 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return True
+
+    def get_python_hash(self):
+        # default hash
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        # id check
+        return self.value is other.value
+
+    def call_tree_map_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "variables.functions.UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: "collections.abc.Sequence[VariableTracker]",
+        tree_map_kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        """Emulate tree_map behavior for user-defined objects.
+
+        In pytree, a type is a leaf if it is NOT in SUPPORTED_NODES.
+        User-defined objects (that are not registered with register_pytree_node)
+        are always treated as leaves. This works for both torch.utils._pytree
+        and optree implementations.
+        """
+        # Determine which tree_map implementation is being used
+        tree_map_module = getattr(getattr(tree_map_fn, "fn", None), "__module__", "")
+        is_optree = tree_map_module.startswith("optree")
+
+        if is_optree:
+            # Check optree's registry - need to handle namespaces
+            # In optree, types can be registered globally (type in registry)
+            # or with a namespace ((namespace, type) in registry)
+            try:
+                from optree.registry import _NODETYPE_REGISTRY
+
+                # Check if registered globally
+                is_registered = self.value_type in _NODETYPE_REGISTRY
+
+                # Also check if registered with a namespace that's being used
+                if not is_registered:
+                    namespace_var = tree_map_kwargs.get("namespace")
+                    if namespace_var is not None:
+                        try:
+                            namespace = namespace_var.as_python_constant()
+                            # Check for namespaced registration
+                            is_registered = (
+                                namespace,
+                                self.value_type,
+                            ) in _NODETYPE_REGISTRY
+                        except NotImplementedError:
+                            # Can't determine namespace at compile time, fall back
+                            return self._tree_map_fallback(
+                                tx,
+                                tree_map_fn,
+                                map_fn,
+                                rest,
+                                tree_map_kwargs,
+                            )
+            except ImportError:
+                # Can't import optree registry, fall back to tracing
+                import logging
+
+                log = logging.getLogger(__name__)
+                log.warning(
+                    "Failed to import optree.registry._NODETYPE_REGISTRY, "
+                    "falling back to tracing for tree_map"
+                )
+                return self._tree_map_fallback(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                )
+        else:
+            # Check pytorch's pytree registry
+            import torch.utils._pytree as pytree
+
+            is_registered = self.value_type in pytree.SUPPORTED_NODES
+
+        # If not registered, it's a leaf and we should apply the map_fn directly
+        if not is_registered:
+            return map_fn.call_function(tx, [self, *rest], {})
+
+        # The type is registered in pytree - we need to fall back to tracing
+        # the actual tree_map implementation since we don't have the flattening
+        # logic implemented here
+        return self._tree_map_fallback(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
-    class HashWrapper:
-        """This class is hashed if a dataclass is used as a key in a dict.
-        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
-
-        def __init__(self, c, fields):
-            self.cls = c
-            self.fields = tuple(fields.items())
-
-        def __eq__(self, other):
-            return (
-                type(self) is type(other)
-                and self.cls == other.cls
-                and self.fields == other.fields
-            )
-
-        def __hash__(self):
-            return hash((self.cls, self.fields))
-
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
@@ -1841,6 +1958,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         return ctor(*args, **kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        from dataclasses import fields
+
         # Handle specific pytree classes
         import torch.utils._pytree as pytree
 
@@ -1852,8 +1971,62 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             codegen.extend_output(create_call_function(0, False))
             return
 
-        # For other frozen dataclasses, fall back to the base class behavior
-        super().reconstruct(codegen)
+        # For general frozen dataclasses, reconstruct by calling the constructor
+        # with the field values as arguments
+        dataclass_cls = self.python_type()
+
+        if hasattr(dataclass_cls, "__post_init__"):
+            unimplemented(
+                gb_type="Frozen dataclass with __post_init__",
+                context=f"dataclass={dataclass_cls.__name__}",
+                explanation="Cannot reconstruct frozen dataclass with __post_init__ method, "
+                "as it may have side effects that would be incorrectly replayed.",
+                hints=[
+                    "Remove the __post_init__ method from the frozen dataclass.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # Collect positional and keyword-only arguments
+        pos_args = []
+        kw_args = []
+        for field in fields(dataclass_cls):
+            if not field.init:
+                continue
+            field_vt = self.fields.get(field.name)
+            if field_vt is None:
+                unimplemented(
+                    gb_type="Frozen dataclass with missing field",
+                    context=f"dataclass={dataclass_cls.__name__}, field={field.name}",
+                    explanation=f"Cannot reconstruct frozen dataclass: field '{field.name}' "
+                    "was not tracked during tracing.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if getattr(field, "kw_only", False):
+                kw_args.append((field.name, field_vt))
+            else:
+                pos_args.append(field_vt)
+
+        # Load the dataclass constructor
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(dataclass_cls)
+            )
+        )
+        # Reconstruct all arguments
+        for arg_vt in pos_args:
+            codegen(arg_vt)
+        for _, arg_vt in kw_args:
+            codegen(arg_vt)
+        # Call the constructor
+        total_args = len(pos_args) + len(kw_args)
+        if kw_args:
+            kw_names = tuple(name for name, _ in kw_args)
+            codegen.extend_output(
+                codegen.create_call_function_kw(total_args, kw_names, push_null=False)
+            )
+        else:
+            codegen.extend_output(create_call_function(total_args, False))
 
     # NB: This is called during __init__ for a frozen dataclass
     # use this to accumulate the most up-to-date field values
@@ -1863,6 +2036,22 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def is_python_hashable(self):
+        # TODO - Check corner cases like eq=False, hash=False etc
+        return True
+
+    def get_python_hash(self):
+        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
+
+    def is_python_equal(self, other):
+        is_class_same = self.python_type() is other.python_type()
+        is_field_name_same = self.fields.keys() == other.fields.keys()
+        is_field_value_same = all(
+            value_a.is_python_equal(value_b)
+            for value_a, value_b in zip(self.fields.values(), other.fields.values())
+        )
+        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
@@ -1911,9 +2100,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         elif (
             name == "__setattr__"
             and len(args) == 2
-            and isinstance(args[0], variables.ConstantVariable)
-            and args[0].value
-            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+            and args[0].is_constant_match(
+                "__cause__", "__context__", "__suppress_context__", "__traceback__"
+            )
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
         elif name == "with_traceback":
@@ -1934,6 +2123,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @property
     def exc_type(self):
         return self.exc_vt.exc_type
+
+    @property
+    def python_stack(self):
+        return self.exc_vt.python_stack
+
+    @python_stack.setter
+    def python_stack(self, value):
+        self.exc_vt.python_stack = value
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
@@ -2084,6 +2281,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._dict_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
+
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
@@ -2157,6 +2358,18 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._set_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._set_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._set_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedSetVariable
+        ) and self._set_vt.is_python_equal(other._set_vt)
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -2197,6 +2410,10 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._list_vt)
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -2245,6 +2462,18 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if type(self.value).__iter__ is tuple.__iter__:
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._tuple_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._tuple_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedTupleVariable
+        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
