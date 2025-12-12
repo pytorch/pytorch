@@ -526,7 +526,7 @@ class GradScaler:
                     raise AssertionError(reason)
                 if new_scale.numel() != 1:
                     raise AssertionError(reason)
-                if new_scale.requires_grad is not False:
+                if new_scale.requires_grad is True:
                     raise AssertionError(reason)
                 self._scale.copy_(new_scale)
         else:
