@@ -1043,9 +1043,10 @@ class RegionalOutputCode(OutputCode):
 
             for mod in graph_module.modules():
                 if isinstance(mod, torch.fx.GraphModule):
-                    mod.meta.pop("source_fn_stack", None)
-                    mod.meta.pop("nn_module_stack", None)
-                    mod.meta.pop("fwd_source_fn_stack", None)
+                    for node in mod.graph.nodes:
+                        node.meta.pop("source_fn_stack", None)
+                        node.meta.pop("nn_module_stack", None)
+                        node.meta.pop("fwd_source_fn_stack", None)
 
             self._serialized_graph_module = GraphPickler.dumps(
                 graph_module, options=Options(ops_filter=None)
