@@ -1574,7 +1574,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif(UNIX)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
-  add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
+  # add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   find_package(ZVECTOR) # s390x simd support
 endif()

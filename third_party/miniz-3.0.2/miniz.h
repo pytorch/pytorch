@@ -1153,6 +1153,10 @@ typedef struct mz_zip_archive /* note: added name so it can be forward declared 
 
     mz_zip_internal_state *m_pState;
 
+    /* CRC32 values stored when MZ_ZIP_CRC_CHECK_FAILED occurs */
+    mz_uint32 m_expected_crc32;
+    mz_uint32 m_computed_crc32;
+
 } mz_zip_archive;
 
 typedef struct
