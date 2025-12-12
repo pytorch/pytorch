@@ -2224,6 +2224,11 @@ class Graph:
 
         return on_generate_code_context_manager()
 
+    def _clear_nodes(self) -> None:
+        for node in reversed(self.nodes):
+            node.meta.clear()
+            self.erase_node(node)
+
 
 @contextmanager
 def _override_sym_repr(
