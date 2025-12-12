@@ -52,6 +52,7 @@ class WhileLoopOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
     # pyrefly: ignore [bad-override]
@@ -637,6 +638,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
@@ -881,7 +883,9 @@ class WhileLoopAutogradOp(torch.autograd.Function):
 
         _, final_grad_carries, final_grad_additional_inputs = split_into_chunks(
             while_loop_op(
+                # pyrefly: ignore [bad-argument-type]
                 cond_gm,
+                # pyrefly: ignore [bad-argument-type]
                 body_gm,
                 # pyrefly: ignore [bad-argument-type]
                 (
