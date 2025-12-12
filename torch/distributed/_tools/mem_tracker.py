@@ -919,7 +919,7 @@ class MemTracker(TorchDispatchMode):
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             res = args[0]
         else:
             res = func(*args, **kwargs or {})

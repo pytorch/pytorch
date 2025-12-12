@@ -248,6 +248,7 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
 class _XPUAllocator:
     r"""Wrapper over internal XPU memory allocators."""
 
+    # pyrefly: ignore [missing-attribute]
     def __init__(self, allocator: torch._C._xpu_XPUAllocator):
         self._allocator = allocator
 
@@ -295,6 +296,7 @@ class XPUPluggableAllocator(_XPUAllocator):
                 "Failed to load allocator symbols from the shared library."
             )
 
+        # pyrefly: ignore [missing-attribute]
         self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
 
 
@@ -307,6 +309,7 @@ def change_current_allocator(allocator: _XPUAllocator) -> None:
     Arguments:
         allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
     """
+    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_changeCurrentAllocator(allocator.allocator())
 
 
@@ -316,6 +319,7 @@ def _get_current_allocator() -> _XPUAllocator:
     Returns:
         _XPUAllocator: the allocator being currently used.
     """
+    # pyrefly: ignore [missing-attribute]
     return _XPUAllocator(torch._C._xpu_getAllocator())
 
 

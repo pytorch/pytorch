@@ -817,6 +817,7 @@ class _ConvTransposeNd(_ConvNd):
         )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
+        # pyrefly: ignore [missing-argument]
         qconv = cls(
             mod.in_channels,
             mod.out_channels,

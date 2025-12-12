@@ -49,6 +49,7 @@ class ControlDeps(HigherOrderOperator):
             raise TypeError(
                 f"subgraph must be GraphModule or callable, got {type(subgraph).__name__}"
             )
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(additional_deps, subgraph, *args, **kwargs)
 
 

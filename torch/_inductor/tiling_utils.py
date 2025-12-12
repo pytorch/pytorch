@@ -256,6 +256,7 @@ def get_pw_red_splits(
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -281,6 +282,7 @@ def get_pw_red_splits(
     if none_if_not_divisible:
         return None
     else:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),

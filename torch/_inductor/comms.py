@@ -2205,6 +2205,7 @@ def reorder_compute_and_comm_for_overlap(
     order = snodes
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
     graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
