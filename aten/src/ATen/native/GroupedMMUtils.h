@@ -103,7 +103,7 @@ std::optional<c10::ScalarType> out_dtype) {
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
 }
 
-inline c10::ScalarType _resolve_grouped_mm_out_dtype(const Tensor& mat_a, const Tensor& mat_b,
+inline c10::ScalarType _resolve_grouped_mm_out_dtype(const Tensor& mat_a, [[maybe_unused]] const Tensor& mat_b,
 std::optional<c10::ScalarType> out_dtype) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   // TODO(future PR): enable float32 output dtype for bfloat16 and float16 inputs

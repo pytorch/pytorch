@@ -55,9 +55,9 @@ class _CacheImpl(ABC):
     It provides thread-safe operations through a locking mechanism and supports
     both get and insert operations.
 
-    Note: We don't use generics here as doing so would require that the interfaces
+    Note: We don't use generics here as doing so would require that callers
     know which k/v types the implementation can work with. Instead, we leave that
-    determination up to the implementation itself and require that the interfaces
+    determination up to the implementation itself and require that callers
     handle any potential errors from invalid k/v types being passed to the
     implementation.
     """

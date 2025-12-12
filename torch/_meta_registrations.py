@@ -2400,19 +2400,20 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index]
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -5087,16 +5088,11 @@ def meta_max_pool3d_with_indices(
         "max_pool3d_with_indices()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
     if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
         out_shape = (nslices, otime, oheight, owidth)
     else:
         out_shape = (nbatch, nslices, otime, oheight, owidth)  # type: ignore[assignment]
@@ -5195,16 +5191,10 @@ def meta_max_pool3d_with_indices_backward(
         "max_pool3d_with_indices_backward()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
-    if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
 
     grad_input = input.new_empty(input.shape)
 
