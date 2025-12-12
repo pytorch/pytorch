@@ -26,9 +26,10 @@ implemented before registering it as a value-typed opaque object class:
   - __eq__: torch.compile will create guards based on the equality of this
   object, meaning that a recompilation will happen if __eq__ returns False.
   - __hash__: This must be implemented for Fake Tensor caching
-  - __repr__: This must be implemented as it will be used in the FX graph's
-    codegen to reconstruct the object. The string representation must be able to
-    construct the object again through its __init__ method.
+  - __fx_repr__: This must be implemented to provide an evaluable representation
+    for FX graph codegen. It should return a tuple of (repr_string, dict[str, type])
+    where repr_string can reconstruct the object and the dict maps names used in
+    repr_string to their corresponding types.
 
 You can register a custom class as being a reference-based opaque object class
 through `register_opaque_type(MyClass, typ="value")`.
@@ -145,12 +146,13 @@ def register_opaque_type(cls: Any, *, typ: str) -> None:
                 "for FakeTensor caching."
             )
 
-        if cls.__repr__ is object.__repr__:  # type: ignore[comparison-overlap]
+        if not hasattr(cls, "__fx_repr__"):
             raise TypeError(
                 f"Value-type opaque object of type {cls} is "
-                "expected to have a non-default `__repr__` "
+                "expected to have a `__fx_repr__` method "
                 "implementation as we will use this to reconstruct "
-                "the object in the FX codegen."
+                "the object in the FX codegen. __fx_repr__ should return "
+                "a tuple of (repr_string, set_of_types)."
             )
 
     # Generate a fully qualified name by combining module and qualname
@@ -202,3 +204,42 @@ def is_opaque_reference_type(cls: Any) -> bool:
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
 
     return _OPAQUE_TYPES[cls].opaque_typ == "reference"
+
+
+def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
+    """
+    Get the FX-evaluable repr for an opaque object and collect required globals.
+
+    Objects must implement __fx_repr__() which should return:
+        (repr_string, dict_mapping_name_to_type)
+
+    where repr_string is an evaluable string representation and
+    dict_mapping_name_to_type maps the names used in repr_string to their types.
+
+    For example, if repr_string is "Foo(bar=Bar(1))", the dict should be:
+        {"Foo": Foo, "Bar": Bar}
+    """
+    if not hasattr(obj, "__fx_repr__"):
+        raise TypeError(
+            f"Value-type opaque object of type {obj} is "
+            "expected to have a `__fx_repr__` method "
+            "implementation as we will use this to reconstruct "
+            "the object in the FX codegen. __fx_repr__ should return "
+            "a tuple of (repr_string, dict[str, type])."
+        )
+
+    repr_str, globals_dict = obj.__fx_repr__()
+
+    if not isinstance(repr_str, str):
+        raise TypeError(
+            f"__fx_repr__ for {type(obj).__name__} must return a string as the "
+            f"first element, got {type(repr_str).__name__}"
+        )
+
+    if not isinstance(globals_dict, dict):
+        raise TypeError(
+            f"__fx_repr__ for {type(obj).__name__} must return a dict as the "
+            f"second element, got {type(globals_dict).__name__}"
+        )
+
+    return repr_str, globals_dict

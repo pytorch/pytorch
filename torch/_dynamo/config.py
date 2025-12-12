@@ -577,6 +577,12 @@ capture_autograd_function = True
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
+# Enable capturing torch.profiler.record_function ops in the graph
+# When True, profiler ops are emitted to the graph and preserved through
+# compilation (make_fx, functionalization). When False, profiler ops
+# are treated as nullcontext.
+capture_profiler_record_function: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
@@ -650,6 +656,12 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
+
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
 
 
 # Checks if we should graph break when seeing nn parameter constructors
