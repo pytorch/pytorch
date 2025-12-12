@@ -11,7 +11,7 @@ import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
@@ -90,7 +90,7 @@ class LaunchConfig:
     min_nodes: int
     max_nodes: int
     nproc_per_node: int
-    logs_specs: Optional[LogsSpecs] = None
+    logs_specs: LogsSpecs | None = None
     run_id: str = ""
     role: str = "default_role"
     rdzv_endpoint: str = ""
@@ -100,14 +100,14 @@ class LaunchConfig:
     max_restarts: int = 3
     monitor_interval: float = 0.1
     start_method: str = "spawn"
-    log_line_prefix_template: Optional[str] = None
+    log_line_prefix_template: str | None = None
     metrics_cfg: dict[str, str] = field(default_factory=dict)
-    local_addr: Optional[str] = None
+    local_addr: str | None = None
     event_log_handler: str = "null"
-    numa_options: Optional[NumaOptions] = None
+    numa_options: NumaOptions | None = None
     signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
-    duplicate_stdout_filters: Optional[list[str]] = None
-    duplicate_stderr_filters: Optional[list[str]] = None
+    duplicate_stdout_filters: list[str] | None = None
+    duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
 
     def __post_init__(self):
@@ -161,7 +161,7 @@ class elastic_launch:
     def __init__(
         self,
         config: LaunchConfig,
-        entrypoint: Union[Callable, str, None],
+        entrypoint: Callable | str | None,
     ):
         self._config = config
         self._entrypoint = entrypoint
@@ -170,9 +170,7 @@ class elastic_launch:
         return launch_agent(self._config, self._entrypoint, list(args))
 
 
-def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: list[Any]
-) -> str:
+def _get_entrypoint_name(entrypoint: Callable | str | None, args: list[Any]) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
     2. If entrypoint is a string, check its value:
@@ -194,7 +192,7 @@ def _get_entrypoint_name(
 
 def _get_addr_and_port(
     rdzv_parameters: RendezvousParameters,
-) -> tuple[Optional[str], Optional[int]]:
+) -> tuple[str | None, int | None]:
     if rdzv_parameters.backend != "static":
         return (None, None)
     endpoint = rdzv_parameters.endpoint
@@ -213,7 +211,7 @@ def _get_addr_and_port(
 
 def launch_agent(
     config: LaunchConfig,
-    entrypoint: Union[Callable, str, None],
+    entrypoint: Callable | str | None,
     args: list[Any],
 ) -> dict[int, Any]:
     if not config.run_id:
