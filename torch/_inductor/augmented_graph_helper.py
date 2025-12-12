@@ -102,13 +102,14 @@ class AugmentedGraphHelper:
         visited: OrderedSet[fx.Node] = OrderedSet()
         queue = [target]
         visited.add(target)
+        source_set = self.merge_sets[source]
 
         while queue:
             current = queue.pop()
 
             for dep in self.get_merged_deps(current):
                 # Check if we reached source or its equivalent
-                if dep in self.merge_sets[source]:
+                if dep in source_set:
                     return True
 
                 if dep in visited:
@@ -118,7 +119,6 @@ class AugmentedGraphHelper:
                 # of target.
                 # If dep is an ancestor of source, any path through dep to source would imply a cycle
                 if self.node_ancestors:
-                    source_set = self.merge_sets[source]
                     is_ancestor_of_source = any(
                         dep in self.node_ancestors[s] for s in source_set
                     )
