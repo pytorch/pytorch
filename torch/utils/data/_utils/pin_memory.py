@@ -6,9 +6,9 @@ static methods.
 """
 
 import collections
-import warnings
 import copy
 import queue
+import warnings
 
 import torch
 from torch._utils import ExceptionWrapper
