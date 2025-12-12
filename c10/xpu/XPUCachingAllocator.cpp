@@ -408,6 +408,61 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   }
 }
 
+template <class T>
+class RingBuffer {
+ public:
+  RingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace = new std::vector<T>();
+  }
+
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
+  }
+
+  void insertEntries(const T& entry) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
+      alloc_trace->emplace_back(entry);
+    } else {
+      (*alloc_trace)[alloc_trace_next++] = entry;
+      if (alloc_trace_next == alloc_trace_max_entries_) {
+        alloc_trace_next = 0;
+      }
+    }
+  }
+
+  void getEntries(std::vector<T>& result) const {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    result.reserve(result.size() + alloc_trace->size());
+    std::rotate_copy(
+        alloc_trace->begin(),
+        std::next(alloc_trace->begin(), alloc_trace_next),
+        alloc_trace->end(),
+        std::back_inserter(result));
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_next = 0;
+    alloc_trace->clear();
+  }
+
+ private:
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  mutable std::mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  // Leaked on deallocation to avoid issues with Python shutdown
+  std::vector<T>* alloc_trace;
+};
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -424,6 +479,10 @@ class DeviceCachingAllocator {
   bool set_fraction = false;
   std::vector<ExpandableSegment*> expandable_segments;
   std::vector<c10::DeviceIndex> devices_with_peer_access; // reserved
+  bool record_history = false;
+  std::atomic<CreateContextFn> context_recorder_;
+  RecordContext record_context_ = RecordContext::NEVER;
+  RingBuffer<TraceEntry> alloc_buffer;
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
       captures_underway;
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
@@ -1220,6 +1279,58 @@ class DeviceCachingAllocator {
     }
   }
 
+  void record_trace(
+      TraceEntry::Action action,
+      size_t addr,
+      size_t size,
+      sycl::queue* queue,
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::shared_ptr<GatheredContext> context) {
+    if (!record_history)
+      return;
+    TraceEntry te(
+        action,
+        device,
+        addr,
+        size,
+        queue,
+        mempool_id,
+        getApproximateTime(),
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
+    alloc_buffer.insertEntries(te);
+  }
+
+  std::vector<TraceEntry> trace(
+      const std::function<time_t(approx_time_t)>& tsc_to_us) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    std::vector<TraceEntry> result;
+    alloc_buffer.getEntries(result);
+
+    // Convert all the timestamps from tsc to epoch time in microseconds.
+    for (auto& te : result) {
+      te.time_.t_ = tsc_to_us(te.time_.approx_t_);
+    }
+    return result;
+  }
+
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
+    record_history = enabled;
+    context_recorder_.store(record_history ? context_recorder : nullptr);
+    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
+    record_context_ = enabled ? when : RecordContext::NEVER;
+    if (!enabled || clearHistory) {
+      alloc_buffer.clear();
+    }
+  }
+
   std::pair<size_t, size_t> getMemoryInfo() {
     const auto& device = c10::xpu::get_raw_device(device_index);
     const size_t total = device.get_info<sycl::info::device::global_mem_size>();
@@ -1502,6 +1613,22 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->setMemoryFraction(fraction);
   }
 
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory) {
+    for (auto& allocator : device_allocators) {
+      allocator->recordHistory(
+          enabled,
+          context_recorder,
+          alloc_buffer_max_entries,
+          when,
+          clearHistory);
+    }
+  }
+
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -1563,6 +1690,16 @@ double getMemoryFraction(DeviceIndex device) {
 
 void setMemoryFraction(double fraction, DeviceIndex device) {
   return native_allocator.setMemoryFraction(fraction, device);
+}
+
+void recordHistory(
+    bool enabled,
+    CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    RecordContext when,
+    bool clearHistory) {
+  native_allocator.recordHistory(
+      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
 }
 
 void createOrIncrefPool(
