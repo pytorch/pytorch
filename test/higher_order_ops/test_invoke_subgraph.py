@@ -3047,6 +3047,42 @@ class InvokeSubgraphNoRetracingTests(TestCase):
         res.sum().backward()
         self.assertEqual(x.grad, x_clone.grad)
 
+    def test_kwargs(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @nested_compile_region(is_pure=True)
+            def forward(self, x, *, y):
+                return torch.sin(x) + y
+
+        class LLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = Block()
+                self.mod2 = Block()
+                self.mod3 = Block()
+
+            def forward(self, x, y):
+                return self.mod3(self.mod2(self.mod1(x, y=y), y=y), y=y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+
+        mod = LLM()
+        backend = AotEagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, fullgraph=True, backend=backend)
+
+        ref = mod(x, y)
+        res = opt_mod(x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(self.count_cache_hit_with_is_pure(backend.graphs[0]), 2)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+
     def test_distinct_layers(self):
         class SinBlock(torch.nn.Module):
             def __init__(self):

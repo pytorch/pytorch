@@ -970,7 +970,7 @@ def validate_args_and_maybe_create_graph_inputs(
         #   - invoke_subgraph's upcoming `is_pure` logic, which needs a stable, guaranteed
         #     ordering of subgraph inputs for a simpler implementation.
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
-            ListVariable(sub_args)
+            ListVariable(list(sub_args))
         ).unpack_var_sequence(tx)
 
         # lift the tensor variables as subgraph inputs right away.
@@ -4953,19 +4953,33 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
-    def get_inputs_for_subgraph_assuming_pure(self, tx, args):
-        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
-            ListVariable(args)
+    def get_inputs_for_subgraph_assuming_pure(self, tx, args, kwargs):
+        """
+        For is_pure=True, during the first tracing, we use `flatten_automatic`
+        to lift the subgraph args. We can follow the exact same process here.
+
+        """
+        flat_args, _ = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(list(args))
         ).unpack_var_sequence(tx)
+        flat_args = flat_args.unpack_var_sequence(tx)
+
+        flat_kwargs = []
+        if kwargs:
+            flat_kwargs, _ = _make_inlined(tx, pytree.tree_flatten)(
+                ListVariable(list(kwargs.values()))
+            ).unpack_var_sequence(tx)
+            flat_kwargs = flat_kwargs.unpack_var_sequence(tx)
 
         lifted_tensor_args = []
-        for x in flat_args.unpack_var_sequence(tx):
+        for x in flat_args + flat_kwargs:
             if isinstance(x, variables.TensorVariable):
                 lifted_tensor_args.append(x)
+
         return lifted_tensor_args
 
     def get_fake_outputs_for_subgraph_assuming_pure(self, tx, mod):
-        # args, body_graph_output_vts):
+        # Get fake values by make a copy from the earlier traced submodule.
         old_fake_outputs = [
             x.meta["example_value"]
             for x in mod.graph.find_nodes(op="output")[0].args[0]
@@ -5024,6 +5038,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def save_subgraph_output_types_assuming_pure(
         self, tx, fn_vt, invoke_subgraph_cache, body_r
     ):
+        """
+        Save the output type - tensor or tuple of tensors for the current fn
+        output. This will be used for subsequent invocations of the is_pure
+        marked fns, to construct the output variable tracker.
+        """
         out_type = self.validate_output_requirements_assuming_pure(tx, body_r)
 
         fn_id = self.get_fn_id(fn_vt)
@@ -5033,13 +5052,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 fn_id, out_type
             )
 
-    def reuse_cached_subgraph_assuming_pure(
+    def get_cached_subgraph_assuming_pure(
         self, tx, submodule_name, invoke_subgraph_cache, fn_id, args, kwargs
     ):
-        mod = tx.output.nn_modules[submodule_name]
-        flat_example_value = self.get_fake_outputs_for_subgraph_assuming_pure(tx, mod)
+        from .builder import wrap_fx_proxy
 
-        subgraph_args = self.get_inputs_for_subgraph_assuming_pure(tx, args)
+        mod = tx.output.nn_modules[submodule_name]
+
+        # Prepare the args for the invoke_subgraph call using the structure
+        # pre-determined by the first tracing.
+        subgraph_args = self.get_inputs_for_subgraph_assuming_pure(tx, args, kwargs)
         proxy_tensor_args = [x.as_proxy() for x in subgraph_args]
         body_node = make_attr(tx, submodule_name)
         p_args = (
@@ -5048,10 +5070,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             *proxy_tensor_args,
         )
 
-        from .builder import wrap_fx_proxy
-
-        # Store the invocation as a call
-        # Add markers for easy debugging
+        # Insert the invoke_subgraph call in the output graph. Use the earlier
+        # traced graph to get a copy of fake outputs.
+        # Add debug markers for cache_hit_with_is_pure for tlparse readability.
+        flat_example_value = self.get_fake_outputs_for_subgraph_assuming_pure(tx, mod)
         with torch.fx.traceback.preserve_node_meta():
             with torch.fx.traceback.annotate(
                 {"cache_hit_with_is_pure": submodule_name}
@@ -5067,7 +5089,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     example_value=flat_example_value,
                 )
 
-        # For is_pure, we will have to assume that flat_variable is same as body_r.
+        # We have the variable trackers from the subgraph, now we have to
+        # construct a variable tracker for the original function output. For
+        # now, we support tensor or tuple of tensors, to keep this
+        # transformation very simple.
         out_type = invoke_subgraph_cache.get_dynamo_installed_submodule_out_type(fn_id)
         assert out_type is not None
         if out_type == PureOutputType.TENSOR:
@@ -5114,7 +5139,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
             if previously_installed_submodules:
                 submodule_name = previously_installed_submodules[0]
-                return self.reuse_cached_subgraph_assuming_pure(
+                return self.get_cached_subgraph_assuming_pure(
                     tx,
                     submodule_name,
                     invoke_subgraph_cache,
