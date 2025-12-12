@@ -14,15 +14,11 @@ import copy
 import functools
 import itertools
 import pprint
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -87,6 +83,7 @@ from .subclass_utils import (
 from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
+    get_cuda_generator_meta_val,
     make_boxed_func,
     partial_flatten_asdict,
     simple_wraps,
@@ -487,33 +484,45 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
     # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
     # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
     # of those two indices incorrect.
-    return_new_outs: bool = True
+    is_inference: bool = True
 
     def pre_compile(
         self,
         flat_fn: torch.fx.GraphModule,
-        flat_args,
-        aot_config,
+        flat_args: list[Any],
+        aot_config: AOTConfig,
         *,
-        fw_metadata,
+        fw_metadata: ViewAndMutationMeta,
     ) -> None:
+        # Add RNG states for forward mode only.
+        if not self.is_inference and fw_metadata.num_graphsafe_rng_states > 0:
+            index = fw_metadata.graphsafe_rng_state_index
+            assert index is not None
+            rng_states = [
+                get_cuda_generator_meta_val(index)
+                for _ in range(fw_metadata.num_graphsafe_rng_states)
+            ]
+            flat_args.extend(rng_states)
+
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
             assert fake_mode is not None
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
-            # We are not clearing flat_args here because
-            # 1) There is a check in the debug compiler at the end
-            # 2) It does not matter as these are fake tensors
+
+        # We are not clearing flat_args here because
+        # 1) There is a check in the debug compiler at the end
+        # 2) It does not matter as these are fake tensors
 
     def post_compile(
         self,
-        compiled_fn,
+        compiled_fn: Callable,
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ):
+        fwd_output_strides: list[tuple[int, ...] | None] | None,
+    ) -> Callable:
         @wraps(compiled_fn)
         def wrapper(runtime_args: list[Any]):
             if runtime_metadata.is_rng_op_functionalized:
@@ -544,7 +553,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
             assert metadata.num_outputs_rng_offset == 1
             new_rng_offset = outs[offset_index]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
-            if self.return_new_outs:
+            if self.is_inference:
                 user_outs = outs[:offset_index] + outs[offset_index + 1 :]
                 return user_outs
             else:
@@ -557,10 +566,6 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
 @dataclass
 class FakifiedOutWrapper(InductorWrapper):
     out_metas: list[torch.Tensor] = field(default_factory=list)
-    # TracingContext.fwd_output_strides
-    # Generated from actually doing compile
-    # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: Optional[list[Optional[list[int]]]] = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -579,9 +584,10 @@ class FakifiedOutWrapper(InductorWrapper):
         else:
             self.needs_post_compile = False
 
-    def _compute_output_meta_with_inductor_strides(self):
+    def _compute_output_meta_with_inductor_strides(
+        self, fwd_output_strides: list[tuple[int, ...] | None]
+    ):
         out = self.out_metas
-        fwd_output_strides = self.fwd_output_strides
         if not fwd_output_strides:
             return out
 
@@ -609,20 +615,19 @@ class FakifiedOutWrapper(InductorWrapper):
             out[i] = out[i].as_strided(out[i].shape, strides)
         return out
 
-    # To be called post compile
-    def set_fwd_output_strides(self, fwd_output_strides):
-        self.fwd_output_strides = fwd_output_strides
-
     def post_compile(
         self,
-        compiled_fn,
+        compiled_fn: Callable,
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ):
+        fwd_output_strides: list[tuple[int, ...] | None] | None,
+    ) -> Callable:
         if self.needs_post_compile:
-            assert self.fwd_output_strides is not None
-            fakified_out = self._compute_output_meta_with_inductor_strides()
+            assert fwd_output_strides is not None
+            fakified_out = self._compute_output_meta_with_inductor_strides(
+                fwd_output_strides
+            )
 
             @wraps(compiled_fn)
             def wrapper(runtime_args):
@@ -2569,6 +2574,22 @@ def pre_compile(
     return flat_fn, flat_args, flat_args_descs, fw_metadata
 
 
+def pre_compile_inductor_wrappers(
+    wrappers: Sequence[InductorWrapper],
+    fw_module: torch.fx.GraphModule,
+    flat_args: list[Tensor],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    """
+    Runs a sequence of InductorWrappers on the given GraphModule and arguments.  Mutates
+    flat_args in place.
+    """
+    for wrapper in wrappers:
+        wrapper.pre_compile(fw_module, flat_args, aot_config, fw_metadata=fw_metadata)
+
+
 def post_compile(
     wrappers: list[CompilerWrapper],
     compiled_fn: Callable,
@@ -2584,6 +2605,28 @@ def post_compile(
             compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn, runtime_metadata
+
+
+def post_compile_inductor_wrappers(
+    wrappers: Sequence[InductorWrapper],
+    compiled_fn: Callable,
+    aot_config: AOTConfig,
+    *,
+    runtime_metadata: ViewAndMutationMeta,
+    fwd_output_strides: list[tuple[int, ...] | None] | None,
+) -> Callable:
+    """
+    Runs a sequence of InductorWrappers on the given function.  Should be called after
+    pre_compile_inductor_wrappers.
+    """
+    for wrapper in reversed(wrappers):
+        compiled_fn = wrapper.post_compile(
+            compiled_fn,
+            aot_config,
+            runtime_metadata=runtime_metadata,
+            fwd_output_strides=fwd_output_strides,
+        )
+    return compiled_fn
 
 
 def make_runtime_safe(
