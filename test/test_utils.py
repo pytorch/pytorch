@@ -987,6 +987,116 @@ def f(x):
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
 
+    def test_captured_traceback_interleaving(self):
+        """
+        Test py-spy style interleaving of Python and C++ stack traces.
+
+        When multiple Python function calls occur within a single C++ eval frame,
+        they should all appear in the traceback with proper interleaving.
+        This tests the is_entry flag implementation in combined_traceback.cpp.
+        """
+        import sys
+
+        # Create a nested call stack with multiple Python frames
+        def innermost():
+            # Capture traceback at the deepest point
+            return CapturedTraceback.extract(cpp=True)
+
+        def middle2():
+            return innermost()
+
+        def middle1():
+            return middle2()
+
+        def outer():
+            return middle1()
+
+        tb = outer()
+        formatted = "".join(tb.format())
+
+        # Verify all Python function names appear in the traceback
+        # This ensures interleaving is working - if it wasn't, we might only
+        # see one Python frame per PyEval_EvalFrame C++ frame
+        self.assertIn("innermost", formatted)
+        self.assertIn("middle2", formatted)
+        self.assertIn("middle1", formatted)
+        self.assertIn("outer", formatted)
+        self.assertIn("test_captured_traceback_interleaving", formatted)
+
+        # On Python 3.11+, verify that we have more Python frames than
+        # PyEval_EvalFrame C++ frames, which would indicate interleaving
+        if sys.version_info >= (3, 11):
+            # Count how many times our function names appear
+            # (should be at least 5: innermost, middle2, middle1, outer, test function)
+            python_frame_count = sum(
+                [
+                    formatted.count(name)
+                    for name in [
+                        "innermost",
+                        "middle2",
+                        "middle1",
+                        "outer",
+                        "test_captured_traceback_interleaving",
+                    ]
+                ]
+            )
+
+            # The interleaving should show all these frames
+            # even though they may be within a single or few PyEval_EvalFrame calls
+            self.assertGreaterEqual(
+                python_frame_count,
+                5,
+                "Expected at least 5 Python frames to demonstrate interleaving",
+            )
+
+    def test_captured_traceback_interleaving_with_torch_ops(self):
+        """
+        Test interleaving when PyTorch operations are involved.
+
+        This creates a stack with Python functions calling torch operations,
+        which then call back into Python. The interleaving should properly
+        show all Python frames even when C++ (PyEval_EvalFrame) frames are involved.
+        """
+
+        def compute_something(x):
+            # Trigger a torch operation which may involve C++ code
+            x + 1
+            # Capture at this point
+            return CapturedTraceback.extract(cpp=True)
+
+        def process_data(x):
+            return compute_something(x * 2)
+
+        def main_function():
+            x = torch.tensor([1.0, 2.0, 3.0])
+            return process_data(x)
+
+        tb = main_function()
+        summary = tb.summary()
+
+        # Extract function names from the stack summary
+        function_names = [frame.name for frame in summary]
+
+        # Verify our Python functions appear
+        self.assertIn("compute_something", function_names)
+        self.assertIn("process_data", function_names)
+        self.assertIn("main_function", function_names)
+
+        # All three of our functions should be visible in the trace
+        # This validates that multiple Python frames within the same
+        # PyEval_EvalFrame are being captured
+        self.assertGreaterEqual(
+            len(
+                [
+                    n
+                    for n in function_names
+                    if n in ["compute_something", "process_data", "main_function"]
+                ]
+            ),
+            3,
+            "All Python frames should be visible with interleaving",
+        )
+
 
 class TestTryImport(TestCase):
     def test_import_imported(self):

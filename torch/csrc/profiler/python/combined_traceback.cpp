@@ -3,8 +3,147 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+
 namespace py = pybind11;
+
+// Forward declarations for Python internal structures needed for frame
+// interleaving. We define these ourselves instead of including internal headers
+// (which require Py_BUILD_CORE in Python 3.14+) to maintain compatibility
+// across Python versions. These structures are based on CPython's
+// internal/pycore_frame.h
+#if IS_PYTHON_3_11_PLUS
+
+// Minimal PyFrameObject structure definition (opaque in Python 3.11+)
+// We only need to access the f_frame field
+struct _PyFrameObject {
+  PyObject_HEAD
+  PyFrameObject* f_back; /* previous frame, or NULL */
+  void* f_frame; /* points to _PyInterpreterFrame - we'll cast this */
+  // ... other fields we don't need
+};
+
+#if IS_PYTHON_3_13_PLUS
+// Python 3.13+ _PyInterpreterFrame layout
+// Changed f_code -> f_executable and prev_instr -> instr_ptr
+struct _PyInterpreterFrame {
+  PyObject* f_executable; // Changed from f_code in 3.13+
+  struct _PyInterpreterFrame* previous;
+  PyObject* f_funcobj;
+  PyObject* f_globals;
+  PyObject* f_builtins;
+  PyObject* f_locals;
+  PyFrameObject* frame_obj;
+  void* instr_ptr; // Changed from prev_instr in 3.13+
+  int stacktop;
+  uint16_t return_offset;
+  char owner; // The field we need
+  // ... rest of structure
+};
+
+#define FRAME_OWNED_BY_CSTACK 3
+
+// Helper function to extract is_entry flag from Python frames
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  if (!frame)
+    return true;
+
+  // Access the internal interpreter frame
+  struct _PyFrameObject* frame_obj =
+      reinterpret_cast<struct _PyFrameObject*>(frame);
+  if (!frame_obj->f_frame)
+    return true;
+
+  struct _PyInterpreterFrame* iframe =
+      reinterpret_cast<struct _PyInterpreterFrame*>(frame_obj->f_frame);
+
+  // Frames owned by the C stack are entry frames
+  return iframe->owner == FRAME_OWNED_BY_CSTACK;
+}
+
+#elif IS_PYTHON_3_12_PLUS
+// Python 3.12 _PyInterpreterFrame layout
+// The owner field determines frame ownership
+struct _PyInterpreterFrame {
+  PyCodeObject* f_code;
+  struct _PyInterpreterFrame* previous;
+  PyObject* f_funcobj;
+  PyObject* f_globals;
+  PyObject* f_builtins;
+  PyObject* f_locals;
+  PyFrameObject* frame_obj;
+  void* prev_instr; // _Py_CODEUNIT*
+  int stacktop;
+  uint16_t return_offset;
+  char owner; // The field we need for Python 3.12+
+  // ... rest of structure
+};
+
+#define FRAME_OWNED_BY_CSTACK 3
+
+// Helper function to extract is_entry flag from Python frames
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  if (!frame)
+    return true;
+
+  // Access the internal interpreter frame
+  struct _PyFrameObject* frame_obj =
+      reinterpret_cast<struct _PyFrameObject*>(frame);
+  if (!frame_obj->f_frame)
+    return true;
+
+  struct _PyInterpreterFrame* iframe =
+      reinterpret_cast<struct _PyInterpreterFrame*>(frame_obj->f_frame);
+
+  // Frames owned by the C stack are entry frames
+  return iframe->owner == FRAME_OWNED_BY_CSTACK;
+}
+
+#else // Python 3.11.x
+// Python 3.11 _PyInterpreterFrame layout with explicit is_entry field
+struct _PyInterpreterFrame {
+  PyObject* f_func;
+  PyObject* f_globals;
+  PyObject* f_builtins;
+  PyObject* f_locals;
+  PyCodeObject* f_code;
+  PyFrameObject* frame_obj;
+  struct _PyInterpreterFrame* previous;
+  void* prev_instr; // _Py_CODEUNIT*
+  int stacktop;
+  bool is_entry; // The field we need for Python 3.11
+  char owner;
+  // ... rest of structure
+};
+
+// Helper function to extract is_entry flag from Python frames
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  if (!frame)
+    return true;
+
+  // Access the internal interpreter frame
+  struct _PyFrameObject* frame_obj =
+      reinterpret_cast<struct _PyFrameObject*>(frame);
+  if (!frame_obj->f_frame)
+    return true;
+
+  struct _PyInterpreterFrame* iframe =
+      reinterpret_cast<struct _PyInterpreterFrame*>(frame_obj->f_frame);
+
+  // Use the is_entry field directly
+  return iframe->is_entry;
+}
+
+#endif // IS_PYTHON_3_12_PLUS
+
+#else // Python < 3.11
+// Python < 3.11: No interleaving support, treat all frames as entry frames
+static bool get_is_entry_from_frame(PyFrameObject* frame) {
+  return true;
+}
+
+#endif // IS_PYTHON_3_11_PLUS
 
 namespace torch {
 // Locking:
@@ -40,8 +179,12 @@ struct PythonTraceback : public CapturedTraceback::Python {
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
     while (f) {
-      frames.emplace_back(
-          CapturedTraceback::PyFrame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+      // Extract is_entry flag for py-spy style interleaving
+      bool is_entry = get_is_entry_from_frame(f);
+
+      frames.emplace_back(CapturedTraceback::PyFrame{
+          PyFrame_GetCode(f), PyFrame_GetLasti(f), is_entry});
+
       auto f_back = PyFrame_GetBack(f);
       Py_XDECREF(f);
       f = f_back;
