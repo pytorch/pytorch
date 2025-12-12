@@ -145,6 +145,8 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
+_in_optimized_module = False
+
 
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
@@ -201,6 +203,27 @@ def get_example_inputs(key: str) -> list[Any]:
         _EXAMPLE_INPUTS[key] = []
 
     return _EXAMPLE_INPUTS[key]
+
+
+@contextlib.contextmanager
+def _set_in_optimized_module():
+    # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
+    # Prevents graph-breaking forward hooks from being registered & traced.
+    # TODO(pianpwk): subsume this flag with better is_compiling() coverage
+    global _in_optimized_module
+    _old_in_optimized_module = (
+        _in_optimized_module  # do we need this? can we just set it to False after
+    )
+    _in_optimized_module = True
+    try:
+        yield
+    finally:
+        _in_optimized_module = _old_in_optimized_module
+
+
+def _is_in_optimized_module() -> bool:
+    global _in_optimized_module
+    return _in_optimized_module
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
@@ -438,7 +461,8 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        with _set_in_optimized_module():
+            return super().__call__(*args, **kwargs)
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """
