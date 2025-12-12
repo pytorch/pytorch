@@ -45,6 +45,18 @@ if HAS_GPU:
     import triton
 
 
+def gen_nn_functionl_call_wrapper():
+    # We need a wrapper to generate a new object so that we can hash on it.
+    return (
+        lambda module,
+        parameter_and_buffer_dicts,
+        args,
+        kwargs: torch.func.functional_call(
+            module, parameter_and_buffer_dicts, args, kwargs
+        )
+    )
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
     def test_simple(self):
@@ -3175,35 +3187,64 @@ class InvokeSubgraphNoRetracingTests(TestCase):
         accordingly.
         """
 
-        class Block(torch.nn.Module):
+        class SinBlock(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
             def forward(self, x):
-                return self.linear(x)
+                return torch.sin(self.linear(x))
+
+        class CosBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                return torch.cos(self.linear(x))
 
         class LLM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self._mods = torch.nn.ModuleList([Block() for _ in range(3)])
-                self.functionalized_modules = [
-                    lambda params, buffers, x: torch.func.functional_call(
-                        module, (params, buffers), x
+                self._mods = torch.nn.ModuleList(
+                    [
+                        SinBlock(),
+                        SinBlock(),
+                        SinBlock(),
+                        CosBlock(),
+                        CosBlock(),
+                        torch.nn.Linear(8, 8),
+                    ]
+                )
+                self.hashed_submods = {}
+                self._functionalized_modules = []
+                for idx, submod in enumerate(self._mods):
+                    hash_submod = type(submod)
+                    if hash_submod not in self.hashed_submods:
+                        wrapper = gen_nn_functionl_call_wrapper()
+                        self.hashed_submods[hash_submod] = nested_compile_region(
+                            wrapper, is_pure=True
+                        )
+                    self._functionalized_modules.append(
+                        self.hashed_submods[hash_submod]
                     )
-                    for module in self._mods
-                ]
-                self.functionalized_modules = [
-                    nested_compile_region(f, is_pure=True)
-                    for f in self.functionalized_modules
-                ]
+
+            def get_params_and_buffer_dict(self, submod):
+                params = dict(submod.named_parameters())
+                buffers = dict(submod.named_buffers())
+                params_and_buffers = {
+                    **dict(params),
+                    **dict(buffers),
+                }
+                return params_and_buffers
 
             def forward(self, x):
-                for idx, mod in enumerate(self.functionalized_modules):
-                    x = mod(
-                        dict(self._mods[idx].named_parameters()),
-                        dict(self._mods[idx].named_buffers()),
-                        x,
+                for idx, functional_call in enumerate(self._functionalized_modules):
+                    x = functional_call(
+                        self._mods[idx],
+                        self.get_params_and_buffer_dict(self._mods[idx]),
+                        (x,),
+                        {},
                     )
                 return x
 
@@ -3217,7 +3258,7 @@ class InvokeSubgraphNoRetracingTests(TestCase):
         ref = mod(x)
         res = opt_mod(x_clone)
         self.assertEqual(ref, res)
-        self.assertEqual(self.count_cache_hit_with_is_pure(backend.graphs[0]), 2)
+        self.assertEqual(self.count_cache_hit_with_is_pure(backend.graphs[0]), 3)
         ref.sum().backward()
         res.sum().backward()
         self.assertEqual(x.grad, x_clone.grad)
