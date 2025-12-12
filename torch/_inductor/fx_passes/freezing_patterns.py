@@ -121,6 +121,173 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
+def _register_int4_mm_fusion_patterns(device, val):
+    """
+    Register INT4 GPU matmul fusion patterns for _weight_int4pack_mm.
+
+    Fuses multiple INT4 matmuls with the same input into a single matmul + split:
+        (int4_mm(x, w1, gs, sz1), int4_mm(x, w2, gs, sz2), ...)
+        -> split(int4_mm(x, cat(w1,w2,...), gs, cat(sz1,sz2,...)), sizes)
+
+    This is beneficial for patterns like Q/K/V projections in attention layers.
+
+    For INT4 packed weight format:
+    - Packed weight shape: [N/8, K/(inner_k*16), 32, inner_k/2]
+    - Scale_zeros shape: [K/group_size, N, 2]
+    We concatenate packed weights on dim=0 and scale_zeros on dim=1.
+
+    Note: Scalar group_size must be hardcoded in patterns (not a variable).
+    We register patterns for common group_size values.
+    """
+    if device not in ("cuda", "mps"):
+        return
+
+    # Create example tensors for INT4 packed weight format
+    # These are representative shapes for pattern matching; actual shapes vary.
+    # Packed weight shape: [N/8, K/(inner_k*16), 32, inner_k/2] where inner_k=8
+    # Scale_zeros shape: [K/group_size, N, 2] (scale and zero packed together)
+    # Note: scale_zeros dtype can be bfloat16, float16, or float32 in practice;
+    # the example dtype here is just for tracing the pattern.
+    int4_weight = functools.partial(
+        torch.empty,
+        (8, 1, 32, 4),
+        device=device,
+        dtype=torch.int32,
+        requires_grad=False,
+    )
+    int4_scale_zeros = functools.partial(
+        torch.empty,
+        (1, 64, 2),
+        device=device,
+        dtype=torch.bfloat16,
+        requires_grad=False,
+    )
+
+    def check_int4_gpu_concat_weights(match):
+        """Check if INT4 GPU weights can be concatenated."""
+        # Must be on CUDA or MPS
+        inp_val = match.kwargs["inp"].meta["val"]
+        if not (inp_val.is_cuda or inp_val.is_mps):
+            return False
+
+        weight_inputs = ["w1", "w2"]
+        if "w3" in match.kwargs:
+            weight_inputs.append("w3")
+
+        scale_inputs = ["sz1", "sz2"]
+        if "sz3" in match.kwargs:
+            scale_inputs.append("sz3")
+
+        # All weights must be get_attr (constants)
+        for wgt in weight_inputs:
+            if match.kwargs[wgt].op != "get_attr":
+                return False
+
+        # All scale_zeros must be get_attr (constants)
+        for sz in scale_inputs:
+            if match.kwargs[sz].op != "get_attr":
+                return False
+
+        # Weights must have same K dimension (dims 1-3 must match)
+        first_w = match.kwargs["w1"].meta["val"]
+        for wgt in weight_inputs[1:]:
+            w = match.kwargs[wgt].meta["val"]
+            if w.shape[1:] != first_w.shape[1:]:
+                return False
+
+        # Scale_zeros must have compatible shapes (same dims except dim=1)
+        # and same dtype for safe concatenation
+        first_sz = match.kwargs["sz1"].meta["val"]
+        for sz in scale_inputs[1:]:
+            sz_val = match.kwargs[sz].meta["val"]
+            # Shape is [K/gs, N, 2] - dims 0 and 2 must match
+            if (
+                sz_val.shape[0] != first_sz.shape[0]
+                or sz_val.shape[2] != first_sz.shape[2]
+            ):
+                return False
+            # Dtype must match for concatenation
+            if sz_val.dtype != first_sz.dtype:
+                return False
+
+        return True
+
+    # 3-way fusion pattern (e.g., Q/K/V projections)
+    def int4_pattern_three(inp, w1, w2, w3, sz1, sz2, sz3, group_size):
+        return (
+            aten._weight_int4pack_mm.default(inp, w1, group_size, sz1),
+            aten._weight_int4pack_mm.default(inp, w2, group_size, sz2),
+            aten._weight_int4pack_mm.default(inp, w3, group_size, sz3),
+        )
+
+    def int4_replacement_three(inp, w1, w2, w3, sz1, sz2, sz3, group_size):
+        cat_w = torch.cat((w1, w2, w3), dim=0)
+        cat_sz = torch.cat((sz1, sz2, sz3), dim=1)
+        mm = aten._weight_int4pack_mm.default(inp, cat_w, group_size, cat_sz)
+        # Packed weight shape is [N/8, ...], so N = w.size(0) * 8
+        # (assumes inner_k_tiles=8 which is the standard int4pack format)
+        n1, n2 = w1.size(0) * 8, w2.size(0) * 8
+        return mm.tensor_split([n1, n1 + n2], dim=-1)
+
+    # 2-way fusion pattern (e.g., K/V in cross-attention)
+    def int4_pattern_two(inp, w1, w2, sz1, sz2, group_size):
+        return (
+            aten._weight_int4pack_mm.default(inp, w1, group_size, sz1),
+            aten._weight_int4pack_mm.default(inp, w2, group_size, sz2),
+        )
+
+    def int4_replacement_two(inp, w1, w2, sz1, sz2, group_size):
+        cat_w = torch.cat((w1, w2), dim=0)
+        cat_sz = torch.cat((sz1, sz2), dim=1)
+        mm = aten._weight_int4pack_mm.default(inp, cat_w, group_size, cat_sz)
+        # Packed weight shape is [N/8, ...], so N = w.size(0) * 8
+        n1 = w1.size(0) * 8
+        return mm.tensor_split([n1], dim=-1)
+
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        int4_pattern_three,
+        # pyrefly: ignore [bad-argument-type]
+        int4_replacement_three,
+        [
+            val(),
+            int4_weight(),
+            int4_weight(),
+            int4_weight(),
+            int4_scale_zeros(),
+            int4_scale_zeros(),
+            int4_scale_zeros(),
+        ],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        pass_patterns[0],
+        extra_check=check_int4_gpu_concat_weights,
+        scalar_workaround={"group_size": 128},
+        exclusive_arg_names=("w1", "w2", "w3", "sz1", "sz2", "sz3"),
+    )
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        int4_pattern_two,
+        # pyrefly: ignore [bad-argument-type]
+        int4_replacement_two,
+        [
+            val(),
+            int4_weight(),
+            int4_weight(),
+            int4_scale_zeros(),
+            int4_scale_zeros(),
+        ],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        pass_patterns[0],
+        extra_check=check_int4_gpu_concat_weights,
+        scalar_workaround={"group_size": 128},
+        exclusive_arg_names=("w1", "w2", "sz1", "sz2"),
+    )
+
+
 @functools.cache
 def addmm_patterns_init():
     """
@@ -286,6 +453,9 @@ def addmm_patterns_init():
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
     )
+
+    # Register INT4 GPU matmul fusion patterns
+    _register_int4_mm_fusion_patterns(device, val)
 
 
 def same_dtype(match):
