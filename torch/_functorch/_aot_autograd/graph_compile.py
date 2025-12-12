@@ -163,20 +163,11 @@ aten = torch.ops.aten
 DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
-def _create_wrappers_for_dispatch(
-    needs_autograd: bool, is_export: bool
-) -> list[CompilerWrapper]:
+def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
     """
     Wrappers that run on every dispatch function
     """
-    out: list[CompilerWrapper] = [
-        AOTDedupeWrapper(),
-        AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
-    ]
-    if is_export:
-        return out
-
-    return out
+    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
 def aot_stage1_graph_capture(
@@ -200,10 +191,8 @@ def aot_stage1_graph_capture(
         return out, out_descs
 
     aot_config = aot_state.aot_config
-    wrappers = _create_wrappers_for_dispatch(
-        aot_state.needs_autograd, aot_config.is_export
-    )
 
+    wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
     flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
         pre_compile(
             wrappers,
@@ -364,9 +353,9 @@ def aot_stage2_compile(
     aot_state.aot_config.inference_compiler = inference_compiler
 
     if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
-        return _aot_stage2_autograd(aot_state, aot_graph_capture)
+        return aot_stage2_autograd(aot_state, aot_graph_capture)
     else:
-        return _aot_stage2_inference(aot_state, aot_graph_capture)
+        return aot_stage2_inference(aot_state, aot_graph_capture)
 
 
 def _log_inference_graph(
@@ -419,7 +408,7 @@ def _aot_stage2b_inference_compile(
     )[1]
 
 
-def _aot_stage2_inference(
+def aot_stage2_inference(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
@@ -1977,7 +1966,7 @@ def _aot_stage2b_bw_compile(
             return lazy_backward_info, compiled_bw_func
 
 
-def _aot_stage2_autograd(
+def aot_stage2_autograd(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
@@ -2245,6 +2234,8 @@ def _aot_stage2b_compile_forward_or_inference(
     - FakifiedOutWrapper
     - FunctionalizedRngRuntimeWrapper
     After compiling, we run post_compile for the following wrappers:
+    - EffectTokensWrapper
+    - AOTDispatchSubclassWrapper
     - FunctionalizedRngRuntimeWrapper
     - FakifiedOutWrapper
     """
