@@ -181,6 +181,7 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
@@ -718,7 +719,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_version_calculator_flag",
         "torch._C._get_warnAlways",
         "torch._C._graph_pool_handle",
-        "torch._C._group_tensors_by_device_and_dtype",
         "torch._C._hack_do_not_use_clone_module_with_class",
         "torch._C._has_distributed",
         "torch._C._has_Standard_Deleter",

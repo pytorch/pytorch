@@ -711,6 +711,34 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(ep)
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_complex_initializer(self):
+        class ComplexInitModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.parameter.Buffer(
+                    torch.complex(
+                        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
+                    )
+                )
+                self.weight = torch.nn.Parameter(
+                    torch.complex(
+                        torch.tensor([7.0, 8.0, 9.0]), torch.tensor([10.0, 11.0, 12.0])
+                    )
+                )
+
+            def forward(self, x):
+                constant = torch.complex(
+                    torch.tensor([11.0, 12.0, 13.0]), torch.tensor([14.0, 15.0, 16.0])
+                )
+                return (x + constant + self.buffer) * self.weight
+
+        x = torch.complex(
+            torch.tensor([10.0, 20.0, 30.0]), torch.tensor([40.0, 50.0, 60.0])
+        )
+
+        onnx_program = self.export(ComplexInitModel(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
