@@ -1,11 +1,8 @@
 #include <torch/optim/lbfgs.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/serialize/archive.h>
 #include <torch/utils.h>
 
-#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>

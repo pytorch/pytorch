@@ -3,7 +3,6 @@ import json
 import math
 import os
 import re
-from typing import Optional
 
 import torch
 import torch.utils.benchmark as benchmark
@@ -586,7 +585,7 @@ class MatMulDimInFP16Pattern(Pattern):
         return shapes_factor_map
 
 
-def source_code_location(event: Optional[_ProfilerEvent]) -> str:
+def source_code_location(event: _ProfilerEvent | None) -> str:
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(
@@ -612,7 +611,7 @@ def report_all_anti_patterns(
     prof,
     should_benchmark: bool = False,
     print_enable: bool = True,
-    json_report_dir: Optional[str] = None,
+    json_report_dir: str | None = None,
 ) -> None:
     report_dict: dict = {}
     anti_patterns = [

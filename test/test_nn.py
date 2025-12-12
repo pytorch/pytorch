@@ -2291,6 +2291,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_with_empty_parameter_shapes(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_2d = nn.Parameter(torch.zeros(0, 16))
+                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
+                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
+                self.param_normal = nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x + self.param_normal.sum()
+
+        model = MyModule()
+        devices = [0, 1]
+        model_parallel = nn.DataParallel(model, device_ids=devices)
+        model_parallel.cuda(devices[0])
+        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
+        output = model_parallel(input_tensor)
+        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
+        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
+        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
+        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
@@ -12633,8 +12657,32 @@ if __name__ == '__main__':
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
         with self.assertRaisesRegex(RuntimeError,
-                                    r'lambda must be greater or equal to 0, but found to be -1\.'):
+                                    r'lambda must be in range \[0,.*input dtype.*found -1'):
             m(input)
+
+    def test_softshrink_lambda_dtype_range(self, device):
+        # test lambda exceeding dtype max for float16
+        x = torch.randn(10, 20, device=device, dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'lambda must be in range \[0, 65504\].*input dtype.*Half.*found 65507'):
+            F.softshrink(x, lambd=65507.0)
+
+        # test negative lambda
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'lambda must be in range \[0,.*input dtype.*found -1'):
+            F.softshrink(x, lambd=-1.0)
+
+        # test valid lambda at boundary
+        out = F.softshrink(x, lambd=65500.0)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.dtype, torch.float16)
+
+        # test lambda exceeding dtype max for bfloat16
+        if device == 'cpu' or (device == 'cuda' and torch.cuda.is_available()):
+            x_bf16 = torch.randn(10, 20, device=device, dtype=torch.bfloat16)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'lambda must be in range \[0,.*input dtype.*BFloat16.*found 1e\+39'):
+                F.softshrink(x_bf16, lambd=1e39)
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_fold(self, device):

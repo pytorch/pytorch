@@ -7,7 +7,6 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/Operators.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <utility>
 
@@ -322,11 +321,13 @@ static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rul
   Tensor& self, std::optional<int64_t> self_bdim,
   Tensor& buffer, std::optional<int64_t> buffer_bdim) {
   // NB: This emulates handle_pointwise_ops except we ignore the last argument, buffer
-  // when any of the inputs are on cuda.
-  // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
+  // when any of the inputs are on cuda/xpu.
+  // We do this because on cuda/xpu, buffer is a dummy tensor always of logical rank 1 and
   // it becomes an issue when the rest of the inputs are scalar
   int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
-  if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
+  bool inputs_on_cuda = grad.is_cuda() || self.is_cuda() || buffer.is_cuda();
+  bool inputs_on_xpu = grad.is_xpu() || self.is_xpu() || buffer.is_xpu();
+  if (!inputs_on_cuda && !inputs_on_xpu) {
     out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
   Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
