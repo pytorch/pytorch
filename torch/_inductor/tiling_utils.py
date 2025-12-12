@@ -502,7 +502,7 @@ def extract_normalized_read_writes(
 
     # TODO - a few dynamic shapes issues to resolve
     if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
+        (isinstance(var, sympy.Expr) and var.free_symbols)
         for var in (pointwise_numel, red_numel)
     ):
         return None

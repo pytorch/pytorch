@@ -401,6 +401,7 @@ class ComboKernel(Kernel):
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
+            is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
         )
@@ -450,9 +451,10 @@ class ComboKernel(Kernel):
                         "Dynamic shape on reduction dimension is not supported"
                     )
                 val = next_power_of_2(val)
-                code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("R0_BLOCK")
+                code.writeline(
+                    f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
+                )
+                uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
@@ -545,7 +547,14 @@ class ComboKernel(Kernel):
                 size_hints["x"] = min(128, size_hints["x"])
             return heuristics, size_hints_list[i], self.sub_kernels[i]
         else:
-            return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
+            # find persistent_reduction with maximum rnumel
+            i, _ = max(
+                enumerate(size_hints_list),
+                key=lambda x: max(
+                    (v for k, v in x[1].items() if prefix_is_reduction(k))
+                ),
+            )
+            return heuristics_list[i], size_hints_list[i], self.sub_kernels[i]
 
     def get_mutated_args_sub_kernels(self) -> list[str]:
         mutated_args: OrderedSet[str] = OrderedSet()

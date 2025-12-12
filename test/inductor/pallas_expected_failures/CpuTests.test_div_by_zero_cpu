@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmp_hxmcead/et/cetxdqt74sjz6s7qaqvmprdcxegxkkqt3r6272o3pvaofvecc7nc.py", line 12, in pallas_fused_div_40e6a2ae_kernel
-    out_ptr0[...] = tmp0.reshape(10)
-                    ^^^^^^^^^^^^
-AttributeError: 'float' object has no attribute 'reshape'
