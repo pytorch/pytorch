@@ -58,7 +58,7 @@ detectron2_fasterrcnn_r_101_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,44
+detectron2_fasterrcnn_r_101_fpn,pass,46
 
 
 
@@ -70,7 +70,7 @@ detectron2_fasterrcnn_r_50_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,44
+detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
@@ -82,7 +82,7 @@ detectron2_maskrcnn_r_101_c4,fail_accuracy,56
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,60
+detectron2_maskrcnn_r_101_fpn,pass,62
 
 
 
@@ -90,7 +90,7 @@ detectron2_maskrcnn_r_50_c4,pass,56
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,60
+detectron2_maskrcnn_r_50_fpn,pass,62
 
 
 
@@ -246,7 +246,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,27
+vision_maskrcnn,pass,29
 
 
 
