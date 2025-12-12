@@ -4,7 +4,9 @@ Collective runtime estimation using CUDA events and power-of-2 rounding.
 
 from __future__ import annotations
 
+import functools
 import itertools
+import operator
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -226,14 +228,14 @@ def _log_compute_estimations(
         "Node",
         "Benchmarked Est(us)",
         "Analytical Est(us)",
-        "Diff(%)",
+        "Diff(ratio)",
         "Diff(us)",
         "Flops",
     ]
 
     rows = [
         [
-            _node_summary(node)[:120],
+            _node_summary(node),
             est_b * 1e3,
             est_a * 1e3,
             (est_a / est_b) if est_b > 0 else 0,
@@ -289,12 +291,8 @@ def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> 
                     if tensor_bytes is None:
                         shape = [get_hint(dim) for dim in t.shape]
                         if all(s is not None for s in shape):
-                            total_elems = 1
-                            for dim in shape:
-                                total_elems *= (
-                                    dim  # pyrefly: ignore[unsupported-operation]
-                                )
-                            tensor_bytes = total_elems * t.dtype.itemsize
+                            numel = functools.reduce(operator.mul, shape, 1)
+                            tensor_bytes = numel * t.dtype.itemsize
                     return t
 
                 torch.utils._pytree.tree_map_only(
@@ -370,7 +368,7 @@ def _log_collective_benchmarks(
 
         rows.append(
             [
-                key[:100],
+                key,
                 f"{benchmarked_ms:.4f}",
                 f"{nccl_ms:.4f}",
                 f"{inductor_ms:.4f}",
