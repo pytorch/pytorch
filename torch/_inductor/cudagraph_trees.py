@@ -41,6 +41,7 @@ import dataclasses
 import functools
 import gc
 import itertools
+import logging
 import operator
 import sys
 import threading
@@ -1471,6 +1472,7 @@ class CUDAGraphNode:
     def _path_to_root(self) -> Generator[CUDAGraphNode, None, None]:
         "Returns all nodes in the path starting at self and ending at root"
         node = self
+        # pyrefly: ignore [bad-assignment]
         while node:
             yield node
             node = node.parent  # type: ignore[assignment]
@@ -2156,7 +2158,8 @@ class CUDAGraphTreeManager:
         )
 
         if not self.in_recording:
-            unexpected_rerecord, unexpected_rerecord_reason = False, lambda: ""
+            unexpected_rerecord = False
+            unexpected_rerecord_reason = None
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
@@ -2170,7 +2173,17 @@ class CUDAGraphTreeManager:
                     or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
                 ):
                     unexpected_rerecord = True
-                    unexpected_rerecord_reason = status_logger
+                    # Only compute detailed reason when debug logging is enabled
+                    if log.isEnabledFor(logging.DEBUG):
+                        unexpected_rerecord_reason = status_logger()
+                        log.debug(
+                            "function %d re-recording due to %s",
+                            function_id.id,
+                            unexpected_rerecord_reason,
+                        )
+                    else:
+                        # Defer reason computation until needed (for exceed_rerecord_limit)
+                        unexpected_rerecord_reason = status_logger
 
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
@@ -2198,11 +2211,19 @@ class CUDAGraphTreeManager:
                 self.num_rerecord[curr_node_id][function_id] += 1
                 if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
+                    # unexpected_rerecord_reason is either a string (if debug was enabled)
+                    # or a callable (if debug was disabled)
+                    assert unexpected_rerecord_reason is not None
+                    reason = (
+                        unexpected_rerecord_reason
+                        if isinstance(unexpected_rerecord_reason, str)
+                        else unexpected_rerecord_reason()
+                    )
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraph due to function {function_id.id} exceeding max "
                         f"re-recording limit "
                         f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
-                        f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}."
+                        f"on cudagraph node {_id} due to {reason}."
                     )
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
