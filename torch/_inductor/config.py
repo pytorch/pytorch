@@ -6,12 +6,7 @@ from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import (
-    Config,
-    get_tristate_env,
-    inherit_fields_from,
-    install_config_module,
-)
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 if TYPE_CHECKING:
@@ -474,6 +469,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+inductor_default_autotune_warmup = int(
+    os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
+)
+inductor_default_autotune_rep = int(
+    os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
+)
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
@@ -1868,12 +1870,27 @@ class aot_inductor_mode:
     compile_standalone: bool = False
 
 
-class cutlass:
-    """
-    Config specific to cutlass backend.
-    """
+class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
 
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch: Optional[str] = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version: Optional[str] = None
+
+    # Optimization level for the host compiler.
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
 
     # Whether to enable debug info, e.g. line number, cutlass debug info.
     enable_debug_info = False
@@ -1886,10 +1903,7 @@ class cutlass:
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(
-                os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
-            ),
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
         )
     )
 
@@ -1908,6 +1922,14 @@ class cutlass:
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
+
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx: Optional[str] = None
 
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
@@ -1976,43 +1998,6 @@ class cutlass:
 
     # Enable caching codegen of cuda templates.
     enable_caching_codegen: bool = True
-
-
-@inherit_fields_from(cutlass)
-class cuda(cutlass):
-    # CUDA arch to use for CUDA template kernel compilation.
-    # e.g. "70", "75", "80", "90", etc.
-    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch: Optional[str] = None
-
-    # CUDA version to use for CUDA template kernel compilation.
-    # e.g. "11.4", "12.1", etc.
-    # When version is None, Inductor uses torch.version.cuda.
-    version: Optional[str] = None
-
-    # Path to CUDA NVCC.
-    # NVCC search order:
-    # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
-    # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
-
-    # Whether to enable device LTO (link-time-optimization).
-    enable_cuda_lto = False
-
-    # Whether to keep intermediate files dring compilation.
-    enable_ptxas_info = False
-
-
-@inherit_fields_from(cutlass)
-class xpu(cutlass):
-    # Xe arch to use for SYCL template kernel compilation.
-    # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
-    arch: Optional[str] = None
-    # oneAPI version to use for SYCL template kernel compilation.
-    # e.g. "20250201".
-    version: Optional[str] = None
 
 
 class rocm:
@@ -2223,7 +2208,6 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cutlass.cutlass_dir",
     "cuda.cutlass_dir",
     # not relevant
     "worker_start_method",
