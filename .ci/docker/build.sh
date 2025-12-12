@@ -116,7 +116,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.0.0
+    CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes

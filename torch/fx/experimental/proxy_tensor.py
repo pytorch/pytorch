@@ -844,6 +844,7 @@ def track_tensor_tree(
                     return None
                 else:
                     assert isinstance(c, (list, tuple))
+                    # pyrefly: ignore [bad-return]
                     return c[idx]
 
             for idx, ee in enumerate(e):
@@ -2125,6 +2126,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 assert "_modules" in self.__dict__
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
+                # pyrefly: ignore [bad-return]
                 return {
                     key: (
                         AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
@@ -2212,6 +2214,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             mod = obj
 
             # Get the parent module
+            # pyrefly: ignore [bad-assignment]
             for item in path:
                 if not hasattr(mod, item):
                     return False

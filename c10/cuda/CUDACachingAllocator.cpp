@@ -1200,6 +1200,9 @@ class DeviceCachingAllocator {
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
+  // tracks which pools should not split a segment
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
   // Map of blocks whose freeing is deferred until after CUDA graph capture.
   //   - Key: Block* to be freed.
   //   - Value: List of "empty nodes" inserted as free markers during capture.
@@ -1570,7 +1573,7 @@ class DeviceCachingAllocator {
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " PYTORCH_ALLOC_CONF=expandable_segments:True to avoid"
           " fragmentation.  See documentation for Memory Management "
           " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
@@ -1585,9 +1588,9 @@ class DeviceCachingAllocator {
       AllocParams& params,
       size_t size,
       cudaStream_t stream,
-      c10::DeviceIndex device_id,
+      c10::DeviceIndex device_idx,
       size_t alloc_size,
-      DeviceStats& stats) {
+      DeviceStats& device_stats) {
     bool block_found = false;
     // if already trying to use a mempool, then just oom
     bool active_pool = params.pool->owner_PrivatePool;
@@ -1600,7 +1603,7 @@ class DeviceCachingAllocator {
         beginAllocateToPool(mempool_id, filter);
         auto& mempool = get_pool(size, stream);
         AllocParams mempool_params(
-            device_id, size, stream, &mempool, alloc_size, false);
+            device_idx, size, stream, &mempool, alloc_size, false);
         mempool_params.stat_types = get_stat_types_for_pool(mempool);
         block_found = get_free_block(mempool_params);
         endAllocateToPool(mempool_id);
@@ -2574,6 +2577,12 @@ class DeviceCachingAllocator {
     }
   }
 
+  void setNoSplit(MempoolId_t mempool_id) {
+    // Choose if this pool should not split a segment
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    no_split_pools.insert(mempool_id);
+  }
+
   // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
@@ -3047,6 +3056,13 @@ class DeviceCachingAllocator {
       const Block* block,
       size_t size,
       bool is_expandable_segments_active) {
+    // If the pool is marked as not splitting a segment, do not split
+    if (no_split_pools.find(block->pool->owner_MempoolId()) !=
+        no_split_pools.end()) {
+      return false;
+    }
+    // Otherwise, check if the remaining size is greater than the minimum block
+    // size
     size_t remaining = block->size - size;
     if (block->pool->is_small || is_expandable_segments_active) {
       return remaining >= kMinBlockSize;
@@ -4241,6 +4257,11 @@ class NativeCachingAllocator : public CUDAAllocator {
       bool use_on_oom) override {
     assertValidDevice(device);
     device_allocator[device]->setUseOnOOM(std::move(mempool_id), use_on_oom);
+  }
+
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->setNoSplit(std::move(mempool_id));
   }
 
   // CUDAGraph interactions
