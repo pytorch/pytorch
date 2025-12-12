@@ -3806,15 +3806,5 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
-  ],
-  "GB0370": [
-    {
-      "Gb_type": "record_function escaped from compiled region",
-      "Context": "str(self)",
-      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
   ]
 }
