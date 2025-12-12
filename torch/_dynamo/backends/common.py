@@ -49,9 +49,7 @@ def wrap_serializable(compiler):
     elif compiler is torch.fx.passes.regional_inductor.regional_inductor:
         # Directly wrapping regional inductor inplace will cause circular import,
         # so not sure where's the best place to put this.
-        return SerializableAOTDispatchCompiler(
-            RegionalOutputCode, compiler, wrap_output_code=True
-        )
+        return SerializableAOTDispatchCompiler(RegionalOutputCode, compiler)
     else:
         raise RuntimeError(
             f"AOT Autograd doesn't support serialization for compiler: {compiler}"
