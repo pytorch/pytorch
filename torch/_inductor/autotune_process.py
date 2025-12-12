@@ -578,7 +578,7 @@ class GPUDeviceBenchmarkMixin:
         else:
             device_idx = device_interface.current_device()
         with device_interface.device(device_idx):  # type: ignore[attr-defined]
-            res = benchmarker.benchmark_gpu(fn)
+            res = benchmarker.benchmark(fn, device=device_type)
             device_interface.synchronize()  # shake out any CUDA errors
 
         return res
