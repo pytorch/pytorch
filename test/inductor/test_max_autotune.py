@@ -13,6 +13,7 @@ import unittest
 from collections.abc import Callable
 from typing import Optional
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -23,6 +24,8 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
+    AsyncAutotuner,
+    AutotuneProcessPool,
     CUDA_VISIBLE_DEVICES,
     TuningProcess,
     TuningProcessPool,
@@ -3573,6 +3576,107 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+
+
+class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
+    """Standalone tests for AsyncAutotuner caching behavior."""
+
+    SKIP_TESTS = {
+        "test_max_autotune_decompose_k": "Subgraphs not supported with async pipelining",
+        "test_cat_max_autotune_triton": "Fusions not supported with async pipelining",
+        "test_linear_and_cel": "Fusions not supported with async pipelining",
+        "test_inf_timing": "Logs not consistent with async pipelined autotuning",
+        "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
+        "test_autotune_device_guard": "Flaky on trunk",
+        "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._async_config = config.patch(
+            {
+                "pipeline_max_autotune_gemm": True,
+                "epilogue_fusion": False,
+                "prologue_fusion": False,
+            }
+        )
+        cls._async_config.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._async_config.__exit__(None, None, None)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        test_name = self._testMethodName
+        for skip_test_name in self.SKIP_TESTS:
+            if skip_test_name in test_name:
+                self.skipTest(self.SKIP_TESTS[skip_test_name])
+
+    def tearDown(self):
+        super().tearDown()
+        AutotuneProcessPool.shutdown_instance()
+
+    def test_async_autotuner_cache_same_inputs(self):
+        AsyncAutotuner.choice_hash_to_future.clear()
+
+        M, K, N = 128, 64, 256
+        M2, K2, N2 = 256, 128, 64
+
+        def three_matmuls(a1, b1, a2, b2, a3, b3):
+            return torch.mm(a1, b1), torch.mm(a2, b2), torch.mm(a3, b3)
+
+        # Same shapes for first two matmuls
+        a1 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b1 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+        a2 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b2 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        # Different shapes for third matmul
+        a3 = torch.randn(M2, K2, device=GPU_TYPE, dtype=torch.bfloat16)
+        b3 = torch.randn(K2, N2, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        # Track how many times submit is called on the AutotuneProcessPool
+        submit_call_count = 0
+        original_submit = AutotuneProcessPool.submit
+
+        def counting_submit(self, fn, *args, **kwargs):
+            nonlocal submit_call_count
+            submit_call_count += 1
+            return original_submit(self, fn, *args, **kwargs)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "test_configs.max_mm_configs": 1,
+            }
+        ):
+            with patch.object(AutotuneProcessPool, "submit", counting_submit):
+                compiled_fn = torch.compile(three_matmuls)
+                result = compiled_fn(a1, b1, a2, b2, a3, b3)
+
+        # Verify correctness
+        expected = three_matmuls(a1, b1, a2, b2, a3, b3)
+        for r, e in zip(result, expected):
+            torch.testing.assert_close(r, e, atol=1e-2, rtol=1e-2)
+
+        # With max_mm_configs=1, we get 2 configs total (1 per unique shape)
+        # First two matmuls share the same shape, third has different shape
+        # 1 aten, 1 triton config
+        cache_size = len(AsyncAutotuner.choice_hash_to_future)
+        self.assertEqual(
+            cache_size, 4, "Cache should have 2 entries (one per unique input shape)"
+        )
+
+        # Verify that only 2 tasks were submitted to the pool (not 3)
+        # 1 aten, 1 triton config
+        self.assertEqual(
+            submit_call_count,
+            4,
+            f"Expected 2 submit calls (one per unique input shape), got {submit_call_count}",
+        )
 
 
 if __name__ == "__main__":
