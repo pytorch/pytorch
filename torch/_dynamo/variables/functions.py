@@ -391,6 +391,13 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
+        # the optimizer.step method and we don't need to trace it
+        if (
+            self.get_name() == "patch_track_step_called"
+            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
+        ):
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
@@ -919,7 +926,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self) -> Never:
-        raise NotImplementedError
+        raise NotImplementedError("get_function")
 
     def has_self(self) -> bool:
         return False
@@ -1572,6 +1579,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def as_python_constant(self):
+        return self.get_function()
+
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
@@ -1580,7 +1590,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            raise NotImplementedError
+            raise NotImplementedError("get_function")
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
@@ -2273,11 +2283,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    _nonvar_fields = {
+        "original_cache_hash",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         func: VariableTracker,
         args: Sequence[VariableTracker],
         keywords: dict[str, VariableTracker],
+        original_cache_hash: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2289,6 +2305,8 @@ class FunctoolsPartialVariable(VariableTracker):
         # fake_value is used for id calculation. Creating this value and id'ng
         # on it is sufficient for the tracing purposes.
         self.fake_value = functools.partial(identity)
+        # Store cache_hash from the original partial for SAC context_fn caching
+        self.original_cache_hash = original_cache_hash
 
     def python_type(self) -> type:
         return functools.partial
@@ -2352,11 +2370,15 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def guard_as_python_constant(self) -> Any:
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
-        return functools.partial(
+        result = functools.partial(
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+        # Preserve cache_hash for SAC context_fn caching
+        if self.original_cache_hash is not None:
+            result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
+        return result
 
     def is_python_hashable(self) -> bool:
         return (

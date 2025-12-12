@@ -2726,6 +2726,8 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if fake_arg is None:
+        return arg
     if isinstance(fake_arg, FakeScriptObject):
         return arg
     if isinstance(arg, ir.IRNode):

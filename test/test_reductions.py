@@ -2652,7 +2652,7 @@ class TestReductions(TestCase):
                                               [None] + list(range(a.ndim))):
                 result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
                 expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
-                                    interpolation=interpolation, keepdims=keepdim)
+                                    method=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
