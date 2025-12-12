@@ -997,9 +997,8 @@ class GuardBuilder(GuardBuilderBase):
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
         runtime_global_scope: Optional[dict[str, object]] = None,
-        guard_filter_fn: Optional[
-            Callable[[list[GuardFilterEntry]], list[bool]]
-        ] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.f_code = f_code
@@ -3551,7 +3550,9 @@ class GuardsStatePickler(pickle.Pickler):
 
 
 def pickle_guards_state(
-    state: GuardsState, guard_tree_values: dict[int, Any], guard_filter_fn
+    state: GuardsState,
+    guard_tree_values: dict[int, Any],
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None,
 ) -> bytes:
     buf = io.BytesIO()
     empty_values = {}
@@ -3600,9 +3601,8 @@ class CheckFunctionManager:
         output_graph: OutputGraphCommon,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-        guard_filter_fn: Optional[
-            Callable[[list[GuardFilterEntry]], list[bool]]
-        ] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
@@ -3640,7 +3640,7 @@ class CheckFunctionManager:
         if torch._dynamo.config.caching_precompile:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
-            def guard_filter_fn(guards: list[GuardFilterEntry]) -> list[bool]:
+            def guard_filter_fn(guards: Sequence[GuardFilterEntry]) -> Sequence[bool]:
                 ret = []
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
@@ -3968,9 +3968,8 @@ class CheckFunctionManager:
         f_code: types.CodeType,
         output_graph: OutputGraphGuardsState,
         save_guards: bool,
-        guard_filter_fn: Optional[
-            Callable[[list[GuardFilterEntry]], list[bool]]
-        ] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
