@@ -1083,22 +1083,20 @@ def f(x):
         self.assertIn("process_data", function_names)
         self.assertIn("main_function", function_names)
 
-        # On Python 3.11+, the implementation should properly interleave frames
-        if sys.version_info >= (3, 11):
-            # All three of our functions should be visible in the trace
-            # This validates that multiple Python frames within the same
-            # PyEval_EvalFrame are being captured
-            self.assertGreaterEqual(
-                len(
-                    [
-                        n
-                        for n in function_names
-                        if n in ["compute_something", "process_data", "main_function"]
-                    ]
-                ),
-                3,
-                "All Python frames should be visible with interleaving",
-            )
+        # All three of our functions should be visible in the trace
+        # This validates that multiple Python frames within the same
+        # PyEval_EvalFrame are being captured
+        self.assertGreaterEqual(
+            len(
+                [
+                    n
+                    for n in function_names
+                    if n in ["compute_something", "process_data", "main_function"]
+                ]
+            ),
+            3,
+            "All Python frames should be visible with interleaving",
+        )
 
 
 class TestTryImport(TestCase):
