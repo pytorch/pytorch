@@ -19,6 +19,12 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup uv
+      if: runner.os != 'Windows' && !inputs.use-gha
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
+
     - name: Zip artifacts for upload
       if: runner.os != 'Windows' && !inputs.use-gha
       shell: bash
@@ -39,19 +45,16 @@ runs:
                     if f.is_file():
                         z.write(f, os.path.relpath(f, d))
         '
-        tmp_venv=$(mktemp -d)/venv
-        uv venv -p 3.12 "$tmp_venv"
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
-        "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+        uv run --no-project python -c "$ZIP_CMD" \
           . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
-          "$tmp_venv/bin/python" -c "$ZIP_CMD" \
+          uv run --no-project python -c "$ZIP_CMD" \
             test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
         fi
-        rm -rf "$(dirname "$tmp_venv")"
 
     # Windows zip
     - name: Zip JSONs for upload
