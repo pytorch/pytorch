@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -78,9 +77,9 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
-        const SwizzleType& swizzle_a,
+        const SwizzleType swizzle_a,
         const Tensor& scale_b,
-        const SwizzleType& swizzle_b,
+        const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
     const bool a_is_2d = mat_a.dim() == 2;
@@ -522,13 +521,13 @@ _scaled_grouped_mm_cuda_v2(
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
-    if (contraction_dim.size() > 0) {
+    if (!contraction_dim.empty()) {
       const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
       TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
           "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
           mat_b.size(dim_b));
       // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Curently contraction dims must be (-1, -2) only");
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
     } else {
       TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
     }
@@ -607,6 +606,8 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      // swizze checks
+      TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,

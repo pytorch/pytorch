@@ -125,6 +125,10 @@
 #endif
 #endif
 
+#ifdef USE_XPU
+#include <ATen/native/transformers/xpu/sdp_utils.h>
+#endif
+
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
@@ -212,8 +216,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << '\n';
+        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+            << ':' << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -398,36 +402,27 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
+      a->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t1's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
+      a->cdata.weak_use_count() - 1);
   TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
+      b->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t2's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
+      b->cdata.weak_use_count() - 1);
+
+  // NB: Creating local copies of *both* Tensors here ensures that they each
+  // hold a strong reference to their PyObject. This avoids having to fix up
+  // reference counts when we swap the PyObject slots below.
+  at::Tensor tmp_a = a->cdata;
+  at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
-  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = tmp_b;
+  b->cdata = tmp_a;
 
-  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
-  // associated with the TensorImpl. Swap this field as well.
-  std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  TORCH_INTERNAL_ASSERT(
-      mb_obj_a.has_value() && mb_obj_b.has_value(),
-      "Both tensors should have PyObjects tagged by the current python interpreter");
-  TORCH_CHECK(mb_obj_a.value() == a_);
-  TORCH_CHECK(mb_obj_b.value() == b_);
-
-  a->cdata = b->cdata;
-  b->cdata = tmp;
-
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
+  // Fix up the PyObjects associated with each TensorImpl
+  a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
+  b->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -691,6 +686,124 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
 
   return tuple;
+  END_HANDLE_TH_ERRORS
+}
+
+struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
+  TorchDLPackExchangeAPI() {
+    header.version.major = DLPACK_MAJOR_VERSION;
+    header.version.minor = DLPACK_MINOR_VERSION;
+    header.prev_api = nullptr;
+    managed_tensor_allocator = ManagedTensorAllocator;
+    managed_tensor_from_py_object_no_sync = ManagedTensorFromPyObjectNoSync;
+    managed_tensor_to_py_object_no_sync = ManagedTensorToPyObjectNoSync;
+    dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
+    current_work_stream = CurrentWorkStream;
+  }
+
+  static const DLPackExchangeAPI* Global() {
+    static TorchDLPackExchangeAPI inst;
+    return &inst;
+  }
+
+ private:
+  // Fast non-owning PyObject→DLTensor conversion
+  static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
+    try {
+      // Use handle (non-owning) to avoid unnecessary refcount operations
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      at::toDLPackNonOwning(tensor, out);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // PyObject→DLManagedTensorVersioned conversion
+  static int ManagedTensorFromPyObjectNoSync(
+      void* py_obj,
+      DLManagedTensorVersioned** out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // DLManagedTensorVersioned→PyObject conversion
+  static int ManagedTensorToPyObjectNoSync(
+      DLManagedTensorVersioned* src,
+      void** py_obj_out) {
+    try {
+      at::Tensor tensor = at::fromDLPackVersioned(src, nullptr);
+      *py_obj_out = THPVariable_Wrap(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // Allocate new tensor from prototype
+  static int ManagedTensorAllocator(
+      DLTensor* prototype,
+      DLManagedTensorVersioned** out,
+      void* error_ctx,
+      void (
+          *SetError)(void* error_ctx, const char* kind, const char* message)) {
+    try {
+      at::IntArrayRef shape(
+          prototype->shape, prototype->shape + prototype->ndim);
+      at::TensorOptions options =
+          at::TensorOptions()
+              .dtype(at::toScalarType(prototype->dtype))
+              .device(at::dlDeviceToTorchDevice(
+                  prototype->device.device_type, prototype->device.device_id));
+      at::Tensor tensor = at::empty(shape, options);
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      SetError(error_ctx, "MemoryError", e.what());
+      return -1;
+    }
+  }
+
+  // Get current CUDA/ROCm work stream
+  static int CurrentWorkStream(
+      DLDeviceType device_type,
+      int32_t device_id,
+      void** out_stream) {
+    try {
+#ifdef USE_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+};
+
+static PyObject* THPModule_DLPackExchangeAPI(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyCapsule_New(
+      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
+      "dlpack_exchange_api",
+      nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1869,6 +1982,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_torchDeviceToDLDevice,
      METH_O,
      nullptr},
+    {"_dlpack_exchange_api", THPModule_DLPackExchangeAPI, METH_NOARGS, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
@@ -2486,7 +2600,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def("_is_flash_attention_available", []() {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
     return sdp::is_flash_attention_available();
 #else
     return false;
@@ -2495,7 +2609,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
         return sdp::can_use_flash_attention(params, debug);
 #else
         return false;
@@ -2781,8 +2895,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
 
   py_module.def(
@@ -2918,7 +3032,6 @@ static void pytorch_duplicate_guard() {
     abort();
   }
   initialized = 1;
-  ;
 }
 
 struct call_duplicate_guard {

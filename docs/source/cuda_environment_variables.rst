@@ -13,8 +13,8 @@ For more information on CUDA runtime environment variables, see `CUDA Environmen
     - Description
   * - ``PYTORCH_NO_CUDA_MEMORY_CACHING``
     - If set to ``1``, disables caching of memory allocations in CUDA. This can be useful for debugging.
-  * - ``PYTORCH_CUDA_ALLOC_CONF``
-    - For a more in depth explanation of this environment variable, see :ref:`cuda-memory-management`.
+  * - ``PYTORCH_ALLOC_CONF``
+    - For a more in depth explanation of this environment variable, see :ref:`cuda-memory-management`. ``PYTORCH_CUDA_ALLOC_CONF`` is its alias and is provided only for backward compatibility.
   * - ``PYTORCH_NVML_BASED_CUDA_CHECK``
     - If set to ``1``, before importing PyTorch modules that check if CUDA is available, PyTorch will use NVML to check if the CUDA driver is functional instead of using the CUDA runtime. This can be helpful if forked processes fail with a CUDA initialization error.
   * - ``TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT``

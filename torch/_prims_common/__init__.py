@@ -272,6 +272,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     expected_stride = 1
     expected_stride_max = 1
 
+    # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
@@ -1895,8 +1896,6 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
-    if correction < 0:
-        raise ValueError("correction argument should be non-negative")
     return sym_float(correction)
 
 

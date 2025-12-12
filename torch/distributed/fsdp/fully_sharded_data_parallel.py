@@ -2007,7 +2007,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim.load_state_dict(result)
         return result
 
-    def register_comm_hook(self, state: object, hook: callable):
+    def register_comm_hook(self, state: object, hook: callable) -> None:
         """Register a communication hook.
 
         This is an enhancement that provides a flexible hook to users where they can specify how FSDP aggregates

@@ -207,6 +207,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
+            # pyrefly: ignore [bad-argument-type]
             callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
@@ -251,7 +252,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, skip_logging=True
+                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
@@ -313,6 +314,7 @@ def _create_delayed_compile_callback(
                 )
             elif stance == "aot_eager_then_compile":
                 aot_eager_fn = get_compiler_fn("aot_eager")
+                # pyrefly: ignore [bad-argument-type]
                 return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
         dynamism = track_dynamism_across_examples(example_inputs)
@@ -398,6 +400,7 @@ class OptimizedModule(torch.nn.Module):
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
+        # pyrefly: ignore [invalid-argument]
         if isinstance(self._orig_mod, Sized):
             return len(self._orig_mod)
         # Mimic python's default behavior for objects without a length
@@ -407,6 +410,7 @@ class OptimizedModule(torch.nn.Module):
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
@@ -418,6 +422,7 @@ class OptimizedModule(torch.nn.Module):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
@@ -766,26 +771,34 @@ class _TorchDynamoContext:
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
-                result = DynamoCache.load(fn)
+                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
                     try:
                         self._package.initialize(
-                            fn, result.dynamo, ignore_inlined_sources=False
+                            fn_key, result.dynamo, ignore_inlined_sources=False
                         )
                         self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
 
         fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if torch._inductor.config.force_disable_caches:
+                raise RuntimeError(
+                    "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
+                )
 
             if not self.fullgraph:
                 raise RuntimeError(
@@ -796,6 +809,7 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
+
             return aot_compile_fullgraph(
                 fn,
                 example_inputs,
@@ -1316,8 +1330,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1461,6 +1475,7 @@ def _optimize(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             hooks,
             package=package,
@@ -1707,13 +1722,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 
@@ -2342,6 +2357,7 @@ def _optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             export=export,
             export_constraints=export_constraints,
