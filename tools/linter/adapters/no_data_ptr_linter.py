@@ -74,10 +74,12 @@ def _capture_git(args: list[str]) -> str | None:
 
 @functools.lru_cache(maxsize=1)
 def _determine_merge_base() -> str | None:
-    base = _capture_git(["git", "merge-base", "HEAD", "main"])
-    if base:
-        logging.debug("Computed merge base vs main: %s", base)
-        return base
+    # Try to find merge base with various main branch refs
+    for ref in ["main", "origin/main", "upstream/main"]:
+        base = _capture_git(["git", "merge-base", "HEAD", ref])
+        if base:
+            logging.debug("Computed merge base vs %s: %s", ref, base)
+            return base
 
     base = _capture_git(["git", "rev-parse", "HEAD^"])
     if base:
