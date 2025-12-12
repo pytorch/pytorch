@@ -24,8 +24,6 @@ from .hooks import Hooks
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.guards import GuardFilterEntry
-
     from .guards import GuardManagerWrapper
     from .package import SourceInfo
 
@@ -176,24 +174,13 @@ class AOTCompiledFunction:
         self._guard_check_enabled = False
 
 
-def default_guard_filter_fn(
-    guard_entries: Sequence["GuardFilterEntry"],
-) -> Sequence[bool]:
-    return [
-        (
-            g.guard_type in ("GLOBAL_STATE", "SHAPE_ENV")
-            or (g.guard_type == "TENSOR_MATCH" and not g.is_global)
-        )
-        for g in guard_entries
-    ]
-
-
 def aot_compile_fullgraph(
     model: Any,
     example_inputs: tuple[tuple[Any, ...], dict[str, Any]],
     hooks: Hooks,
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
 ) -> AOTCompiledFunction:
+    from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import TracingContext
@@ -210,7 +197,23 @@ def aot_compile_fullgraph(
         assert graph_capture_output.output_graph is not None
 
         if not hooks.guard_filter_fn:
-            hooks.guard_filter_fn = default_guard_filter_fn
+            from torch._dynamo.types import GuardFilterEntry
+
+            def new_guard_filter_fn(
+                guard_entries: Sequence[GuardFilterEntry],
+            ) -> Sequence[bool]:
+                return [
+                    (
+                        not (
+                            g.is_global
+                            or g.guard_type
+                            in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                        )
+                    )
+                    for g in guard_entries
+                ]
+
+            hooks.guard_filter_fn = new_guard_filter_fn
 
         fn, _ = convert_frame.get_traced_fn(model)
 
