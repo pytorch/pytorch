@@ -2615,8 +2615,9 @@ class GuardBuilder(GuardBuilderBase):
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
 
-        self.guard_manager.root.add_global_state_guard(global_state, code, guard.user_stack)
-
+        self.guard_manager.root.add_global_state_guard(
+            global_state, code, guard.user_stack
+        )
 
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
         assert self.check_fn_manager.torch_function_mode_stack is not None
