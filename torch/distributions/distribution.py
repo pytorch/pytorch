@@ -318,7 +318,8 @@ class Distribution:
                 stacklevel=2,
             )
             return
-        assert support is not None
+        if support is None:
+            raise AssertionError("support is unexpectedly None")
         valid = support.check(value)
         if not torch._is_all_true(valid):
             raise ValueError(

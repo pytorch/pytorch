@@ -72,7 +72,8 @@ class Binomial(Distribution):
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             (
                 self.total_count,
                 # pyrefly: ignore [read-only]
