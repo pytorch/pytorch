@@ -989,6 +989,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        clear_history (bool, optional): Clear history when enabling, defaults to False.
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
