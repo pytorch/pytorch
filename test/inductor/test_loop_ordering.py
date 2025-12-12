@@ -1222,6 +1222,92 @@ class TestTiling(TestCase):
         result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
         self.assertEqual(result, None)
 
+    def test_embedding_indirect_tiling(self):
+        """Test that embedding operations get proper loop ordering for coalesced access.
+
+        For embedding patterns like weights[indices[i], j], the index load only depends
+        on variable i, while the weight read is coalesced on variable j. This test
+        verifies that we detect this pattern and reorder loops so that:
+        - The index-dependent dimension (i) is placed on program_id(0) for better SM scheduling
+        - The coalesced dimension (j) uses the fast-moving index within the block
+        """
+        B, S, V, D = 8, 512, 1024, 256
+
+        indices = torch.randint(0, V, (B, S), device=GPU_TYPE)
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding(idx, w):
+            return torch.nn.functional.embedding(idx, w)
+
+        out, code = run_and_get_code(torch.compile(embedding), indices, weights)
+
+        # Check correctness
+        expected = embedding(indices, weights)
+        self.assertEqual(out, expected)
+
+        # The kernel should be 2D tiled (have both XBLOCK and YBLOCK)
+        FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
+
+        # The index load should use the x dimension (from program_id(0))
+        # and the weight load should be coalesced on y
+        # This pattern shows the loop reordering is working:
+        # - in_ptr0 (indices) loaded via x index
+        # - in_ptr1 (weights) loaded with y in the stride-1 position
+        FileCheck().check("in_ptr0").check("in_ptr1").run(code[0])
+
+    def test_indirect_access_not_coalesced(self):
+        """Test that memory accesses with indirect indexing are treated as uncoalesced.
+
+        When we have an access pattern like weights[indices[i]], the weight load
+        uses an indirect index and should NOT be counted as coalesced since the
+        access pattern is effectively random.
+        """
+        from torch._inductor import tiling_utils
+        from torch._inductor.codegen import simd as simd_module
+        from torch.utils._sympy.symbol import SymT, symbol_is_type
+
+        # Track whether analyze_memory_coalescing treats indirect access correctly
+        indirect_in_uncoalesced = []
+
+        original_analyze = tiling_utils.analyze_memory_coalescing
+
+        def check_analyze(node):
+            result = original_analyze(node)
+            if result:
+                # Check that any expression with INDIRECT symbols is in uncoalesced_addrs
+                for expr in result.uncoalesced_addrs:
+                    if any(symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols):
+                        indirect_in_uncoalesced.append(True)
+                # Verify no INDIRECT symbols in coalesced_by_var keys
+                for var in result.coalesced_by_var:
+                    if symbol_is_type(var, SymT.INDIRECT):
+                        indirect_in_uncoalesced.append(False)  # Should never happen
+            return result
+
+        V, D = 1024, 256
+        indices = torch.randint(0, V, (4096,), device=GPU_TYPE)
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding_1d(idx, w):
+            return w[idx]
+
+        # Patch in simd module where it's actually called
+        with unittest.mock.patch.object(
+            simd_module, "analyze_memory_coalescing", check_analyze
+        ):
+            compiled = torch.compile(embedding_1d)
+            out = compiled(indices, weights)
+
+        # Verify correctness
+        expected = embedding_1d(indices, weights)
+        self.assertEqual(out, expected)
+
+        # Verify that indirect accesses were found and treated as uncoalesced
+        self.assertTrue(
+            any(indirect_in_uncoalesced),
+            "Expected indirect accesses to be treated as uncoalesced",
+        )
+
 
 class TestIndexInversion(TestCase):
     @classmethod

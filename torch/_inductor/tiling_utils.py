@@ -180,6 +180,81 @@ def find_broadcast_var(
     return None
 
 
+def find_indirect_broadcast_vars(
+    body: "torch._inductor.loop_body.LoopBody",
+    iter_vars: list[sympy.Symbol],
+) -> OrderedSet[sympy.Symbol]:
+    """
+    Find variables that indirect accesses are broadcast over.
+
+    For embedding-like patterns, the index load only depends on a subset of
+    iteration variables. The remaining variables are "broadcast" - splitting
+    on the index-dependent variables allows the indirect load to be shared.
+
+    Returns the set of variables that indirect accesses do NOT depend on
+    (i.e., the variables the indirect access is broadcast over).
+    """
+    if not body.indirect_vars:
+        return OrderedSet()
+
+    # Trace which iter_vars the indirect index expressions depend on.
+    # The FX graph pattern is:
+    #   get_index('indexN') -> load(ops, buffer, index) -> set_indirect(load_result)
+    indirect_index_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+
+    for node in body.get_nodes():
+        # Look for set_indirect calls (e.g., "set_tmp0")
+        if not (node.op == "call_module" and node.target.startswith("set_")):
+            continue
+
+        # The argument to set_indirect is the load result
+        if not node.args:
+            continue
+
+        load_node = node.args[0]
+        if not (
+            getattr(load_node, "op", None) == "call_method"
+            and getattr(load_node, "target", None) == "load"
+            and len(getattr(load_node, "args", ())) >= 3
+        ):
+            continue
+
+        get_index_node = load_node.args[2]
+        if not (
+            getattr(get_index_node, "op", None) == "call_module"
+            and getattr(get_index_node, "target", None) == "get_index"
+            and getattr(get_index_node, "args", ())
+        ):
+            continue
+
+        index_name = get_index_node.args[0]
+        if index_name not in body.indexing_exprs:
+            continue
+
+        index_expr = body.indexing_exprs[index_name]
+        expr_iter_vars = index_expr.free_symbols & set(iter_vars)
+        indirect_index_vars |= expr_iter_vars
+        loop_tiling_log.info(
+            "Indirect var from index '%s' (%s) depends on vars: %s",
+            index_name,
+            index_expr,
+            expr_iter_vars,
+        )
+
+    # The broadcast vars are iteration variables NOT used in indirect index expressions
+    all_iter_vars = OrderedSet(iter_vars)
+    broadcast_vars = all_iter_vars - indirect_index_vars
+
+    if broadcast_vars:
+        loop_tiling_log.info(
+            "Found indirect broadcast vars: %s (indirect_index_vars: %s)",
+            broadcast_vars,
+            indirect_index_vars,
+        )
+
+    return broadcast_vars
+
+
 def find_coalesced_var(
     index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
 ) -> Optional[sympy.Expr]:
@@ -233,6 +308,12 @@ class FusedNormalizedReadsWrites:
     reads: dict[sympy.Expr, OrderedSet[str]]
     writes: dict[sympy.Expr, OrderedSet[str]]
     var_ranges: dict[sympy.Symbol, int]
+    # Variables that indirect accesses are broadcast over.
+    # If an indirect access only depends on a subset of iteration variables,
+    # splitting on those variables can allow the indirect load to be shared.
+    indirect_broadcast_vars: OrderedSet[sympy.Symbol] = dataclasses.field(
+        default_factory=OrderedSet
+    )
 
 
 @overload
@@ -523,16 +604,17 @@ def extract_normalized_read_writes(
         pw_splits, red_splits, prefix="n"
     )
 
+    # Track indirect broadcast variables across all nodes
+    all_indirect_broadcast_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
             continue
 
         body = n._body
 
-        # TODO - not handled well. indirect loads will not be coalesced,
-        # need to account for that in analysis.
-        if body.indirect_vars:
-            return None
+        # Handle indirect indexing - instead of bailing out, analyze the
+        # indirect access patterns to find profitable splits
 
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -553,6 +635,16 @@ def extract_normalized_read_writes(
         (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
             n, pointwise_numel, red_numel
         )
+
+        # Detect variables that indirect accesses are broadcast over
+        if body.indirect_vars:
+            indirect_broadcast = find_indirect_broadcast_vars(body, list(iter_vars))
+            # Map the broadcast vars from the node's iter_vars to the normalized vars
+            # We need to find which normalized var corresponds to each iter_var
+            # For now, we track these and will map them later
+            for i, v in enumerate(iter_vars):
+                if v in indirect_broadcast and i < len(norm_pw_vars):
+                    all_indirect_broadcast_vars.add(norm_pw_vars[i])
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))
@@ -608,12 +700,18 @@ def extract_normalized_read_writes(
         V.graph.sizevars.simplify_with_ranges(w, ranges): v for w, v in writes.items()
     }
 
+    if all_indirect_broadcast_vars:
+        loop_tiling_log.info(
+            "Indirect broadcast vars (normalized): %s", all_indirect_broadcast_vars
+        )
+
     fused_out = FusedNormalizedReadsWrites(
         norm_pw_vars,  # type: ignore[arg-type]
         norm_red_vars,  # type: ignore[arg-type]
         reads,
         writes,
         ranges,
+        all_indirect_broadcast_vars,
     )
     loop_tiling_log.info("Normalized Fused reads: %s", fused_out)
     return fused_out
@@ -680,6 +778,7 @@ class CoalesceVarAnalysis:
     suggested_split: Optional[VarTiling] = None
 
 
+
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
 ) -> Optional[CoalesceVarAnalysis]:
@@ -712,20 +811,26 @@ def analyze_memory_coalescing(
         ((True, item) for item in reads.items()),
         ((False, item) for item in writes.items()),
     ):
-        # TODO skip memory deps with indirect vars
-        # handled in extract_normalized_read_writes currently
+        # Check if this access uses INDIRECT symbols - these have random access patterns
+        # and cannot be coalesced in the traditional sense
+        has_indirect = any(
+            symbol_is_type(s, SymT.INDIRECT) for s in memory_expr.free_symbols
+        )
 
         size = get_score(memory_expr, var_ranges, buf_names)
 
         if size == 0:
             continue
 
-        maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
-        # while broadcasting vars are not technically coalesced,
-        # accesses at least stay in cache, so they provide most of the benefit.
-        # treat the same for now.
-        if maybe_coalesced_var is None:
-            maybe_coalesced_var = find_broadcast_var(memory_expr, var_ranges)
+        # Only try to find coalesced/broadcast vars for non-indirect accesses
+        maybe_coalesced_var = None
+        if not has_indirect:
+            maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+            # while broadcasting vars are not technically coalesced,
+            # accesses at least stay in cache, so they provide most of the benefit.
+            # treat the same for now.
+            if maybe_coalesced_var is None:
+                maybe_coalesced_var = find_broadcast_var(memory_expr, var_ranges)
 
         total_score = 0
         for buf_name in buf_names:
@@ -744,7 +849,48 @@ def analyze_memory_coalescing(
         else:
             uncoalesced_addrs[memory_expr] += total_score
 
-    if not uncoalesced_addrs:
+    # If we have indirect broadcast vars, the non-broadcast vars are good split candidates.
+    # Splitting on them allows sharing the indirect index loads within a block.
+    # We add these vars to coalesced_by_var so they get considered for splitting.
+    indirect_broadcast_vars = norm_read_writes.indirect_broadcast_vars
+
+    if indirect_broadcast_vars:
+        # The beneficial split is on the vars that indirect accesses depend on
+        # (i.e., all iter vars except the broadcast vars)
+        all_iter_vars = set(norm_read_writes.index_vars)
+        indirect_index_vars = all_iter_vars - set(indirect_broadcast_vars)
+
+        if indirect_index_vars:
+            # Calculate a score for splitting on indirect index vars
+            # The benefit is proportional to the size of the broadcast dimension
+            broadcast_size = 1
+            for v in indirect_broadcast_vars:
+                if v in var_ranges:
+                    broadcast_size *= get_hint(var_ranges[v])
+
+            # The score represents the memory savings from sharing index loads
+            # Each index load is shared across broadcast_size threads instead of being
+            # loaded broadcast_size times. This is a significant savings.
+            # Score = broadcast_size * num_indices * bytes_per_index
+            # We use the full range of the split var as an approximation of num_indices
+            for split_var in indirect_index_vars:
+                split_var_size = get_hint(var_ranges[split_var]) if split_var in var_ranges else 1
+                # Redundant loads avoided = (broadcast_size - 1) * num_indices * 8 bytes
+                # We approximate this conservatively
+                indirect_score = (broadcast_size - 1) * split_var_size * 8
+                # Add to coalesced_by_var so the var gets considered for splitting
+                coalesced_by_var[split_var] += indirect_score
+                loop_tiling_log.info(
+                    "Indirect tiling: adding split_var=%s to coalesced_by_var with score=%s "
+                    "(broadcast_size=%s, split_var_size=%s)",
+                    split_var,
+                    indirect_score,
+                    broadcast_size,
+                    split_var_size,
+                )
+
+
+    if not uncoalesced_addrs and not coalesced_by_var:
         return CoalesceVarAnalysis(
             coalesced_by_var=coalesced_by_var,
             uncoalesced_addrs=uncoalesced_addrs,
@@ -755,6 +901,10 @@ def analyze_memory_coalescing(
     tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
 
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
+        # Skip expressions with indirect symbols - no tiling can help these
+        if any(symbol_is_type(s, SymT.INDIRECT) for s in uncoalesced_expr.free_symbols):
+            continue
+
         expr_subs = dict.fromkeys(var_ranges.keys(), 0)
         for v in uncoalesced_expr.free_symbols & var_ranges.keys():
             # skip non iter/reduce var variables

@@ -20,7 +20,7 @@ import torch
 import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.tiling_utils import analyze_memory_coalescing
+from torch._inductor.tiling_utils import analyze_memory_coalescing, loop_tiling_log
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
@@ -1805,6 +1805,47 @@ class SIMDScheduling(BaseScheduling):
                 assert self.scheduler
                 node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
             coalesce_analysis = analyze_memory_coalescing(node)
+
+            # For indirect indexing patterns (e.g., embedding), check if swapping
+            # loop order would improve memory access patterns.
+            # This places the index-dependent dimension on program_id(0) for better
+            # SM scheduling when the coalesced reads are on a broadcast variable.
+            should_swap = False
+            if coalesce_analysis is not None and len(nodes) > 0:
+                norm_rw = coalesce_analysis.norm_read_writes
+                indirect_broadcast_vars = norm_rw.indirect_broadcast_vars
+                if indirect_broadcast_vars and len(norm_rw.index_vars) >= 2:
+                    # Check if any broadcast variable has significant coalesced reads
+                    broadcast_coalesced_score = sum(
+                        coalesce_analysis.coalesced_by_var.get(v, 0)
+                        for v in indirect_broadcast_vars
+                    )
+                    if broadcast_coalesced_score > 0:
+                        should_swap = True
+                        loop_tiling_log.info(
+                            "Enabling loop swap for indirect indexing pattern "
+                            "(indirect_broadcast_vars=%s, broadcast_coalesced_score=%s)",
+                            indirect_broadcast_vars,
+                            broadcast_coalesced_score,
+                        )
+
+            if should_swap:
+                # Get the number of pointwise dimensions
+                pw_ranges, _ = nodes[0].get_ranges()
+                if len(pw_ranges) == 2:
+                    # Swap the two pointwise dimensions: [1, 0]
+                    new_order = [1, 0]
+                    loop_tiling_log.info(
+                        "Applying loop reorder %s for indirect indexing pattern",
+                        new_order,
+                    )
+                    for snode in nodes:
+                        if isinstance(snode, scheduler.SchedulerNode):
+                            snode.apply_new_loop_order(new_order)
+                    # Re-analyze after reordering
+                    if len(nodes) != len(node.get_nodes()):
+                        node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
+                    coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
 
@@ -1864,7 +1905,10 @@ class SIMDScheduling(BaseScheduling):
         kernels = self.create_kernel_choices(
             kernel_features,
             [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
+            {
+                "features": kernel_features,
+                "tiling_scores": tiling_score,
+            },
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
