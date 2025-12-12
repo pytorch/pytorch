@@ -1121,7 +1121,343 @@ class CommonTemplate:
             rtol=0.06,
         )
 
-    # test that
+    @xfail_if_use_tensor_descriptor
+    def test_pointwise_index_order(self):
+        """
+        Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
+        then Y, then X.
+        """
+
+        inps = [
+            self._discontiguous_tensor((5, 5, 5), device=self.device) for _ in range(2)
+        ]
+
+        result, (triton_code,) = self._run_and_compare(
+            torch.add,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check the load and store for block pointer strides.
+        load_lines, store_lines, index_lines = tuple(
+            self._get_lines_containing_substr(triton_code, substr)
+            for substr in ("tl.load", "tl.store", "index =")
+        )
+        self.assertExpectedInline(
+            load_lines,
+            """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            store_lines,
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
+
+        # Check the indices. These are used for non-block pointers.
+        self.assertExpectedInline(
+            index_lines,
+            """\
+    zindex = zoffset + tl.arange(0, ZBLOCK)[:, None, None]
+    yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
+    xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
+        )
+
+    def test_expand_clone_broadcast(self):
+        """
+        Test expand followed by clone. This uses an explicit Triton broadcast.
+        """
+        base_size = (1, 32)
+        expanded_size = (32, 32)
+
+        def foo(x):
+            return x.expand(*expanded_size).clone()
+
+        inps = [torch.randn(base_size, device=self.device)]
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=2,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # We should only need one broadcast.
+        num_broadcasts = triton_code.count("tl.broadcast_to")
+        self.assertEqual(num_broadcasts, 1)
+
+    def test_mul_broadcast_multi_output(self):
+        def foo(x, y, z):
+            a = x * y
+            b = 128.0
+            c = a * b
+            d = a * z
+            e = x * z
+            return a, c, d, e
+
+        inps = [
+            torch.randn((8, 11, 128), device=self.device),
+            torch.randn((128,), device=self.device),
+            torch.randn((8, 11, 128), device=self.device),
+        ]
+        result, (triton_code,) = self._run_and_compare(
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=7,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check that the tiling is 2D, even though we allow up to 3D.
+        # Singleton splits should be discarded.
+        self._assert_pointwise_ndims(triton_code, 2)
+
+    # Integration test to ensure that matched dims & strides from match_mod_div_expr
+    # are unsigned and signed integers respectively. This test case has the following
+    # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
+    # and the match below is a candidate that is invalid:
+    # match={
+    #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
+    #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
+    # }
+    # This is now fixed by ensuring that that wild symbols only match integers
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
+    def test_ensure_integral_dims_and_strides(self):
+        def model(data, *args):
+            return torch.nn.functional.unfold(data, *args)
+
+        data = torch.zeros(
+            [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
+        )
+        args = [2, 1, 0, 1]
+        self._run_and_compare(
+            model,
+            data,
+            *args,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+            compile_kwargs={"fullgraph": True},
+        )
+
+    # Integration test to test block analysis with index expressions using
+    # negative strides.
+    # This test case has the following index:
+    # index_relative_to_xyr_index = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8))
+    #    - 16*(ModularIndexing(xindex, 8, 8)) + 1911
+    # subexpr = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8)) - 16*(ModularIndexing(xindex, 8, 8))
+    # Block analysis should produce the following:
+    # BlockParameters(
+    #   shape=[8, 8, 8],
+    #   block_shape=[((XBLOCK + 63)//64), Min(8, ((XBLOCK + 7)//8)), Min(8, XBLOCK) ],
+    #   strides=[-256, -16, -1],
+    #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
+    #   )
+    # constant_offset = 1911
+    @xfail_if_use_tensor_descriptor
+    def test_negative_strides(self):
+        def model(x, y):
+            # Slice in reverse order via a negative stride
+            return torch.flip(x, [0, 1, 2]) + y
+
+        x, y = (
+            self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
+        )
+        self._run_and_compare(
+            model,
+            x,
+            y,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+        )
+
+    @config.patch("triton.prefer_nd_tiling", True)
+    @config.patch("triton.max_tiles", 3)
+    @parametrize(
+        "block_multiple, ynumel_exceed_ygrid_size, include_z",
+        [
+            # No boundary check in all dimensions
+            [True, False, True],
+            # No xdim boundary check, ydim is checked since > max_ygrid
+            # z dim can be used since its not included
+            [True, True, False],
+            # Boundary check in all dimensions
+            # skip triton_cpu very slow test > 1000s
+            subtest(
+                [False, False, True], decorators=[test_torchinductor.skip_if_triton_cpu]
+            ),
+        ],
+    )
+    @xfail_if_use_tensor_descriptor
+    def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
+        @dataclasses.dataclass
+        class InputShape:
+            x: int
+            y: int
+            z: Optional[int] = None
+
+            def to_list(self):
+                out = [self.y, self.x]
+                if self.z is not None:
+                    out.insert(0, self.z)
+                return out
+
+        BLOCK_SIZE = 8
+        DIM_SIZE = BLOCK_SIZE if block_multiple else BLOCK_SIZE + 1
+        shape = InputShape(DIM_SIZE, DIM_SIZE, DIM_SIZE if include_z else None)
+        if ynumel_exceed_ygrid_size:
+            shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
+
+        # Use fixed block sizes to avoid having to generate very large input tensors
+        class FixedBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                block_sizes = {
+                    f"{prefix.upper()}BLOCK": BLOCK_SIZE
+                    for prefix, size in dataclasses.asdict(shape).items()
+                    if size is not None
+                }
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(block_sizes)
+                return kernel_kwargs
+
+        a = self._discontiguous_tensor(shape.to_list(), device=self.device)
+        b_shape = shape.to_list()
+        b_shape[-1] = 1
+        b = self._discontiguous_tensor(b_shape, device=self.device)
+
+        def func(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        with V.set_choices_handler(FixedBlockSizeChoices()):
+            result, code = self._run_and_compare(
+                func,
+                a,
+                b,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=3,
+            )
+
+            code = code[0]
+            if block_multiple:
+                if ynumel_exceed_ygrid_size:
+                    self.assertIn(
+                        "yoffset = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)) * YBLOCK",
+                        code,
+                    )
+                    # Only the y dimension should be boundary checked
+                    # a, b, and output
+                    self.assertEqual(code.count("boundary_check=[0]"), 3)
+                else:
+                    # No boundary checking
+                    self.assertNotIn("boundary_check", code)
+            else:
+                # Loading a
+                self.assertTrue("boundary_check=[0, 1, 2]" in code)
+                # Loading b
+                self.assertTrue("boundary_check=[0, 1]" in code)
+
+
+@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+@config.patch(cpu_backend="triton")
+@config.patch("triton.use_block_ptr", True)
+class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
+    device = "cpu"
+
+
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
+
+
+@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@config.patch("triton.use_block_ptr", True)
+class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
+    device = GPU_TYPE
+
+
+test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+
+
+@unittest.skipIf(
+    not (
+        HAS_CUDA_AND_TRITON
+        and torch.cuda.get_device_capability()[0] >= 9
+        and torch.version.hip is None
+    ),
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
+)
+@config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
+@instantiate_parametrized_tests
+class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
+    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
+    device = GPU_TYPE
+
+    @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
+    @parametrize(
+        "view_size,permute_order,num_tensor_descriptors,expect_transpose",
+        [
+            ((128,), (0,), 3, False),
+            ((128, 128), (0, 1), 3, False),
+            ((128, 64), (1, 0), 3, True),
+            ((256, 32, 16), (2, 0, 1), 3, True),
+            ((16, 32, 256), (2, 0, 1), 3, True),
+        ],
+    )
+    def test_match_with_transpose(
+        self,
+        view_size: tuple[int],
+        permute_order: tuple[int],
+        num_tensor_descriptors: int,
+        expect_transpose: bool,
+    ):
+        a = self._discontiguous_tensor(view_size, self.device)
+        pre_permute_size = [1] * len(view_size)
+        for i, value in zip(permute_order, view_size):
+            pre_permute_size[i] = value
+        b = self._discontiguous_tensor(pre_permute_size, self.device)
+        b = b.permute(permute_order)
+
+        def fn(a, b):
+            return a * b
+
+        result, (code,) = self._run_and_compare(
+            fn,
+            a,
+            b,
+            expected_num_block_pointers=num_tensor_descriptors,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        transpose_count = code.count("tl.trans")
+        self.assertEqual(transpose_count, 1 if expect_transpose else 0)
+
+
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonTensorDescriptorTestCUDA,
+    GPU_TYPE,
+    xfail_prop="_expected_failure_use_tensor_descriptor",
+    test_failures=TMA_TEST_XFAIL,
+)
+
+
+class TestTilingExtra(InductorTestCase):
     def test_tiling_split_valid(self):
         import torch.nn.functional as F
 
@@ -1660,340 +1996,6 @@ class CommonTemplate:
                 **params,
             )
 
-    @xfail_if_use_tensor_descriptor
-    def test_pointwise_index_order(self):
-        """
-        Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
-        then Y, then X.
-        """
-
-        inps = [
-            self._discontiguous_tensor((5, 5, 5), device=self.device) for _ in range(2)
-        ]
-
-        result, (triton_code,) = self._run_and_compare(
-            torch.add,
-            *inps,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=3,
-            config_patches={
-                "triton.max_tiles": 3,
-                "triton.prefer_nd_tiling": True,
-            },
-        )
-
-        # Check the load and store for block pointer strides.
-        load_lines, store_lines, index_lines = tuple(
-            self._get_lines_containing_substr(triton_code, substr)
-            for substr in ("tl.load", "tl.store", "index =")
-        )
-        self.assertExpectedInline(
-            load_lines,
-            """\
-    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
-        )
-
-        self.assertExpectedInline(
-            store_lines,
-            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
-        )
-
-        # Check the indices. These are used for non-block pointers.
-        self.assertExpectedInline(
-            index_lines,
-            """\
-    zindex = zoffset + tl.arange(0, ZBLOCK)[:, None, None]
-    yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
-    xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
-        )
-
-    def test_expand_clone_broadcast(self):
-        """
-        Test expand followed by clone. This uses an explicit Triton broadcast.
-        """
-        base_size = (1, 32)
-        expanded_size = (32, 32)
-
-        def foo(x):
-            return x.expand(*expanded_size).clone()
-
-        inps = [torch.randn(base_size, device=self.device)]
-        result, (triton_code,) = self._run_and_compare(
-            foo,
-            *inps,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=2,
-            config_patches={
-                "triton.max_tiles": 3,
-                "triton.prefer_nd_tiling": True,
-            },
-        )
-
-        # We should only need one broadcast.
-        num_broadcasts = triton_code.count("tl.broadcast_to")
-        self.assertEqual(num_broadcasts, 1)
-
-    def test_mul_broadcast_multi_output(self):
-        def foo(x, y, z):
-            a = x * y
-            b = 128.0
-            c = a * b
-            d = a * z
-            e = x * z
-            return a, c, d, e
-
-        inps = [
-            torch.randn((8, 11, 128), device=self.device),
-            torch.randn((128,), device=self.device),
-            torch.randn((8, 11, 128), device=self.device),
-        ]
-        result, (triton_code,) = self._run_and_compare(
-            foo,
-            *inps,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=7,
-            config_patches={
-                "triton.max_tiles": 3,
-                "triton.prefer_nd_tiling": True,
-            },
-        )
-
-        # Check that the tiling is 2D, even though we allow up to 3D.
-        # Singleton splits should be discarded.
-        self._assert_pointwise_ndims(triton_code, 2)
-
-    # Integration test to ensure that matched dims & strides from match_mod_div_expr
-    # are unsigned and signed integers respectively. This test case has the following
-    # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
-    # and the match below is a candidate that is invalid:
-    # match={
-    #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
-    #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
-    # }
-    # This is now fixed by ensuring that that wild symbols only match integers
-    @skipIfXpu(
-        msg="Triton issue exposed by new driver, will be resolved after next triton update."
-    )
-    def test_ensure_integral_dims_and_strides(self):
-        def model(data, *args):
-            return torch.nn.functional.unfold(data, *args)
-
-        data = torch.zeros(
-            [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
-        )
-        args = [2, 1, 0, 1]
-        self._run_and_compare(
-            model,
-            data,
-            *args,
-            expected_num_triton_kernels=2,
-            expected_num_block_pointers=4,
-            compile_kwargs={"fullgraph": True},
-        )
-
-    # Integration test to test block analysis with index expressions using
-    # negative strides.
-    # This test case has the following index:
-    # index_relative_to_xyr_index = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8))
-    #    - 16*(ModularIndexing(xindex, 8, 8)) + 1911
-    # subexpr = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8)) - 16*(ModularIndexing(xindex, 8, 8))
-    # Block analysis should produce the following:
-    # BlockParameters(
-    #   shape=[8, 8, 8],
-    #   block_shape=[((XBLOCK + 63)//64), Min(8, ((XBLOCK + 7)//8)), Min(8, XBLOCK) ],
-    #   strides=[-256, -16, -1],
-    #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
-    #   )
-    # constant_offset = 1911
-    @xfail_if_use_tensor_descriptor
-    def test_negative_strides(self):
-        def model(x, y):
-            # Slice in reverse order via a negative stride
-            return torch.flip(x, [0, 1, 2]) + y
-
-        x, y = (
-            self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
-        )
-        self._run_and_compare(
-            model,
-            x,
-            y,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=3,
-        )
-
-    @config.patch("triton.prefer_nd_tiling", True)
-    @config.patch("triton.max_tiles", 3)
-    @parametrize(
-        "block_multiple, ynumel_exceed_ygrid_size, include_z",
-        [
-            # No boundary check in all dimensions
-            [True, False, True],
-            # No xdim boundary check, ydim is checked since > max_ygrid
-            # z dim can be used since its not included
-            [True, True, False],
-            # Boundary check in all dimensions
-            # skip triton_cpu very slow test > 1000s
-            subtest(
-                [False, False, True], decorators=[test_torchinductor.skip_if_triton_cpu]
-            ),
-        ],
-    )
-    @xfail_if_use_tensor_descriptor
-    def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
-        @dataclasses.dataclass
-        class InputShape:
-            x: int
-            y: int
-            z: Optional[int] = None
-
-            def to_list(self):
-                out = [self.y, self.x]
-                if self.z is not None:
-                    out.insert(0, self.z)
-                return out
-
-        BLOCK_SIZE = 8
-        DIM_SIZE = BLOCK_SIZE if block_multiple else BLOCK_SIZE + 1
-        shape = InputShape(DIM_SIZE, DIM_SIZE, DIM_SIZE if include_z else None)
-        if ynumel_exceed_ygrid_size:
-            shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
-
-        # Use fixed block sizes to avoid having to generate very large input tensors
-        class FixedBlockSizeChoices(InductorChoices):
-            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
-                block_sizes = {
-                    f"{prefix.upper()}BLOCK": BLOCK_SIZE
-                    for prefix, size in dataclasses.asdict(shape).items()
-                    if size is not None
-                }
-                kernel_kwargs["fixed_config"] = FixedTritonConfig(block_sizes)
-                return kernel_kwargs
-
-        a = self._discontiguous_tensor(shape.to_list(), device=self.device)
-        b_shape = shape.to_list()
-        b_shape[-1] = 1
-        b = self._discontiguous_tensor(b_shape, device=self.device)
-
-        def func(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return a + b
-
-        with V.set_choices_handler(FixedBlockSizeChoices()):
-            result, code = self._run_and_compare(
-                func,
-                a,
-                b,
-                expected_num_triton_kernels=1,
-                expected_num_block_pointers=3,
-            )
-
-            code = code[0]
-            if block_multiple:
-                if ynumel_exceed_ygrid_size:
-                    self.assertIn(
-                        "yoffset = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)) * YBLOCK",
-                        code,
-                    )
-                    # Only the y dimension should be boundary checked
-                    # a, b, and output
-                    self.assertEqual(code.count("boundary_check=[0]"), 3)
-                else:
-                    # No boundary checking
-                    self.assertNotIn("boundary_check", code)
-            else:
-                # Loading a
-                self.assertTrue("boundary_check=[0, 1, 2]" in code)
-                # Loading b
-                self.assertTrue("boundary_check=[0, 1]" in code)
-
-
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-@config.patch(cpu_backend="triton")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
-    device = "cpu"
-
-
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonBlockPointerTestCPU,
-    "cpu",
-    xfail_prop="_expected_failure_triton_cpu",
-)
-
-
-@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
-    device = GPU_TYPE
-
-
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
-
-
-@unittest.skipIf(
-    not (
-        HAS_CUDA_AND_TRITON
-        and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip is None
-    ),
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
-)
-@config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
-@instantiate_parametrized_tests
-class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
-    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
-    device = GPU_TYPE
-
-    @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
-    @parametrize(
-        "view_size,permute_order,num_tensor_descriptors,expect_transpose",
-        [
-            ((128,), (0,), 3, False),
-            ((128, 128), (0, 1), 3, False),
-            ((128, 64), (1, 0), 3, True),
-            ((256, 32, 16), (2, 0, 1), 3, True),
-            ((16, 32, 256), (2, 0, 1), 3, True),
-        ],
-    )
-    def test_match_with_transpose(
-        self,
-        view_size: tuple[int],
-        permute_order: tuple[int],
-        num_tensor_descriptors: int,
-        expect_transpose: bool,
-    ):
-        a = self._discontiguous_tensor(view_size, self.device)
-        pre_permute_size = [1] * len(view_size)
-        for i, value in zip(permute_order, view_size):
-            pre_permute_size[i] = value
-        b = self._discontiguous_tensor(pre_permute_size, self.device)
-        b = b.permute(permute_order)
-
-        def fn(a, b):
-            return a * b
-
-        result, (code,) = self._run_and_compare(
-            fn,
-            a,
-            b,
-            expected_num_block_pointers=num_tensor_descriptors,
-            expected_num_triton_kernels=1,
-            config_patches=tiled_reduction_config,
-        )
-
-        transpose_count = code.count("tl.trans")
-        self.assertEqual(transpose_count, 1 if expect_transpose else 0)
-
-
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonTensorDescriptorTestCUDA,
-    GPU_TYPE,
-    xfail_prop="_expected_failure_use_tensor_descriptor",
-    test_failures=TMA_TEST_XFAIL,
-)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
