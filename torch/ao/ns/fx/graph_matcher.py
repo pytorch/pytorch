@@ -83,6 +83,7 @@ class _NSGraphMatchableSubgraphsIterator:
                 )
                 if is_match:
                     # navigate to the base node
+                    # pyrefly: ignore [bad-assignment]
                     for rev_fusion_idx in range(len(_reverse_fusion_ops) - 1):
                         # pyrefly: ignore [bad-argument-type]
                         self.seen_nodes.add(cur_start_node)

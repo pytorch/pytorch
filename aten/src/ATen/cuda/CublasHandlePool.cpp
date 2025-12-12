@@ -241,6 +241,38 @@ at::DataPtr getNewCUDABlasLtWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
 }
 
+void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+
+  auto& workspace = cublas_handle_stream_to_workspace();
+
+  size_t workspace_size = getChosenWorkspaceSize();
+
+  // Fast path: check if workspace already exists
+  {
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it != workspace.map.end()) {
+      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
+          handle, workspace_it->second.get(), workspace_size));
+      return;
+    }
+  }
+
+  // Slow path: allocate workspace outside the lock
+  auto new_workspace = getNewWorkspace();
+
+  // Insert with lock (double-check in case another thread inserted while we
+  // were allocating)
+  {
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.try_emplace(key, std::move(new_workspace)).first;
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(handle, workspace_it->second.get(), workspace_size));
+  }
+}
+
 void* getCUDABlasLtWorkspace() {
 #ifndef USE_ROCM
   static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
@@ -279,13 +311,8 @@ void* getCUDABlasLtWorkspace() {
   // were allocating)
   {
     std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it = workspace.map.find(key);
-    if (workspace_it == workspace.map.end()) {
-      workspace_it =
-          workspace.map.emplace(key, std::move(new_workspace)).first;
-    }
-    // else: another thread inserted it, our new_workspace will be automatically
-    // freed
+    auto workspace_it =
+          workspace.map.try_emplace(key, std::move(new_workspace)).first;
     return workspace_it->second.mutable_get();
   }
 }
@@ -331,41 +358,8 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // will allocate memory dynamically (even if they're cheap) outside
   // PyTorch's CUDA caching allocator. It's possible that CCA used up
   // all the memory and cublas's cudaMallocAsync will return OOM
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+  setWorkspaceForHandle(handle, stream);
 
-  auto& workspace = cublas_handle_stream_to_workspace();
-
-  size_t workspace_size = getChosenWorkspaceSize();
-
-  // Fast path: check if workspace already exists
-  {
-    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it = workspace.map.find(key);
-    if (workspace_it != workspace.map.end()) {
-      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
-          handle, workspace_it->second.get(), workspace_size));
-      return handle;
-    }
-  }
-
-  // Slow path: allocate workspace outside the lock
-  auto new_workspace = getNewWorkspace();
-
-  // Insert with lock (double-check in case another thread inserted while we
-  // were allocating)
-  {
-    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
-    auto workspace_it = workspace.map.find(key);
-    if (workspace_it == workspace.map.end()) {
-      workspace_it =
-          workspace.map.emplace(key, std::move(new_workspace)).first;
-    }
-    // else: another thread inserted it, our new_workspace will be automatically
-    // freed
-    TORCH_CUDABLAS_CHECK(
-        cublasSetWorkspace(handle, workspace_it->second.get(), workspace_size));
-  }
 #if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.

@@ -65,6 +65,7 @@ class Independent(Distribution, Generic[D]):
         event_shape = shape[len(shape) - event_dim :]
         self.base_dist = base_distribution
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

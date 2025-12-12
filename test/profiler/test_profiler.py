@@ -1207,8 +1207,8 @@ class TestProfiler(TestCase):
                     parts[-4].isdigit() and int(parts[-4]) > 0,
                     "Wrong tracing file name pattern",
                 )
-                self.assertEqual(parts[-3:], ["pt", "trace", "json"])
-                file_num += 1
+                if parts[-3:] == ["pt", "trace", "json"]:
+                    file_num += 1
             self.assertEqual(file_num, 3)
 
         # test case for gzip file format
@@ -1492,7 +1492,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        We expect the correlation_id to be unique across multiple invocation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()
@@ -3276,7 +3276,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.

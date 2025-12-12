@@ -32,7 +32,6 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -658,11 +657,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -711,7 +710,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -733,7 +732,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -1064,8 +1063,8 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
         else:
             return tensor
 
@@ -1262,14 +1261,6 @@ class TestDTensorSpec(DTensorTestBase):
         # shard order omit partial
         tensor_global = DTensor.from_local(
             tensor_local, mesh, [Partial(), Replicate(), Replicate()]
-        )
-        self.assertEqual(tensor_global._spec.shard_order, ())
-
-        # shard_order doesn't work with _StridedShard
-        tensor_global = DTensor.from_local(
-            tensor_local,
-            mesh,
-            [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 

@@ -13,7 +13,7 @@ import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
@@ -37,19 +37,19 @@ T = TypeVar("T")
 
 @dataclass
 class SyncPayload(Generic[T]):
-    stage_name: Optional[str]
+    stage_name: str | None
     success: bool
     payload: T
-    exception: Optional[Exception] = None
+    exception: Exception | None = None
 
 
 def broadcast(
-    data_or_fn: Union[T, Callable[[], T]],
+    data_or_fn: T | Callable[[], T],
     *,
     success: bool = True,
-    stage_name: Optional[str] = None,
+    stage_name: str | None = None,
     rank: int = 0,
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> T:
     """
     Broadcasts the data payload from rank 0 to all other ranks.
@@ -79,8 +79,8 @@ def broadcast(
             "Data or Function is expected to be None if not successful"
         )
 
-    payload: Optional[T] = None
-    exception: Optional[Exception] = None
+    payload: T | None = None
+    exception: Exception | None = None
     # if no pg is passed then execute if rank is 0
     if (pg is None and rank == 0) or (pg is not None and pg.rank() == rank):
         # determine if it is an executable function or data payload only
@@ -124,9 +124,9 @@ def broadcast(
 
 
 def all_gather(
-    data_or_fn: Union[T, Callable[[], T]],
-    stage_name: Optional[str] = None,
-    pg: Optional[dist.ProcessGroup] = None,
+    data_or_fn: T | Callable[[], T],
+    stage_name: str | None = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> list[T]:
     """
     A simple all_gather primitive with basic synchronization guard logic,
@@ -144,8 +144,8 @@ def all_gather(
     Example usage:
     >> all_ids = all_gather(data_or_fn=allocate_id, pg=ext_pg.my_pg)
     """
-    payload: Optional[T] = None
-    exception: Optional[Exception] = None
+    payload: T | None = None
+    exception: Exception | None = None
     success = True
     # determine if it is an executable function or data payload only
     if callable(data_or_fn):
@@ -189,8 +189,7 @@ def all_gather(
             raise RuntimeError(  # type: ignore[misc]
                 error_msg,
                 exception_list,
-                # pyrefly: ignore [invalid-inheritance]
-            ) from exception_list[0]
+            ) from exception_list[0]  # pyrefly: ignore [bad-raise, invalid-inheritance]
         return ret_list
     else:
         if not sync_obj.success:
@@ -247,7 +246,7 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
         raise AssertionError("ranks should all be positive")
     if len(set(ranks)) != len(ranks):
         raise AssertionError("ranks should not contain duplicates")
-    curr: Optional[Union[int, range]] = None
+    curr: int | range | None = None
     ranges = []
     while ranks:
         x = ranks.pop(0)
@@ -345,9 +344,7 @@ def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
     return str(f"{headers}\n{row_str}")
 
 
-def _check_rng_sync(
-    generator: torch.Generator, group: dist.ProcessGroup
-) -> Optional[str]:
+def _check_rng_sync(generator: torch.Generator, group: dist.ProcessGroup) -> str | None:
     value_ranks, value_header = _check_rng_sync_internal(generator, group)
     log_str = None
     if len(value_ranks) > 1:

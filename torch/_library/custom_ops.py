@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
@@ -13,6 +14,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from .effects import EffectType
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -471,6 +473,9 @@ class CustomOpDef:
         self._abstract_fn = fn
         return fn
 
+    def register_effect(self, effect: Optional[EffectType]) -> None:
+        self._lib._register_effectful_op(self._qualname, effect)
+
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
     ) -> Callable:
@@ -656,12 +661,18 @@ class CustomOpDef:
                 # Handle view + mutation that are in the schema
                 return original_kernel.call_boxed(keyset, *args, **kwargs)
 
-            lib.impl(
-                self._name,
-                adinplaceorview_impl,
-                "ADInplaceOrView",
-                with_keyset=True,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Warning only once for all operators",
+                    category=UserWarning,
+                )
+                lib.impl(
+                    self._name,
+                    adinplaceorview_impl,
+                    "ADInplaceOrView",
+                    with_keyset=True,
+                )
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
