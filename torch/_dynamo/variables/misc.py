@@ -433,6 +433,9 @@ class ExceptionVariable(VariableTracker):
         # Contains the call stack where the exception was raised. Dynamo does
         # not track traceback. So, this variable is always set to None
         self.__traceback__ = ConstantVariable(None)
+        # The user stack at the time this exception was first raised.
+        # Used to preserve the original exception location when re-raising.
+        self.python_stack = None
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
@@ -1778,9 +1781,22 @@ class DebuggingVariable(VariableTracker):
         return True
 
 
+class IgnoredFunctionVariable(VariableTracker):
+    """
+    Represents a call to an arbitrary function that should be ignored.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_function(self, tx, args, kwargs):
+        return variables.ConstantVariable.create(None)
+
+
 class LoggingLoggerVariable(VariableTracker):
     """
-    Represents a call to any of logging.Logger methods
+    Represents a call to any logging.Logger methods.
     """
 
     def __init__(self, value, **kwargs) -> None:
@@ -1795,18 +1811,24 @@ class LoggingLoggerVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if tx.export:
-            # For export cases, we can just make debugging functions no-ops
-            return
+            # For export cases, we can just make logging functions no-ops.
+            return variables.ConstantVariable.create(None)
+
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
-        if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
+
+        # Unified ignore set
+        ignore_set = torch._dynamo.config.ignore_logging_functions
+
+        if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
+
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "Add the logging method to `torch._dynamo.config.ignore_logger_methods.",
+                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
             ],
         )
 

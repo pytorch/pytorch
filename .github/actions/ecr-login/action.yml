@@ -1,0 +1,76 @@
+name: Login to ECR via OIDC
+
+description: |
+  Configures AWS credentials via OIDC and logs into Amazon ECR.
+  Works uniformly on all runner types (AWS EC2, GCP, ROCm, b200, etc.)
+
+inputs:
+  aws-role-to-assume:
+    description: IAM role to assume via OIDC
+    required: false
+    default: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+  aws-region:
+    description: AWS region
+    required: false
+    default: us-east-1
+  role-duration-seconds:
+    description: Duration for the assumed role session
+    required: false
+    default: "18000"
+  use-iam-profile-if-available:
+    description: If true, will check for and use an IAM instance profile if available.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Check for IAM instance profile
+      id: check_env
+      if: inputs.use-iam-profile-if-available == 'true'
+      shell: bash
+      run: |
+        if curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/iam/info >/dev/null 2>&1; then
+          echo "has_profile=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_profile=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Configure AWS credentials via OIDC
+      if: inputs.use-iam-profile-if-available == 'false' || steps.check_env.outputs.has_profile == 'false'
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      with:
+        role-to-assume: ${{ inputs.aws-role-to-assume != '' && inputs.aws-role-to-assume || 'arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only' }}
+        role-session-name: gha-ecr-login
+        aws-region: ${{ inputs.aws-region || 'us-east-1' }}
+        role-duration-seconds: ${{ inputs.role-duration-seconds }}
+        role-skip-session-tagging: true
+
+    # Primary ECR login - works with both OIDC and instance profile credentials
+    - name: Log in to ECR
+      continue-on-error: true
+      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+      with:
+        registries: 308535385114  # META_AWS_ACCOUNT_ID
+
+    # Cross-account login for LF runners (only when on AWS with a different account)
+    - name: Log in to ECR (cross-account)
+      if: steps.check_env.outputs.has_profile == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
+      run: |
+        if ! command -v aws &> /dev/null; then
+          echo "AWS CLI not available, skipping cross-account login"
+          exit 0
+        fi
+
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        META_AWS_ACCOUNT_ID=308535385114
+
+        if [ "$AWS_ACCOUNT_ID" != "$META_AWS_ACCOUNT_ID" ]; then
+          echo "Cross-account detected, logging into Meta's ECR ($AWS_ACCOUNT_ID)"
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+        fi
