@@ -99,7 +99,7 @@ class AugmentedGraphHelper:
         assert self.merge_sets[source] is not self.merge_sets[target]
 
         # search backwards from target to source
-        visited: set[fx.Node] = set()
+        visited: OrderedSet[fx.Node] = OrderedSet()
         queue = [target]
         visited.add(target)
         source_set = self.merge_sets[source]

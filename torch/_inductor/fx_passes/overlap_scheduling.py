@@ -3,6 +3,7 @@ import heapq
 import itertools
 import logging
 import sys
+import weakref
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -66,7 +67,7 @@ class WhyNoOverlap:
 
 
 # Cache for group names to avoid repeated normalize_function calls
-_group_name_cache: dict[fx.Node, str] = {}
+_group_name_cache: weakref.WeakKeyDictionary[fx.Node, str] = weakref.WeakKeyDictionary()
 
 
 def get_group_name(n: fx.Node) -> str:
@@ -1136,7 +1137,7 @@ class OverlapScheduler:
         """
         unscheduled_ancestors: OrderedSet[fx.Node] = OrderedSet()
         stack = list(target.all_input_nodes)
-        visited = set()
+        visited = OrderedSet()
 
         while stack:
             node = stack.pop()
