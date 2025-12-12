@@ -239,17 +239,31 @@ void PyTorchStreamReader::init() {
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
   const auto err = mz_zip_get_last_error(ar_.get());
-  TORCH_CHECK(
-      err == MZ_ZIP_NO_ERROR,
-      "PytorchStreamReader failed ",
-      what,
-      info,
-      ": ",
-      mz_zip_get_error_string(err),
+  if (err == MZ_ZIP_NO_ERROR) {
+    return;
+  }
+
+  std::string error_msg = "PytorchStreamReader failed ";
+  error_msg += what;
+  error_msg += info;
+  error_msg += ": ";
+  error_msg += mz_zip_get_error_string(err);
+
+  // For CRC failures, include the expected and computed CRC values
+  if (err == MZ_ZIP_CRC_CHECK_FAILED) {
+    std::ostringstream oss;
+    oss << " (expected CRC32: 0x" << std::hex << ar_->m_expected_crc32
+        << ", computed CRC32: 0x" << ar_->m_computed_crc32 << ")";
+    error_msg += oss.str();
+  }
+
+  error_msg +=
       ". This is an internal miniz error. If you are seeing this error, there "
       "is a high likelihood that your checkpoint file is corrupted. "
       "This can happen if the checkpoint was not saved properly, "
-      "was transferred incorrectly, or the file was modified after saving.");
+      "was transferred incorrectly, or the file was modified after saving.";
+
+  TORCH_CHECK(false, error_msg);
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;

@@ -4667,8 +4667,13 @@ mz_bool mz_zip_reader_extract_to_mem_no_alloc1(mz_zip_archive *pZip, mz_uint fil
 #ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
         if ((flags & MZ_ZIP_FLAG_COMPRESSED_DATA) == 0)
         {
-            if (mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, (size_t)file_stat.m_uncomp_size) != file_stat.m_crc32)
+            mz_uint32 computed_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, (size_t)file_stat.m_uncomp_size);
+            if (computed_crc32 != file_stat.m_crc32)
+            {
+                pZip->m_expected_crc32 = file_stat.m_crc32;
+                pZip->m_computed_crc32 = computed_crc32;
                 return mz_zip_set_error(pZip, MZ_ZIP_CRC_CHECK_FAILED);
+            }
         }
 #endif
 
@@ -4743,10 +4748,16 @@ mz_bool mz_zip_reader_extract_to_mem_no_alloc1(mz_zip_archive *pZip, mz_uint fil
             status = TINFL_STATUS_FAILED;
         }
 #ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
-        else if (mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, (size_t)file_stat.m_uncomp_size) != file_stat.m_crc32)
+        else
         {
-            mz_zip_set_error(pZip, MZ_ZIP_CRC_CHECK_FAILED);
-            status = TINFL_STATUS_FAILED;
+            mz_uint32 computed_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, (size_t)file_stat.m_uncomp_size);
+            if (computed_crc32 != file_stat.m_crc32)
+            {
+                pZip->m_expected_crc32 = file_stat.m_crc32;
+                pZip->m_computed_crc32 = computed_crc32;
+                mz_zip_set_error(pZip, MZ_ZIP_CRC_CHECK_FAILED);
+                status = TINFL_STATUS_FAILED;
+            }
         }
 #endif
     }
