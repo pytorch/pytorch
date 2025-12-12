@@ -19,6 +19,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libpng-dev \
         python3 \
         python3-pip \
+        python-is-python3 \
         python3-dev && \
     rm -rf /var/lib/apt/lists/*
 # Remove PEP 668 restriction (safe in containers)
