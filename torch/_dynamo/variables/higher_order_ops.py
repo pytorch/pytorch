@@ -4656,9 +4656,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
-    @raise_hard_error_if_graph_break(
-        reason="torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-    )
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -4715,16 +4712,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 from .builder import wrap_fx_proxy
 
                 # Store the invocation as a call
-                flat_variable = wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch._higher_order_ops.invoke_subgraph,
-                        args=p_args,
-                        kwargs={},
-                    ),
-                    example_value=flat_example_value,
-                )
+                # Add markers for easy debugging
+                with torch.fx.traceback.preserve_node_meta():
+                    with torch.fx.traceback.annotate(
+                        {"cache_hit_with_is_pure": submodule_name}
+                    ):
+                        flat_variable = wrap_fx_proxy(
+                            tx=tx,
+                            proxy=tx.output.create_proxy(
+                                "call_function",
+                                torch._higher_order_ops.invoke_subgraph,
+                                args=p_args,
+                                kwargs={},
+                            ),
+                            example_value=flat_example_value,
+                        )
 
                 # For is_pure, we will have to assume that flat_variable is same as body_r.
                 out_type = (
