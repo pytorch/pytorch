@@ -578,16 +578,26 @@ class _TritonKernelCall(_DebugCall):
 class _AnnotateCall(_DebugCall):
     """Custom annotation call"""
 
-    def __init__(self, tag: Any, call_depth: int, stack: bool = False) -> None:
+    def __init__(
+        self, tag: Any, is_profiler_record: bool, call_depth: int, stack: bool = False
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.tag = tag
+        self.is_profiler_record = is_profiler_record
 
     def render(self, attributes: list[str]) -> str:
-        return f"[annotate] {self.tag}"
+        if self.is_profiler_record:
+            return f"[record function] {self.tag}"
+        else:
+            return f"[annotate] {self.tag}"
 
     def __iter__(self):
         yield from [
-            f"[nn.Mod] {self.tag}",
+            (
+                f"[record function] {self.tag}"
+                if self.is_profiler_record
+                else f"[annotate] {self.tag}"
+            ),
             (),
             {},
             self.call_depth,
@@ -671,6 +681,7 @@ class DebugMode(TorchDispatchMode):
         record_stack_trace=False,
         record_output=True,
         record_ids=False,
+        record_profiler_context=True,
     ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -715,6 +726,10 @@ class DebugMode(TorchDispatchMode):
         # Annotates string dumps with graph-style tensor ids, e.g. op($1, $2) -> $3.
         self.record_ids: bool = record_ids
 
+        # Annotates string dumps with profiler.record_function contexts from runtime code.
+        # Currently does not preserve contexts inside torch.compile-d regions.
+        self.record_profiler_context: bool = record_profiler_context
+
         self.reset()
 
     def reset(self) -> None:
@@ -722,6 +737,7 @@ class DebugMode(TorchDispatchMode):
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
+        self.ignored_record_functions = 0
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
@@ -776,10 +792,45 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def _maybe_record_function(self, tag):
+        # filter out tags that appear noisy, or aren't runtime-related
+        if any(
+            tag.startswith(prefix)
+            for prefix in [
+                # assuming these are from benchmarking, not the actual runtime call
+                "CachingAutotuner.",
+                "InductorBenchmarker.",
+                # inductor compilation
+                "compile_fx.<locals>.",
+            ]
+        ):
+            self.ignored_record_functions += 1
+            return
+
+        call = _AnnotateCall(tag, True, self.call_depth, stack=self.record_stack_trace)
+        self.operators.append(call)
+        self.call_depth += 1
+
+    def _maybe_exit_record_function(self):
+        assert self.ignored_record_functions >= 0
+        if self.ignored_record_functions > 0:
+            self.ignored_record_functions -= 1
+        else:
+            self.call_depth -= 1
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
+        # Handle record_function entries
+        if self.record_profiler_context:
+            if func == torch.ops.profiler._record_function_enter_new.default:
+                assert len(args) == 1
+                self._maybe_record_function(args[0])
+            elif func == torch.ops.profiler._record_function_exit._RecordFunction:
+                self._maybe_exit_record_function()
+
+        # Handle DebugMode._annotate()
         if func is torch.ops.debug_mode_ops.annotate.default:
             assert len(args) == 1
             self._handle_annotate(args[0])
@@ -1123,7 +1174,7 @@ class DebugMode(TorchDispatchMode):
 
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
-        call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
+        call = _AnnotateCall(tag, False, self.call_depth, self.record_stack_trace)
         self.operators.append(call)
 
     @staticmethod
