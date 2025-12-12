@@ -101,7 +101,10 @@ class TransformedDistribution(Distribution):
             transform.codomain.event_dim,  # the transform is coupled
             base_event_dim + transform_change_in_event_dim,  # the base dist is coupled
         )
-        assert len(forward_shape) >= event_dim
+        if len(forward_shape) < event_dim:
+            raise AssertionError(
+                f"forward_shape length {len(forward_shape)} must be >= event_dim {event_dim}"
+            )
         cut = len(forward_shape) - event_dim
         batch_shape = forward_shape[:cut]
         event_shape = forward_shape[cut:]
