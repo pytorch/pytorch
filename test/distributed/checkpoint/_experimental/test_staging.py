@@ -1,15 +1,15 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
-from unittest import skipIf
 from concurrent.futures import Future
+from unittest import skipIf
 
 import torch
 from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_ACCELERATOR
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_ACCELERATOR
 
 
 class TestDefaultStager(TestCase):
@@ -216,9 +216,7 @@ class TestDefaultStager(TestCase):
         stager.close()
 
 
-instantiate_device_type_tests(
-    TestDefaultStager, globals(), allow_xpu=True
-)
+instantiate_device_type_tests(TestDefaultStager, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
