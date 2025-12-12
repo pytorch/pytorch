@@ -306,6 +306,7 @@ class Match:
 
                 # second graph
                 example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                # pyrefly: ignore [bad-argument-type]
                 replacement = trace_fn(graph_with_eager_vals, example_vals)
 
                 # propagate metadata from first graph to second
