@@ -366,7 +366,7 @@ class FakeTensorConverter:
         trace: bool = True,
     ) -> FakeTensor:
         # see note [Tensor Fakification and Symbol Caching]
-        if not symbolic_context and not source and shape_env:
+        if not symbolic_context and not source and not shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
                 if t in tracing_context.tensor_to_context:
                     symbolic_context = tracing_context.tensor_to_context[t]
@@ -894,6 +894,23 @@ class FakeTensor(Tensor):
             return NotImplemented
 
         assert not fake_mode.in_kernel_invocation
+
+        # Intercept deepcopy here and error only when deepcopy() is called
+        # on a real tensor inside FakeTensorMode.  This avoids making
+        # from_real_tensor() refuse non-meta tensors generally.
+        try:
+            func_name = getattr(func, "__name__", "")
+        except Exception:
+            func_name = ""
+
+        if func_name == "deepcopy":
+            # inspect all leaves of args/kwargs and raise for any real tensor
+            for leaf in pytree.arg_tree_leaves(*args, **kwargs):
+                if isinstance(leaf, torch.Tensor) and leaf.device.type != "meta":
+                    raise NotImplementedError(
+                        "deepcopy() is not supported on a real tensor (e.g., CPU, CUDA) "
+                        "inside FakeTensorMode. This operation is not traceable."
+                    )
 
         with fake_mode:
             return func(*args, **kwargs)
@@ -2349,6 +2366,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
+
         from torch._higher_order_ops.utils import registered_hop_fake_fns
 
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
@@ -2370,7 +2388,6 @@ class FakeTensorMode(TorchDispatchMode):
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
-
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
