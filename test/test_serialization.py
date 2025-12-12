@@ -4753,7 +4753,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"invalid header or archive is corrupted"
+                r"invalid header or archive is corrupted\. "
                 r"This is an internal miniz error[\s\S]*"
                 r"there is a high likelihood that your checkpoint file is corrupted"
             ):
