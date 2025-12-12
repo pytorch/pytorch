@@ -2376,12 +2376,18 @@ class ExternKernelCaller(ChoiceCaller):
 
         self.input_tensor_meta: Union[list[TensorMeta], TensorMeta]
         self.output_tensor_meta: Union[list[TensorMeta], TensorMeta]
+        self.input_tensor_meta, self.output_tensor_meta = [], []
         if device.type == "cpu":
-            self.input_tensor_meta, self.output_tensor_meta = [], []
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
-            self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
-            self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            try:
+                self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+                self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+            except Exception:
+                log.warning(
+                    "Constructing input/output tensor meta failed for Extern Choice"
+                )
+
             benchmark_cls = ExternKernelGPUBenchmarkRequest
 
         self.bmreq: ExternKernelBenchmarkRequest = benchmark_cls(
@@ -2777,7 +2783,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3595,7 +3601,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timeout_seconds = config.collective_benchmark_timeout
 
         nruns = config.collective_benchmark_nruns
-        nwarmup = ir.autotune_warmup
+        nwarmup = config.inductor_default_autotune_warmup
 
         # Use default process group (None = all ranks)
         process_group = None
@@ -3689,9 +3695,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3702,9 +3706,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3867,12 +3869,12 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
-            config.cutlass.cutlass_prescreening
-            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -3901,7 +3903,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
