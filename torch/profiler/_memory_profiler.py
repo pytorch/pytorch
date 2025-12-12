@@ -5,7 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Optional
 
 import torch
 from torch._C import FunctionSchema
@@ -110,9 +110,9 @@ class TensorKey(Key):
 
     @staticmethod
     def _make(
-        tensor_id: Optional[int],
-        storage_ptr: Optional[int],
-        allocation_id: Optional[int],
+        tensor_id: int | None,
+        storage_ptr: int | None,
+        allocation_id: int | None,
         device: torch.device,
     ) -> Optional["TensorKey"]:
         if (
@@ -128,7 +128,7 @@ class TensorKey(Key):
         return cls._make(alloc.id, alloc.ptr, alloc.allocation_id, alloc.device)
 
     @classmethod
-    def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
+    def from_tensor(cls, t: _TensorMetadata | None) -> Optional["TensorKey"]:
         if t is not None:
             return cls._make(t.id, t.storage_data_ptr, t.allocation_id, t.device)
         return None
@@ -140,7 +140,7 @@ class TensorKey(Key):
 
 def _extract_parameters_and_gradients(
     node: _ProfilerEvent,
-) -> Iterator[tuple[Optional[TensorKey], Optional[TensorKey]]]:
+) -> Iterator[tuple[TensorKey | None, TensorKey | None]]:
     children = node.children
 
     # AccumulateGrad is used in the Autograd engine to handle gradient updates.
@@ -188,13 +188,13 @@ def extract_parameters(node: _ProfilerEvent) -> Iterator[TensorKey]:
 
 def extract_gradients(
     node: _ProfilerEvent,
-) -> Iterator[tuple[Optional[TensorKey], TensorKey]]:
+) -> Iterator[tuple[TensorKey | None, TensorKey]]:
     for p, p_grad in _extract_parameters_and_gradients(node):
         if p_grad is not None:
             yield p, p_grad
 
 
-def get_scopes(event: Optional[_ProfilerEvent]) -> tuple[RecordScope, ...]:
+def get_scopes(event: _ProfilerEvent | None) -> tuple[RecordScope, ...]:
     scopes = []
     while event:
         if event.typed[0] == _EventType.TorchOp:
@@ -217,7 +217,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> tuple[Optional[bool], ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> tuple[bool | None, ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -226,7 +226,7 @@ class SchemaMatcher:
         overload. If we cannot find any valid schema then we must be
         conservative and assume all inputs are mutable.
         """
-        mutable: Optional[list[bool]] = None
+        mutable: list[bool] | None = None
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
@@ -275,7 +275,7 @@ class SchemaMatcher:
                 isinstance(i, TensorKey) for i in observed
             )
 
-        type_map: tuple[tuple[Any, Union[type, tuple[type, ...]]], ...] = (
+        type_map: tuple[tuple[Any, type | tuple[type, ...]], ...] = (
             (torch._C.TensorType, TensorKey),
             (torch._C.NoneType, type(None)),
             (torch._C.BoolType, bool),
@@ -296,7 +296,7 @@ class SchemaMatcher:
         return observed is None
 
     @staticmethod
-    def lookup_schemas(name: str) -> Optional[tuple[FunctionSchema, ...]]:
+    def lookup_schemas(name: str) -> tuple[FunctionSchema, ...] | None:
         # TODO(robieta):
         #   _jit_get_schemas_for_operator is quite expensive. (~100us / call)
         #   Consider adding `functools.lru_cache` if that becomes an issue.
@@ -375,7 +375,7 @@ class SizeMap:
 
         self._values.update(allocations)
 
-    def _update_values(self, t: Optional[_TensorMetadata]) -> None:
+    def _update_values(self, t: _TensorMetadata | None) -> None:
         key = TensorKey.from_tensor(t)
         if key is not None and t is not None and t.layout == torch.strided:
             # Scalars are represented as zero dim Tensors
@@ -401,8 +401,8 @@ class SizeMap:
 
 @dataclasses.dataclass()
 class DataFlowEdge:
-    input_version: Optional[int] = None
-    mutated: Optional[bool] = False
+    input_version: int | None = None
+    mutated: bool | None = False
 
     @property
     def is_allocation(self) -> bool:
@@ -431,7 +431,7 @@ class DataFlowNode:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
         # Start by populating edges from op inputs and outputs.
-        mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
+        mutable_by_key: dict[TensorKey | None, set[bool | None]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
                 op.inputs, SchemaMatcher.inputs_are_mutable(op), strict=True
@@ -447,7 +447,7 @@ class DataFlowNode:
                         key = TensorKey.from_tensor(op_input_i)
                         mutable_by_key.setdefault(key, set()).add(mutable)
 
-        edges: collections.defaultdict[Optional[TensorKey], DataFlowEdge]
+        edges: collections.defaultdict[TensorKey | None, DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
         for key, mutable_set in mutable_by_key.items():
             if key is not None:
@@ -511,7 +511,7 @@ class DataFlowGraph:
     def __init__(self, op_tree: OpTree) -> None:
         self._op_tree = op_tree
         self._leaf_events = self._extract_leaf_events(op_tree)
-        self._active_version: dict[TensorKey, Optional[int]] = {}
+        self._active_version: dict[TensorKey, int | None] = {}
         self._flow_nodes = [DataFlowNode(e, self) for e in self.leaf_events]
         self._flow_nodes.sort(key=lambda x: x.start_time)
         self.validate()
@@ -615,7 +615,7 @@ class DataFlowGraph:
 
 @dataclasses.dataclass
 class CategoryElement:
-    by_id: Optional[Category] = None
+    by_id: Category | None = None
     by_key: dict[TensorKey, Category] = dataclasses.field(default_factory=dict)
     by_version: dict[TensorAndID, Category] = dataclasses.field(default_factory=dict)
 
@@ -645,7 +645,7 @@ class CategoryDict:
     ) -> None:
         self._values[key.id].by_version.setdefault((key, version), category)
 
-    def get(self, key: Key, version: int) -> Optional[Category]:
+    def get(self, key: Key, version: int) -> Category | None:
         if isinstance(key, Key) and not isinstance(key, TensorKey):
             return None
         element = self._values[key.id]
@@ -742,7 +742,7 @@ class MemoryProfile:
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
 
-    def _category_snapshot(self) -> dict[TensorAndID, Optional[Category]]:
+    def _category_snapshot(self) -> dict[TensorAndID, Category | None]:
         all_tensor_versions: set[TensorAndID] = set()
 
         for node in self._data_flow_graph.flow_nodes:

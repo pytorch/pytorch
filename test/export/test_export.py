@@ -652,6 +652,35 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    @skipIfCrossRef
+    def test_custom_tag_metadata_runtime_assert(self):
+        class Foo(torch.nn.Module):
+            @torch._dynamo.disable()
+            def forward(self, x, y):
+                if (
+                    x.shape[0] ** 2 - y.shape[0] ** 2 >= 4  # 16
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 <= 20
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 != 15
+                ):
+                    return x * 2, y * 2
+
+        inputs = (torch.randn(5), torch.randn(3))
+        shapes = {"x": (torch.export.Dim("dx"),), "y": (torch.export.Dim("dy"),)}
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(
+                Foo(),
+                inputs,
+                dynamic_shapes=shapes,
+                prefer_deferred_runtime_asserts_over_guards=True,
+            )
+
+        gm = ep.module()
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue("custom" in node.meta)
+                self.assertTrue(node.meta["custom"] != {})
+
     @testing.expectedFailureSerDer  # can't serialize functorch ops
     @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     def test_vmap_to_assert(self):
@@ -775,6 +804,9 @@ class TestExport(TestCase):
 ('call_function', 'item', {'moo': 0})
 ('call_function', 'ge_1', {'moo': 0})
 ('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul_1', {'moo': 0})
+('call_function', 'le', {'moo': 0})
+('call_function', '_assert_scalar_default_1', {'moo': 0})
 ('call_function', 'mul', {'moo': 0})""",
         )
 
@@ -2447,9 +2479,7 @@ class GraphModule(torch.nn.Module):
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
-
         getitem_1: "Sym(u0)" = cond[0];  cond = None
-
         ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
         le_1: "Sym(u0 <= 1)" = getitem_1 <= 1
@@ -13378,11 +13408,17 @@ graph():
 
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
-    def test_register_constant(self):
+    def test_opaque_obj(self):
         @dataclass(frozen=True)
         class MyInput:
             int_1: int
             int_2: int
+
+            def __fx_repr__(self):
+                return (
+                    f"MyInput(int_1={self.int_1!r}, int_2={self.int_2!r})",
+                    {"MyInput": MyInput},
+                )
 
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -13391,7 +13427,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        register_constant(MyInput)
+        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -16322,6 +16358,82 @@ class GraphModule(torch.nn.Module):
 """,
             ignore_empty_lines=True,
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_module_to_with_shared_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with (
+            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+        ):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = torch.export.export(
+                container,
+                (torch.randn(4, 4, 4, device="cuda"),),
+                strict=True,
+            ).module()
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                """\
+def forward(self, x):
+    args_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    mod_embedding_weight = self.mod.embedding.weight
+    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
+    empty = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    submod_6 = self.submod_1
+    to = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_6, mod_embedding_weight);  submod_6 = mod_embedding_weight = None
+    getitem = to[0];  to = None
+    submod_7 = self.submod_3
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_7);  submod_7 = wrap_with_set_grad_enabled = None
+    submod_8 = self.submod_4
+    view_as = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_8, detach, getitem);  submod_8 = detach = getitem = None
+    getitem_1 = view_as[0];  view_as = None
+    ones = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
+    embedding = torch.ops.aten.embedding.default(getitem_1, ones);  getitem_1 = ones = None
+    sum_1 = torch.ops.aten.sum.default(embedding);  embedding = None
+    sum_2 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_3 = torch.ops.aten.sum.default(sum_1);  sum_1 = None
+    add = torch.ops.aten.add.Tensor(sum_2, sum_3);  sum_2 = sum_3 = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+            )
+
+            inp = torch.randn(4, 4, 4, device="cuda")
+
+            # Call container first to move shared weights to CUDA
+            export_out = gm(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though weights are now on CUDA
+            # and .to(cuda) returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation

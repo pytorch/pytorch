@@ -32,7 +32,7 @@ import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -45,6 +45,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     format_skip_frame_message,
+    get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
@@ -390,6 +391,13 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
+        # the optimizer.step method and we don't need to trace it
+        if (
+            self.get_name() == "patch_track_step_called"
+            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
+        ):
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
@@ -907,7 +915,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
-        inline_tracer.output.side_effects.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -919,7 +926,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self) -> Never:
-        raise NotImplementedError
+        raise NotImplementedError("get_function")
 
     def has_self(self) -> bool:
         return False
@@ -976,12 +983,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             return tracer.inline_call_()
-        except ObservedUserStopIteration:
-            tracer.output.side_effects.untrack_generator(self)
-            raise
-        except ObservedException:
+        except ObservedException as e:
             tracer.generator_exhausted = True
-            raise
+            raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
@@ -1023,10 +1027,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def should_allow_nested_graph_breaks(self):
         return False
 
-    def _setup_and_raise_exception(
+    def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        # Raise an exception at the point where the generator is paused
         tracer = self.inline_tracer
         try:
             tracer._raise_exception_variable(exc)
@@ -1060,10 +1063,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(
-                    isinstance(arg, ConstantVariable) and arg.value is None
-                    for arg in args
-                ):
+                if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
             tracer = self.inline_tracer
             tracer.push_many(args)
@@ -1090,7 +1090,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
             try:
-                self._setup_and_raise_exception(
+                self._setup_exception(
                     tx, variables.ExceptionVariable(GeneratorExit, ())
                 )
                 # There's an extra block on Python 3.12+ to handle StopIteration
@@ -1139,7 +1139,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # returns the next value yielded by the generator.
             # * If the generator exits without yielding, raise StopIteration
             # * If the generator function does not catch the passed-in exception,
-            # or raises a different exception, then that new exception propagates to the caller.
+            # or raises a different exception, then that exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
             tracer = self.inline_tracer
@@ -1148,15 +1148,84 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # In such cases, we re-raise the exception object given to avoid
                 # creating a new object, so that IS_OP works.
                 # See: https://github.com/pytorch/pytorch/pull/146496
-                self._setup_and_raise_exception(
-                    tx, args[1] if len(args) == 3 else args[0]
-                )
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
             except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
                 raise
 
-            # If reaches here, it means user code captured the exception
-            return self.next_variable(tx)
+            retval = self.next_variable(tx)
+
+            # The exception raised before is still active. We need to check the exception
+            # table one more time to find the next target. But why? Let's walk
+            # through an example and its generated bytecode: https://godbolt.org/z/ebdTbMv8M
+            #
+            #     z = 0
+            #     def whoo():
+            #         global z
+            #         z = 0
+            #         try:
+            #             yield 1
+            #         except ValueError:
+            #             yield 2
+            #         finally:
+            #             z += 1
+            #         z += 10
+            #
+            #     gen = whoo()
+            #     next(gen)
+            #     gen.throw(ValueError)
+            #     print('z', z)  -> z = 1
+            #
+            #              ...
+            #         >>   58 PUSH_EXC_INFO
+            #
+            #   8          60 LOAD_GLOBAL              2 (ValueError)
+            #              70 CHECK_EXC_MATCH
+            #              72 POP_JUMP_IF_FALSE        7 (to 88)
+            #              74 POP_TOP
+            #
+            #   9          76 LOAD_CONST               3 (2)
+            #              78 YIELD_VALUE              3      <------ ValueError is still active here
+            #              80 RESUME                   1
+            #              82 POP_TOP
+            #              84 POP_EXCEPT
+            #              86 jump_backward           34 (to 20)
+            #              ...
+            #
+            #     ExceptionTable:
+            #     4 to 8 -> 124 [0] lasti
+            #     12 to 18 -> 58 [0]
+            #     20 to 56 -> 124 [0] lasti
+            #     58 to 82 -> 90 [1] lasti     <------ move to 90
+            #     84 to 86 -> 96 [0]
+            #     88 to 88 -> 90 [1] lasti
+            #     90 to 94 -> 96 [0]
+            #     96 to 116 -> 118 [1] lasti
+            #     118 to 122 -> 124 [0] lasti
+            #
+            # In this scenario, a generator can yield after `throw()` is called. Even
+            # after the exception is raised a few lines above, it remains active
+            # within the `78 YIELD_VALUE` instruction. When the generator resumes
+            # after the second yield on instruction `80 RESUME`, we cannot simply
+            # return the control flow to the next instruction. Instead, one must
+            # check the exception table (or equivalent) to find the next target
+            # In this case, it says the instruction pointer must be moved to 90.
+            #
+            # Without this step, if we let the trace proceed to the next
+            # instruction, it would follow the control flow where the exception
+            # raised by `throw()` was handled and swallowed, potentially leading
+            # to incorrect behavior.
+            exc_type = type("__InternalThrowException", (Exception,), {})
+
+            try:
+                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
+                self.next_variable(tx)
+            except get_dynamo_observed_exception(exc_type):
+                # We should get back the exception raised before.
+                pass
+            else:
+                raise_observed_exception(RuntimeError, tracer)
+            return retval
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1458,8 +1527,8 @@ def invoke_and_store_as_constant(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     def convert(x: VariableTracker) -> Any:
-        if isinstance(x, variables.TensorVariable):
-            return x.get_real_value()
+        if x.is_tensor():
+            return cast("TensorVariable", x).get_real_value()
         return x.as_python_constant()
 
     args = [convert(x) for x in args]
@@ -1510,6 +1579,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def as_python_constant(self):
+        return self.get_function()
+
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
@@ -1518,7 +1590,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            raise NotImplementedError
+            raise NotImplementedError("get_function")
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
@@ -2211,11 +2283,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    _nonvar_fields = {
+        "original_cache_hash",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         func: VariableTracker,
         args: Sequence[VariableTracker],
         keywords: dict[str, VariableTracker],
+        original_cache_hash: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2227,6 +2305,8 @@ class FunctoolsPartialVariable(VariableTracker):
         # fake_value is used for id calculation. Creating this value and id'ng
         # on it is sufficient for the tracing purposes.
         self.fake_value = functools.partial(identity)
+        # Store cache_hash from the original partial for SAC context_fn caching
+        self.original_cache_hash = original_cache_hash
 
     def python_type(self) -> type:
         return functools.partial
@@ -2290,11 +2370,15 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def guard_as_python_constant(self) -> Any:
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
-        return functools.partial(
+        result = functools.partial(
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+        # Preserve cache_hash for SAC context_fn caching
+        if self.original_cache_hash is not None:
+            result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
+        return result
 
     def is_python_hashable(self) -> bool:
         return (
@@ -2408,7 +2492,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
             and all(
-                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
                 or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
                 for x in args[0].items
             )
@@ -2424,8 +2508,8 @@ class PolyfilledFunctionVariable(VariableTracker):
                 sym_num=torch.sym_sum(
                     [
                         (
-                            x.value
-                            if isinstance(x, variables.ConstantVariable)
+                            x.as_python_constant()
+                            if x.is_python_constant()
                             else x.sym_num  # type: ignore[attr-defined]
                         )
                         for x in args[0].items
@@ -2630,7 +2714,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
         combined_args_raw: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
-        from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
@@ -2664,17 +2747,17 @@ class DynamoTritonHOPifier(TritonHOPifier):
         constant_args = {
             k: v.as_python_constant()
             for k, v in combined_args_raw.items()
-            if isinstance(v, ConstantVariable)
+            if isinstance(v, VariableTracker) and v.is_python_constant()
         }
         non_constant_args = {
             k: v
             for k, v in combined_args.items()
-            if not isinstance(v, ConstantVariable)
+            if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
 
         for v in non_constant_args.values():
             v = v.realize()
-            if not isinstance(v, (variables.TensorVariable, variables.SymNodeVariable)):
+            if not (v.is_tensor() or v.is_symnode_like()):
                 self.raise_unsupported(
                     f"Unexpected argument type for a Triton kernel: {repr(v)}."
                 )
@@ -2796,7 +2879,7 @@ class TMADescriptorStableVariable(VariableTracker):
         block_shape: "ListVariable",
         **kwargs: Any,
     ) -> None:
-        assert isinstance(tensor, variables.TensorVariable)
+        assert tensor.is_tensor()
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
@@ -2970,9 +3053,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         if len(args) == 2:
             is_leaf = args[1]
 
-        if not (
-            isinstance(is_leaf, variables.ConstantVariable) and is_leaf.value is None
-        ):
+        if not is_leaf.is_constant_none():
             return super().call_function(tx, args, kwargs)
 
         # Optimize the case where is_leaf is None
