@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
     MI200_ARCH,
     requires_gpu,
     requires_triton,
+    skipIfRocmArch,
 )
 
 
