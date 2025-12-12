@@ -309,9 +309,14 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager4[1], compiled4[1])
         self.assertEqual(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(specialize_int=True)
     def test_python_type_does_not_realize(self):
         """Test that python_type() on a lazy constant does not trigger realization.
-        This verifies that type-based queries can be answered without full guarding."""
+        This verifies that type-based queries can be answered without full guarding.
+
+        Note: This test requires specialize_int=True because with specialize_int=False,
+        lazy_isinstance must realize to determine if the int becomes SymNodeVariable.
+        """
         from torch._dynamo.source import LocalSource
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.lazy import LazyCache, LazyConstantVariable
