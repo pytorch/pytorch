@@ -3048,12 +3048,13 @@ main()
         out = model(inputs)
         loss = reduce_to_scalar_loss(out)
 
-        with compiled_autograd._enable(compiler_fn):
+        with (
+            torch._inductor.config.patch(graph_partition=graph_partition),
+            compiled_autograd._enable(compiler_fn),
+        ):
             torch._inductor.config.triton.cudagraphs = True
-            torch._inductor.config.graph_partition = graph_partition
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
-            torch._inductor.config.graph_partition = True  # restore default
 
         # CPU-only graphs skip cudagraphs regardless of graph_partition setting
         # (no GPU devices to use cudagraphs with)
