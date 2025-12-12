@@ -170,6 +170,7 @@ from .variables.misc import (
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
+    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -2093,6 +2094,17 @@ class InstructionTranslatorBase(
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
         return val
 
+    def pytraceback_here(self) -> None:
+        # based on CPython's PyTraceBack_Here impl
+        frame_summary = self.frame_summary()
+        curr_exc = self.exn_vt_stack.get_current_exception()
+        tb = curr_exc.var_getattr(self, "__traceback__")
+        new_tb = TracebackVariable(frame_summary, tb)
+        curr_exc.call_method(
+            self, "__setattr__", [ConstantVariable("__traceback__"), new_tb], {}
+        )
+        self.exn_vt_stack.set_current_exception(curr_exc)
+
     def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
@@ -2123,6 +2135,7 @@ class InstructionTranslatorBase(
 
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
+        self.pytraceback_here()
 
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
@@ -2232,7 +2245,7 @@ class InstructionTranslatorBase(
             val = self.stack[-1]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = ConstantVariable(None)
+            tb = val.var_getattr(self, "__traceback__")
             if sys.version_info >= (3, 14):
                 if not isinstance(self.stack[-4], NullVariable):
                     args.append(self.stack[-4])
@@ -2242,7 +2255,7 @@ class InstructionTranslatorBase(
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
-            tb = ConstantVariable(None)
+            tb = val.var_getattr(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2286,6 +2299,7 @@ class InstructionTranslatorBase(
                     )
 
                 # 3) push the exception to the stack
+                self.pytraceback_here()
                 self.push(self.exn_vt_stack.get_current_exception())
 
                 # 4) jump to the handler
