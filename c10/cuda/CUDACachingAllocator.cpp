@@ -2508,7 +2508,7 @@ class DeviceCachingAllocator {
       while (block != nullptr && block->mapped) {
         segment_info.blocks.emplace_back();
         BlockInfo& block_info = segment_info.blocks.back();
-        
+
         block_info.size = block->size;
         block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
