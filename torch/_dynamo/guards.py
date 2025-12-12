@@ -809,18 +809,6 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
     return f"{code_part:<60}{extra}"
 
 
-def get_verbose_user_stack(guard: Guard) -> str:
-    user_stack_frames = []
-    if is_recompiles_verbose_enabled():
-        for fs in reversed(guard.user_stack):
-            if fs.filename not in uninteresting_files():
-                user_stack_frames.append(format_frame(fs, line=True))
-    user_stack_format = [
-        f"#  {i}: {frame}" for i, frame in enumerate(user_stack_frames)
-    ]
-    return "\n".join(user_stack_format)
-
-
 def get_verbose_code_parts(
     code_parts: Union[str, list[str]],
     guard: Optional[Guard],
@@ -1214,7 +1202,7 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"])
+                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"], None)
 
                 # Install the value manager
                 return mgr.get_value_manager(
@@ -1809,12 +1797,10 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_manager.root.add_epilogue_lambda_guard(
                 guard_fn,
                 verbose_code_parts,
-                "epilogue",
+                None,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(
-                guard_fn, verbose_code_parts, "lambda"
-            )
+            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts, None)
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
