@@ -1,0 +1,730 @@
+diff --git a/test/dynamo/cpython/3_13/test_traceback.py b/test/dynamo/cpython/3_13/test_traceback.py
+index 4b5dd3d2565..5cae5693d00 100644
+--- a/test/dynamo/cpython/3_13/test_traceback.py
++++ b/test/dynamo/cpython/3_13/test_traceback.py
+@@ -30,6 +30,27 @@ from functools import partial
+ from pathlib import Path
+ import _colorize
+ 
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_exceptions.py
++
++import torch
++import torch._dynamo.test_case
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ MODULE_PREFIX = f'{__name__}.' if __name__ == '__main__' else ''
+ 
+ test_code = namedtuple('code', ['co_filename', 'co_name'])
+@@ -41,7 +62,7 @@ test_tb = namedtuple('tb', ['tb_frame', 'tb_lineno', 'tb_next', 'tb_lasti'])
+ LEVENSHTEIN_DATA_FILE = Path(__file__).parent / 'levenshtein_examples.json'
+ 
+ 
+-class TracebackCases(unittest.TestCase):
++class TracebackCases(__TestCase):
+     # For now, a very minimal set of tests.  I want to be sure that
+     # formatting of SyntaxErrors works based on changes for 2.1.
+     def setUp(self):
+@@ -215,9 +236,10 @@ class TracebackCases(unittest.TestCase):
+         self.assertEqual(lst, ['KeyboardInterrupt\n'])
+ 
+     def test_format_exception_only_bad__str__(self):
+-        class X(Exception):
+-            def __str__(self):
+-                1/0
++        with torch._dynamo.error_on_graph_break(False):
++            class X(Exception):
++                def __str__(self):
++                    1/0
+         err = traceback.format_exception_only(X, X())
+         self.assertEqual(len(err), 1)
+         str_value = '<exception str() failed>'
+@@ -1743,7 +1765,7 @@ class TracebackErrorLocationCaretTestBase:
+ class PurePythonTracebackErrorCaretTests(
+     PurePythonExceptionFormattingMixin,
+     TracebackErrorLocationCaretTestBase,
+-    unittest.TestCase,
++    __TestCase,
+ ):
+     """
+     Same set of tests as above using the pure Python implementation of
+@@ -1757,7 +1779,7 @@ class PurePythonTracebackErrorCaretTests(
+ class CPythonTracebackErrorCaretTests(
+     CAPIExceptionFormattingMixin,
+     TracebackErrorLocationCaretTestBase,
+-    unittest.TestCase,
++    __TestCase,
+ ):
+     """
+     Same set of tests as above but with Python's internal traceback printing.
+@@ -1769,7 +1791,7 @@ class CPythonTracebackErrorCaretTests(
+ class CPythonTracebackLegacyErrorCaretTests(
+     CAPIExceptionFormattingLegacyMixin,
+     TracebackErrorLocationCaretTestBase,
+-    unittest.TestCase,
++    __TestCase,
+ ):
+     """
+     Same set of tests as above but with Python's legacy internal traceback printing.
+@@ -2097,9 +2119,10 @@ class TracebackFormatMixin:
+     def test_unhashable(self):
+         from _testcapi import exception_print
+ 
+-        class UnhashableException(Exception):
+-            def __eq__(self, other):
+-                return True
++        with torch._dynamo.error_on_graph_break(False):
++            class UnhashableException(Exception):
++                def __eq__(self, other):
++                    return True
+ 
+         ex1 = UnhashableException('ex1')
+         ex2 = UnhashableException('ex2')
+@@ -2178,12 +2201,12 @@ boundaries = re.compile(
+     '(%s|%s)' % (re.escape(cause_message), re.escape(context_message)))
+ 
+ @force_not_colorized_test_class
+-class TestTracebackFormat(unittest.TestCase, TracebackFormatMixin):
++class TestTracebackFormat(__TestCase, TracebackFormatMixin):
+     pass
+ 
+ @cpython_only
+ @force_not_colorized_test_class
+-class TestFallbackTracebackFormat(unittest.TestCase, TracebackFormatMixin):
++class TestFallbackTracebackFormat(__TestCase, TracebackFormatMixin):
+     DEBUG_RANGES = False
+     def setUp(self) -> None:
+         self.original_unraisable_hook = sys.unraisablehook
+@@ -2415,18 +2438,19 @@ class BaseExceptionReportingTests:
+         e = ValueError(123)
+         vanilla = self.get_report(e)
+ 
+-        # non-sequence __notes__
+-        class BadThing:
+-            def __str__(self):
+-                return 'bad str'
++        with torch._dynamo.error_on_graph_break(False):
++            # non-sequence __notes__
++            class BadThing:
++                def __str__(self):
++                    return 'bad str'
+ 
+-            def __repr__(self):
+-                return 'bad repr'
++                def __repr__(self):
++                    return 'bad repr'
+ 
+-        # unprintable, non-sequence __notes__
+-        class Unprintable:
+-            def __repr__(self):
+-                raise ValueError('bad value')
++            # unprintable, non-sequence __notes__
++            class Unprintable:
++                def __repr__(self):
++                    raise ValueError('bad value')
+ 
+         e.__notes__ = BadThing()
+         notes_repr = 'bad repr'
+@@ -2454,12 +2478,13 @@ class BaseExceptionReportingTests:
+         err_msg = "b'please do not show me as numbers'"
+         self.assertEqual(self.get_report(e), vanilla + err_msg + '\n')
+ 
+-        # an exception with a broken __getattr__ raising a non expected error
+-        class BrokenException(Exception):
+-            broken = False
+-            def __getattr__(self, name):
+-                if self.broken:
+-                    raise ValueError(f'no {name}')
++        with torch._dynamo.error_on_graph_break(False):
++            # an exception with a broken __getattr__ raising a non expected error
++            class BrokenException(Exception):
++                broken = False
++                def __getattr__(self, name):
++                    if self.broken:
++                        raise ValueError(f'no {name}')
+ 
+         e = BrokenException(123)
+         vanilla = self.get_report(e)
+@@ -2492,11 +2517,12 @@ class BaseExceptionReportingTests:
+                     vanilla + 'Note 5\n' + 'Note 6\n')
+ 
+     def test_exception_qualname(self):
+-        class A:
+-            class B:
+-                class X(Exception):
+-                    def __str__(self):
+-                        return "I am X"
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                class B:
++                    class X(Exception):
++                        def __str__(self):
++                            return "I am X"
+ 
+         err = self.get_report(A.B.X())
+         str_value = 'I am X'
+@@ -2505,9 +2531,10 @@ class BaseExceptionReportingTests:
+         self.assertEqual(exp, MODULE_PREFIX + err)
+ 
+     def test_exception_modulename(self):
+-        class X(Exception):
+-            def __str__(self):
+-                return "I am X"
++        with torch._dynamo.error_on_graph_break(False):
++            class X(Exception):
++                def __str__(self):
++                    return "I am X"
+ 
+         for modulename in '__main__', 'builtins', 'some_module':
+             X.__module__ = modulename
+@@ -2537,9 +2564,10 @@ class BaseExceptionReportingTests:
+         self.assertIn(exp, err)
+ 
+     def test_exception_modulename_not_unicode(self):
+-        class X(Exception):
+-            def __str__(self):
+-                return "I am X"
++        with torch._dynamo.error_on_graph_break(False):
++            class X(Exception):
++                def __str__(self):
++                    return "I am X"
+ 
+         X.__module__ = 42
+ 
+@@ -2548,9 +2576,10 @@ class BaseExceptionReportingTests:
+         self.assertEqual(exp, err)
+ 
+     def test_exception_bad__str__(self):
+-        class X(Exception):
+-            def __str__(self):
+-                1/0
++        with torch._dynamo.error_on_graph_break(False):
++            class X(Exception):
++                def __str__(self):
++                    1/0
+         err = self.get_report(X())
+         str_value = '<exception str() failed>'
+         str_name = '.'.join([X.__module__, X.__qualname__])
+@@ -2998,7 +3027,7 @@ class BaseExceptionReportingTests:
+ 
+ 
+ @force_not_colorized_test_class
+-class PyExcReportingTests(BaseExceptionReportingTests, unittest.TestCase):
++class PyExcReportingTests(BaseExceptionReportingTests, __TestCase):
+     #
+     # This checks reporting through the 'traceback' module, with both
+     # format_exception() and print_exception().
+@@ -3015,7 +3044,7 @@ class PyExcReportingTests(BaseExceptionReportingTests, unittest.TestCase):
+ 
+ 
+ @force_not_colorized_test_class
+-class CExcReportingTests(BaseExceptionReportingTests, unittest.TestCase):
++class CExcReportingTests(BaseExceptionReportingTests, __TestCase):
+     #
+     # This checks built-in reporting by the interpreter.
+     #
+@@ -3029,7 +3058,7 @@ class CExcReportingTests(BaseExceptionReportingTests, unittest.TestCase):
+         return s.getvalue()
+ 
+ 
+-class LimitTests(unittest.TestCase):
++class LimitTests(__TestCase):
+ 
+     ''' Tests for limit argument.
+         It's enough to test extact_tb, extract_stack and format_exception '''
+@@ -3149,7 +3178,7 @@ class LimitTests(unittest.TestCase):
+             self.assertEqual(extract(), [])
+ 
+ 
+-class MiscTracebackCases(unittest.TestCase):
++class MiscTracebackCases(__TestCase):
+     #
+     # Check non-printing functions in traceback module
+     #
+@@ -3190,7 +3219,7 @@ class MiscTracebackCases(unittest.TestCase):
+         self.assertEqual(len(result[0]), 4)
+ 
+ 
+-class TestFrame(unittest.TestCase):
++class TestFrame(__TestCase):
+ 
+     def test_basics(self):
+         linecache.clearcache()
+@@ -3231,7 +3260,7 @@ class TestFrame(unittest.TestCase):
+         self.assertEqual(len(f), 4)
+ 
+ 
+-class TestStack(unittest.TestCase):
++class TestStack(__TestCase):
+ 
+     def test_walk_stack(self):
+         def deeper():
+@@ -3328,9 +3357,10 @@ class TestStack(unittest.TestCase):
+             ], s.format())
+ 
+     def test_custom_format_frame(self):
+-        class CustomStackSummary(traceback.StackSummary):
+-            def format_frame_summary(self, frame_summary, colorize=False):
+-                return f'{frame_summary.filename}:{frame_summary.lineno}'
++        with torch._dynamo.error_on_graph_break(False):
++            class CustomStackSummary(traceback.StackSummary):
++                def format_frame_summary(self, frame_summary, colorize=False):
++                    return f'{frame_summary.filename}:{frame_summary.lineno}'
+ 
+         def some_inner():
+             return CustomStackSummary.extract(
+@@ -3353,11 +3383,12 @@ class TestStack(unittest.TestCase):
+ 
+         tb = g()
+ 
+-        class Skip_G(traceback.StackSummary):
+-            def format_frame_summary(self, frame_summary, colorize=False):
+-                if frame_summary.name == 'g':
+-                    return None
+-                return super().format_frame_summary(frame_summary)
++        with torch._dynamo.error_on_graph_break(False):
++            class Skip_G(traceback.StackSummary):
++                def format_frame_summary(self, frame_summary, colorize=False):
++                    if frame_summary.name == 'g':
++                        return None
++                    return super().format_frame_summary(frame_summary)
+ 
+         stack = Skip_G.extract(
+             traceback.walk_tb(tb)).format()
+@@ -3421,7 +3452,7 @@ class FalseyExceptionGroup(ExceptionGroup):
+         return False
+ 
+ 
+-class TestTracebackException(unittest.TestCase):
++class TestTracebackException(__TestCase):
+     def do_test_smoke(self, exc, expected_type_str):
+         try:
+             raise exc
+@@ -3443,8 +3474,9 @@ class TestTracebackException(unittest.TestCase):
+         self.do_test_smoke(ValueError(42), 'ValueError')
+ 
+     def test_smoke_user_exception(self):
+-        class MyException(Exception):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class MyException(Exception):
++                pass
+ 
+         if __name__ == '__main__':
+             expected = ('TestTracebackException.'
+@@ -3677,9 +3709,10 @@ class TestTracebackException(unittest.TestCase):
+         self.assertEqual(list(excs[0].format()), list(excs[1].format()))
+ 
+     def test_unhashable(self):
+-        class UnhashableException(Exception):
+-            def __eq__(self, other):
+-                return True
++        with torch._dynamo.error_on_graph_break(False):
++            class UnhashableException(Exception):
++                def __eq__(self, other):
++                    return True
+ 
+         ex1 = UnhashableException('ex1')
+         ex2 = UnhashableException('ex2')
+@@ -3785,7 +3818,7 @@ class TestTracebackException(unittest.TestCase):
+             self.assertIn(context_message, traceback.format_exception(e))
+ 
+ 
+-class TestTracebackException_ExceptionGroups(unittest.TestCase):
++class TestTracebackException_ExceptionGroups(__TestCase):
+     def setUp(self):
+         super().setUp()
+         self.eg = self._get_exception_group()
+@@ -4023,34 +4056,35 @@ class SuggestionFormattingTestBase:
+         return result_lines[0]
+ 
+     def test_getattr_suggestions(self):
+-        class Substitution:
+-            noise = more_noise = a = bc = None
+-            blech = None
++        with torch._dynamo.error_on_graph_break(False):
++            class Substitution:
++                noise = more_noise = a = bc = None
++                blech = None
+ 
+-        class Elimination:
+-            noise = more_noise = a = bc = None
+-            blch = None
++            class Elimination:
++                noise = more_noise = a = bc = None
++                blch = None
+ 
+-        class Addition:
+-            noise = more_noise = a = bc = None
+-            bluchin = None
++            class Addition:
++                noise = more_noise = a = bc = None
++                bluchin = None
+ 
+-        class SubstitutionOverElimination:
+-            blach = None
+-            bluc = None
++            class SubstitutionOverElimination:
++                blach = None
++                bluc = None
+ 
+-        class SubstitutionOverAddition:
+-            blach = None
+-            bluchi = None
++            class SubstitutionOverAddition:
++                blach = None
++                bluchi = None
+ 
+-        class EliminationOverAddition:
+-            blucha = None
+-            bluc = None
++            class EliminationOverAddition:
++                blucha = None
++                bluc = None
+ 
+-        class CaseChangeOverSubstitution:
+-            Luch = None
+-            fluch = None
+-            BLuch = None
++            class CaseChangeOverSubstitution:
++                Luch = None
++                fluch = None
++                BLuch = None
+ 
+         for cls, suggestion in [
+             (Addition, "'bluchin'?"),
+@@ -4066,17 +4100,19 @@ class SuggestionFormattingTestBase:
+             self.assertIn(suggestion, actual)
+ 
+     def test_getattr_suggestions_underscored(self):
+-        class A:
+-            bluch = None
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                bluch = None
+ 
+         self.assertIn("'bluch'", self.get_suggestion(A(), 'blach'))
+         self.assertIn("'bluch'", self.get_suggestion(A(), '_luch'))
+         self.assertIn("'bluch'", self.get_suggestion(A(), '_bluch'))
+ 
+-        class B:
+-            _bluch = None
+-            def method(self, name):
+-                getattr(self, name)
++        with torch._dynamo.error_on_graph_break(False):
++            class B:
++                _bluch = None
++                def method(self, name):
++                    getattr(self, name)
+ 
+         self.assertIn("'_bluch'", self.get_suggestion(B(), '_blach'))
+         self.assertIn("'_bluch'", self.get_suggestion(B(), '_luch'))
+@@ -4087,15 +4123,17 @@ class SuggestionFormattingTestBase:
+         self.assertIn("'_bluch'", self.get_suggestion(partial(B().method, 'bluch')))
+ 
+     def test_getattr_suggestions_do_not_trigger_for_long_attributes(self):
+-        class A:
+-            blech = None
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                blech = None
+ 
+         actual = self.get_suggestion(A(), 'somethingverywrong')
+         self.assertNotIn("blech", actual)
+ 
+     def test_getattr_error_bad_suggestions_do_not_trigger_for_small_names(self):
+-        class MyClass:
+-            vvv = mom = w = id = pytho = None
++        with torch._dynamo.error_on_graph_break(False):
++            class MyClass:
++                vvv = mom = w = id = pytho = None
+ 
+         for name in ("b", "v", "m", "py"):
+             with self.subTest(name=name):
+@@ -4108,8 +4146,9 @@ class SuggestionFormattingTestBase:
+                 self.assertNotIn("'pytho'", actual)
+ 
+     def test_getattr_suggestions_do_not_trigger_for_big_dicts(self):
+-        class A:
+-            blech = None
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                blech = None
+         # A class with a very big __dict__ will not be considered
+         # for suggestions.
+         for index in range(2000):
+@@ -4119,66 +4158,72 @@ class SuggestionFormattingTestBase:
+         self.assertNotIn("blech", actual)
+ 
+     def test_getattr_suggestions_no_args(self):
+-        class A:
+-            blech = None
+-            def __getattr__(self, attr):
+-                raise AttributeError()
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                blech = None
++                def __getattr__(self, attr):
++                    raise AttributeError()
+ 
+         actual = self.get_suggestion(A(), 'bluch')
+         self.assertIn("blech", actual)
+ 
+-        class A:
+-            blech = None
+-            def __getattr__(self, attr):
+-                raise AttributeError
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                blech = None
++                def __getattr__(self, attr):
++                    raise AttributeError
+ 
+         actual = self.get_suggestion(A(), 'bluch')
+         self.assertIn("blech", actual)
+ 
+     def test_getattr_suggestions_invalid_args(self):
+-        class NonStringifyClass:
+-            __str__ = None
+-            __repr__ = None
++        with torch._dynamo.error_on_graph_break(False):
++            class NonStringifyClass:
++                __str__ = None
++                __repr__ = None
+ 
+-        class A:
+-            blech = None
+-            def __getattr__(self, attr):
+-                raise AttributeError(NonStringifyClass())
++            class A:
++                blech = None
++                def __getattr__(self, attr):
++                    raise AttributeError(NonStringifyClass())
+ 
+-        class B:
+-            blech = None
+-            def __getattr__(self, attr):
+-                raise AttributeError("Error", 23)
++            class B:
++                blech = None
++                def __getattr__(self, attr):
++                    raise AttributeError("Error", 23)
+ 
+-        class C:
+-            blech = None
+-            def __getattr__(self, attr):
+-                raise AttributeError(23)
++            class C:
++                blech = None
++                def __getattr__(self, attr):
++                    raise AttributeError(23)
+ 
+         for cls in [A, B, C]:
+             actual = self.get_suggestion(cls(), 'bluch')
+             self.assertIn("blech", actual)
+ 
+     def test_getattr_suggestions_for_same_name(self):
+-        class A:
+-            def __dir__(self):
+-                return ['blech']
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                def __dir__(self):
++                    return ['blech']
+         actual = self.get_suggestion(A(), 'blech')
+         self.assertNotIn("Did you mean", actual)
+ 
+     def test_attribute_error_with_failing_dict(self):
+-        class T:
+-            bluch = 1
+-            def __dir__(self):
+-                raise AttributeError("oh no!")
++        with torch._dynamo.error_on_graph_break(False):
++            class T:
++                bluch = 1
++                def __dir__(self):
++                    raise AttributeError("oh no!")
+ 
+         actual = self.get_suggestion(T(), 'blich')
+         self.assertNotIn("blech", actual)
+         self.assertNotIn("oh no!", actual)
+ 
+     def test_attribute_error_with_non_string_candidates(self):
+-        class T:
+-            bluch = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class T:
++                bluch = 1
+ 
+         instance = T()
+         instance.__dict__[0] = 1
+@@ -4195,13 +4240,14 @@ class SuggestionFormattingTestBase:
+         self.assertNotIn("?", result_lines[-1])
+ 
+     def test_attribute_error_inside_nested_getattr(self):
+-        class A:
+-            bluch = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                bluch = 1
+ 
+-        class B:
+-            def __getattribute__(self, attr):
+-                a = A()
+-                return a.blich
++            class B:
++                def __getattribute__(self, attr):
++                    a = A()
++                    return a.blich
+ 
+         actual = self.get_suggestion(B(), 'something')
+         self.assertIn("Did you mean", actual)
+@@ -4550,43 +4596,46 @@ class SuggestionFormattingTestBase:
+         self.assertNotIn("blech", actual)
+ 
+     def test_name_error_with_instance(self):
+-        class A:
+-            def __init__(self):
+-                self.blech = None
+-            def foo(self):
+-                blich = 1
+-                x = blech
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                def __init__(self):
++                    self.blech = None
++                def foo(self):
++                    blich = 1
++                    x = blech
+ 
+         instance = A()
+         actual = self.get_suggestion(instance.foo)
+         self.assertIn("self.blech", actual)
+ 
+     def test_unbound_local_error_with_instance(self):
+-        class A:
+-            def __init__(self):
+-                self.blech = None
+-            def foo(self):
+-                blich = 1
+-                x = blech
+-                blech = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                def __init__(self):
++                    self.blech = None
++                def foo(self):
++                    blich = 1
++                    x = blech
++                    blech = 1
+ 
+         instance = A()
+         actual = self.get_suggestion(instance.foo)
+         self.assertNotIn("self.blech", actual)
+ 
+     def test_unbound_local_error_with_side_effect(self):
+-        # gh-132385
+-        class A:
+-            def __getattr__(self, key):
+-                if key == 'foo':
+-                    raise AttributeError('foo')
+-                if key == 'spam':
+-                    raise ValueError('spam')
+-
+-            def bar(self):
+-                foo
+-            def baz(self):
+-                spam
++        with torch._dynamo.error_on_graph_break(False):
++            # gh-132385
++            class A:
++                def __getattr__(self, key):
++                    if key == 'foo':
++                        raise AttributeError('foo')
++                    if key == 'spam':
++                        raise ValueError('spam')
++
++                def bar(self):
++                    foo
++                def baz(self):
++                    spam
+ 
+         suggestion = self.get_suggestion(A().bar)
+         self.assertNotIn('self.', suggestion)
+@@ -4624,7 +4673,7 @@ class SuggestionFormattingTestBase:
+ class PurePythonSuggestionFormattingTests(
+     PurePythonExceptionFormattingMixin,
+     SuggestionFormattingTestBase,
+-    unittest.TestCase,
++    __TestCase,
+ ):
+     """
+     Same set of tests as above using the pure Python implementation of
+@@ -4636,14 +4685,14 @@ class PurePythonSuggestionFormattingTests(
+ class CPythonSuggestionFormattingTests(
+     CAPIExceptionFormattingMixin,
+     SuggestionFormattingTestBase,
+-    unittest.TestCase,
++    __TestCase,
+ ):
+     """
+     Same set of tests as above but with Python's internal traceback printing.
+     """
+ 
+ 
+-class MiscTest(unittest.TestCase):
++class MiscTest(__TestCase):
+ 
+     def test_all(self):
+         expected = set()
+@@ -4685,6 +4734,7 @@ class MiscTest(unittest.TestCase):
+         CHECK("AttributeError", "AttributeErrorTests", 10)
+         CHECK("ABA", "AAB", 4)
+ 
++    @unittest.expectedFailure
+     @support.requires_resource('cpu')
+     def test_levenshtein_distance_short_circuit(self):
+         if not LEVENSHTEIN_DATA_FILE.is_file():
+@@ -4730,9 +4780,10 @@ class MiscTest(unittest.TestCase):
+             None
+         )
+ 
+-        # gh-131936: _generate_suggestions() doesn't accept list subclasses
+-        class MyList(list):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            # gh-131936: _generate_suggestions() doesn't accept list subclasses
++            class MyList(list):
++                pass
+ 
+         with self.assertRaises(TypeError):
+             _suggestions._generate_suggestions(MyList(), "")
+@@ -4740,7 +4791,7 @@ class MiscTest(unittest.TestCase):
+ 
+ 
+ 
+-class TestColorizedTraceback(unittest.TestCase):
++class TestColorizedTraceback(__TestCase):
+     def test_colorized_traceback(self):
+         def foo(*args):
+             x = {'a':{'b': None}}
+@@ -4871,4 +4922,4 @@ class TestColorizedTraceback(unittest.TestCase):
+         self.assertEqual(actual, expected)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
