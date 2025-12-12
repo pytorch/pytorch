@@ -2833,7 +2833,7 @@ class TestLinalg(TestCase):
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        if runOnRocmArch(MI200_ARCH) and dtype is torch.complex128:
+        if isRocmArchAnyOf(MI200_ARCH) and dtype is torch.complex128:
             self.skipTest("Currently failing on rocm mi200") 
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
