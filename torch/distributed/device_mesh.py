@@ -1061,10 +1061,10 @@ else:
         def _flatten(
             self,
             mesh_dim_name: str | None = None,
-            backend_override: None
-            | str
+            backend_override: str
             | C10dBackend.Options
-            | tuple[str, C10dBackend.Options] = None,
+            | tuple[str, C10dBackend.Options]
+            | None = None,
         ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
