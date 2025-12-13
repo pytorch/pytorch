@@ -38,10 +38,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup Python
+    - name: Setup Python 3.10
       uses: actions/setup-python@v6
       with:
-        python-version: '3.10'
+        python-version: '3.10.x'
+        cache: pip
     - name: Print Inputs
       shell: bash
       run: |

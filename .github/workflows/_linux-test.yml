@@ -511,6 +511,9 @@ jobs:
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
 
+      - name: Check python before
+        run: python3 --version   # maybe 3.9 or 3.11
+
       - name: Upload utilization stats
         if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
@@ -521,6 +524,8 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+      - name: Check python after
+        run: python3 --version   # maybe 3.9 or 3.11
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
