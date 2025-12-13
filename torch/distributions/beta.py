@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -41,9 +40,9 @@ class Beta(ExponentialFamily):
 
     def __init__(
         self,
-        concentration1: Union[Tensor, float],
-        concentration0: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        concentration1: Tensor | float,
+        concentration0: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
