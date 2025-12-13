@@ -1057,6 +1057,10 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 
+def get_kernel(kernel_idx: int) -> "TritonKernelType":
+    return kernel_side_table.get_kernel(kernel_idx)
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
     *,

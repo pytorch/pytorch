@@ -122,7 +122,7 @@
 
 // libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the
 // same api)
-#ifdef TORCH_CUDA_BUILD_MAIN_LIB
+#if defined(TORCH_CUDA_BUILD_MAIN_LIB)
 #define TORCH_CUDA_CPP_API C10_EXPORT
 #define TORCH_CUDA_CU_API C10_EXPORT
 #else
@@ -130,12 +130,14 @@
 #define TORCH_CUDA_CU_API C10_IMPORT
 #endif
 
+#if !defined(TORCH_CUDA_CPP_API)
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
 #define TORCH_HIP_CPP_API C10_EXPORT
 #define TORCH_HIP_API C10_EXPORT
 #else
 #define TORCH_HIP_CPP_API C10_IMPORT
 #define TORCH_HIP_API C10_IMPORT
+#endif
 #endif
 
 #if defined(TORCH_XPU_BUILD_MAIN_LIB)

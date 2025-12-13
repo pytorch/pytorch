@@ -13,12 +13,13 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import sys
 import threading
 import traceback
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, TYPE_CHECKING
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -91,7 +92,7 @@ try:
                     self.paths: list[str] = paths
 
                 def hooked_CDLL(
-                    self, name: str | Path | None, *args: Any, **kwargs: Any
+                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
                     if name and Path(name).name == "libamd_smi.so":
                         for path in self.paths:
@@ -659,9 +660,9 @@ class StreamContext:
     .. note:: Streams are per-device.
     """
 
-    cur_stream: Stream | None
+    cur_stream: Optional["torch.cuda.Stream"]
 
-    def __init__(self, stream: Stream | None):
+    def __init__(self, stream: Optional["torch.cuda.Stream"]):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -705,7 +706,7 @@ class StreamContext:
         torch.cuda.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
 
 
-def stream(stream: Stream | None) -> StreamContext:
+def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
@@ -751,7 +752,7 @@ def set_stream(stream: Stream):
     )
 
 
-def _parse_visible_devices() -> list[int] | list[str]:
+def _parse_visible_devices() -> Union[list[int], list[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
 
@@ -855,7 +856,7 @@ def _raw_device_count_nvml() -> int:
     return dev_count.value
 
 
-def _raw_device_uuid_amdsmi() -> list[str] | None:
+def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
     if not _HAS_PYNVML:  # If amdsmi is not available
@@ -891,7 +892,7 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
     return uuids
 
 
-def _raw_device_uuid_nvml() -> list[str] | None:
+def _raw_device_uuid_nvml() -> Optional[list[str]]:
     r"""Return list of device UUID as reported by NVML or None if NVM discovery/initialization failed."""
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
@@ -1038,7 +1039,7 @@ def _get_nvml_device_index(device: "Device") -> int:
     return visible_devices[idx]
 
 
-_cached_device_count: int | None = None
+_cached_device_count: Optional[int] = None
 
 
 def device_count() -> int:
@@ -1188,7 +1189,7 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-def set_sync_debug_mode(debug_mode: int | str) -> None:
+def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
     Args:
@@ -1448,7 +1449,7 @@ def clock_rate(device: "Device" = None) -> int:
         return _get_amdsmi_clock_rate(device)
 
 
-def _get_device(device: int | str | torch.device) -> torch.device:
+def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -1474,7 +1475,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: int | str | torch.device = "cuda"
+    offset: int, device: Union[int, str, torch.device] = "cuda"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -1492,7 +1493,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
+def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:
@@ -1760,9 +1761,9 @@ _lazy_call(_register_triton_kernels)
 def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: str | None = None,
-    cuda_include_dirs: list | None = None,
-    nvcc_options: list | None = None,
+    compute_capability: Optional[str] = None,
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.

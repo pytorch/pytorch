@@ -987,6 +987,7 @@ class aten_distributed_optimizations:
 
     # Maximum prefetch or bucketing candidates. Mainly intended for compile time.
     max_coll_distance: Optional[int] = None
+    log_final_collectives_estimations: bool = False
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1426,6 +1427,9 @@ class triton:
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # Emit objgraph backref dumps for leaked cudagraph pool tensors
+    cudagraph_trees_objgraph = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()
