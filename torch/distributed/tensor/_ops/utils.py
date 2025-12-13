@@ -1,546 +1,30 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-import heapq
 import itertools
-import logging
 import operator
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, Optional, Union
+from typing import cast
 
 import torch
-from torch._ops import OpOverload
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
     PlacementList,
     StrategyType,
-    TupleStrategy,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _ShardingPlaceholder,
     _StridedShard,
     Partial,
     Placement,
     Replicate,
     Shard,
 )
-
-
-logger = logging.getLogger(__name__)
-
-
-def _args_schema_with_tensor_meta(
-    args_schema: ArgsType, kwargs_schema: KwargsType
-) -> tuple[ArgsType, KwargsType]:
-    """
-    Replace DTensorSpec with TensorMeta in args_schema, for use with single-dim strategies
-    """
-
-    def spec_to_strategy(spec: object) -> object:
-        if isinstance(spec, DTensorSpec):
-            return spec.tensor_meta
-        elif (
-            isinstance(spec, (list, tuple))
-            and len(spec) > 0
-            and isinstance(spec[0], DTensorSpec)
-        ):
-            raise NotImplementedError("Tuples!")
-            #     # tensor list create tuple strategy
-            #     tuple_strategy = [spec_to_strategy(s) for s in spec]
-            #     tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
-            #     return TupleStrategy(
-            #         tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
-            #     )
-        else:
-            return spec
-
-    args_op_strategy = tuple([spec_to_strategy(a) for a in args_schema])
-
-    kwargs_op_strategy = {k: spec_to_strategy(v) for k, v in kwargs_schema.items()}
-
-    return args_op_strategy, kwargs_op_strategy
-
-
-def _cost_helper(src_placements, dst_placements, mesh, tensor_meta):
-    current_spec = DTensorSpec(
-        mesh,
-        src_placements,
-        tensor_meta=tensor_meta,
-    )
-    new_spec = DTensorSpec(
-        mesh,
-        dst_placements,
-        tensor_meta=tensor_meta,
-    )
-    return redistribute_cost(current_spec, new_spec)
-
-
-def _find_lowest_cost_sharding(
-    mesh: DeviceMesh,
-    op_schema: OpSchema,
-    single_dim_strategy: Callable[
-        [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
-    ],
-) -> StrategyType:
-    """
-    Find the lowest cost sharding for the given op_schema.
-
-    This solves the runtime complexity problem of using _expand_single_dim_strategy_to_mesh by avoiding enumerating
-    the product of the single dim strategy over all the mesh dims and then searching the enumerated list for the min
-    cost.  Instead, it starts from the input placements and expands a search from there, starting by checking if
-    the input placements already describe a legal placement on all mesh dims, and then if not, iterating by taking
-    the lowest-cost redistributions in priority-queue order.
-
-    Initial state:
-        input placements are in the pq with redistribute cost 0
-
-    Loop over pq:
-        pop the lowest cost state from the pq
-        if it's a match for any of our single-dim strategies, return it
-            - a match is computed by checking each mesh-dim exactly matches one of the single-dim strategies
-        else, add all possible next states to the pq
-            - next states are computed by taking the current state and redistributing exactly one input tensor
-            - each possible next state is added to the pq with the cost of the redistribution
-            - next states seen before are not added to the pq
-
-    """
-    # Get the arguments schema and prepare for strategy computation
-    args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-        op_schema.args_schema, op_schema.kwargs_schema
-    )
-
-    # Generate single-dim strategies with placeholders
-    single_dim_strategies_with_placeholders = single_dim_strategy(
-        op_schema.op, args_schema, kwargs_schema
-    )
-
-    # Expand placeholders to get concrete strategies for one mesh dimension
-    unique_input_placements = _get_unique_placements(op_schema)
-    expanded_strategies_over_one_mesh_dim = _fill_single_dim_strategy_placeholders(
-        unique_input_placements, single_dim_strategies_with_placeholders
-    )
-
-    # we only consider redistributing to the types of shardings allowed by the expanded rules for each input
-    def is_sharding(p: Placement):
-        return isinstance(p, (Shard, _StridedShard))
-
-    allowed_sharding_per_input = defaultdict(set)
-    for strategy in expanded_strategies_over_one_mesh_dim:
-        for input_idx in range(len(strategy) - 1):
-            p = strategy[1 + input_idx]
-            if is_sharding(p):
-                allowed_sharding_per_input[input_idx].add(p)
-
-    logger.debug("Allowed sharding per input idx: %s", allowed_sharding_per_input)
-
-    # Extract input DTensorSpecs from op_schema.args_schema
-    input_specs = [
-        spec for spec in op_schema.args_schema if isinstance(spec, DTensorSpec)
-    ]
-    assert len(input_specs) > 0, "broken input"
-    # Build src_strategies wrapping input specs for redistribute cost computation
-    src_strategies = [OpStrategy([OpSpec(spec)]) for spec in input_specs]
-
-    # Priority queue: (cost, counter, input_placements_tuple)
-    # input_placements_tuple is a tuple of placements tuples, one per input tensor
-    # Each input's placements tuple has one placement per mesh dimension
-    counter: int = 0
-    pq: list[tuple[float, int, tuple[tuple[Placement, ...], ...]]] = []
-    visited: set[tuple[tuple[Placement, ...], ...]] = set()
-
-    # Start from the current input placements (cost 0 since no redistribution needed)
-    initial_input_placements = tuple(spec.placements for spec in input_specs)
-    heapq.heappush(pq, (0.0, counter, initial_input_placements))
-    counter += 1
-
-    # Explore priority queue to find the first valid strategy
-    while pq:
-        cost, counter_, input_placements_tuple = heapq.heappop(pq)
-        logger.debug(
-            "Checking counter=%d cost=%f input_placements_tuple=%s",
-            counter_,
-            cost,
-            input_placements_tuple,
-        )
-
-        # Check if current input placements match one of the single-dim strategies for each mesh dim
-        # For each mesh dim, we check if the input placements at that dim match any strategy
-        selected_output_placements = []
-        is_match = True
-
-        for mesh_dim in range(mesh.ndim):
-            # Get input placements for this mesh dimension
-            input_placements_for_dim = tuple(
-                placements[mesh_dim] for placements in input_placements_tuple
-            )
-
-            # Check if this matches any single-dim strategy
-            match_found = False
-            for strategy in expanded_strategies_over_one_mesh_dim:
-                # strategy is [output_placement, input1_placement, input2_placement, ...]
-                strategy_input_placements = tuple(strategy[1:])
-                if strategy_input_placements == input_placements_for_dim:
-                    # Found a match for this mesh dim
-                    selected_output_placements.append(strategy[0])
-                    match_found = True
-                    break
-
-            if not match_found:
-                is_match = False
-                break
-
-        if is_match:
-            # All mesh dims matched! Create the result DTensorSpec
-            output_placements_tuple = tuple(selected_output_placements)
-
-            # Build input specs from current placements
-            arg_specs = [
-                DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
-                for placements, input_spec in zip(input_placements_tuple, input_specs)
-            ]
-
-            # Compute redistribute costs from original input specs to required arg_specs
-            redistribute_costs = [
-                generate_redistribute_costs(src_strategy, arg_spec)
-                for src_strategy, arg_spec in zip(src_strategies, arg_specs)
-            ]
-
-            # Create and return the first valid OpSpec found
-            op_spec = OpSpec(
-                output_specs=DTensorSpec(
-                    mesh, output_placements_tuple, tensor_meta=None
-                ),
-                input_specs=arg_specs,
-                redistribute_cost=redistribute_costs,
-            )
-
-            exhaustive = len(expanded_strategies_over_one_mesh_dim) ** mesh.ndim
-            logger.debug(
-                "returning cost=%f %s, counter=%d, exhaustive=%d",
-                cost,
-                op_spec,
-                counter,
-                exhaustive,
-            )
-            return OpStrategy([op_spec])
-
-        def can_chunk(placements: tuple[Placement, ...]) -> bool:
-            return any(isinstance(p, Replicate) for p in placements)
-
-        def can_allgather(placements: tuple[Placement, ...]) -> bool:
-            return any(is_sharding(p) for p in placements)
-
-        # if we can chunk any more, we chunk
-        if any(can_chunk(placements) for placements in input_placements_tuple):
-            for input_idx in range(len(input_placements_tuple)):
-                for mesh_dim in range(mesh.ndim):
-                    # if we can chunk, we chunk
-                    if isinstance(
-                        input_placements_tuple[input_idx][mesh_dim], Replicate
-                    ):
-                        # copy and convert to list to mutate just this mesh-dim's placements
-                        new_input_placements = [
-                            list(input_placement)
-                            for input_placement in input_placements_tuple
-                        ]
-                        for sharding in allowed_sharding_per_input[input_idx]:
-                            new_input_placements[input_idx][mesh_dim] = sharding
-                            new_input_placements_tuple = tuple(
-                                tuple(p) for p in new_input_placements
-                            )
-                            if new_input_placements_tuple in visited:
-                                continue
-                            new_total_cost = cost + _cost_helper(
-                                input_placements_tuple[input_idx],
-                                new_input_placements_tuple[input_idx],
-                                mesh,
-                                input_specs[input_idx].tensor_meta,
-                            )
-                            visited.add(new_input_placements_tuple)
-                            logger.debug(
-                                "Pushing chunk (%s) for input %d, mesh_dim %d: "
-                                "new_total_cost=%6.2f new_input_placements_tuple=%s, counter=%d",
-                                str(sharding),
-                                input_idx,
-                                mesh_dim,
-                                new_total_cost,
-                                new_input_placements_tuple,
-                                counter,
-                            )
-                            heapq.heappush(
-                                pq,
-                                (
-                                    new_total_cost,
-                                    counter,
-                                    new_input_placements_tuple,
-                                ),
-                            )
-                            counter += 1
-
-        # if not, we try all2all
-        # TODO
-
-        # if not all2all we try allgather or reducescatter
-        # TODO reducescatter
-        elif any(can_allgather(placements) for placements in input_placements_tuple):
-            for input_idx in range(len(input_placements_tuple)):
-                for mesh_dim in range(mesh.ndim):
-                    if is_sharding(input_placements_tuple[input_idx][mesh_dim]):
-                        new_input_placements = [
-                            list(input_placement)
-                            for input_placement in input_placements_tuple
-                        ]
-                        new_input_placements[input_idx][mesh_dim] = Replicate()
-                        new_input_placements_tuple = tuple(
-                            tuple(p) for p in new_input_placements
-                        )
-                        if new_input_placements_tuple in visited:
-                            continue
-                        new_total_cost = cost + _cost_helper(
-                            input_placements_tuple[input_idx],
-                            new_input_placements_tuple[input_idx],
-                            mesh,
-                            input_specs[input_idx].tensor_meta,
-                        )
-                        visited.add(new_input_placements_tuple)
-                        logger.debug(
-                            "Pushing allgather for input %d, mesh_dim %d: "
-                            "new_total_cost=%6.2f new_input_placements_tuple=%s, counter=%d",
-                            input_idx,
-                            mesh_dim,
-                            new_total_cost,
-                            new_input_placements_tuple,
-                            counter,
-                        )
-                        heapq.heappush(
-                            pq,
-                            (
-                                new_total_cost,
-                                counter,
-                                new_input_placements_tuple,
-                            ),
-                        )
-                        counter += 1
-
-        # finally, we try allreduce
-        # TODO
-
-    # If we get here, no valid strategy was found - this should not happen
-    raise AssertionError(
-        f"No valid strategy found for op_schema {op_schema}. "
-        f"Explored {len(visited)} strategy combinations."
-    )
-
-
-# TODO delete mesh arg?
-def _fill_single_dim_strategy_placeholders(
-    unique_input_placements: set[Placement],
-    single_dim_strategies_with_placeholders: list[
-        list[Placement | _ShardingPlaceholder]
-    ],
-) -> list[list[Placement]]:
-    """
-    Replace any _ShardingPlaceholder with the specific Sharding types used by the inputs in op_schema.
-    Supports implicit replication.
-
-    Example:
-    single_dim_strategies_with_placeholders = [[Partial(), _ShardingPlaceholder(1), _ShardingPlaceholder(0)]]
-    input0: Shard(0)
-    input1: StridedShard(1, split_factor=2)
-    returns: [
-       [Partial(), Shard(1), Shard(0)],
-       [Partial(), StridedShard(1, split_factor=2), StridedShard(0, split_factor=2)],
-       [Replicate(), Replicate(), Replicate()]
-    ]
-    """
-    # TODO avoid taking num_inputs this way; make it an explicit arg? or a separate util for adding the replicate
-    # placement
-    num_inputs = len(single_dim_strategies_with_placeholders[0]) - 1
-    shard_builders: dict[str, Callable[[int], Placement]] = {}
-    for placement in unique_input_placements:
-        if isinstance(placement, _StridedShard):
-            key = f"StridedShard(sf={placement.split_factor})"
-            if key not in shard_builders:
-                sf = placement.split_factor
-                shard_builders[key] = lambda tensor_dim: _StridedShard(
-                    tensor_dim, split_factor=sf
-                )
-        elif isinstance(placement, Shard):
-            key = "Shard()"
-            if key not in shard_builders:
-                shard_builders[key] = lambda tensor_dim: Shard(tensor_dim)
-
-    # if any of the placements is a placeholder, we need to expand the strategy
-    # to all possible combinations of placements
-    expanded_strategies_over_one_mesh_dim: list[list[Placement]] = []
-    for s in single_dim_strategies_with_placeholders:
-        if any(isinstance(p, _ShardingPlaceholder) for p in s):
-            for shard_builder in shard_builders.values():
-                expanded_strategy: list[Placement] = []
-                for maybe_placeholder in s:
-                    if isinstance(maybe_placeholder, _ShardingPlaceholder):
-                        # we combine the tensor dim to shard from the placeholder
-                        # with other metadata (e.g. split_factor) from the sharding class
-                        expanded_strategy.append(shard_builder(maybe_placeholder.dim))
-                    else:
-                        assert isinstance(maybe_placeholder, Placement)
-                        expanded_strategy.append(maybe_placeholder)
-                expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
-        else:
-            assert all(isinstance(p, Placement) for p in s)
-            expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
-
-    # implicitly allow replicating output, all inputs
-    # TODO: op_schema.args_spec is empty in this case, but op_schema.args_schema isn't.  What's the difference?
-    expanded_strategies_over_one_mesh_dim.append([Replicate()] * (1 + num_inputs))
-
-    return expanded_strategies_over_one_mesh_dim
-
-
-def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
-    unique_placements = set()
-
-    def _update_placements(obj: Any):
-        if isinstance(obj, DTensorSpec):
-            unique_placements.update(obj.placements)
-        elif isinstance(obj, OpStrategy):
-            assert len(obj.strategies) == 1
-            unique_placements.update(obj.strategies[0].output_spec.placements)
-        elif isinstance(obj, TupleStrategy):
-            for child in obj.children:
-                _update_placements(child)
-
-    for obj in op_schema.args_schema:
-        _update_placements(obj)
-
-    return unique_placements
-
-
-def _expand_single_dim_strategy_to_mesh(
-    mesh: DeviceMesh,
-    op_schema: OpSchema,
-    single_dim_strategy: Callable[
-        [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
-    ],
-) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
-    """
-    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
-    sharding types used by inputs.
-
-    This supports functional correctness but will generate all possible combinations, which is prohibitively expensive
-    for larger numbers of mesh dimensions.
-
-    The expanded_strategy function accesses both the args_schema/kwargs_schema, which contains TensorMeta in place of
-    tensor arguments, but also the op_schema which contains OpStrategy in place of Tensor args.
-    """
-    unique_input_placements = _get_unique_placements(op_schema)
-
-    def expanded_strategy(
-        op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-    ) -> StrategyType:
-        # Note: op_schema vs [args_schema, kwargs_schema]
-        # -----------------------------------------------
-        # Inside `expanded_strategy function we purposefully have access to 2 similar structures.
-        # 1) (op, args_schema, kwargs_schema): This is all the single_dim_strategy is allowed to see.
-        # importantly, it does not contain information about input placements or meshes - just TensorMeta.
-        # 2) op_schema - captured from the parent scope, this contains the input placement and mesh info, needed
-        # to actually perform expansion.
-
-        # Note: Trees vs Flat Lists
-        # -------------------------
-        # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
-        # args_schema has corresponding TupleStrategy, but with TensorSpec in place of child strategies.
-        # CURRENTLY: single_dim_strategy will return a flat list of Placements for each strategy, where any
-        # input tuple strategies have been inlined.  I'm not sure if we want to keep doing this, or preserve a pytree
-        # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
-        # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
-        # flattened, with the flat Placement list returned from single_dim strategy.
-        strategies_over_one_mesh_dim = single_dim_strategy(
-            op, args_schema, kwargs_schema
-        )
-        expanded_strategies_over_one_mesh_dim = _fill_single_dim_strategy_placeholders(
-            unique_input_placements, strategies_over_one_mesh_dim
-        )
-
-        # TODO: identify differences between this and 'expand_' util
-        all_mesh_dim_strategies = [expanded_strategies_over_one_mesh_dim] * mesh.ndim
-
-        # TODO: needs_pytree=True in cat op is not enough to make op_schema.args_strategy unflatten, why?
-        # src_strategies = list(op_schema.args_strategy)
-        src_strategies = []
-        for obj in op_schema.args_schema:
-            if isinstance(obj, OpStrategy):
-                src_strategies.append(obj)
-            elif isinstance(obj, TupleStrategy):
-                src_strategies.extend(obj.children)
-
-        all_combinations = itertools.product(*all_mesh_dim_strategies)
-        all_strategies = []
-        for nd_placements in all_combinations:
-            # nd_placements is ([placements mesh_dim 0], [placements mesh_dim 1], ...)
-            # where placements is [out, in0, in1, ...]
-            # spec_list is inverted, [DTensorSpec0, 1, ...] where each spec has placements for all mesh dims
-            spec_list = [
-                DTensorSpec(mesh, tuple(placements))
-                for placements in zip(*nd_placements)
-            ]
-            arg_specs = spec_list[1:]
-            assert len(src_strategies) == len(arg_specs), (
-                f"{len(src_strategies)=}, {len(arg_specs)=}, "
-                "if src_strategies is empty, check needs_pytree in op registration"
-            )
-
-            # TODO replace isinstance with inheritance or util
-            # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are
-            # 'shardable' instead, we filter out unshardable strategies after mesh expansion.
-            # TODO: make this more robust after adding _ShardingPlaceholder, allowing us to say inside a single_dim_strategy
-            # whether we care about even-sharding or other specific properties
-            valid = True
-            for i, (src_strategy, arg_spec) in enumerate(
-                zip(src_strategies, arg_specs)
-            ):
-                if any(
-                    isinstance(p, (Shard, _StridedShard)) for p in arg_spec.placements
-                ):
-                    # TODO(whc) it doesn't seem safe to me to allow_unbacked_sharding=True,
-                    # but it's what we did in matrix_ops so i added it for now to pass
-                    # TestDTensorCompile.test_dtensor_matmul_zero_size_shards
-                    if not is_tensor_shardable(
-                        src_strategy.shape, arg_spec, allow_unbacked_sharding=True
-                    ):
-                        logger.debug(
-                            "expand skipping unshardable %s: arg %d spec %s",
-                            nd_placements,
-                            i,
-                            arg_spec,
-                        )
-                        valid = False
-                        break
-            if valid:
-                all_strategies.append(
-                    OpSpec(
-                        output_specs=spec_list[0],
-                        input_specs=spec_list[1:],
-                        redistribute_cost=[
-                            generate_redistribute_costs(src_strategy, arg_spec)
-                            for (src_strategy, arg_spec) in zip(
-                                src_strategies, arg_specs
-                            )
-                        ],
-                    )
-                )
-        return OpStrategy(all_strategies)
-
-    return expanded_strategy
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
@@ -575,9 +59,9 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def as_list(
-    x: Union[list[object], object],
+    x: list[object] | object,
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
-) -> Union[list[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
+) -> list[object] | torch.fx.immutable_collections.immutable_list:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
@@ -609,7 +93,7 @@ def prod(xs: Iterable[int]) -> int:
 def is_tensor_shardable(
     shape: Sequence[int],
     spec: DTensorSpec,
-    allow_unbacked_sharding: Optional[bool] = None,
+    allow_unbacked_sharding: bool | None = None,
 ) -> bool:
     """
     Check if the shape is shardable according to the spec.
@@ -728,14 +212,21 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard)
+            assert isinstance(placement, Shard | _StridedShard)
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:
                 # there's a map from the common shape shard dim to
                 # the input shape shard dim before broadcasting,
                 # use that instead
-                new_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, _StridedShard):
+                    new_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
+                else:
+                    new_placements.append(Shard(new_shard_dim))
             else:
                 # there's no map between common shape shard dim and
                 # the input shape shard dim before broadcasting,
@@ -771,9 +262,10 @@ def expand_to_full_mesh_op_strategy(
     *,
     input_index: int = 1,
     inplace_op: bool = False,
-    is_valid_strategy_cb: Optional[
-        Callable[[list[DTensorSpec], tuple[Optional[DTensorSpec], ...]], bool]
-    ] = None,
+    is_valid_strategy_cb: Callable[
+        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+    ]
+    | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -808,7 +300,7 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list: list[Optional[DTensorSpec]] = []
+        spec_list: list[DTensorSpec | None] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
@@ -837,7 +329,7 @@ def expand_to_full_mesh_op_strategy(
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
-        output_specs: tuple[Optional[DTensorSpec], ...]
+        output_specs: tuple[DTensorSpec | None, ...]
         if input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
