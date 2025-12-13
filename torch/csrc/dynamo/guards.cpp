@@ -2730,7 +2730,7 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(std::move(source)), _is_dict(false) {}
+      : _root(root), _source(std::move(source)) {}
 
   GuardManager(
       RootGuardManager* root,
@@ -2874,7 +2874,7 @@ class GuardManager {
         _source(std::move(source)),
         _is_dict(is_dict),
         _is_immutable(is_immutable),
-        _weak_type(weak_type) {}
+        _weak_type(std::move(weak_type)) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -3770,8 +3770,8 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_dict_pointer(PyObject* dict_pointer) {
-    _recorded_dict_pointers.push_back(
-        std::make_pair(dict_pointer, get_dict_version_unchecked(dict_pointer)));
+    _recorded_dict_pointers.emplace_back(
+        dict_pointer, get_dict_version_unchecked(dict_pointer));
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {

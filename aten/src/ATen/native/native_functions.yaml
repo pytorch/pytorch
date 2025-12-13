@@ -1563,8 +1563,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_out
-    MPS: clamp_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_out
   tags: pointwise
 
 - func: clamp.Tensor_out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -1602,8 +1601,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_max_out
-    MPS: clamp_max_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_max_out
   tags: pointwise
 
 - func: clamp_max.Tensor_out(Tensor self, Tensor max, *, Tensor(a!) out) -> Tensor(a!)
@@ -1611,8 +1609,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_max_Tensor_out
-    MPS: clamp_max_Tensor_out_mps
+    CPU, CUDA, MPS: clamp_max_Tensor_out
   tags: pointwise
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
@@ -1642,8 +1639,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_min_out
-    MPS: clamp_min_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_min_out
   tags: pointwise
 
 - func: clamp_min.Tensor_out(Tensor self, Tensor min, *, Tensor(a!) out) -> Tensor(a!)
@@ -1651,8 +1647,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_min_Tensor_out
-    MPS: clamp_min_Tensor_out_mps
+    CPU, CUDA, MPS: clamp_min_Tensor_out
   tags: pointwise
 
 # clip is an alias for clamp
@@ -3053,6 +3048,7 @@
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
     MPS: _fft_c2r_mps
+  tags: core
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -6885,6 +6881,7 @@
   dispatch:
     SparseCPU: _sparse_sum_backward_cpu
     SparseCUDA: _sparse_sum_backward_cuda
+    SparseMPS: _sparse_sum_backward_mps
   autogen: _sparse_sum_backward.out
 
 - func: _sparse_csr_sum.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -6912,12 +6909,14 @@
   dispatch:
     SparseCPU: softmax_sparse_cpu
     SparseCUDA: softmax_sparse_cuda
+    SparseMPS: softmax_sparse_mps
   autogen: _sparse_softmax.out
 
 - func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
     SparseCPU: softmax_backward_sparse_cpu
     SparseCUDA: softmax_backward_sparse_cuda
+    SparseMPS: softmax_backward_sparse_mps
   autogen: _sparse_softmax_backward_data.out
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
@@ -6933,12 +6932,14 @@
   dispatch:
     SparseCPU: log_softmax_sparse_cpu
     SparseCUDA: log_softmax_sparse_cuda
+    SparseMPS: log_softmax_sparse_mps
   autogen: _sparse_log_softmax.out
 
 - func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
     SparseCPU: log_softmax_backward_sparse_cpu
     SparseCUDA: log_softmax_backward_sparse_cuda
+    SparseMPS: log_softmax_backward_sparse_mps
   autogen: _sparse_log_softmax_backward_data.out
 
 - func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
@@ -9475,6 +9476,7 @@
     QuantizedCUDA: index_select_quantized_cuda
     SparseCPU: index_select_sparse_cpu
     SparseCUDA: index_select_sparse_cuda
+    SparseMPS: index_select_sparse_mps
     MPS: index_select_mps
   tags: core
 

@@ -567,6 +567,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad,
                 unsharded_grads,
                 (
+                    # pyrefly: ignore [bad-argument-type]
                     self._reduce_scatter_process_group
                     if isinstance(self.mesh_info, FSDPMeshInfo)
                     else None  # pyre-fixme[6]

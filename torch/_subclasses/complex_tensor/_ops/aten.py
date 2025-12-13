@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import torch
@@ -164,7 +165,7 @@ def div_impl(lhs: ComplexTensor, rhs: ComplexTensor, *, rounding_mode=None):
         raise NotImplementedError(
             "`rounding_mode` other than `None` not implemented for`ComplexTensor`."
         )
-    a_r, a_i = split_complex_tensor(lhs)
+    a_r, a_i = split_complex_arg(lhs)
     if not is_complex(rhs):
         return ComplexTensor(a_r / rhs, a_i / rhs)
     b_r, b_i = split_complex_arg(rhs)
@@ -698,8 +699,20 @@ def linalg_vector_norm_impl(self: ComplexTensor, *args, **kwargs) -> torch.Tenso
 
 
 @register_force_test(aten.copy_)
-def copy__impl(self: ComplexTensor, src, *args, **kwargs):
-    self_re, self_im = split_complex_tensor(self)
+def copy__impl(
+    self: ComplexTensor | torch.Tensor,
+    src: ComplexTensor | torch.Tensor,
+    *args,
+    **kwargs,
+) -> ComplexTensor | torch.Tensor:
+    if not self.dtype.is_complex:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part", UserWarning
+        )
+        src_re, src_im = split_complex_arg(src)
+        return self.copy_(src_re)
+
+    self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
 
     ret_re = self_re.copy_(src_re, *args, **kwargs)
@@ -724,6 +737,7 @@ def allclose_impl(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> bool:
+    # pyrefly: ignore [bad-return]
     return torch.all(
         torch.isclose(input, other, rtol=rtol, atol=atol, equal_nan=equal_nan)
     ).item()  # type: ignore[bad-return]

@@ -34,6 +34,7 @@ from ..pattern_matcher import (
     CallFunctionVarArgs,
     filter_nodes,
     fwd_only,
+    gen_register_replacement,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -85,6 +86,30 @@ pass_patterns = [
 ]
 
 
+def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
+    """
+    Remove profiler ops (record_function) from the graph.
+    These ops are side-effectful but don't affect computation,
+    and we don't want them to block fusion.
+    """
+    profiler_ops = OrderedSet(
+        [
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        ]
+    )
+
+    nodes_to_remove = []
+
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target in profiler_ops:
+            nodes_to_remove.append(node)
+
+    for node in reversed(nodes_to_remove):
+        graph.erase_node(node)
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -131,6 +156,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
             # Concat linear optimization for WOQ int4
             concat_linear_woq_int4(gm)
+
+    # Remove profiler ops (record_function) to prevent them blocking fusion
+    GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
+        _remove_profiler_ops
+    )
 
     if config.pattern_matcher:
         lazy_init()
@@ -289,30 +319,22 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
-        from torch._inductor.config import aten_distributed_optimizations as dist_opts
         from torch._inductor.fx_passes.overlap_scheduling import (
-            schedule_overlap_bucketing,
+            schedule_overlap_bucketing_from_inductor_configs,
         )
+
+        overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
 
         # by default, insert overlap deps within inductor
-        kwargs: dict[str, object] = {"insert_overlap_deps": True}
-
-        config_keys = (
-            "collective_bucketing",
-            "max_compute_pre_fetch",
-            "custom_runtime_estimation",
-            "insert_overlap_deps",
-            "collective_estimator",
-            "max_memory_increase_gb",
-            "max_memory_increase_ratio",
-        )
-        for key in config_keys:
-            if (val := getattr(dist_opts, key)) is not None:
-                kwargs[key] = val
-
-        GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
-            lambda graph: schedule_overlap_bucketing(graph.owning_module, **kwargs)  # type: ignore[arg-type]
-        )
+        with config.patch(
+            "aten_distributed_optimizations.insert_overlap_deps",
+            True if overlap_deps is None else overlap_deps,
+        ):
+            GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+                lambda graph: schedule_overlap_bucketing_from_inductor_configs(
+                    graph.owning_module
+                )
+            )
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -365,10 +387,11 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and device_type in ["cuda", "xpu"]
+        and getattr(config, f"{device_type}_backend") == "triton"
     )
 
 
@@ -688,6 +711,66 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
+@functools.cache
+def register_addmm_activation_fusions():
+    def is_valid_addmm_activation_fusion(match: Match) -> bool:
+        # Exclude ROCm
+        if torch.version.hip:
+            return False
+
+        if config.max_autotune or config.max_autotune_gemm:
+            return False
+
+        inp = match.kwargs["inp"].meta["val"]
+
+        if not inp.is_cuda:
+            return False
+
+        output = match.output_node()
+        return not all(
+            is_pointwise_use(use, lambda target: torch.Tag.reduction in target.tags)
+            for use in output.users
+        )
+
+    args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
+    beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
+
+    def addmm_relu_pattern(inp, m1, m2, beta, alpha):
+        return aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha))
+
+    def addmm_gelu_pattern(inp, m1, m2, beta, alpha):
+        return aten.gelu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
+        )
+
+    def addmm_relu_replacement(inp, m1, m2, beta, alpha):
+        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha)
+
+    def addmm_gelu_replacement(inp, m1, m2, beta, alpha):
+        return aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
+        )
+
+    patterns = (addmm_relu_pattern, addmm_gelu_pattern)
+    replacements = (addmm_relu_replacement, addmm_gelu_replacement)
+    for pattern, replacement in zip(patterns, replacements):
+        key = f"{pattern.__name__}"
+        gen_register_replacement(
+            key,
+            # pyrefly: ignore [bad-argument-type]
+            pattern,
+            # pyrefly: ignore [bad-argument-type]
+            replacement,
+            args,
+            # pyrefly: ignore [bad-argument-type]
+            trace_fn=fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            pass_dicts=pass_patterns[1],
+            extra_check=is_valid_addmm_activation_fusion,
+            scalar_workaround=beta_alpha_workaround,
+        )
+
+
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -712,6 +795,8 @@ def lazy_init():
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
+
+    register_addmm_activation_fusions()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -788,13 +873,22 @@ def is_valid_mm_plus_mm(match: Match):
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    # Check if all required values exist
+    mat1_val = match.kwargs["mat1"].meta.get("val")
+    mat2_val = match.kwargs["mat2"].meta.get("val")
+    mat3_val = match.kwargs["mat3"].meta.get("val")
+    mat4_val = match.kwargs["mat4"].meta.get("val")
+
+    if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
+        return False
+
+    *_b1, m1, k1 = mat1_val.shape
+    *_b2, k2, n1 = mat2_val.shape
     if k1 != k2:
         return False
 
-    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = mat3_val.shape
+    *_b2, k4, n2 = mat4_val.shape
     if k3 != k4:
         return False
 
