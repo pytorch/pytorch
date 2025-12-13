@@ -933,10 +933,12 @@ class Redistribute(torch.autograd.Function):
         async_op: bool = False,
         forward_dtype: torch.dtype | None = None,
         backward_dtype: torch.dtype | None = None,
+        grad_placements: tuple[Placement, ...] | None = None,
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype
         ctx.original_dtype = input._local_tensor.dtype
+        ctx.grad_placements = grad_placements
 
         if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
             local_tensor = input._local_tensor.to(dtype=forward_dtype)
@@ -963,10 +965,12 @@ class Redistribute(torch.autograd.Function):
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
+            ctx.forward_no_op = False
         else:
             # use the same local tensor if placements are the same.
             output = local_tensor
             target_spec = current_spec
+            ctx.forward_no_op = True
 
         # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
@@ -982,6 +986,7 @@ class Redistribute(torch.autograd.Function):
         previous_spec = ctx.current_spec
         async_op = ctx.async_op
         backward_dtype = ctx.backward_dtype or ctx.original_dtype
+        grad_placements = ctx.grad_placements
 
         if backward_dtype != grad_output._local_tensor.dtype:
             local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
@@ -1002,41 +1007,67 @@ class Redistribute(torch.autograd.Function):
         else:
             local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
-        # skip the replicate to partial transformation when we are in backward pass
-        # In this case we keep the grad as replicate, this is because we don't
-        # want to convert the replicated gradients back to partial, although
-        # that's logically conform with the same layout, converting the gradients
-        # back to partial is actually useless as you would have to do reduce later
-        # which would be more expensive than keeping it replicate!
 
-        # for backward shard -> partial, we just do shard -> replicate
-        # for backward replicate -> partial, we skip the transformation
-        normalized_placements: list[Placement] = []
-        for current, target in zip(current_spec.placements, previous_spec.placements):
-            if (current.is_shard() or current.is_replicate()) and target.is_partial():
-                normalized_placements.append(Replicate())
+        # When user provided grad_placements, we use it as the desired layout without any optimizations
+        if grad_placements is not None:
+            previous_spec = DTensorSpec(
+                previous_spec.device_mesh,
+                grad_placements,
+                tensor_meta=grad_output._spec.tensor_meta,
+            )
+            output = redistribute_local_tensor(
+                local_tensor,
+                current_spec,
+                previous_spec,
+                async_op=async_op,
+            )
+        else:
+            if ctx.forward_no_op:
+                # if redistribute forward is a no-op, backward should also be no-op regardless
+                # of what grad_output's placement is
+                output = local_tensor
+                previous_spec = DTensorSpec(
+                    mesh=previous_spec.device_mesh,
+                    placements=current_spec.placements,
+                    tensor_meta=previous_spec.tensor_meta,
+                )
             else:
-                normalized_placements.append(target)
+                # skip the replicate to partial transformation when we are in backward pass
+                # In this case we keep the grad as replicate, this is because we don't
+                # want to convert the replicated gradients back to partial, although
+                # that's logically conform with the same layout, converting the gradients
+                # back to partial is actually useless as you would have to do reduce later
+                # which would be more expensive than keeping it replicate!
+                # When user provided grad_placements, we use it as the desired layout without any optimizations
 
-        previous_spec = DTensorSpec(
-            previous_spec.device_mesh,
-            placements=tuple(normalized_placements),
-            tensor_meta=previous_spec.tensor_meta,
-        )
+                # for backward shard -> partial, we just do shard -> replicate
+                # for backward replicate -> partial, we skip the transformation
+                normalized_placements: list[Placement] = []
+                for current, target in zip(current_spec.placements, previous_spec.placements):
+                    if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                        normalized_placements.append(Replicate())
+                    else:
+                        normalized_placements.append(target)
 
-        output = redistribute_local_tensor(
-            local_tensor,
-            current_spec,
-            previous_spec,
-            async_op=async_op,
-        )
+                previous_spec = DTensorSpec(
+                    previous_spec.device_mesh,
+                    placements=tuple(normalized_placements),
+                    tensor_meta=previous_spec.tensor_meta,
+                )
+
+                output = redistribute_local_tensor(
+                    local_tensor,
+                    current_spec,
+                    previous_spec,
+                    async_op=async_op,
+                )
 
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
 
         spec = DTensorSpec(
             previous_spec.device_mesh,
-            tuple(normalized_placements),
+            previous_spec.placements,
             tensor_meta=TensorMeta(
                 shape=grad_output.shape,
                 stride=grad_output.stride(),

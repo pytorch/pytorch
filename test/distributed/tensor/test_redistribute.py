@@ -186,8 +186,9 @@ class RedistributeTest(DTensorTestBase):
             )
             out.backward(torch.ones_like(out))
 
-        self.assertEqual(comm_mode.get_total_counts(), 1)
-        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+        # redistribute forward is no-op, backward 
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 0)
 
     @with_comms
     def test_replicate_to_shard_forward_backward(self):
