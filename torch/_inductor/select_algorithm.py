@@ -1235,6 +1235,7 @@ class TritonTemplateKernel(TritonKernel):
                         # after the remapping.
                         # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
+                    # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
                 else:
                     mask_vars: list[str] = []
