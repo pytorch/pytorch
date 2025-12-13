@@ -605,11 +605,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
         try:
             graph = chunk(graph)
-        except CantChunk as e:
+        except CantChunk:
             auto_chunker_log = torch._logging.getArtifactLogger(
                 __name__, "auto_chunker"
             )
-            auto_chunker_log.debug("AutoChunker fail with error: %s", str(e))
+            auto_chunker_log.debug("AutoChunker fail.", exc_info=True)
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):

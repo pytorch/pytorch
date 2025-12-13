@@ -44,7 +44,8 @@ def chunk(gm: GraphModule) -> GraphModule:
         # skip
         return gm
 
-    log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
 
     amplifier_node = find_amplifier_node(graph)
     if amplifier_node is None:

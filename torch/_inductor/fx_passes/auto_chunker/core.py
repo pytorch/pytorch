@@ -115,10 +115,6 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
     """
 
     amplifier_nodes_ratio = []
-    for node in graph.nodes:
-        # We only look for amplifier nodes in the fwd part of the graph
-        if use_tangent(node):
-            break
 
     for node in graph.nodes:
         if use_tangent(node):

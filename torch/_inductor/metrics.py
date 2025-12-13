@@ -53,7 +53,7 @@ num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
 
 num_loop_reordering = 0
-num_auto_chunking = 0
+num_auto_chunking: int = 0
 
 # counter for parallel reduction.
 parallel_reduction_count = 0

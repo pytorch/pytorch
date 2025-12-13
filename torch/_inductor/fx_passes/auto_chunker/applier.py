@@ -73,7 +73,7 @@ class ChunkingApplier:
         self.subgraph_output: list[Node] = []
         self._categorize_subgraph_nodes()
 
-        self.chunk_sizes = None
+        self.chunk_sizes: Optional[list[int]] = None
 
         # First index is node index,
         # Second index is chunk index.
@@ -264,6 +264,7 @@ class ChunkingApplier:
             # Chunk aten.expand a scalar
             if (
                 original_node.target == aten.expand.default
+                and isinstance(original_node.args[0], torch.fx.Node)
                 and original_node.args[0].meta["val"].numel() == 1
                 and (meta := get_chunking_meta(original_node)) is not None
                 and meta.chunk_dim is not None
@@ -366,7 +367,7 @@ class ChunkingApplier:
             meta = get_chunking_meta(node)
             assert meta is not None
 
-            recovered = node
+            recovered: torch.fx.Node = node
 
             if meta.chunk_dim is not None:
                 chunks = self.chunks_for_recovering[node]
