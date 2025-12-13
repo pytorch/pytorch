@@ -1385,8 +1385,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
 
-        allocator = symm_mem.get_mempool_allocator(self.device)
-        mempool = torch.cuda.MemPool(allocator, no_split=True)
+        mempool = symm_mem.get_mem_pool(self.device)
 
         with torch.cuda.use_mem_pool(mempool):
             tensor = torch.arange(numel, dtype=dtype, device=self.device)
@@ -1410,8 +1409,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         w = torch.ones(dim, dim, dtype=dtype, device=self.device)
         x = torch.ones(1, dim, dtype=dtype, device=self.device)
 
-        allocator = symm_mem.get_mempool_allocator(self.device)
-        mempool = torch.cuda.MemPool(allocator, no_split=True)
+        mempool = symm_mem.get_mem_pool(self.device)
 
         with torch.cuda.use_mem_pool(mempool):
             y = torch.mm(x, w)
