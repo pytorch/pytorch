@@ -1813,8 +1813,6 @@ test_operator_microbenchmark() {
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
-
-  sleep 7200
 }
 
 test_attention_microbenchmark() {

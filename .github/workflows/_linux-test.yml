@@ -167,7 +167,7 @@ jobs:
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
-        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
+        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' || contains(matrix.runner, 'b200') }}
 
       - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
         id: setup-sscache-port-flag
