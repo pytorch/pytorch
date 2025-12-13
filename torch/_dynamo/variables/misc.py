@@ -29,7 +29,7 @@ import traceback
 import types
 import warnings
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -408,11 +408,27 @@ class SuperVariable(VariableTracker):
         )
 
 
+class FrameSummaryVariable(VariableTracker):
+    def __init__(self, frame_summary: traceback.FrameSummary, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.frame_summary = frame_summary
+
+    def var_getattr(self, tx, name):
+        if name == "lineno":
+            return variables.ConstantVariable.create(self.frame_summary.lineno)
+        elif name == "filename":
+            return variables.ConstantVariable.create(self.frame_summary.filename)
+        elif name == "name":
+            return variables.ConstantVariable.create(self.frame_summary.name)
+        elif name == "line":
+            return variables.ConstantVariable.create(self.frame_summary.line)
+        return super().var_getattr(tx, name)
+
+
 class TracebackVariable(VariableTracker):
     def __init__(
         self,
         frame_summary: traceback.FrameSummary,
-        # tb_lineno: ConstantVariable,
         tb_next,
         **kwargs,
     ) -> None:
@@ -428,11 +444,24 @@ class TracebackVariable(VariableTracker):
         assert tb_next is not None
         self.tb_next = tb_next
 
+    @classmethod
+    def from_frame_summary(
+        cls,
+        frame_summary: traceback.FrameSummary,
+        tb_next: Union["TracebackVariable", ConstantVariable],
+    ):
+        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
         return istype(obj, TracebackVariable) or (
             istype(obj, ConstantVariable) and obj.is_constant_none()
         )
+
+    def extract_tb(self) -> list[traceback.FrameSummary]:
+        if istype(self.tb_next, ConstantVariable):
+            return [self.frame_summary]
+        return [self.frame_summary] + self.tb_next.extract_tb()
 
     def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
         # checks if `tb` is in the chain of tb_next starting from `self`
@@ -468,6 +497,8 @@ class TracebackVariable(VariableTracker):
             return self.tb_next
         elif name == "tb_lineno":
             return variables.ConstantVariable.create(self.frame_summary.lineno)
+        elif name == "frame_summary":
+            return self.frame_summary
         elif name == "tb_lasti":
             # Not tracked for now, return a dummy value
             return variables.ConstantVariable.create(-1)
