@@ -237,6 +237,7 @@ from .misc import (
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
+    IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
@@ -871,6 +872,12 @@ class VariableBuilder:
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
+        elif callable(value) and any(
+            value is fn for fn in torch._dynamo.config.ignore_logging_functions
+        ):
+            # Treat ignored functions as full no-ops
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return IgnoredFunctionVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
@@ -910,7 +917,11 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+            # Preserve cache_hash for SAC context_fn caching
+            original_cache_hash = getattr(value, "cache_hash", None)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original_cache_hash=original_cache_hash
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)

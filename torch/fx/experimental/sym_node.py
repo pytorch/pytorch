@@ -211,7 +211,9 @@ class SymNode:
                 # for the unbacked symints, we may need to beef it up at some point.
                 unbacked_symbols = free_unbacked_symbols(self.expr)
                 replacements = {
-                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    s: fallback
+                    if s in unbacked_symbols
+                    else self.shape_env.var_to_val[s]
                     for s in self.expr.free_symbols
                 }
                 return self.expr.xreplace(replacements)
