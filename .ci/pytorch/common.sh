@@ -3,7 +3,6 @@
 # Common setup for all Jenkins scripts
 # shellcheck source=./common_utils.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-
 set -ex -o pipefail
 
 # Source ROCm environment for theRock nightly builds
