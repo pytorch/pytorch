@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 from torch.ao.quantization.backend_config import (
@@ -48,7 +48,7 @@ class QuantizeHandler(ABC):  # noqa: B024
         self,
         node_pattern: NodePattern,
         modules: dict[str, torch.nn.Module],
-        root_node_getter: Optional[Callable] = None,
+        root_node_getter: Callable | None = None,
         is_custom_module=False,
         is_standalone_module=False,
     ):
@@ -114,14 +114,15 @@ def _get_quantize_handler_cls(
             self,
             node_pattern: NodePattern,
             modules: dict[str, torch.nn.Module],
-            root_node_getter: Optional[Callable] = None,
+            root_node_getter: Callable | None = None,
         ):
             super().__init__(node_pattern, modules, root_node_getter)
             if num_tensor_args_to_observation_type:
-                assert self.num_tensor_args in num_tensor_args_to_observation_type, (
-                    f"Must provide observation_type config for tensor number {self.num_tensor_args}"
-                    f" in num_tensor_args_to_observation_type for {node_pattern}"
-                )
+                if self.num_tensor_args not in num_tensor_args_to_observation_type:
+                    raise AssertionError(
+                        f"Must provide observation_type config for tensor number {self.num_tensor_args}"
+                        f" in num_tensor_args_to_observation_type for {node_pattern}"
+                    )
                 self.observation_type = num_tensor_args_to_observation_type[
                     self.num_tensor_args
                 ]

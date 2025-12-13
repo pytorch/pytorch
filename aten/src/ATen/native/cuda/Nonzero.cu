@@ -212,7 +212,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
       std::nullopt /* memory format */
   );
   at::cuda::memcpy_and_sync(
-      (void*)pinned_num_nonzeros_h.const_data_ptr<int>(),
+      pinned_num_nonzeros_h.template data_ptr<int>(),
       num_nonzeros.get(),
       sizeof(int) * num_chunks,
       cudaMemcpyDeviceToHost,
@@ -220,7 +220,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   int64_t num_nonzeros_h = 0;
 
   for (int64_t idx = 0; idx < num_chunks; idx++) {
-    num_nonzeros_h += (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+    num_nonzeros_h += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
   }
   // num_nonzeros_h = (int)*(pinned_num_nonzeros_h.const_data_ptr<int>());
   // expected output size is num_nonzeros x ndim
@@ -267,8 +267,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           ((int*)num_nonzeros.get()) + idx,
           remaining,
           stream));
-      curr_nonzeros +=
-          (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+      curr_nonzeros += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
     }
     if (num_nonzeros_h > 0 && self.dim() > 1) {
       TensorDims<int64_t> dims;
@@ -300,8 +299,6 @@ void nonzero_static_cuda_out_impl(
     int64_t size,
     int64_t fill_value,
     Tensor& out) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
-
   Tensor self_contiguous_ = self.contiguous();
   // see comment in nonzero_cuda_out_impl on reqs for out
   bool out_correct_size =
@@ -377,9 +374,6 @@ void nonzero_static_cuda_out_impl(
   if (need_to_copy) {
     out.copy_(out_temp);
   }
-#else
-  TORCH_CHECK(false, "Nonzero_static is not supported for cuda <= 11.4");
-#endif
 }
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {

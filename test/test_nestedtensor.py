@@ -52,7 +52,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    IS_WINDOWS,
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
@@ -63,6 +62,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
+    xfailIfWindows,
 )
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -857,6 +857,22 @@ class TestNestedTensor(NestedTensorTestCase):
         ):
             torch.cat([x, y], dim=-1)
 
+    # https://github.com/pytorch/pytorch/issues/161812
+    def test_jagged_with_dim_error(self):
+        x = torch.nested.nested_tensor(
+            [torch.ones(3, 2, 3), torch.ones(4, 2, 3)], layout=torch.jagged
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.cat([x, x])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.stack([x, x])
+
     def test_nested_view_from_buffer_overflow_errors(self):
         buffer = torch.tensor([1])
         sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
@@ -1089,6 +1105,138 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         check(inputs, y)
 
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_max_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_min_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_min.values, expected_min)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amax = x.amax(dim=1)
+        expected_amax = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_amax, expected_amax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amin = x.amin(dim=1)
+        expected_amin = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_amin, expected_amin)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmax = x.argmax(dim=1)
+        expected_argmax = torch.tensor([9, 19, 29], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmax, expected_argmax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmin = x.argmin(dim=1)
+        expected_argmin = torch.tensor([0, 0, 0], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmin, expected_argmin)
+
     @skipMeta
     @torch.inference_mode()
     @dtypes(*floating_types_and_half())
@@ -1227,6 +1375,24 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         is_cuda = "cuda" in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_share_memory(self, device):
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(5, 4, device=device)
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+
+        # Guard CUDA tensors
+        if "cuda" in device:
+            result = nt.share_memory_()
+            self.assertIs(result, nt)
+            return
+
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+
+        # Verify in shared memory
+        self.assertTrue(nt.is_shared())
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
@@ -1315,6 +1481,82 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             "NestedTensor must be contiguous to get buffer.",
             lambda: func(nt_noncontiguous),
         )
+
+    def test_is_any_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, False, False, True, True, False],
+                    [False, False, True, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_any_true.default(nt).item()
+            out_vals = torch.ops.aten._is_any_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_false_returns_false"):
+            cond_false = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            nt_false = torch.nested.narrow(
+                cond_false, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_any_true.default(nt_false).item())
+
+        with self.subTest("one_true_returns_true"):
+            cond_mixed = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 0] = True
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_any_true.default(nt_mixed).item())
+
+    def test_is_all_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, True, True, False, False, False],
+                    [True, True, False, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_all_true.default(nt).item()
+            out_vals = torch.ops.aten._is_all_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_true_returns_true"):
+            cond_true = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            nt_true = torch.nested.narrow(
+                cond_true, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_all_true.default(nt_true).item())
+
+        with self.subTest("any_false_returns_false"):
+            cond_mixed = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 1] = False
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_all_true.default(nt_mixed).item())
 
     @parametrize("func", [subtest(torch.ge, name="ge"), subtest(torch.eq, name="eq")])
     def test_binary_ops_with_scalar(self, device, func):
@@ -6430,7 +6672,6 @@ torch.cuda.synchronize()
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape(self, device):
         values = torch.randn((18, 16), device=device)
@@ -6452,7 +6693,6 @@ torch.cuda.synchronize()
         )
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape_recompile(self, device):
         def generate_inp(total_len):
@@ -6763,9 +7003,9 @@ torch.cuda.synchronize()
                 check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # Guarding with sqrt() doesn't work on ROCm?
+    @xfailIfWindows
     @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(
@@ -6950,8 +7190,8 @@ torch.cuda.synchronize()
                 out, out_component, atol=output_ref_atol, rtol=output_ref_rtol
             )
 
+    @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # mha_varlen_fwd not supported on ROCm
     @skipCUDAIfRocm
@@ -6988,7 +7228,6 @@ torch.cuda.synchronize()
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
@@ -7135,10 +7374,13 @@ torch.cuda.synchronize()
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_dummy_mha_with_nt(self, device, use_legacy_api):
         bs = 3
         d1 = 2
@@ -7488,10 +7730,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
@@ -7519,10 +7757,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
@@ -7556,10 +7790,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
@@ -7593,10 +7823,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
@@ -7689,9 +7915,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7720,7 +7950,6 @@ torch.cuda.synchronize()
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double, torch.half)
@@ -7740,9 +7969,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7819,10 +8052,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
@@ -7912,7 +8141,6 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @dtypes(torch.float32)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -8487,7 +8715,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # min() / max(): weird bug
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -8504,7 +8732,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_compile_backward",

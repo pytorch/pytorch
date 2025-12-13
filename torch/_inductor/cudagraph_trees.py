@@ -50,7 +50,7 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch.fx
 from torch import Tensor
@@ -86,7 +86,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterator, Sequence
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
@@ -102,7 +102,7 @@ S = TypeVar("S", bound="StorageWeakRefWrapper")
 if torch.backends.cuda.is_built():
     from torch._C import (
         _cuda_CUDAAllocator_AllocatorState as AllocatorState,
-        _set_cached_tensors_enabled as _set_cached_tensors_enabled,
+        _set_cached_tensors_enabled,
     )
 else:
 
@@ -407,6 +407,7 @@ def cudagraphify_impl(
         fn = align_inputs_from_check_idxs(
             fn, inputs_to_check=check_input_idxs, mutated_input_idxs=mutated_input_idxs
         )
+        # pyrefly: ignore [unsupported-operation]
         fn_cache[int_key] = fn
 
         return out
@@ -535,9 +536,14 @@ class StorageWeakRefWrapper:
         if self.extra_ref_check is not None and not self.extra_ref_check():
             return False
 
-        # if extra_ref_check is not None we expect an additional reference
         stor_count = torch._C._storage_Use_Count(self.ref.cdata)
-        return (stor_count - (self.extra_ref_check is not None)) == 0
+        if self.extra_ref_check is not None:
+            # if extra_ref_check is not None we expect two additional references:
+            #  - one from the Python storage object
+            #  - one from the cached Tensor
+            stor_count -= 2
+        assert stor_count >= 0
+        return stor_count == 0
 
     def __repr__(self) -> str:
         if self.ref is None or self.ref.expired():
@@ -757,7 +763,7 @@ LevelList = list  # levels (distance from root of tree)
 
 
 class OutputAliasInfo:
-    pass
+    __slots__ = []
 
 
 class _UnaliasedStorage(OutputAliasInfo):
@@ -922,6 +928,7 @@ class CUDAGraphNode:
             return None
 
         self.static_input_data_ptrs: InputList[Optional[int]] = [
+            # pyrefly: ignore [bad-argument-type]
             maybe_get_static_data_ptr(i, inputs, self.static_input_idxs)
             for i in range(len(inputs))
         ]
@@ -947,7 +954,7 @@ class CUDAGraphNode:
         self.recorded_liveness_before_graph: LevelList[OutputList[bool]] = []
         self.recorded_liveness_after_graph: LevelList[OutputList[bool]] = []
 
-        # List of Tuples of (depth, output_index) that index into node at depth
+        # List of tuples of (depth, output_index) that index into node at depth
         # number of nodes from root and output_index of outputs. Will index into
         # path_weakrefs.
         self.expected_dead_indices_before_graph: list[PathOutputIndex] = []
@@ -968,8 +975,10 @@ class CUDAGraphNode:
             self.expected_dead_indices_before_graph = different_indices
 
         rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
+        # pyrefly: ignore [bad-argument-type]
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
+        # pyrefly: ignore [missing-attribute]
         inputs.clear()
         del inputs
 
@@ -1281,8 +1290,10 @@ class CUDAGraphNode:
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
 
+        # pyrefly: ignore [bad-argument-type]
         self._add_first_outputs(static_outputs, static_input_persistent_storage_ptrs)
 
+        # pyrefly: ignore [bad-return]
         return static_outputs
 
     def _add_first_outputs(
@@ -1433,7 +1444,15 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
-                return self_loc.get_output_refcount(i) == 2
+                refcount = self_loc.get_output_refcount(i)
+                # pyrefly: ignore
+                if self_loc.cached_tensor_outputs[i]._use_count() > 1:
+                    # c10::Tensor may also holds one reference count
+                    assert refcount >= 3
+                    return refcount == 3
+                else:
+                    assert refcount >= 2
+                    return refcount == 2
 
             check = functools.partial(check_refcount, i=i)
 
@@ -1676,6 +1695,7 @@ class CUDAGraphNode:
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
                     assert isinstance(inp, (int, torch.Generator))
+                    # pyrefly: ignore [bad-argument-type]
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
@@ -1840,6 +1860,7 @@ def check_memory_pool(
         formatted = []
         for dp, block in allocated_not_in_live_storages.items():
             trace = format_tb(block.get("frames", []))
+            # pyrefly: ignore [bad-argument-type]
             formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
         formatted_s = "\n".join(formatted)
         msg = (
@@ -2547,7 +2568,11 @@ class CUDAGraphTreeManager:
         live_storages_weak_refs: list[int] = [t() for t in live_storages_wrappers]  # type: ignore[misc]
         ptrs_to_deallocate = self.current_node.data_ptrs_dead_since_invocation()
         torch._C._cuda_setCheckpointPoolState(
-            device, state, stale_storages, live_storages_weak_refs
+            device,
+            # pyrefly: ignore [bad-argument-type]
+            state,
+            stale_storages,
+            live_storages_weak_refs,
         )
 
         # NB: deduplicate aliased outputs

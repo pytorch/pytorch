@@ -443,12 +443,18 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
-            torch._dynamo.trace_rules.add(mod.__name__)
-            x = torch.rand(3)
-            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-            ref = fn(x)
-            res = opt_fn(x)
-            self.assertEqual(ref, res)
+            skip_dirs_backup = torch._dynamo.trace_rules.SKIP_DIRS.copy()
+            skip_dirs_re_backup = torch._dynamo.trace_rules.SKIP_DIRS_RE
+            try:
+                torch._dynamo.trace_rules.add(mod.__name__)
+                x = torch.rand(3)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+                ref = fn(x)
+                res = opt_fn(x)
+                self.assertEqual(ref, res)
+            finally:
+                torch._dynamo.trace_rules.SKIP_DIRS = skip_dirs_backup
+                torch._dynamo.trace_rules.SKIP_DIRS_RE = skip_dirs_re_backup
 
     def test_no_special_handlers_for_torch_non_c_bindings(self):
         handlers = TorchInGraphFunctionVariable._get_handlers()
@@ -466,6 +472,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_cudnn_is_acceptable",  # No global state
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
+            "handle_current_stream",  # Safely implemented
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):

@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
-#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>

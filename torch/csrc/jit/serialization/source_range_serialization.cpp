@@ -167,9 +167,7 @@ std::vector<char> SourceRangePickler::pickle(
     }
 
     ivalues.emplace_back(c10::ivalue::Tuple::create(
-        {(int64_t)range.bytes,
-         srs->serialize(range.range),
-         static_cast<int64_t>(source_range_tag)}));
+        {(int64_t)range.bytes, srs->serialize(range.range), source_range_tag}));
   }
 
   std::vector<at::Tensor> table;

@@ -39,7 +39,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
         torch.ao.quantization.convert(artificial_model, inplace=True)
 
         # manually changing bias
-        for name, submodule in artificial_model.named_modules():
+        for submodule in artificial_model.modules():
             if type(submodule) in _supported_modules:
                 x = get_param(submodule, "bias")
                 weight = get_param(submodule, "weight")

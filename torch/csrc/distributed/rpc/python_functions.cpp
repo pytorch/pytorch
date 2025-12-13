@@ -1,5 +1,4 @@
 #include <ATen/ThreadLocalState.h>
-#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -8,14 +7,12 @@
 #include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <exception>
 
 namespace torch::distributed::rpc {

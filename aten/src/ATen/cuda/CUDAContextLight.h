@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <shared_mutex>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -88,8 +89,13 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
-TORCH_CUDA_CPP_API std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace();
-TORCH_CUDA_CPP_API std::map<std::tuple<void *, void *>, at::DataPtr>& cublaslt_handle_stream_to_workspace();
+struct WorkspaceMapWithMutex {
+  std::map<std::tuple<void*, void*>, at::DataPtr> map;
+  std::shared_mutex mutex;
+};
+
+TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublas_handle_stream_to_workspace();
+TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();

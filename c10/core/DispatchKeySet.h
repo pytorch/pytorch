@@ -15,6 +15,8 @@
 #include <string>
 #include <type_traits>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 struct FunctionalityOffsetAndMask {
@@ -172,10 +174,10 @@ class DispatchKeySet final {
   // use of DispatchKeySet in TLS requires this.
   constexpr DispatchKeySet() = default;
 
-  constexpr DispatchKeySet(Full)
+  constexpr DispatchKeySet(Full /*unused*/)
       : repr_((1ULL << (num_backends + num_functionality_keys - 1)) - 1) {}
 
-  constexpr DispatchKeySet(FullAfter, DispatchKey t)
+  constexpr DispatchKeySet(FullAfter /*unused*/, DispatchKey t)
       // LSB after t are OK, but not t itself.
       // "functionalities" have a notion of ordering (e.g. Autograd > Sparse >
       // Quantized > Dense). But backends don't really have an ordering.
@@ -191,7 +193,7 @@ class DispatchKeySet final {
 
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
-  constexpr DispatchKeySet(Raw, uint64_t x) : repr_(x) {}
+  constexpr DispatchKeySet(Raw /*unused*/, uint64_t x) : repr_(x) {}
 
   constexpr explicit DispatchKeySet(BackendComponent k) {
     if (k == BackendComponent::InvalidBit) {
@@ -631,8 +633,8 @@ class DispatchKeySet final {
   }
 };
 
-C10_API std::string toString(DispatchKeySet);
-C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
+C10_API std::string toString(DispatchKeySet /*ts*/);
+C10_API std::ostream& operator<<(std::ostream& /*os*/, DispatchKeySet /*ts*/);
 
 inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
   return DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
@@ -966,3 +968,5 @@ using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
             1>,
         typename guts::infer_function_traits_t<FuncType>::parameter_types>>;
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

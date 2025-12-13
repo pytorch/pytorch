@@ -24,6 +24,7 @@ import textwrap
 import time
 import unittest
 from collections.abc import (
+    Callable,
     Collection,
     Generator,
     Iterator,
@@ -35,37 +36,36 @@ from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
-    Callable,
     cast,
+    Concatenate,
     Generic,
     Literal,
     NamedTuple,
     Optional,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeAlias,
-    TypeGuard,
-)
+from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
 
 import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import DeviceInfo
+from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
@@ -272,7 +272,34 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
 
 
 def do_bench_using_profiling(
-    fn: Callable[[], Any], warmup: int = 25, rep: int = 100
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    rep: int = 100,
+    is_vetted_benchmarking: bool = False,
+) -> float:
+    # We did't use decorator may_distort_benchmarking_result directly since that
+    # requires us to import torch._inductor.runtime.benchmarking into global scope.
+    # Importing torch._inductor.runtime.benchmarking will cause cuda initialization
+    # (because of calling torch.cuda.available in global scope)
+    # which cause failure in vllm when it create child processes. Check log:
+    #   https://gist.github.com/shunting314/c194e147bf981e58df095c14874dd65a
+    #
+    # Another way to solve the issue is to just move do_bench_using_profiling
+    # to torch._inductor.runtime.benchmarking and change all the call site.
+    # But that's not trivial due to so many call sites in and out of pytorch.
+
+    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+
+    return may_distort_benchmarking_result(_do_bench_using_profiling)(
+        fn, warmup, rep, is_vetted_benchmarking
+    )
+
+
+def _do_bench_using_profiling(
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    rep: int = 100,
+    is_vetted_benchmarking: bool = False,
 ) -> float:
     """
     Returns benchmark results by examining torch profiler events.
@@ -281,6 +308,11 @@ def do_bench_using_profiling(
     vectorized_elementwise_kernel which is used to fill L2 cache,
     various CUDA events, etc, so could also be fragile.
     """
+
+    if not is_vetted_benchmarking:
+        from torch._inductor.runtime.benchmarking import may_ban_benchmarking
+
+        may_ban_benchmarking()
 
     fn()
     torch.cuda.synchronize()
@@ -313,7 +345,7 @@ def do_bench_using_profiling(
         ]
     ) as p:
         # Benchmark
-        for i in range(n_repeat):
+        for _ in range(n_repeat):
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
@@ -504,7 +536,7 @@ def is_pointwise_use(
     Uses in views ops will follow the views uses
     """
 
-    if not use.op == "call_function":
+    if use.op != "call_function":
         return False
     if not (
         isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
@@ -627,6 +659,7 @@ def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
 
 P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
+FN_TYPE = Callable[Concatenate[Any, P], RV]
 
 
 class CachedMethod(Protocol, Generic[P, RV]):
@@ -666,6 +699,60 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
+def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
+    """
+    Variant of cache_on_self for properties. The only difference is the type signature.
+    """
+    # pyrefly: ignore [bad-argument-type]
+    return cache_on_self(fn)
+
+
+def cache_on_self_and_args(
+    class_name: str,
+) -> Callable[[FN_TYPE[P, RV]], FN_TYPE[P, RV]]:
+    # include both class_name and fn_name in the key to support `super().fn(self, **args, **kwargs)` calls.
+
+    def wrapper(
+        fn: FN_TYPE[P, RV],
+    ) -> FN_TYPE[P, RV]:
+        key = f"__{class_name}_{fn.__name__}_cache"
+
+        # wrapper is likely on the hot path, compile a specialized version of it
+        ctx = {"fn": fn}
+        exec(
+            f"""\
+            def inner(self: Any, *args: P.args, **kwargs: P.kwargs) -> RV:
+                args_kwargs = (args, tuple(sorted(kwargs.items())))
+
+                if not hasattr(self, "{key}"):
+                    object.__setattr__(self, "{key}", {{}})
+
+                cache = self.{key}
+
+                try:
+                    return cache[args_kwargs]
+                except KeyError:
+                    pass
+
+                rv = fn(self, *args, **kwargs)
+
+                cache[args_kwargs] = rv
+                return rv
+            """.lstrip(),
+            ctx,
+        )
+        inner = functools.wraps(fn)(ctx["inner"])
+
+        def clear_cache(self: Any) -> None:
+            if hasattr(self, key):
+                delattr(self, key)
+
+        inner.clear_cache = clear_cache  # type: ignore[attr-defined]
+        return inner
+
+    return wrapper
+
+
 def aggregate_origins(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
 ) -> OrderedSet[Node]:
@@ -675,6 +762,7 @@ def aggregate_origins(
         return functools.reduce(
             operator.or_,
             [
+                # pyrefly: ignore [missing-attribute]
                 node.node.origins
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
@@ -693,9 +781,19 @@ def get_fused_kernel_name(
 ) -> str:
     all_origins = aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
+
+        def get_origin_meta_str(origin):
+            original_aten = origin.meta["original_aten"]
+            key = ""
+            if isinstance(original_aten, torch._ops.OpOverload):
+                key = original_aten._overloadpacket.__name__
+            elif isinstance(original_aten, torch._ops.HigherOrderOperator):
+                key = str(original_aten.name())
+            return key
+
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
+            get_origin_meta_str(origin)
             for origin in all_origins
             if origin.op == "call_function"
             and "original_aten" in origin.meta
@@ -706,12 +804,22 @@ def get_fused_kernel_name(
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
-            if origin.op == "call_function" and "source_fn_stack" in origin.meta:
-                source_fn = origin.meta["source_fn_stack"][-1]
+            if origin.op == "call_function":
+                source_fn = None
+                suffix = ""
+                if "source_fn_stack" in origin.meta:
+                    source_fn = origin.meta["source_fn_stack"][-1]
+                elif "fwd_source_fn_stack" in origin.meta:
+                    # backward nodes have "fwd_source_fn_stack" instead
+                    source_fn = origin.meta["fwd_source_fn_stack"][-1]
+                    suffix = "backward"
+                if not source_fn:
+                    continue
                 if isinstance(source_fn[1], str):
-                    sources.append(source_fn[1])
+                    sources.append(source_fn[1] + suffix)
                 else:
-                    sources.append(source_fn[1].__name__)
+                    sources.append(source_fn[1].__name__ + suffix)
+
         sources = sorted(OrderedSet(sources))
     elif descriptive_names == "inductor_node":
         sources = [
@@ -719,7 +827,6 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    sources = sources
     return "_".join(["fused"] + sources)
 
 
@@ -751,7 +858,7 @@ def get_kernel_metadata(
     # where `inductor_nodes` contains nodes from multiple graph instances
     # is not supported. An example of this is conditional statements.
     single_graph = None
-    if len(inductor_nodes):
+    if inductor_nodes:
         unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
@@ -765,11 +872,20 @@ def get_kernel_metadata(
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
-            key = str(node.meta["original_aten"]._overloadpacket)
-            original_aten_dict[key].append(node.name)
+            original_aten = node.meta["original_aten"]
+            key = None
+            if isinstance(original_aten, torch._ops.OpOverload):
+                key = str(original_aten._overloadpacket)
+            elif isinstance(original_aten, torch._ops.HigherOrderOperator):
+                key = str(original_aten.name())
+            if key:
+                original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
             key = node.meta["from_node"][0].name
             from_node_dict[key].append(node.name)
+        elif node.meta.get("partitioner_tag") == "is_backward":
+            # backward nodes currently don't have a "from node"
+            from_node_dict[node.name].append(node.name)
     sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
         f"{wrapper.comment} {sort_str} Source Nodes: [{', '.join(from_node_dict.keys())}], "
@@ -1140,7 +1256,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(
@@ -1151,6 +1267,7 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
+                            # pyrefly: ignore [missing-attribute]
                             result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
@@ -1253,15 +1370,27 @@ clear_inductor_caches = clear_caches
 fresh_inductor_cache = fresh_cache
 
 
-def argsort(seq: Sequence[Any]) -> list[int]:
-    # preserve original order for equal strides
+def argsort(seq: Sequence[Any], *, reverse: bool = False) -> list[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+    # preserve original order for equal strides
+    # e.g. if strides are [32, 8, 8, 1]
+    # argsort -> [3, 2, 1, 0], rather than
+    # [3, 1, 2, 0]
+    # i.e. for equal strides in ascending order (reverse=False) an
+    # inner dimension should come before an outer dimension, and vice versa
+    # for descending
+    sort_idx = list(sorted(a_r, key=getter, reverse=True))  # noqa: C413
+    if not reverse:
+        return list(reversed(sort_idx))
+    return sort_idx
 
 
 def argsort_sym(
-    shape_env: ShapeEnv, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
+    shape_env: ShapeEnv,
+    seq: Sequence[Union[int, torch.SymInt, sympy.Expr]],
+    *,
+    reverse: bool = False,
 ) -> list[int]:
     def cmp(a: tuple[int, sympy.Expr], b: tuple[int, sympy.Expr]) -> int:
         a_idx, a_val = a
@@ -1291,7 +1420,7 @@ def argsort_sym(
         (idx, s.node.expr if isinstance(s, torch.SymInt) else s)
         for idx, s in enumerate(seq)
     ]
-    exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
+    exprs = sorted(exprs, key=functools.cmp_to_key(cmp), reverse=reverse)
     result = [idx for idx, _ in exprs]
     return result
 
@@ -1424,6 +1553,7 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
+            # pyrefly: ignore [bad-assignment]
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -1533,6 +1663,20 @@ class DelayReplaceLine(DeferredLineBase):
 
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
+
+
+class DelayMaybeLine(DeferredLineBase):
+    """At end of codegen return `line if `pred_fn() else None`"""
+
+    def __init__(self, pred_fn: Callable[[], bool], line: str):
+        super().__init__(line)
+        self.pred_fn = pred_fn
+
+    def __call__(self) -> str | None:
+        return self.line if self.pred_fn() else None
+
+    def _new_line(self, line: str) -> DelayMaybeLine:
+        return DelayMaybeLine(self.pred_fn, line)
 
 
 @functools.cache
@@ -1809,11 +1953,89 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+@functools.lru_cache(maxsize=1)
+def ensure_cute_available() -> bool:
+    """Check if CuTeDSL is importable; cache the result for reuse.
+
+    Call ensure_cute_available.cache_clear() after installing CuTeDSL
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass.cute") is not None
+    except ImportError:
+        return False
+
+
+def use_blackwell_cutedsl_grouped_mm(
+    mat_a: Any,
+    mat_b: Any,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: Optional[Any],
+    bias: Optional[Any],
+    scale_result: Optional[Any],
+) -> bool:
+    """
+    Returns True if we can use the blackwell kernel for grouped mm.
+    Required conditions:
+        1. CuTeDSL backend is enabled
+        2. CuTeDSL is available
+        3. We are on a blackwell arch
+        4. The dtype is bf16
+        5. Max autotune or max autotune gemm is enabled
+        6. A, B, and the output are 16B aligned
+        7. We are not using dynamic shapes
+        8. A is 2d
+        9. B is 3d
+        10. Offsets are provided
+        11. Bias and Scale are not provided
+    """
+    if not ensure_cute_available():
+        return False
+
+    if not _use_autotune_backend("CUTEDSL"):
+        return False
+
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    if not is_gpu(layout.device.type):
+        return False
+
+    if not is_datacenter_blackwell_arch():
+        return False
+
+    layout_dtypes = [torch.bfloat16]
+    if not _use_template_for_gpu(layout, layout_dtypes):
+        return False
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+
+    # Checks for 16B ptr and stride alignment
+    if not can_use_tma(mat_a, mat_b, output_layout=layout):
+        return False
+
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+        return False
+
+    if not a_is_2d or b_is_2d:
+        return False
+
+    if offs is None:
+        return False
+
+    if bias is not None or scale_result is not None:
+        return False
+
+    return True
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+    if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
@@ -1834,9 +2056,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
         if not try_import_cutlass():
             log.warning(
                 "Failed to import CUTLASS lib. Please check whether "
-                "_inductor.config.cuda.cutlass_dir %s is set correctly. "
+                "_inductor.config.cutlass.cutlass_dir %s is set correctly. "
                 "Skipping CUTLASS backend for now.",
-                config.cuda.cutlass_dir,
+                config.cutlass.cutlass_dir,
             )
             return False
     return res
@@ -1844,7 +2066,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
 
 def _use_cutlass_for_op(op_name: str) -> bool:
     """Check if CUTLASS should be used for the given operation."""
-    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    enabled_ops = config.cutlass.cutlass_enabled_ops.upper()
     if enabled_ops == "ALL":
         return True
     return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
@@ -1854,10 +2076,12 @@ _IntLike: TypeAlias = Union[int, sympy.Expr]
 
 
 @functools.cache
-def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+def use_decompose_k_choice(
+    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
+) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = config.triton.decompose_k_threshold
+    decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
         not torch.version.hip
@@ -1869,6 +2093,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
+        and config.triton.num_decompose_k_splits > 0
     )
 
 
@@ -1996,7 +2221,7 @@ def use_ck_template(layout: Layout) -> bool:
     if not torch.version.hip:
         return False
     # tensors must be on GPU
-    if not layout.device.type == "cuda":
+    if layout.device.type != "cuda":
         return False
     # hardware check
     # if config arch list is not specified, get the native arch from the device properties
@@ -2062,9 +2287,21 @@ def use_cpp_bmm_template(
 
     assert isinstance(mat1.layout, Layout)
 
-    return (
-        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
-        and mat1.layout.is_contiguous()
+    # In certain scenarios, such as when the first stride is 0, the entire tensor may not be contiguous.
+    # But the 2D matrix within each batch can still be contiguous, allowing us to apply max autotune.
+    # So here we specifically check for contiguity within the 2D matrix of each batch.
+    mat1_size = mat1.layout.size
+    mat1_stride = mat1.layout.stride
+    mat1_each_batch_is_contiguous = (
+        _use_template_for_cpu(layout)
+        and mat1.get_dtype() == torch.float32
+        and (len(mat1_size) == 3)
+        and (len(mat1_stride) == 3)
+        and (mat1_stride[1] == mat1_size[2])
+        and (mat1_stride[2] == 1)
+    )
+    return use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False) and (
+        mat1.layout.is_contiguous() or mat1_each_batch_is_contiguous
     )
 
 
@@ -2162,20 +2399,21 @@ def run_and_get_code(
 ) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: list[str] = []
+    source_codes: OrderedSet[str] = OrderedSet()
 
     def save_output_code(code: str) -> None:
-        source_codes.append(code)
+        source_codes.add(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
-    return result, source_codes
+    return result, list(source_codes)
 
 
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -2236,6 +2474,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 
 
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
+    # pyrefly: ignore [bad-argument-type]
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2247,6 +2486,7 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
 def run_and_get_triton_code(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> str:
+    # pyrefly: ignore [bad-argument-type]
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2416,9 +2656,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = DeviceInfo.lookup_tops_current_device(
-        dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32
-    )
+    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -2445,11 +2683,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(torch.float32)
         else:
+            # pyrefly: ignore  # missing-argument
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2463,7 +2704,19 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
+    # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
+
+
+def get_max_numwarps() -> int:
+    if torch.cuda.is_available():
+        warp_size = torch.cuda.get_device_properties().warp_size
+        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+    else:
+        # Defaults
+        warp_size = 32
+        max_threads_per_block = 1024
+    return max_threads_per_block // warp_size
 
 
 def is_welford_reduction(reduction_type: str) -> bool:
@@ -2529,7 +2782,6 @@ def pass_execution_and_save(
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
-        delete=False,
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
@@ -2600,7 +2852,7 @@ def is_collective(
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
         # overlap, torchrec's communication ops should be not used.
-        type(node) == ir.FallbackKernel
+        type(node) is ir.FallbackKernel
         and (
             # NOTE: the `hasattr()` check is to bypass errors such as the following:
             # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
@@ -2624,16 +2876,19 @@ def is_collective(
 def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     from . import ir
 
-    return type(node) == ir._WaitKernel
+    return type(node) is ir._WaitKernel
 
 
-def contains_collective(snode: BaseSchedulerNode) -> bool:
+def contains_collective(
+    snode: BaseSchedulerNode,
+    filter_fn: Optional[Callable[[BaseSchedulerNode], bool]] = None,
+) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(snode.node)
+    return is_collective(snode.node) and (filter_fn is None or filter_fn(snode))
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:
@@ -2803,19 +3058,10 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    # tl.atomic add has bfloat16 support in fbcode
-    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
-    # we will fallback until the code is upstreamed to OSS
-    if (
-        config.is_fbcode()
-        and dtype == torch.bfloat16
-        and torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and config.bfloat16_atomic_adds_enabled
-    ):
-        return False
+    if dtype == torch.bfloat16 and torch.cuda.is_available():
+        return torch.cuda.get_device_capability() < (9, 0)
     else:
-        return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
+        return dtype in (torch.int64, torch.bool)
 
 
 def use_scatter_fallback(
@@ -2968,6 +3214,15 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
 
+        # Check tensor sizes and strides for SymInt values
+        if isinstance(input, torch.Tensor):
+            for size in input.size():
+                if isinstance(size, torch.SymInt):
+                    return size.node.shape_env
+            for stride in input.stride():
+                if isinstance(stride, torch.SymInt):
+                    return stride.node.shape_env
+
     # TODO(voz): Should we always have one anyway?
     return None
 
@@ -3062,6 +3317,10 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     int_max = torch.iinfo(torch.int32).max
     size_hint = V.graph.sizevars.size_hint
     has_hint = V.graph.sizevars.shape_env.has_hint
+
+    if config.assume_32bit_indexing:
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
+        return True
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
@@ -3243,14 +3502,17 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
     op_requires_libdevice_fp64.add(name)
 
 
-def get_current_backend() -> str:
+def get_current_backend(device_type: Optional[str] = None) -> str:
     from torch._inductor.virtualized import V
 
-    device_str = V.graph.get_current_device_or_throw().type
-    if device_str == "cpu":
+    if not device_type:
+        device_type = V.graph.get_current_device_or_throw().type
+    if device_type == "cpu":
         return config.cpu_backend
-    elif device_str == "mps":
+    elif device_type == "mps":
         return "mps"
+    elif device_type == "xpu":
+        return config.xpu_backend
     else:
         return config.cuda_backend
 
@@ -3321,12 +3583,7 @@ class ScopedDict(MutableMapping[KeyType, ValType]):
 @dataclass_transform(frozen_default=True)
 def ir_dataclass(cls: Optional[type[Any]] = None, /, *, frozen: bool = True) -> Any:
     def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls, frozen=frozen)
+        return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
 
     if cls is None:
         return wrap
@@ -3521,7 +3778,7 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     """
     Ensures the configuration is internally consistent for standalone AOTInductor.
 
-    If `aot_inductor.compile_standalone` is set to True in the provided
+    If `aot_inductor_mode.compile_standalone` is set to True in the provided
     `config_patches` (or falls back to the global config), this function ensures
     that the following configs are also enabled:
         - `aot_inductor.package_cpp_only`
@@ -3542,11 +3799,24 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
             config_patches[config_name] = config_value
         elif not value and value != config_value:
             raise RuntimeError(
-                f"Invalid config: {config_name}={config_value} when aot_inductor.compile_standalone is True."
+                f"Invalid config: {config_name}={config_value} when aot_inductor_mode.compile_standalone is True."
             )
 
+    def force_patch_config(
+        config_patches: dict[str, Any], config_name: str, config_value: Any
+    ) -> None:
+        value = config_patches.get(config_name, getattr(config, config_name))
+        if value != config_value:
+            log.warning(
+                "Overriding: %s=%s when aot_inductor_mode.compile_standalone is True.",
+                config_name,
+                config_value,
+            )
+        config_patches[config_name] = config_value
+
     compile_standalone = config_patches.get(
-        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+        "aot_inductor_mode.compile_standalone",
+        config.aot_inductor_mode.compile_standalone,
     )
     # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
     config_patches = config_patches.copy()
@@ -3562,8 +3832,72 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )
+        # TODO: change these two configs to default to None and use patch_config
+        force_patch_config(
+            config_patches,
+            "aot_inductor.link_libtorch",
+            config.test_configs.use_libtorch,
+        )
+        force_patch_config(config_patches, "aot_inductor.dynamic_linkage", False)
+
+    cross_target_platform = config_patches.get(
+        "aot_inductor.cross_target_platform",
+        config.aot_inductor.cross_target_platform,
+    )
+
+    package_constants_in_so = config_patches.get(
+        "aot_inductor.package_constants_in_so",
+        config.aot_inductor.package_constants_in_so,
+    )
+
+    if cross_target_platform == "windows" and package_constants_in_so:
+        raise RuntimeError(
+            "config.aot_inductor.package_constants_in_so is not supported for windows cross-compilation. "
+            "Please use config.aot_inductor.package_constants_on_disk_format = binary_blob."
+        )
 
     return config_patches
+
+
+def determine_aoti_mmap_flags(consts_size: int) -> tuple[bool, bool]:
+    """
+    Decide whether we should mmap weights, and whether to store the weights with .so.
+
+    If force_mmap_weights or package_constants_on_disk_format == "binary_blob" configs are set, respect the config.
+
+    Returns tuple (use_external_weights, use_mmap_weights).
+    """
+
+    if (
+        config.aot_inductor.force_mmap_weights
+        and config.aot_inductor.package_constants_on_disk_format == "binary_blob"
+    ):
+        raise RuntimeError(
+            "config.aot_inductor.package_constants_on_disk_format = binary_blob and "
+            "config.aot_inductor.force_mmap_weights cannot both be True."
+        )
+
+    if config.aot_inductor.force_mmap_weights:
+        if config.aot_inductor.cross_target_platform == "windows":
+            raise RuntimeError(
+                "when cross_target_platform is windows, use_mmap_weights should not be true."
+            )
+        use_mmap_weights = True
+        use_external_weights = False
+        return use_external_weights, use_mmap_weights
+
+    if config.aot_inductor.package_constants_on_disk_format == "binary_blob":
+        use_external_weights = True
+        use_mmap_weights = False
+        return use_external_weights, use_mmap_weights
+
+    if consts_size <= 2_000_000_000:
+        return False, False
+
+    use_external_weights = False
+    use_mmap_weights = not config.is_fbcode()
+
+    return use_external_weights, use_mmap_weights
 
 
 def is_valid_aoti_model_name() -> bool:
@@ -3740,4 +4074,71 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     # before checking for known strings.
     if V.graph.name:
         dep_name = dep_name.removeprefix(V.graph.name + "_")
-    return dep_name.startswith(("primals_", "arg", "fwd_rng_state", "bwd_rng_state"))
+    return dep_name.startswith(
+        ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
+    )
+
+
+# Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
+def load_template(name: str, template_dir: Path) -> str:
+    """Load a template file and return its content."""
+    with open(template_dir / f"{name}.py.jinja") as f:
+        return f.read()
+
+
+def should_fallback_by_default(node: torch.fx.Node) -> bool:
+    """Decide whether fallback for a node. This is only used in inductor lite mode."""
+    target = node.target
+
+    assert isinstance(
+        target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
+
+    if not config.fallback_by_default:
+        return False
+
+    # some ops need special handle due to dynamic shapes. we can avoid
+    # fallback if they do not impact numerics.
+    skip_fallback_due_to_dynamic_shape = OrderedSet(
+        [
+            torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.lift_fresh_copy.default,
+        ]
+    )
+
+    if target in skip_fallback_due_to_dynamic_shape:
+        return False
+
+    # Most hops have registered lowering. We should follow the lowering and not fallback.
+    # However, in rare cases, hops may not register lowering, such as
+    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
+    # these hops.
+    fallback_hops = OrderedSet(
+        [torch.ops.higher_order.triton_kernel_wrapper_functional]
+    )
+
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        return target in fallback_hops
+
+    return not _needs_inductor_compile(node)
+
+
+# Collective operation names for specialized benchmarking
+COLLECTIVE_OPS = OrderedSet(
+    [
+        "torch.ops._c10d_functional.all_reduce.default",
+        "torch.ops._c10d_functional.all_reduce_.default",
+        "torch.ops._c10d_functional.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional.all_to_all_single.default",
+        "torch.ops._c10d_functional_autograd.all_reduce.default",
+        "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+    ]
+)
+
+
+def is_collective_op(op_name: str) -> bool:
+    """Check if an operation is a collective operation."""
+    return op_name in COLLECTIVE_OPS

@@ -90,6 +90,10 @@ public:
     allocator_->setMemoryFraction(fraction, device);
   }
 
+  std::vector<HIPCachingAllocator::StreamSegmentSize> getExpandableSegmentSizes(c10::DeviceIndex device) override {
+    return allocator_->getExpandableSegmentSizes(device);
+  }
+
   void enable(bool value) override {
     allocator_->enable(value);
   }

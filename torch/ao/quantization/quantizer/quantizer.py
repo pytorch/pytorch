@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Union
+from typing import Annotated
 
 import torch
 from torch import Tensor
@@ -40,10 +41,10 @@ class QuantizationSpec(QuantizationSpecBase):
     # or we can attach some custom args to them
     # e.g. MinMaxObserver.with_args(eps=eps)
     observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor
-    quant_min: Optional[int] = None
-    quant_max: Optional[int] = None
-    qscheme: Optional[torch.qscheme] = None
-    ch_axis: Optional[int] = None
+    quant_min: int | None = None
+    quant_max: int | None = None
+    qscheme: torch.qscheme | None = None
+    ch_axis: int | None = None
     is_dynamic: bool = False
 
     def __post_init__(self):
@@ -69,9 +70,9 @@ class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     dtype: torch.dtype
     scale: float
     zero_point: int
-    quant_min: Optional[int] = None
-    quant_max: Optional[int] = None
-    qscheme: Optional[torch.qscheme] = None
+    quant_min: int | None = None
+    quant_max: int | None = None
+    qscheme: torch.qscheme | None = None
     is_dynamic: bool = False
 
 
@@ -81,7 +82,7 @@ an input edge or an output value
 input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
 output value is an fx Node
 """
-EdgeOrNode = Union[tuple[Node, Node], Node]
+EdgeOrNode = Annotated[tuple[Node, Node] | Node, None]
 EdgeOrNode.__module__ = "torch.ao.quantization.quantizer.quantizer"
 
 
@@ -102,10 +103,10 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     derived_from: list[EdgeOrNode]
     derive_qparams_fn: Callable[[list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]]
     dtype: torch.dtype
-    quant_min: Optional[int] = None
-    quant_max: Optional[int] = None
-    qscheme: Optional[torch.qscheme] = None
-    ch_axis: Optional[int] = None
+    quant_min: int | None = None
+    quant_max: int | None = None
+    qscheme: torch.qscheme | None = None
+    ch_axis: int | None = None
     is_dynamic: bool = False
 
 
@@ -117,13 +118,13 @@ class QuantizationAnnotation:
     """
 
     # a map from torch.fx.Node to a type of QuantizationSpecBase
-    input_qspec_map: dict[Node, Optional[QuantizationSpecBase]] = field(
+    input_qspec_map: dict[Node, QuantizationSpecBase | None] = field(
         default_factory=dict
     )
 
     # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR
-    output_qspec: Optional[QuantizationSpecBase] = None
+    output_qspec: QuantizationSpecBase | None = None
 
     # For a Node: node1 and edge: (node1, node2), since they are observing the same
     # Tensor, we may want to implicitly share observers, this flag allows people to

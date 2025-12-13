@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -13,7 +11,6 @@
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
-#include <torch/csrc/utils/pybind.h>
 #include <sstream>
 
 namespace torch::jit {
@@ -292,7 +289,7 @@ void NodeToONNX(
       std::ostringstream ss;
       ss << "symbolic for " << op_name
          << " produced an incorrect number of outputs (expected ";
-      ss << num_old_outputs << ", but got " << outputs.size() << ")";
+      ss << num_old_outputs << ", but got " << outputs.size() << ')';
       throw std::runtime_error(ss.str());
     }
     // For const node, it does not need params_dict info, so set it to {}.

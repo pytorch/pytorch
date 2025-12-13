@@ -14,6 +14,7 @@
  */
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/OpMathType.h>
 
 namespace at::cuda::blas {
@@ -136,15 +137,6 @@ void int8_gemm(
     int32_t* result_ptr,
     int64_t result_ld);
 
-enum class ScalingType : std::uint8_t {
-  TensorWise,  // fp32 scales
-  RowWise,  // fp32 scales
-  BlockWise1x16,  // fp8_e4m3fn scales
-  BlockWise1x32,  // fp8_e8m0fnu scales
-  BlockWise1x128,  // fp32 scales
-  BlockWise128x128,  // fp32 scales
-};
-
 void scaled_gemm(
     char transa,
     char transb,
@@ -156,20 +148,21 @@ void scaled_gemm(
     int64_t mat1_ld,
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
-    ScalingType mat1_scaling_type,
+    at::blas::ScalingType mat1_scaling_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
-    ScalingType mat2_scaling_type,
+    at::blas::ScalingType mat2_scaling_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
     const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    bool use_fast_accum);
+    bool use_fast_accum,
+    const std::optional<Tensor>& alpha);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 

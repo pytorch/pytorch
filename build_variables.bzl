@@ -68,6 +68,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
+    # This needs to belong here because it defines the first non-inline virtual
+    # function, which matters for AutogradMetaInterface's vtable.
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -480,6 +482,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/shim_common.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -518,6 +521,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
+    "torch/csrc/distributed/c10d/control_plane/WaitCounterHandler.cpp",
     "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
     "torch/csrc/distributed/c10d/cuda/StreamBlock.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
@@ -728,6 +732,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/cuda/CUDAPluggableAllocator.cpp",
+    "torch/csrc/cuda/shim_common.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
@@ -853,6 +858,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Stream.cpp",
     "torch/csrc/cuda/Graph.cpp",
     "torch/csrc/cuda/MemPool.cpp",
+    "torch/csrc/cuda/GreenContext.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
@@ -869,6 +875,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
@@ -897,6 +904,7 @@ libtorch_python_core_sources = [
     "torch/csrc/Stream.cpp",
     "torch/csrc/Event.cpp",
     "torch/csrc/TypeInfo.cpp",
+    "torch/csrc/acc/Module.cpp",
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/init.cpp",
@@ -912,6 +920,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/distributed/python_placement.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",
@@ -923,6 +932,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/utils.cpp",
     "torch/csrc/dynamo/init.cpp",
+    "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
@@ -1010,6 +1020,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
+    "torch/csrc/functionalization/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
     "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
@@ -1017,6 +1028,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/python_callback_work.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -1052,6 +1064,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
         "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp",
     ]]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
@@ -1067,6 +1080,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
+    "aten/src/ATen/detail/XLAHooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
     "aten/src/ATen/detail/IPUHooksInterface.cpp",
@@ -1085,6 +1099,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/HPUHooksInterface.h",
     "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
+    "aten/src/ATen/detail/XLAHooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
     "aten/src/ATen/detail/IPUHooksInterface.h",

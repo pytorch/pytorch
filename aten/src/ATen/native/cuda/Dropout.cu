@@ -75,7 +75,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
     // We'll use this to actually cause vectorized loads later
     LoadT *value = reinterpret_cast<LoadT*>(&src);
 
-    //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
+    //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for Halfs, so generate float for everything
     // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
     if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
@@ -159,7 +159,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;
        linearIndex += gridDim.x * blockDim.x*UNROLL) {
-//curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
+//curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for Halfs, so generate float for everything
        float4 rand = curand_uniform4(&state);
        scalar_t src[UNROLL];
        rand.x = rand.x < p;

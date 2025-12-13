@@ -2,8 +2,8 @@ import logging
 import os
 import warnings
 import zipfile
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -51,7 +51,7 @@ from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -64,13 +64,12 @@ log: logging.Logger = logging.getLogger(__name__)
 def export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[Mapping[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -160,20 +159,18 @@ def export_for_training(
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _use_new_tracer_experimental=_use_new_tracer_experimental,
     )
 
 
 def export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[Mapping[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -286,7 +283,6 @@ def export(
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            _use_new_tracer_experimental=_use_new_tracer_experimental,
         )
     except Exception as e:
         draft_export_msg = (
@@ -322,8 +318,8 @@ def save(
     ep: ExportedProgram,
     f: FileLike,
     *,
-    extra_files: Optional[dict[str, Any]] = None,
-    opset_version: Optional[dict[str, int]] = None,
+    extra_files: dict[str, Any] | None = None,
+    opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     """
@@ -393,14 +389,17 @@ def save(
 def load(
     f: FileLike,
     *,
-    extra_files: Optional[dict[str, Any]] = None,
-    expected_opset_version: Optional[dict[str, int]] = None,
+    extra_files: dict[str, Any] | None = None,
+    expected_opset_version: dict[str, int] | None = None,
 ) -> ExportedProgram:
     """
 
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
+
+    .. warning::
+        :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
 
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
@@ -451,8 +450,8 @@ def load(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError as e:
-        log.warning("Ran into the following error when deserializing: %s", e)
+    except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
@@ -493,10 +492,10 @@ def load(
 
         # Load serialized_ep and serialized_state_dict from the zip file
 
-        serialized_exported_program: Optional[bytes] = None
-        serialized_state_dict: Optional[bytes] = None
-        serialized_constants: Optional[bytes] = None
-        serialized_example_inputs: Optional[bytes] = None
+        serialized_exported_program: bytes | None = None
+        serialized_state_dict: bytes | None = None
+        serialized_constants: bytes | None = None
+        serialized_example_inputs: bytes | None = None
 
         for file_info in zipf.infolist():
             file_content = zipf.read(file_info.filename)
@@ -504,10 +503,10 @@ def load(
             if file_info.filename == "serialized_exported_program.json":
                 serialized_exported_program = file_content
             elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_constants = file_content
             elif file_info.filename == "serialized_state_dict.pt":
                 serialized_state_dict = file_content
@@ -539,9 +538,9 @@ def load(
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[Mapping[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -567,7 +566,7 @@ def draft_export(
 def register_dataclass(
     cls: type[Any],
     *,
-    serialized_type_name: Optional[str] = None,
+    serialized_type_name: str | None = None,
 ) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.

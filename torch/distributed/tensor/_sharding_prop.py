@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
+import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Optional, Union
+from typing import cast
 
 import torch
+from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -29,6 +31,8 @@ from torch.distributed.tensor._utils import (
 
 aten = torch.ops.aten
 
+log = logging.getLogger(__name__)
+
 
 def _length(obj) -> int:
     if obj is None:
@@ -48,6 +52,9 @@ class LocalLRUCache(threading.local):
     def cache_info(self):
         return self.cache.cache_info()
 
+    def cache_clear(self):
+        return self.cache.cache_clear()
+
 
 class ShardingPropagator:
     def __init__(self) -> None:
@@ -64,9 +71,7 @@ class ShardingPropagator:
         )
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
-        self.op_to_shape_and_stride_idx: dict[
-            OpOverload, Union[int, tuple[int, int]]
-        ] = {
+        self.op_to_shape_and_stride_idx: dict[OpOverload, int | tuple[int, int]] = {
             # new factory ops
             aten.new_empty.default: 1,
             aten.new_full.default: 1,
@@ -86,7 +91,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         rule_func: Callable[[OpSchema], OutputSharding],
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a sharding propagation rule for an operator.
@@ -99,7 +104,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         strategy_func: Callable[[OpSchema], StrategyType],
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a :class:`OpStrategy` generator for an operator.
@@ -152,7 +157,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -161,9 +166,10 @@ class ShardingPropagator:
             # data dependent ops can't be used for fake propagation
             return None
 
-        # NOTE: We must call the tracing in fake tensor mode so that it
-        # avoids materializing memory
-        with FakeTensorMode():
+        # NOTE: We must call the tracing in fake tensor mode so that it avoids
+        # materializing memory.
+        fake_mode = detect_fake_mode() or FakeTensorMode()
+        with fake_mode:
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -174,7 +180,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list: list[Optional[TensorMeta]] = []
+            tensor_meta_list: list[TensorMeta | None] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -198,7 +204,7 @@ class ShardingPropagator:
     @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Cached version of _propagate_tensor_meta_non_cached
         This is a private API. Use propagate_tensor_meta instead.
@@ -207,7 +213,7 @@ class ShardingPropagator:
 
     def propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
@@ -222,7 +228,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
+        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -243,7 +249,7 @@ class ShardingPropagator:
                 )
             return output_specs.shallow_copy_with_tensor_meta(output_tensor_meta)
         elif isinstance(output_specs, (tuple, list)):
-            new_specs: list[Optional[DTensorSpec]] = []
+            new_specs: list[DTensorSpec | None] = []
             if not isinstance(output_tensor_meta, (tuple, list)) or len(
                 output_specs
             ) != len(output_tensor_meta):
@@ -258,14 +264,16 @@ class ShardingPropagator:
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
                         # NOTE: aten.convolution_backward.default is an exception and it
-                        # needs extra handling because the first Tensor in the output
-                        # tuple can be `None` if the input Tensor to convolution op has
-                        # `requires_grad=False` (e.g. convolution layer is the first
-                        # layer in the model). We explicitly allow its corresponding
-                        # TensorMeta to be `None`.
+                        # needs extra handling because any Tensor in the output tuple
+                        # can be `None` depending on the output_mask parameter. This can
+                        # occur during double backpropagation or when certain gradients
+                        # are not needed (e.g., grad_input when input has requires_grad=False,
+                        # grad_weight/grad_bias when weight/bias have requires_grad=False,
+                        # or grad_bias when bias is None). We explicitly allow the
+                        # corresponding TensorMeta to be `None`.
                         if (
                             op == aten.convolution_backward.default
-                            and i == 0
+                            and i in (0, 1, 2)
                             and output_tensor_meta_i is None
                         ):
                             assert isinstance(output_specs, list)
@@ -326,6 +334,10 @@ class ShardingPropagator:
         )
 
     def propagate(self, op_info: OpInfo) -> None:
+        # NB: The logic here is duplicated in _propagate_op_sharding_dispatch_slow_path.
+        # Ideally, this function would be deleted, but there are a handful of
+        # one off call sites here that aren't cleaned up.
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -342,6 +354,10 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
+        # no-op in OSS, logs API usage metrics in meta-internal runs
+        torch._C._log_api_usage_once(
+            "torch.distributed.tensor._sharding_prop.ShardingPropagator.propogate_op_sharding_non_cached"
+        )
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
@@ -415,16 +431,14 @@ class ShardingPropagator:
                     output_specs: OutputSpecType = output_strategy.output_specs
                     if isinstance(output_specs, DTensorSpec):
                         output_specs = tuple(
-                            [
-                                # create a new DTensorSpec with the same placement as the
-                                # output_specs in output_strategy
-                                DTensorSpec(
-                                    mesh=output_specs.mesh,
-                                    placements=output_specs.placements,
-                                    tensor_meta=output_specs.tensor_meta,
-                                )
-                                for _ in range(len(op_schema.op._schema.returns))
-                            ]
+                            # create a new DTensorSpec with the same placement as the
+                            # output_specs in output_strategy
+                            DTensorSpec(
+                                mesh=output_specs.mesh,
+                                placements=output_specs.placements,
+                                tensor_meta=output_specs.tensor_meta,
+                            )
+                            for _ in range(len(op_schema.op._schema.returns))
                         )
                 elif (
                     op_schema.return_type_tensor()
@@ -568,14 +582,18 @@ class ShardingPropagator:
             )
 
     def _select_strategy(
-        self, strategy: OpStrategy, op_schema: Optional[OpSchema] = None
+        self, strategy: OpStrategy, op_schema: OpSchema | None = None
     ) -> OpSpec:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
             return strategy.strategies[0]
 
-        op_spec_costs: list[float] = []
+        op_spec_costs: list[torch.types.FloatLikeType] = []
         no_redistribute_strategy_index: int = -1
+        negative_cost_index: int = -1
+        zero_cost_index: int = -1
         for strategy_idx, op_spec in enumerate(strategy.strategies):
             assert op_spec.redistribute_cost is not None, (
                 "must set redistribute cost each OpSpec!"
@@ -583,37 +601,48 @@ class ShardingPropagator:
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
-            # If there's no redistribute cost, we record the index of the strategy
-            # which doesn't need redistribute.
+            # If there are strategies with negative/zero/no redistribute cost,
+            # we record those indices.
             # TODO: Currently this only applies to OpStrategy selection. Requires extra
             # logic to make it work for TupleStrategy, if needed.
-            if op_schema is not None and redistribute_cost == 0:
-                needs_redistribute = False
-                for spec_idx, input_spec in enumerate(op_schema.args_spec):
-                    desired_spec = (
-                        op_spec.output_spec
-                        if op_spec.input_specs is None
-                        else op_spec.input_specs[spec_idx]
-                    )
-                    if input_spec.placements != desired_spec.placements:
-                        needs_redistribute = True
-                        break
+            if op_schema is not None:
+                if guard_or_false(redistribute_cost < 0):
+                    if (
+                        negative_cost_index == -1
+                        or redistribute_cost < op_spec_costs[negative_cost_index]
+                    ):
+                        negative_cost_index = strategy_idx
+                elif guard_or_false(redistribute_cost == 0):
+                    needs_redistribute = False
+                    for spec_idx, input_spec in enumerate(op_schema.args_spec):
+                        desired_spec = (
+                            op_spec.output_spec
+                            if op_spec.input_specs is None
+                            else op_spec.input_specs[spec_idx]
+                        )
+                        if input_spec.placements != desired_spec.placements:
+                            needs_redistribute = True
+                            break
 
-                if not needs_redistribute:
-                    no_redistribute_strategy_index = strategy_idx
+                    if not needs_redistribute:
+                        no_redistribute_strategy_index = strategy_idx
+                    elif zero_cost_index == -1:
+                        zero_cost_index = strategy_idx
 
-        # for eager execution, we just select the one with the minimal redistribute cost
-        min_cost = min(op_spec_costs)
-        if min_cost < 0:
+        # prioritize negative/zero/no redistribute cost strategies
+        if negative_cost_index != -1:
             # If there's negative cost, we select the one with the minimal cost,
             # even if this means we need to redistribute, e.g. via local chunking.
             # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
             # when the inputs / outputs are sharded.
-            selected_strategy_index = op_spec_costs.index(min_cost)
-        elif min_cost == 0 and no_redistribute_strategy_index != -1:
-            # If there's no redistribute cost, we select the one with no redistribute.
+            selected_strategy_index = negative_cost_index
+        elif no_redistribute_strategy_index != -1:
             selected_strategy_index = no_redistribute_strategy_index
+        elif zero_cost_index != -1:
+            selected_strategy_index = zero_cost_index
         else:
+            # default to choosing minimal redistribute cost
+            min_cost = min(op_spec_costs)
             selected_strategy_index = op_spec_costs.index(min_cost)
 
         return strategy.strategies[selected_strategy_index]
@@ -635,7 +664,7 @@ class ShardingPropagator:
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
         expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
-            out_tensor_meta.shape, spec.mesh, spec.placements
+            out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
 
         # adjust the stride arg for aten.new_empty_strided.default

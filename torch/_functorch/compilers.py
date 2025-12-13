@@ -5,9 +5,10 @@ import logging
 import os
 import pickle
 import random
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable, Union
+from typing import Union
 
 import sympy
 
@@ -360,7 +361,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             input_meta += get_input_meta(args[1])
             return input_meta
         for arg in args:
-            if type(arg) == int or type(arg) == float:
+            if type(arg) is int or type(arg) is float:
                 input_meta.append((type(arg),))
             else:
                 input_meta.append(
@@ -390,13 +391,10 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         gm.to_folder(
             f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
         )
-        pickle.dump(
-            input_meta,
-            open(
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",  # noqa: B950
-                "wb",
-            ),
-        )  # noqa: E501
+        with open(
+            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input"
+        ) as f:
+            pickle.dump(input_meta, f)
         if dump_example_input:
             torch.save(
                 args,

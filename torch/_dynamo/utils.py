@@ -51,16 +51,18 @@ from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
@@ -87,6 +89,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -95,6 +98,7 @@ from .graph_utils import _get_flat_args
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
+        Callable,
         Container,
         Generator,
         ItemsView,
@@ -165,7 +169,7 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
 )
 optimus_scuba_log: dict[str, Any] = {}
 troubleshooting_url = (
-    "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
+    "https://pytorch.org/docs/main/compile/programming_model.recompilation.html"
 )
 nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
@@ -281,6 +285,12 @@ def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
     return _recompile_user_contexts
 
 
+def reset_recompile_user_contexts() -> None:
+    """Clear any registered recompile user-context hooks (test helper)."""
+    global _recompile_user_contexts
+    _recompile_user_contexts = None
+
+
 op_count = 0
 
 
@@ -294,11 +304,13 @@ def increment_op_count(cnt: int) -> None:
 def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
+        # pyrefly: ignore [unsupported-operation]
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
         "entire_frame_compile", 0
     ) + total_by_key.get("entire_backward_compile", 0)
+    # pyrefly: ignore [bad-return]
     return total_by_key
 
 
@@ -797,6 +809,7 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
 ) -> tuple[list[str], list[object]]: ...
@@ -896,11 +909,33 @@ def reset_graph_break_dup_checker() -> None:
     graph_break_dup_warning_checker.reset()
 
 
+# Matches ANSI escape sequences (CSI)
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
+    \x1B            # ESC
+    \[              # [
+    [0-?]*          # Parameter bytes
+    [ -/]*          # Intermediate bytes
+    [@-~]           # Final byte
+    """,
+    re.VERBOSE,
+)
+
+
+class StripAnsiFormatter(logging.Formatter):
+    """Logging formatter that strips ANSI escape codes."""
+
+    def format(self, record):
+        msg = super().format(record)
+        return ANSI_ESCAPE_PATTERN.sub("", msg)
+
+
 def add_file_handler() -> contextlib.ExitStack:
     log_path = os.path.join(get_debug_dir(), "torchdynamo")
     os.makedirs(log_path, exist_ok=True)
 
     log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file_handler.setFormatter(StripAnsiFormatter("%(message)s"))
     logger = logging.getLogger("torch._dynamo")
     logger.addHandler(log_file_handler)
 
@@ -1024,6 +1059,8 @@ def istype(obj: object, allowed_types: Any) -> bool:
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
+    # Check for consistency e.g. here:
+    # https://github.com/python/cpython/blob/f2b82b3b3b1f8c7a81e84df35ee921e44517cf32/Lib/typing.py#L32
     _builtin_final_typing_classes = (
         typing.ParamSpecArgs,
         typing.ParamSpecKwargs,
@@ -1034,18 +1071,26 @@ if sys.version_info >= (3, 12):
     )
 
 
+if sys.version_info >= (3, 14):
+    _builtin_final_typing_classes += (typing.Union,)
+
+
 def is_typing(value: Any) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
-    #   - Union
+    #   - Union (Python < 3.14)
     #   ...
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
-    return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
+    return (
+        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        or value is typing.Generic
+        or value is typing.Union
+    )
 
 
 def is_numpy_int_type(value: Any) -> bool:
@@ -1238,10 +1283,10 @@ def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
         from .variables.base import typestr
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to convert args/kwargs to proxy",
             context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
             explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
@@ -1305,6 +1350,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool] = None
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
+    compiler_config: Optional[str] = None
     is_forward: Optional[bool] = None
     num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
@@ -1365,6 +1411,8 @@ class CompilationMetrics:
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1448,6 +1496,7 @@ class CompilationMetrics:
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
+        # pyrefly: ignore [bad-argument-type]
         return cls(**all_metrics)
 
 
@@ -1542,6 +1591,30 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
     return json.dumps(config_dict, sort_keys=True)
 
 
+def _compiler_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    if not torch.compiler.config:
+        return None
+
+    try:
+        compiler_config_copy = torch.compiler.config.get_config_copy()  # type: ignore[attr-defined]
+    except (TypeError, AttributeError):
+        return "Compiler Config cannot be pickled"
+
+    config_dict = clean_for_json(compiler_config_copy)
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1563,7 +1636,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if torch._inductor.config:
         try:
             inductor_config_copy = torch._inductor.config.get_config_copy()
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
     if inductor_config_copy is not None:
@@ -1629,11 +1702,13 @@ def record_compilation_metrics(
         "config_suppress_errors": config.suppress_errors,
         "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
+        "pytorch_version": torch.__version__,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -2138,6 +2213,10 @@ def clone_input(
                 x.shape,
                 layout=x.layout,
             )
+        elif is_traceable_wrapper_subclass(x):
+            # Questionable - but this is required to not fail executorch related
+            # torchao tests.
+            return torch_clone(x)
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
@@ -2201,12 +2280,15 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
-        from .exc import SkipFrame
+        from .exc import format_skip_frame_message, SkipFrame
 
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
         raise SkipFrame(
-            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+            format_skip_frame_message(
+                None,
+                f"torch.compile cannot be run in context: {functorch_subclass_name}",
+            )
         ) from e
 
 
@@ -2234,6 +2316,7 @@ def is_jit_model(
     Union[
         torch.jit._trace.TopLevelTracedModule,
         torch.jit._script.RecursiveScriptModule,
+        # pyrefly: ignore [invalid-param-spec]
         torch.jit.ScriptFunction[Any, Any],
         torch.jit.ScriptModule,
     ]
@@ -2342,6 +2425,7 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = [
             (param, param._version, torch.clone(param))
+            # pyrefly: ignore [bad-argument-type]
             for param in itertools.chain(gm.parameters(), gm.buffers())
         ]
 
@@ -2464,20 +2548,20 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
         # Assume integers from global variables want to be specialized
-        not source.guard_source().is_local()
+        not source.guard_source.is_local()
         # Assume that integers that came from NN modules want to be
         # specialized (as we don't expect users to be changing the
         # NN modules on the fly), unless explicitly disabled
         or (
-            source.guard_source().is_specialized_nn_module()
+            source.guard_source.is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_builtin_nn_module()
+            source.guard_source.is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_nn_module()
+            source.guard_source.is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -2516,11 +2600,11 @@ def specialize_symnode(arg: Any) -> Any:
 
 
 def guard_if_dyn(arg: Any) -> Any:
-    from .variables import ConstantVariable
+    from .variables import VariableTracker
 
     arg = specialize_symnode(arg)
 
-    if isinstance(arg, ConstantVariable):
+    if isinstance(arg, VariableTracker) and arg.is_python_constant():
         return arg.as_python_constant()
 
     return arg
@@ -2531,14 +2615,14 @@ def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
-    from .variables.constant import ConstantVariable
+    from .variables import VariableTracker
     from .variables.tensor import UnspecializedPythonVariable
 
     unspec_count = 0
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, ConstantVariable):
+        elif not (isinstance(x, VariableTracker) and x.is_python_constant()):
             return False
     return unspec_count > 0
 
@@ -2607,13 +2691,16 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
+        # pyrefly: ignore [bad-argument-type]
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
+        # pyrefly: ignore [bad-argument-type]
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
+    # pyrefly: ignore [bad-argument-type]
     torch.nn.Module.__init__(obj)
     return obj
 
@@ -2655,11 +2742,13 @@ def to_subclass(t: Any, cls: type) -> Any:
 dict_getitem = dict.__getitem__
 
 
+@torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
     if isinstance(d, OrderedDict):
         dict_class = OrderedDict
+    # pyrefly: ignore [bad-argument-type]
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
@@ -2702,9 +2791,9 @@ def _get_fake_tensor(vt: VariableTracker) -> Any:
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
         from . import graph_break_hints
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Cannot check Tensor object identity without its fake value",
             context=str(fake_tensor),
             explanation="TensorVariable is missing a fake example_value.",
@@ -2718,14 +2807,25 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
+def raise_args_mismatch(
+    tx: InstructionTranslatorBase,
+    name: str,
+    expect: str = "",
+    actual: str = "",
+) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
+
+    msg_str = (
+        f"wrong number of arguments or keyword arguments for {name}() call.\n"
+        f"  Expect: {expect}\n"
+        f"  Actual: {actual}"
+    )
 
     raise_observed_exception(
         TypeError,
         tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+        args=[ConstantVariable(msg_str)],
     )
 
 
@@ -2735,7 +2835,7 @@ def iter_contains(
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
+    from .variables import BuiltinVariable, ConstantVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2746,7 +2846,7 @@ def iter_contains(
         return ConstantVariable.create(found_const)
 
     must_check_tensor_id = False
-    if check_tensor_identity and isinstance(search, TensorVariable):
+    if check_tensor_identity and search.is_tensor():
         must_check_tensor_id = True
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
@@ -2754,7 +2854,7 @@ def iter_contains(
     found: Optional[VariableTracker] = None
     for x in items:
         if must_check_tensor_id:
-            if isinstance(x, TensorVariable):
+            if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
@@ -2778,7 +2878,7 @@ def key_is_id(
 
 
 def key_to_id(value: Any) -> list[Any]:
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
+    return [id(k) if key_is_id(k) else k for k in value]
 
 
 def const_repr(x: Any, *, local: Any) -> str:
@@ -2864,11 +2964,11 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
         msg = f"Encountered exception ({e.reason}) during fake tensor propagation."
         log.warning(msg)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Fake tensor propagation exception",
             context=str(e.reason),
             explanation=msg,
@@ -2889,6 +2989,15 @@ def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     Calculate root mean squared error
     """
     return torch.sqrt(torch.mean(torch.square(ref - res)))
+
+
+def bitwise_same(ref: Any, res: Any, equal_nan: bool = False) -> bool:
+    return same(
+        ref,
+        res,
+        tol=0.0,
+        equal_nan=equal_nan,
+    )
 
 
 def same(
@@ -3189,7 +3298,7 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
-            for key in ref.__dict__.keys()
+            for key in ref.__dict__
         )
     else:
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
@@ -3203,8 +3312,10 @@ def format_func_info(code: CodeType) -> str:
 @contextlib.contextmanager
 def disable_cache_limit() -> Generator[None, None, None]:
     prior = config.recompile_limit
+    # pyrefly: ignore [bad-assignment]
     config.recompile_limit = sys.maxsize
     prior_acc_limit = config.accumulated_recompile_limit
+    # pyrefly: ignore [bad-assignment]
     config.accumulated_recompile_limit = sys.maxsize
 
     try:
@@ -3250,11 +3361,11 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        from torch._dynamo.exc import unimplemented_v2
+        from torch._dynamo.exc import unimplemented
 
         from . import graph_break_hints
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Missing FakeTensor example value",
             context=str(node),
             explanation=f"`FakeTensor` example value was required for {node} but not available.",
@@ -3309,7 +3420,7 @@ def get_fake_value(
 
     from .exc import (
         TorchRuntimeError,
-        unimplemented_v2,
+        unimplemented,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3403,7 +3514,7 @@ def get_fake_value(
                     "Consider wrapping the operator into a PyTorch-understood custom operator "
                     "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
                 ]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Data dependent operator",
                 context=str(cause.func),
                 explanation=f"Operator `{cause.func}` has a non-Tensor output "
@@ -3414,7 +3525,7 @@ def get_fake_value(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
@@ -3424,7 +3535,7 @@ def get_fake_value(
                     ],
                 )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator (no meta kernel)",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
@@ -3448,7 +3559,7 @@ def get_fake_value(
                         f"module `{module}` and you may need to `import {module}`"
                         f"({ctx}), otherwise "
                     )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Operator does not support running with fake tensors",
                 context=f"unsupported operator: {cause.func}",
                 explanation="",
@@ -3469,7 +3580,7 @@ def get_fake_value(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
@@ -3547,9 +3658,9 @@ def run_node(
                 return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
                 if not hasattr(args[0], node.target):  # type: ignore[arg-type]
-                    from .exc import unimplemented_v2
+                    from .exc import unimplemented
 
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Missing attribute when running call_method node",
                         context="",
                         explanation=make_error_message("attribute not defined"),
@@ -3567,7 +3678,7 @@ def run_node(
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
-            from .exc import unimplemented_v2
+            from .exc import unimplemented
 
             hints = []
             if isinstance(e, NotImplementedError):
@@ -3575,7 +3686,7 @@ def run_node(
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
                 ]
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
                 context="",
                 explanation=make_error_message(e),
@@ -3745,8 +3856,8 @@ def tensor_always_has_static_shape(
     from .source import is_from_unspecialized_param_buffer_source
 
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        tensor_source.guard_source.is_specialized_nn_module()
+        or tensor_source.guard_source.is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -3939,6 +4050,7 @@ class numpy_operator_wrapper(Generic[_P, R]):
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         assert not kwargs
 
+        # pyrefly: ignore [bad-assignment]
         args = (
             tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
         )
@@ -4488,6 +4600,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
+        # pyrefly: ignore [annotation-mismatch]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
@@ -4618,6 +4731,10 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+def get_current_stream(device: torch.device) -> torch.Stream:
+    return torch.accelerator.current_stream(device)
+
+
 # call from C dynamo in order to inspect values in pdb
 def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
@@ -4682,21 +4799,12 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
-# whose lifetime is governed by the user.
-# e.g. torch.cuda.Event is a prime example.
-user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
+def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
+    return torch._C.Stream(*args, **kwargs)
 
 
-def get_user_object_from_id(obj_id: int) -> Any:
-    obj = user_obj_id_to_weakref[obj_id]()
-    assert obj is not None, "User object is no longer alive"
-    return obj
-
-
-def store_user_object_weakref(obj: object) -> None:
-    obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
+    return torch._C.Event(*args, **kwargs)
 
 
 class CompileTimeInstructionCounter:
@@ -4854,3 +4962,21 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
+    from . import graph_break_hints
+    from .exc import unimplemented
+
+    is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden:
+        unimplemented(
+            gb_type="User-defined object with overridden __hash__",
+            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
+            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
+            hints=[
+                "Dynamo does not support hashing user-defined objects with overridden __hash__",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )

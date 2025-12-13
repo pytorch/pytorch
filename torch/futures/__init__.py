@@ -1,9 +1,14 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import Callable, cast, Generic, Optional, TypeVar, Union
+from typing import cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = ["Future", "collect_all", "wait_all"]

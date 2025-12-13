@@ -16,7 +16,7 @@ DO_PROFILING = os.environ.get("DO_PROFILING") == "1"
 
 
 @config.patch(
-    "AutoChunker.enable", os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
+    "auto_chunker.enable", os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
 )
 class AutoChunkerTest(TestCase):
     def setUp(self):
@@ -95,18 +95,18 @@ class AutoChunkerTest(TestCase):
     # Due to not able to generate an inplace version of a softmax like
     # kernel, having 2 chunks does not have large enough savings.
     # Use at least 4 chunks here.
-    @config.patch("AutoChunker.num_chunk", config.AutoChunker.num_chunk or 4)
+    @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 4)
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
 
     def test_matmul_softmax_dynamic_shape(self):
         self.common_matmul_test(has_softmax=True, dynamic_shape=True)
 
-    @config.patch("AutoChunker.num_chunk", 4)
+    @config.patch("auto_chunker.num_chunk", 4)
     def test_linear_softmax(self):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
-    @config.patch("AutoChunker.num_chunk", config.AutoChunker.num_chunk or 16)
+    @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
     @largeTensorTest("6GB", device=GPU_TYPE, inductor=True)
     def test_fused_linear_cel(self):
         B = 32
@@ -168,7 +168,7 @@ class AutoChunkerTest(TestCase):
             print(f"Write the chrome trace to {path}")
             p.export_chrome_trace(path)
 
-        if config.AutoChunker.enable:
+        if config.auto_chunker.enable:
             self.assertEqual(metrics.num_auto_chunking, 1)
             expected_bound = B * T * V * x.dtype.itemsize
             self.assertTrue(

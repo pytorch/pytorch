@@ -137,8 +137,8 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
 
         ratio = output_size / input_size
         if (
-            output_size > config.AutoChunker.output_size_threshold
-            and ratio > config.AutoChunker.amplify_ratio_threshold
+            output_size > config.auto_chunker.output_size_threshold
+            and ratio > config.auto_chunker.amplify_ratio_threshold
         ):
             amplifier_nodes_ratio.append((node, ratio))
 

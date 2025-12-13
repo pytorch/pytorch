@@ -72,6 +72,7 @@ class CUDATemplate(KernelTemplate):
 
     @classmethod
     @functools.lru_cache(None)
+    # pyrefly: ignore [bad-override]
     def _template_from_string(cls, source: str) -> Any:
         return KernelTemplate._template_from_string(source)
 
@@ -109,7 +110,7 @@ class CUDATemplate(KernelTemplate):
         args are different.
         """
         key: Optional[str] = None
-        if config.cuda.enable_caching_codegen:
+        if config.cutlass.enable_caching_codegen:
             key = self.make_key(name=name, input_key=input_key, layout_repr=layout_repr)
 
         if key is not None and key in self.code_cache:

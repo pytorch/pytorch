@@ -497,7 +497,7 @@ def forward(self, x_1, output_1):
             x: torch.Tensor,
             y: torch.Tensor,
         ):
-            for i in range(4):
+            for _ in range(4):
                 x = add_in_loop(x, y)
             return x
 
@@ -711,7 +711,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_gpu
-    @skipIfXpu
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -723,6 +722,7 @@ def forward(self, x_1, output_1):
         ):
             pid = tl.program_id(axis=0)
             block_start = pid * BLOCK_SIZE
+
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
@@ -1209,6 +1209,20 @@ def forward(self, x_1, output_1):
             # torch.sort creates fallback kernel and hence MultiOutput
             add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
             return out, out2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f)(x, y)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    def test_triton_kernel_to_cpu(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_kernel[(1,)](x, y, out, 16, 16)
+            out_cpu = out.cpu() + 1
+            return out_cpu
 
         x = torch.randn(4, 4, device=GPU_TYPE)
         y = torch.randn(4, 4, device=GPU_TYPE)
@@ -2243,7 +2257,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
@@ -2542,8 +2556,11 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
+    @skipIfXpu(
+        msg="XPU Triton result in nan, "
+        "https://github.com/intel/torch-xpu-ops/issues/2330"
+    )
     @skipIfRocm
-    @skipIfXpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):
@@ -2566,6 +2583,52 @@ def forward(self, arg0_1, arg1_1):
         actual = fn(inp)
         expected = torch.compile(fn, fullgraph=True)(inp)
         self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @inductor_config.patch("emulate_precision_casts", True)
+    def test_triton_kernel_emulate_precision_unaffected(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets, mask=(offsets < numel))
+            output = x * x
+            if add_amount is not None:
+                output = output + add_amount
+            tl.store(out_ptr + offsets, output, mask=(offsets < numel))
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (1,)
+            triton_[grid](x, y, x.numel(), None, BLOCK_SIZE)
+            return y
+
+        t1 = torch.rand(5, device=GPU_TYPE)
+        fn = torch.compile(fn)
+        _, (code,) = run_and_get_code(fn, t1)
+        self.assertTrue("enable_fp_fusion" not in code)
+
+    @requires_gpu
+    @inductor_config.patch("emulate_precision_casts", True)
+    @inductor_config.patch("max_autotune_gemm_backends", "TRITON")
+    def test_triton_kernel_emulate_precision_mm_kernels_do_not_change(self):
+        from torch._inductor.utils import run_and_get_code
+
+        @torch.compile(mode="max-autotune")
+        def fn(a, b):
+            return a @ b
+
+        t1 = torch.rand(512, 512, device=GPU_TYPE)
+        t2 = torch.rand(512, 512, device=GPU_TYPE)
+        try:
+            _, (code,) = run_and_get_code(fn, t1, t2)
+            self.assertTrue("enable_fp_fusion" not in code)
+        except Exception as e:
+            if "NoValidChoicesError" in str(e):
+                raise unittest.SkipTest(
+                    "where inductor has no triton mm kernels available, this test is meaningless"
+                ) from e
+            raise
 
 
 def make_mutation_test(fn):
@@ -2925,7 +2988,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(4):
+            for _ in range(4):
                 output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
@@ -2959,7 +3022,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            for i in range(0, BLOCK_SIZE):
+            for i in range(BLOCK_SIZE):
                 i = tl.multiple_of(i, 1)
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
@@ -2995,8 +3058,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(2):
-                for j in range(2):
+            for _ in range(2):
+                for _ in range(2):
                     output += x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
@@ -3032,8 +3095,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             y = tl.load(in_ptr1 + offsets, mask=mask)
             output1 = tl.zeros((n_elements,), dtype=tl.float32)
             output2 = tl.zeros((n_elements,), dtype=tl.float32)
-            for i in range(2):
-                for j in range(2):
+            for _ in range(2):
+                for _ in range(2):
                     output1 += y
                     output2 += x
             output = output1 + output2
@@ -3114,7 +3177,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(x_block_ptr)
 
             # Compute gating
-            for c2 in range(0, tl.cdiv(C2, BLOCK_SIZE_C2)):
+            for c2 in range(tl.cdiv(C2, BLOCK_SIZE_C2)):
                 # Compute block pointers
                 offs_c2 = c2 * BLOCK_SIZE_C2 + tl.arange(0, BLOCK_SIZE_C2)
                 o_block_ptr = O_ptr + offs_m[:, None] * C2 + offs_c2[None, :]

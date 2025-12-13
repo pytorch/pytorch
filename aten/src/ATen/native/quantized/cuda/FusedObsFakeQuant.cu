@@ -101,6 +101,9 @@ __device__ inline bool isinf_device(float v) {
 __device__ inline bool isinf_device(c10::BFloat16 v) {
   return ::isinf(static_cast<float>(v));
 }
+__device__ inline bool isinf_device(at::Half v) {
+  return ::isinf(static_cast<float>(v));
+}
 
 // CUDA kernel to compute Moving Average Min/Max of the tensor.
 // It uses the running_min and running_max along with averaging const, c.
@@ -160,8 +163,8 @@ void _calculate_moving_average(
     std::tie(x_min, x_max) = at::aminmax(x, 1);
     int num_threads = std::min(size, (int64_t)512);
     const uint64_t num_blocks = ceil_div<uint64_t>(size, num_threads);
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::kBFloat16, x.scalar_type(), "aminmax_kernel", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
           scalar_t* x_min_data = x_min.data_ptr<scalar_t>();
           scalar_t* x_max_data = x_max.data_ptr<scalar_t>();
 
@@ -181,8 +184,8 @@ void _calculate_moving_average(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     std::tie(x_min, x_max) = at::aminmax(x);
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::kBFloat16, x.scalar_type(), "aminmax_kernel", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
           scalar_t* x_min_data = x_min.data_ptr<scalar_t>();
           scalar_t* x_max_data = x_max.data_ptr<scalar_t>();
 
@@ -221,8 +224,8 @@ void _calc_moving_avg_qparams_helper(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::kBFloat16, x.scalar_type(), "aminmax_kernel", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
           scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
           scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
           int num_threads = std::min(size, (int64_t)512);
@@ -244,8 +247,8 @@ void _calc_moving_avg_qparams_helper(
         });
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::kBFloat16, x.scalar_type(), "aminmax_kernel", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::kBFloat16, at::kHalf, x.scalar_type(), "aminmax_kernel", [&] {
           scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
           scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
           ChooseQuantizationParamsKernelImpl<<<1, 1, 0, cuda_stream>>>(

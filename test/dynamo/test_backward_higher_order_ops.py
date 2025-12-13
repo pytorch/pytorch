@@ -140,7 +140,7 @@ class GraphModule(torch.nn.Module):
 
         size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False, 6)]);  getitem = size = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
@@ -171,7 +171,7 @@ class GraphModule(torch.nn.Module):
 
         size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False, 6)]);  getitem = size = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
@@ -255,7 +255,7 @@ class GraphModule(torch.nn.Module):
 
         size: "Sym(s21)" = l_sizes_0_.size(1);  l_sizes_0_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False)]);  getitem = size = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [size], False, 6)]);  getitem = size = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None

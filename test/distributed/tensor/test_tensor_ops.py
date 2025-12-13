@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import unittest
 
 import torch
 from torch.distributed.tensor import (
@@ -13,10 +14,12 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import MI200_ARCH, run_tests, skipIfRocmArch
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
     with_comms,
@@ -295,8 +298,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     def test_stack(self):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
@@ -332,6 +335,34 @@ class DistTensorOpsTest(DTensorTestBase):
             stack_dim1_shard1_dt.full_tensor(),
             torch.stack([global_input, global_input], dim=1),
         )
+
+    @with_comms
+    def test_stack_cache(self):
+        device_mesh = self.build_device_mesh()
+
+        shape = (4, 8)
+        placements = [Replicate()]
+        dtensor_list = []
+        for _ in range(3):
+            local_tensor = torch.randn(shape)
+            dt = DTensor.from_local(local_tensor, device_mesh, placements)
+            dtensor_list.append(dt)
+
+        _ = torch.stack(dtensor_list)
+
+        dtensor_list2 = []
+        for _ in range(3):
+            local_tensor = torch.randn(shape)
+            dt = DTensor.from_local(local_tensor, device_mesh, placements)
+            dtensor_list2.append(dt)
+
+        def error(*args, **kwargs):
+            raise AssertionError
+
+        with unittest.mock.patch.object(
+            ShardingPropagator, "_propagate_tensor_meta_non_cached", error
+        ):
+            _ = torch.stack(dtensor_list2)
 
     @with_comms
     def test_equal(self):
@@ -510,7 +541,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
@@ -521,7 +552,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with comm_mode:
             output_dt = torch.gather(input_dt, gather_dim, index_dt)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertIsInstance(output_dt.placements[0], _MaskPartial)
+        self.assertIsInstance(output_dt.placements[0], MaskPartial)
         self.assertEqual(output_dt.full_tensor(), global_output)
 
         # case 3 index sharding: input replicated, index sharded, output sharded
@@ -538,7 +569,7 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @skipIfRocm
+    @skipIfRocmArch(MI200_ARCH)
     @with_comms
     def test_index(self):
         meshes = [
@@ -704,6 +735,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_dtype_conversion(self):
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
+
+        _clear_fast_path_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -722,16 +759,14 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
-        from torch.distributed.tensor.debug import _get_sharding_prop_cache_info
-
         # by this point we only have cache misses
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
@@ -775,7 +810,7 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
     def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
-        torch.manual_seed(self.rank)
+        self.init_manual_seed_for_rank()
         mesh = self.build_device_mesh()
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
@@ -821,6 +856,47 @@ class DistTensorOpsTest(DTensorTestBase):
                 ):
                     self.assertEqual(x.full_tensor(), y)
 
+
+class DistArgMaxArgMinTest(DTensorTestBase):
+    _ops = [torch.argmax, torch.argmin]
+    sample = [
+        [0, 2, 1, 11, 5, 9, -2, -23],
+        [3, 5, 7, 9, 0, -1, 4, 2],
+        [8, 4, 6, -5, -10, 12, 7, 1],
+        [13, 6, 9, -5, 0, 4, 2, 8],
+        [4, 9, 2, 1, -6, -3, 5, 7],
+        [0, -4, -2, 8, 6, 3, 12, -7],
+        [20, 6, -3, 1, -8, 4, 2, 0],
+        [5, 9, 11, -1, -4, 2, 3, 8],
+    ]
+    placements_tuples = (
+        [Partial(), Shard(1)],
+        [Partial(), Shard(0)],
+        [Shard(0), Shard(1)],
+        [Replicate(), Shard(0)],
+        [Replicate(), Shard(1)],
+    )
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_argmax_argmin_with_placements(self):
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.tensor(self.sample, device=self.device_type)
+        for placements in self.placements_tuples:
+            dtensor_input = distribute_tensor(local_tensor, device_mesh, placements)
+            for op in self._ops:
+                d_result = op(dtensor_input, dim=1)
+                full_dresult = d_result.full_tensor()
+                local_result = op(local_tensor, dim=1)
+                self.assertEqual(full_dresult, local_result)
+
+    def build_device_mesh(self):
+        return init_device_mesh(self.device_type, (2, 2))
+
+
+DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -21,13 +21,14 @@ def _gfile_join(a, b):
         return fs.join(a, b)
 
 
-def make_tsv(metadata, save_path, metadata_header=None):
+def make_tsv(metadata, save_path, metadata_header=None) -> None:
     if not metadata_header:
         metadata = [str(x) for x in metadata]
     else:
-        assert len(metadata_header) == len(
+        if len(metadata_header) != len(
             metadata[0]
-        ), "len of header must be equal to the number of columns in metadata"
+        ):
+            raise AssertionError("len of header must be equal to the number of columns in metadata")
         metadata = ["\t".join(str(e) for e in l) for l in [metadata_header] + metadata]
 
     metadata_bytes = tf.compat.as_bytes("\n".join(metadata) + "\n")
@@ -36,13 +37,13 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
-def make_sprite(label_img, save_path):
+def make_sprite(label_img, save_path) -> None:
     from PIL import Image
     from io import BytesIO
 
     # this ensures the sprite image has correct dimension as described in
     # https://www.tensorflow.org/get_started/embedding_viz
-    nrow = int(math.ceil((label_img.size(0)) ** 0.5))
+    nrow = math.ceil((label_img.size(0)) ** 0.5)
     arranged_img_CHW = make_grid(make_np(label_img), ncols=nrow)
 
     # augment images so that #images equals nrow*nrow
@@ -73,13 +74,13 @@ def get_embedding_info(metadata, label_img, subdir, global_step, tag):
     return info
 
 
-def write_pbtxt(save_path, contents):
+def write_pbtxt(save_path, contents) -> None:
     config_path = _gfile_join(save_path, "projector_config.pbtxt")
     with tf.io.gfile.GFile(config_path, "wb") as f:
         f.write(tf.compat.as_bytes(contents))
 
 
-def make_mat(matlist, save_path):
+def make_mat(matlist, save_path) -> None:
     with tf.io.gfile.GFile(_gfile_join(save_path, "tensors.tsv"), "wb") as f:
         for x in matlist:
             x = [str(i.item()) for i in x]

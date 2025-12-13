@@ -383,7 +383,7 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wno-interference-size)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wextra-semi -Wmove)
@@ -439,10 +439,6 @@ function(torch_compile_options libname)
         $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
-  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE
-      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
-
 endfunction()
 
 ##############################################################################
@@ -482,6 +478,8 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckCCompilerFlag)
+include(CheckLinkerFlag)
 
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
@@ -504,10 +502,47 @@ function(append_cxx_flag_if_supported flag outputvar)
     endif()
 endfunction()
 
+function(append_c_flag_if_supported flag outputvar)
+    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+
+    # GCC silences unknown -Wno-XXX flags, so test the corresponding -WXXX.
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        string(REGEX REPLACE "^Wno-" "W" new_flag "${flag}")
+    else()
+        set(new_flag "${flag}")
+    endif()
+
+    check_c_compiler_flag("${new_flag}" ${_FLAG_NAME})
+    if(${_FLAG_NAME})
+        string(APPEND ${outputvar} " ${flag}")
+        set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(target_compile_options_if_supported target flag)
   set(_compile_options "")
   append_cxx_flag_if_supported("${flag}" _compile_options)
   if(NOT "${_compile_options}" STREQUAL "")
     target_compile_options(${target} PRIVATE ${flag})
+  endif()
+endfunction()
+
+# Check if a global link option is supported
+function(add_link_options_if_supported flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    add_link_options("LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
+  endif()
+endfunction()
+
+function(target_link_options_if_supported tgt flag)
+  check_linker_flag(C "LINKER:${flag}" _supported)
+  if("${_supported}")
+    target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
+  else()
+    message(WARNING "Attempted to use unsupported link option : ${flag}.")
   endif()
 endfunction()

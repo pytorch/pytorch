@@ -34,7 +34,7 @@ class HintsWrapper(HigherOrderOperator):
              backend compiler.
         """
         if not isinstance(args, tuple):
-            raise RuntimeError(f"args must be a tuple, got {type(args)}")
+            args = tuple(args)
 
         if not all(isinstance(t, (torch.Tensor, int, float, bool)) for t in args):
             raise RuntimeError(

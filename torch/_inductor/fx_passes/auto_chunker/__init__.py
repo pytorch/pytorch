@@ -60,6 +60,6 @@ def chunk(gm: GraphModule) -> GraphModule:
             "because the chunking metadata does not propagate to the backward "
             "(e.g. due to too trivial loss function)"
         )
-    out_gm = ChunkingApplier(gm, config.AutoChunker.num_chunk or 8).apply()
+    out_gm = ChunkingApplier(gm, config.auto_chunker.num_chunk or 8).apply()
     metrics.num_auto_chunking += 1
     return out_gm

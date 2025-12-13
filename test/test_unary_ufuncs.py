@@ -773,6 +773,48 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tan_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tan on CUDA against NumPy reference
+        # Includes values near tan singularities on the real axis
+        eps = 1e-3
+        specials = torch.tensor(
+            [
+                math.pi / 2 - eps,
+                math.pi / 2 + eps,
+                -math.pi / 2 - eps,
+                -math.pi / 2 + eps,
+            ],
+            device=device,
+            dtype=torch.float32,
+        )
+        real = torch.randn(1024, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(1024, device=device, dtype=torch.float32) * 5.0
+        real = torch.cat([real, specials])
+        imag = torch.cat(
+            [
+                imag,
+                torch.linspace(
+                    -3,
+                    3,
+                    steps=specials.numel(),
+                    device=device,
+                ),
+            ]
+        )
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tan, np.tan, z)
+
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tanh on CUDA against NumPy reference
+        real = torch.randn(2048, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(2048, device=device, dtype=torch.float32) * 5.0
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tanh, np.tanh, z)
+
     def check_internal_mem_overlap(
         self, inplace_op, num_inputs, dtype, device, expected_failure=False
     ):
@@ -1845,6 +1887,28 @@ class TestUnaryUfuncs(TestCase):
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
+    # test for issue #161871 where mvlgamma_ should handle integer input gracefully
+    # with a clear error message on all architectures (not crash with FPE on x86)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_inplace_integer_error(self, device, dtype):
+        tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"result type .* can't be cast to the desired output type"
+        ):
+            tensor.mvlgamma_(2)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_integer_promotion(self, device, dtype):
+        tensor = torch.tensor([5, 6, 7], device=device, dtype=dtype)
+        result = torch.mvlgamma(tensor, 2)
+
+        self.assertTrue(result.dtype.is_floating_point)
+        self.assertTrue(torch.all(torch.isfinite(result)))
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
