@@ -5,6 +5,7 @@ import functools
 import inspect
 from typing import Any, TYPE_CHECKING
 
+from .. import config
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker, VariableTrackerMeta
 
@@ -134,6 +135,16 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
+
+    def get_handler_type_for_dispatch(self) -> type:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        For regular LazyVariableTracker (not LazyConstantVariable), we return
+        LazyVariableTracker itself so that _make_handler knows it needs to realize
+        the arguments before calling the handler. LazyConstantVariable overrides
+        this to return ConstantVariable since it can stay lazy.
+        """
+        return LazyVariableTracker
 
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
@@ -325,6 +336,44 @@ class LazyConstantVariable(LazyVariableTracker):
         self._ensure_type_guard()
         return False
 
+    def _maybe_realize_for_type(self) -> type | None:
+        """Check if we need to realize to determine the VariableTracker type.
+
+        Returns None if we can determine the type without realization (and installs
+        TYPE_MATCH guard). Returns the realized type if realization was needed.
+
+        With specialize_int=False or specialize_float=False, ints/floats may become
+        either ConstantVariable or SymNodeVariable, so we must realize to know.
+        For bool/str, we always know it will be ConstantVariable.
+        """
+        if self.is_realized():
+            return type(self.realize())
+
+        value_type = self.peek_type()
+
+        # When specialize_int/specialize_float is False, ints/floats may become
+        # SymNodeVariable. Must realize to determine the actual type.
+        if not config.specialize_int and value_type is int:
+            return type(self.realize())
+        if not config.specialize_float and value_type is float:
+            return type(self.realize())
+
+        # For bool/str, or when specializing ints/floats, we know it will be
+        # ConstantVariable. Install TYPE_MATCH guard and return None.
+        self._ensure_type_guard()
+        return None
+
+    def get_handler_type_for_dispatch(self) -> type:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        This allows builtins like isinstance() and type() to find the correct
+        handler without triggering full realization of the lazy constant.
+        """
+        from .constant import ConstantVariable
+
+        realized_type = self._maybe_realize_for_type()
+        return realized_type if realized_type is not None else ConstantVariable
+
     def lazy_isinstance(self, cls: type) -> bool:
         """Check isinstance without triggering realization when possible.
 
@@ -336,23 +385,24 @@ class LazyConstantVariable(LazyVariableTracker):
         and floats may realize to SymNodeVariable instead of ConstantVariable,
         so we must fall back to full realization for those cases.
         """
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
         # If already realized, delegate to the parent which does the regular check
         if self.is_realized():
             return super().lazy_isinstance(cls)
 
-        from .. import config
-        from .constant import ConstantVariable
+        # LazyConstantVariable can only realize to ConstantVariable or SymNodeVariable.
+        # If cls is not a parent of either, we can answer False without realization.
+        if not issubclass(ConstantVariable, cls) and not issubclass(
+            SymNodeVariable, cls
+        ):
+            self._ensure_type_guard()
+            return False
 
-        value_type = self.peek_type()
-
-        # When specialize_int/specialize_float is False, ints/floats may become
-        # SymNodeVariable. Fall back to full realization to get the correct answer.
-        if not config.specialize_int and value_type is int:
-            return super().lazy_isinstance(cls)
-        if not config.specialize_float and value_type is float:
-            return super().lazy_isinstance(cls)
-
-        self._ensure_type_guard()
+        realized_type = self._maybe_realize_for_type()
+        if realized_type is not None:
+            return issubclass(realized_type, cls)
         return issubclass(ConstantVariable, cls)
 
 
