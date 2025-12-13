@@ -14,7 +14,11 @@ import torch.nn.functional as F
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.autotune_process import (
+    ExternKernelGPUBenchmarkRequest,
+    TensorMeta,
+    TritonBenchmarkRequest,
+)
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout
@@ -506,6 +510,153 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+class TestExternKernelCaller(TestCase):
+    @patches
+    def test_extern_kernel_caller_hash_key_deduplication(self):
+        def fn(a, b, c, d):
+            # Two identical matmuls with same shapes
+            result1 = torch.mm(a, b)
+            result2 = torch.mm(c, d)
+            return result1 + result2
+
+        # Use identical shapes for all tensors
+        shape = (64, 64)
+        a = torch.randn(*shape, device=GPU_TYPE)
+        b = torch.randn(*shape, device=GPU_TYPE)
+        c = torch.randn(*shape, device=GPU_TYPE)
+        d = torch.randn(*shape, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(a, b, c, d)
+
+        # Verify correctness
+        expected = torch.mm(a, b) + torch.mm(c, d)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
+        # Only autotune once, cache hit
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_extern_kernel_benchmark_valid_timing(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        # Use larger matrices to ensure measurable timing
+        a = torch.randn(256, 256, device=GPU_TYPE)
+        b = torch.randn(256, 256, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        result = compiled_fn(a, b)
+
+        # Verify correctness
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @requires_gpu()
+    def test_extern_kernel_benchmark_request_variations(self):
+        """
+        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
+        different configurations:
+        - With has_out_variant=True
+        - When out is None (tensors created from metadata)
+        - With profile_bandwidth_with_do_bench_using_profiling enabled
+        - When len(args) is 0
+        """
+
+        input_meta = [
+            TensorMeta(
+                device=torch.device(GPU_TYPE),
+                dtype=torch.float32,
+                sizes=(64, 64),
+                strides=(64, 1),
+                offset=0,
+            ),
+            TensorMeta(
+                device=torch.device(GPU_TYPE),
+                dtype=torch.float32,
+                sizes=(64, 64),
+                strides=(64, 1),
+                offset=0,
+            ),
+        ]
+        output_meta = TensorMeta(
+            device=torch.device(GPU_TYPE),
+            dtype=torch.float32,
+            sizes=(64, 64),
+            strides=(64, 1),
+            offset=0,
+        )
+
+        # Test 1: has_out_variant=True with out=None and len(args)==0
+        # This should call super().benchmark() which creates tensors from metadata
+        request_out_variant = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=True,
+        )
+        timing = request_out_variant.benchmark(out=None)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+
+        # Test 2: has_out_variant=False with out=None and len(args)==0
+        # When has_out_variant=False but len(args)==0, it should still call super().benchmark()
+        request_no_out_variant = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=False,
+        )
+        timing = request_no_out_variant.benchmark(out=None)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+
+        # Test 3: has_out_variant=False with args provided
+        # This should execute the non-out-variant path: call algo(*args) and copy result
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        out = torch.empty(64, 64, device=GPU_TYPE)
+
+        request_with_args = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=False,
+        )
+        timing = request_with_args.benchmark(a, b, out=out)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+        # Verify that the output was copied correctly
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
+
+        # Test 4: profile_bandwidth_with_do_bench_using_profiling enabled
+        # with has_out_variant=False and len(args) > 0
+        with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
+            a = torch.randn(64, 64, device=GPU_TYPE)
+            b = torch.randn(64, 64, device=GPU_TYPE)
+            out = torch.empty(64, 64, device=GPU_TYPE)
+
+            request_profiling = ExternKernelGPUBenchmarkRequest(
+                kernel_name="mm",
+                input_tensor_meta=input_meta,
+                output_tensor_meta=output_meta,
+                extra_args=[],
+                callable_path="extern_kernels.mm",
+                has_out_variant=False,
+            )
+            timing = request_profiling.benchmark(a, b, out=out)
+            self.assertIsInstance(timing, float)
+            self.assertGreaterEqual(timing, 0.0)
 
 
 @contextlib.contextmanager

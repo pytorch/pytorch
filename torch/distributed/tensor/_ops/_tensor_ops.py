@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
     StrategyType,
+    TensorMeta,
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
@@ -24,8 +25,8 @@ from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops.registration import (
     register_op_strategy,
     register_prop_rule,
-    register_single_dim_strategy,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -37,7 +38,6 @@ from torch.distributed.tensor._ops.utils import (
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
-    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
@@ -148,9 +148,13 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     return equal_strategy
 
 
+register_op_strategy(
+    aten.empty_like.default, schema_info=RuntimeSchemaInfo(1, ["dtype"])
+)(propagate_single_input_strategy)
+
+
 @register_op_strategy(
     [
-        aten.empty_like.default,
         aten.ones_like.default,
         aten.rand_like.default,
         aten.randn_like.default,
@@ -806,18 +810,18 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_tuple_strategy = args_schema[0]
-    assert isinstance(input_tuple_strategy, TupleStrategy)
-    input_strategies: list[OpStrategy] = []
-    for child in input_tuple_strategy.children:
-        assert isinstance(child, OpStrategy)
-        input_strategies.append(child)
-    num_inputs = len(input_strategies)
-    ndim_set = {strategy.ndim for strategy in input_strategies}
+    input_list = args_schema[0]
+    # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
+    assert isinstance(input_list, tuple), type(input_list)
+    assert all(isinstance(tm, TensorMeta) for tm in input_list)
+    num_inputs = len(input_list)
+    ndim_set = {len(meta.shape) for meta in input_list}
     assert len(ndim_set) in (1, 2), (
         "Expected all cat inputs to be the same ndim, except empty tensors"
     )
@@ -834,7 +838,7 @@ def cat_single_dim_strategy(
     return single_dim_strategies
 
 
-# @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+@register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
@@ -1039,6 +1043,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
             cost_values_spec = generate_redistribute_costs(values_spec, new_values_spec)
             op_strategy.strategies.append(
                 OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     input_specs=(
                         new_in_spec,
                         *new_indices_spec,  # type: ignore[arg-type]

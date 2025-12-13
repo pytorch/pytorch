@@ -160,6 +160,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /test/xpu/ @EikanWang @gujinghui
 /test/test_xpu.py @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui
+/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
 
 # torch.export
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
