@@ -114,7 +114,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -133,7 +133,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release
@@ -220,7 +220,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -240,7 +240,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-release
@@ -362,7 +362,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -381,7 +381,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: libtorch-cuda12_6-shared-with-deps-release
@@ -469,7 +469,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -489,7 +489,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_6-shared-with-deps-release
@@ -612,7 +612,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -631,7 +631,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: libtorch-cuda12_8-shared-with-deps-release
@@ -719,7 +719,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -739,7 +739,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_8-shared-with-deps-release
@@ -862,7 +862,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -881,7 +881,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: libtorch-cuda13_0-shared-with-deps-release
@@ -969,7 +969,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -989,7 +989,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda13_0-shared-with-deps-release

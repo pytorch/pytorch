@@ -43,7 +43,7 @@ jobs:
           fi
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Fetch full history to ensure we have all commits
           fetch-depth: 0

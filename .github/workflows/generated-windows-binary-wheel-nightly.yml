@@ -110,7 +110,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -129,7 +129,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_10-cpu
@@ -212,7 +212,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -232,7 +232,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cpu
@@ -346,7 +346,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -365,7 +365,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_10-cuda12_6
@@ -449,7 +449,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -469,7 +469,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda12_6
@@ -584,7 +584,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -603,7 +603,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_10-cuda12_8
@@ -687,7 +687,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -707,7 +707,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda12_8
@@ -822,7 +822,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -841,7 +841,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_10-cuda13_0
@@ -925,7 +925,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -945,7 +945,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-cuda13_0
@@ -1060,7 +1060,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1079,7 +1079,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_10-xpu
@@ -1162,7 +1162,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1182,7 +1182,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_10-xpu
@@ -1295,7 +1295,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1314,7 +1314,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -1397,7 +1397,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1417,7 +1417,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_11-cpu
@@ -1531,7 +1531,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1550,7 +1550,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_11-cuda12_6
@@ -1634,7 +1634,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1654,7 +1654,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_11-cuda12_6
@@ -1769,7 +1769,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1788,7 +1788,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_11-cuda12_8
@@ -1872,7 +1872,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1892,7 +1892,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_11-cuda12_8
@@ -2007,7 +2007,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2026,7 +2026,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_11-cuda13_0
@@ -2110,7 +2110,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2130,7 +2130,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_11-cuda13_0
@@ -2245,7 +2245,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2264,7 +2264,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_11-xpu
@@ -2347,7 +2347,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2367,7 +2367,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_11-xpu
@@ -2480,7 +2480,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2499,7 +2499,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -2582,7 +2582,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2602,7 +2602,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_12-cpu
@@ -2716,7 +2716,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2735,7 +2735,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_12-cuda12_6
@@ -2819,7 +2819,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2839,7 +2839,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_12-cuda12_6
@@ -2954,7 +2954,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2973,7 +2973,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_12-cuda12_8
@@ -3057,7 +3057,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3077,7 +3077,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_12-cuda12_8
@@ -3192,7 +3192,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3211,7 +3211,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_12-cuda13_0
@@ -3295,7 +3295,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3315,7 +3315,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_12-cuda13_0
@@ -3430,7 +3430,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3449,7 +3449,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_12-xpu
@@ -3532,7 +3532,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3552,7 +3552,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_12-xpu
@@ -3665,7 +3665,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3684,7 +3684,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -3767,7 +3767,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3787,7 +3787,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13-cpu
@@ -3901,7 +3901,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3920,7 +3920,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13-cuda12_6
@@ -4004,7 +4004,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4024,7 +4024,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13-cuda12_6
@@ -4139,7 +4139,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4158,7 +4158,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13-cuda12_8
@@ -4242,7 +4242,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4262,7 +4262,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13-cuda12_8
@@ -4377,7 +4377,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4396,7 +4396,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13-cuda13_0
@@ -4480,7 +4480,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4500,7 +4500,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13-cuda13_0
@@ -4615,7 +4615,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4634,7 +4634,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13-xpu
@@ -4717,7 +4717,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4737,7 +4737,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13-xpu
@@ -4850,7 +4850,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4869,7 +4869,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13t-cpu
@@ -4952,7 +4952,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4972,7 +4972,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13t-cpu
@@ -5086,7 +5086,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5105,7 +5105,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13t-cuda12_6
@@ -5189,7 +5189,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5209,7 +5209,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13t-cuda12_6
@@ -5324,7 +5324,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5343,7 +5343,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13t-cuda12_8
@@ -5427,7 +5427,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5447,7 +5447,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13t-cuda12_8
@@ -5562,7 +5562,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5581,7 +5581,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13t-cuda13_0
@@ -5665,7 +5665,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5685,7 +5685,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13t-cuda13_0
@@ -5800,7 +5800,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5819,7 +5819,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_13t-xpu
@@ -5902,7 +5902,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -5922,7 +5922,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_13t-xpu
@@ -6035,7 +6035,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6054,7 +6054,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -6137,7 +6137,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6157,7 +6157,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14-cpu
@@ -6271,7 +6271,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6290,7 +6290,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14-cuda12_6
@@ -6374,7 +6374,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6394,7 +6394,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14-cuda12_6
@@ -6509,7 +6509,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6528,7 +6528,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14-cuda12_8
@@ -6612,7 +6612,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6632,7 +6632,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14-cuda12_8
@@ -6747,7 +6747,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6766,7 +6766,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14-cuda13_0
@@ -6850,7 +6850,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -6870,7 +6870,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14-cuda13_0
@@ -6985,7 +6985,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7004,7 +7004,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14-xpu
@@ -7087,7 +7087,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7107,7 +7107,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14-xpu
@@ -7220,7 +7220,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7239,7 +7239,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14t-cpu
@@ -7322,7 +7322,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7342,7 +7342,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14t-cpu
@@ -7456,7 +7456,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7475,7 +7475,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14t-cuda12_6
@@ -7559,7 +7559,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7579,7 +7579,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14t-cuda12_6
@@ -7694,7 +7694,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7713,7 +7713,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14t-cuda12_8
@@ -7797,7 +7797,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7817,7 +7817,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14t-cuda12_8
@@ -7932,7 +7932,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -7951,7 +7951,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14t-cuda13_0
@@ -8035,7 +8035,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -8055,7 +8055,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14t-cuda13_0
@@ -8170,7 +8170,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -8189,7 +8189,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: wheel-py3_14t-xpu
@@ -8272,7 +8272,7 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -8292,7 +8292,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: wheel-py3_14t-xpu

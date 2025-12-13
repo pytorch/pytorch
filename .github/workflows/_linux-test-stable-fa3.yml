@@ -65,7 +65,7 @@ jobs:
           no-sudo: true
 
       - name: Checkout flash-attention as a secondary repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Dao-AILab/flash-attention
           path: flash-attention

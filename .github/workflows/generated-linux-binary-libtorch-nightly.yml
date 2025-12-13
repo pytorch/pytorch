@@ -438,13 +438,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-rocm7_0-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -557,13 +557,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7
         name: Download Build Artifacts
         with:
           name: libtorch-rocm7_1-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive

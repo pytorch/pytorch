@@ -67,7 +67,7 @@ jobs:
           python-version: "3.10.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -96,7 +96,7 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release
