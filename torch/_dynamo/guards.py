@@ -1797,12 +1797,10 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_manager.root.add_epilogue_lambda_guard(
                 guard_fn,
                 verbose_code_parts,
-                "epilogue_lambda_guard",
+                None,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(
-                guard_fn, verbose_code_parts, "lambda guard"
-            )
+            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts, None)
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
