@@ -3,22 +3,18 @@
 import functools
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
-from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast, Optional, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
-from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    OutputSharding,
     PlacementList,
-    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -30,79 +26,14 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
-
-# convenient wrapper to register sharding propagation rules
-def register_prop_rule(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
-]:
-    def wrapper(
-        impl: Callable[[OpSchema], OutputSharding],
-    ) -> Callable[[OpSchema], OutputSharding]:
-        overloads = op if isinstance(op, list) else [op]
-        for overload in overloads:
-            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
-                overload, impl, schema_info
-            )
-        return impl
-
-    return wrapper
-
-
-def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[2]: Parameter must be annotated.
-
-    # For every ATen op that accepts any args in this list,
-    # the arg itself can impact the strides (and potentially the sharding strategy)
-    # of the output tensor.
-    # thus, we will detect ATen schemas with any of these args and ensure
-    # that they get specialized here.
-    arg_names_that_require_specializing_cache_strategy = [
-        "memory_format",
-    ]
-
-    def wrapper(impl):
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
-
-        for overload in overloads:
-            curr_schema_info = None
-            if schema_info is None:
-                specialized_args = [
-                    a.name
-                    for a in overload._schema.arguments
-                    if a.name in arg_names_that_require_specializing_cache_strategy
-                ]
-                if any(specialized_args):
-                    curr_schema_info = RuntimeSchemaInfo(
-                        static_kwargkey=specialized_args
-                    )
-            else:
-                curr_schema_info = schema_info
-            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
-                overload, impl, curr_schema_info
-            )
-        return impl
-
-    return wrapper
-
-
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Fallback strategy all use Replication()
     """
-    inputs_strategy = op_schema.args_strategy
-    # TODO(zpcore): handle kwarg_inputs_strategy
-    # kwarg_inputs_strategy = op_schema.kwargs_schema
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    inputs_strategy = args_strategy + kwargs_strategy
+
     output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
     output_len = output_type.count("Tensor")
     # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
@@ -150,7 +81,7 @@ def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     elif isinstance(dims, list):
         dims = [normalize_dim(dim, ndim) for dim in dims]
     elif isinstance(dims, tuple):
-        dims = tuple([normalize_dim(dim, ndim) for dim in dims])
+        dims = tuple(normalize_dim(dim, ndim) for dim in dims)
     return dims
 
 
@@ -158,8 +89,33 @@ def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
 
 
-def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the shape is shardable according to the spec."""
+def is_tensor_shardable(
+    shape: Sequence[int],
+    spec: DTensorSpec,
+    allow_unbacked_sharding: Optional[bool] = None,
+) -> bool:
+    """
+    Check if the shape is shardable according to the spec.
+
+    allow_unbacked_sharding: determines the fallback value if unbacked shapes are involved,
+    and the queried shape properties are not statically known.
+
+    e.g. when asking if u0 is shardable on num_shards, and u0 has generic bounds [0, inf],
+    the behavior of allow_unbacked_sharding is:
+
+        None: will data-dependent error
+        True: assumes shardability; we return True, allowing zero-size shards at runtime when u0 < num_shards.
+        False: returns False, and lower-bounding u0, e.g. torch._check(u0 >= num_shards), is needed to enable sharding.
+    """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    assert allow_unbacked_sharding in [None, True, False]
+    guard_fn = {
+        None: bool,
+        True: guard_or_false,
+        False: guard_or_true,
+    }[allow_unbacked_sharding]
+
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -172,7 +128,7 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, dim_size in enumerate(shape):
         # TODO: maybe we should determine is_shardable based on
         #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and dim_size < shards_map[i]:
+        if shards_map[i] > 1 and guard_fn(dim_size < shards_map[i]):
             return False
 
     return True
@@ -194,6 +150,22 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     return True
 
 
+def is_tensor_evenly_shardable_on_dim(
+    shape: Sequence[int], spec: DTensorSpec, dim: int
+) -> bool:
+    """Check if the shape is evenly shardable according to the spec on dim."""
+    dim = normalize_dim(dim, len(shape))
+
+    num_shards = 1
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if shard_dim == dim:
+                num_shards *= spec.mesh.size(i)
+
+    return shape[dim] % num_shards == 0
+
+
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded."""
     return any(p.is_shard(dim) for p in spec.placements)
@@ -209,6 +181,9 @@ def infer_broadcast_dims_map(
 ) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
+    # e.g. if common_shape = [1, 2, 3, 4] and input_shape = [2, 3, 4],
+    # broadcast_dims_map will be [-1, 0, 1, 2]
+    # meaning that dim 0 in the output has no mapping to the input, and dim 1 in the output maps to dim 0 in the input
     common_ndim = len(common_shape)
     input_ndim = len(input_shape)
     broadcast_dims_map = [-1] * common_ndim
@@ -320,6 +295,7 @@ def expand_to_full_mesh_op_strategy(
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
+                # pyrefly: ignore [bad-argument-type]
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
@@ -328,8 +304,15 @@ def expand_to_full_mesh_op_strategy(
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
 
-        input_args_strategy = op_schema.args_strategy
-        assert len(input_specs) == len(input_args_strategy)
+        args_strategy = op_schema.args_strategy
+        kwargs_strategy = op_schema.kwargs_strategy
+        input_args_strategy = args_strategy + kwargs_strategy
+
+        if len(input_specs) != len(input_args_strategy):
+            raise AssertionError(
+                f"input_specs({len(input_specs)}) != strategies({len(input_args_strategy)}: "
+                f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
+            )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         if inplace_op and self_spec.placements != input_specs[0].placements:

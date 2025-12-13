@@ -71,10 +71,22 @@ def _get_hiprtc_library() -> ctypes.CDLL:
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
+    major_version = int(torch.version.cuda.split(".")[0])  # type: ignore[union-attr]
     if sys.platform == "win32":
-        return ctypes.CDLL("nvrtc64_120_0.dll")
+        nvrtc_libs = [
+            f"nvrtc64_{major_version}0_0.dll",
+        ]
     else:
-        return ctypes.CDLL("libnvrtc.so")
+        nvrtc_libs = [
+            f"libnvrtc.so.{major_version}",
+            "libnvrtc.so",  # Fallback to unversioned
+        ]
+    for lib_name in nvrtc_libs:
+        try:
+            return ctypes.CDLL(lib_name)
+        except OSError:
+            continue
+    raise OSError("Could not find any NVRTC library")
 
 
 def _get_gpu_rtc_library() -> ctypes.CDLL:
@@ -114,7 +126,6 @@ def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
     auto_pch: bool = False,
@@ -127,7 +138,6 @@ def _nvrtc_compile(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
         auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
@@ -156,14 +166,8 @@ def _nvrtc_compile(
             )
             raise RuntimeError(f"CUDA error: {error_message}")
 
-    # Combine header code and kernel source
-    if header_code:
-        full_source = header_code + "\n" + kernel_source
-    else:
-        full_source = kernel_source
-
     # Convert source to bytes
-    source_bytes = full_source.encode("utf-8")
+    source_bytes = kernel_source.encode("utf-8")
 
     # Get compute capability if not provided
     if compute_capability is None:
@@ -275,6 +279,7 @@ class _CudaModule:
             return self._kernels[name]
 
         # Import the CUDA library inside the method
+        # pyrefly: ignore [missing-module-attribute]
         from torch.cuda._utils import _get_gpu_runtime_library
 
         libcuda = _get_gpu_runtime_library()
@@ -416,7 +421,7 @@ class _CudaKernel:
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
             # CDNA4 allows a max of 160KB shared memory
             max_shared_mem = (
-                65536 if device_props.gcnArchName not in ["gfx950"] else 160 * 1024
+                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_shared_mem = getattr(

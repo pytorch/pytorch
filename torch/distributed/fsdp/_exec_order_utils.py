@@ -214,7 +214,8 @@ class _ExecOrderData:
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
             # current implementation, this should never raise the error.
-            assert self.world_size is not None  # mypy
+            if self.world_size is None:
+                raise AssertionError("Expected world_size to not be None")
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
                 # tensor comparison control flow.
@@ -298,7 +299,8 @@ class _ExecOrderData:
                 warnings.warn(
                     "Forward order differs from that of the first iteration "
                     f"on rank {self.rank}. Collectives are unchecked and may "
-                    f"give incorrect results or hang.\n{msg_prefix}{msg_suffix}"
+                    f"give incorrect results or hang.\n{msg_prefix}{msg_suffix}",
+                    stacklevel=2,
                 )
                 self.warn_status = _ExecOrderWarnStatus.WARNING
             self.current_order_index += 1

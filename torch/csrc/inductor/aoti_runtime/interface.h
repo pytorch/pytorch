@@ -30,6 +30,11 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
+struct AOTInductorConstantMapEntry {
+  const char* name;
+  AtenTensorHandle handle;
+};
+
 // TODO: Deprecate this API. This was kept for BC compatibility.
 // Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -151,6 +156,16 @@ AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     bool use_inactive,
     bool validate_full_update);
 
+// Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
+// but no std::unordered_map crosses DLL boundaries for cross-compilation.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
@@ -226,6 +241,16 @@ AOTI_API AOTIRuntimeError AOTInductorModelRun(
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// Get the size of the constant blob
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
+    AOTInductorModelContainerHandle container_handle,
+    uint64_t* ret_size);
+
+// Load weights from a single blob in weight_blob_ptr
+AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
+    AOTInductorModelContainerHandle container_handle,
+    const uint8_t* weight_blob_ptr);
 
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTI_API AOTIRuntimeError

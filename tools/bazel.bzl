@@ -16,6 +16,7 @@ def _is_cpu_static_dispatch_build():
 # build structure aims to replicate Bazel as much as possible, most of
 # the rules simply forward to the Bazel definitions.
 rules = struct(
+    alias = native.alias,
     cc_binary = cc_binary,
     cc_library = cc_library,
     cc_test = cc_test,

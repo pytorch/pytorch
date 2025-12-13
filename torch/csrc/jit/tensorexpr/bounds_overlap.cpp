@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
-#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 #include <iostream>
 
@@ -35,7 +33,7 @@ static bool mustBeZero(const ExprPtr& e) {
 }
 
 void Bound::print() const {
-  std::cout << "(" << *start << ", " << *end << ")";
+  std::cout << '(' << *start << ", " << *end << ')';
 }
 
 bool Bound::equals(const Bound& other) const {

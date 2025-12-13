@@ -22,7 +22,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     if (batched) {
       ss << "Batched[lvl=" << batched->level() << " dim=" << batched->bdim() << ", ";
       dumpTensor(ss, batched->value());
-      ss << "]";
+      ss << ']';
       return;
     }
     ss << "Tensor" << tensor.sizes();
@@ -36,7 +36,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     ss << "dead, ";
   }
   dumpTensor(ss, wrapped->value());
-  ss << "]";
+  ss << ']';
 }
 
 void TensorWrapper::refreshMetadata() {

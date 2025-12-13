@@ -46,6 +46,9 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    expectedFailureDynamic,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -53,6 +56,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -964,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
@@ -996,6 +1009,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def tearDown(self) -> None:
         self.exit_stack.close()
         super().tearDown()
+
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
 
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
@@ -1119,6 +1144,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test = f_compiled(x_test, y_test)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
+
+    # https://github.com/pytorch/pytorch/issues/168381
+    def test_index_select_contiguous_with_compile(self):
+        def fn(x):
+            x = x.permute(1, 2, 0)
+            x = x.unsqueeze(2)
+            idx = torch.tensor([0], device=x.device)
+            x = torch.index_select(x, 0, idx)
+            return x
+
+        x = torch.randn(6, 3, 6)
+        eager_out = fn(x)
+        self.assertTrue(eager_out.is_contiguous())
+        compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        compiled_out = compiled_fn(x)
+        self.assertTrue(compiled_out.is_contiguous())
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
 
     # https://github.com/pytorch/pytorch/issues/109053
     def test_view_dtype_overload(self):
@@ -3248,7 +3291,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, x.size()
+            assert x[0] == 2, f"Error {x}: {x.size()}"
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
@@ -4258,7 +4301,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
@@ -4468,7 +4511,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(0, 5):
+        for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4620,7 +4663,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(0, 10):
+        for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4781,7 +4824,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(0, 10):
+            if 3 in range(10):
                 return x + 1
             else:
                 return x + 2
@@ -4822,6 +4865,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
         ):
             f_compiled(a)
+        # See https://github.com/pytorch/pytorch/issues/161010
+
+    def test_preserve_stride_with_clone(self) -> None:
+        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+
+        def fn(
+            src: torch.Tensor, count: torch.Tensor
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            Q, R = torch.linalg.qr(src)
+            rhs = torch.ones(Q.shape[0], 1, device=src.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            cloned = a.clone(memory_format=torch.preserve_format)
+            return a.stride(), cloned.stride()
+
+        a_stride, cloned_stride = fn(A, torch.zeros(1))
+        self.assertEqual(
+            a_stride,
+            cloned_stride,
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+        )
+
+        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
+            B, torch.zeros(1)
+        )
+        self.assertEqual(
+            compiled_a_stride,
+            compiled_cloned_stride,
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+        )
+
+    # Extension of https://github.com/pytorch/pytorch/issues/161010
+    # in the non memory dense case
+    def test_clone_not_memory_dense(self):
+        def foo() -> torch.Tensor:
+            x = torch.randn(10, 8).t()[::2, ::2]
+            y = x.clone()
+            return y
+
+        y = foo()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Reference eager implementation should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="eager")()
+        self.assertEqual(
+            y.stride(), (1, 4), "Compile with eager backend should have stride (1, 4)"
+        )
+        y = torch.compile(foo, backend="aot_eager")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with aot_eager backend should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="inductor")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with inductor backend should have stride (1, 4)",
+        )
 
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
@@ -4949,7 +5053,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
@@ -5684,7 +5788,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1
@@ -5754,6 +5858,31 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_export_vs_dynamo_for_multiheadattention(self):
+        # More details at https://github.com/pytorch/pytorch/issues/164062
+
+        # Ensure that both dynamo and export do not take the fast path.
+        with torch.no_grad():
+            inp = torch.randn(1, 2, 64)
+            mha = nn.MultiheadAttention(64, 2, dropout=0.1, batch_first=True)
+            mha.eval()
+
+            backend = EagerAndRecordGraphs()
+            mha_compile = torch.compile(mha, backend=backend, fullgraph=True)
+            mha_compile(inp, inp, inp)
+            torch.compiler.reset()
+
+            mha_export = torch._dynamo.export(mha)(inp, inp, inp)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            export_nodes = mha_export.graph_module.graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(len(compile_nodes), 0)
+            self.assertEqual(len(export_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
@@ -6983,15 +7112,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
@@ -7132,11 +7260,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7149,9 +7279,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)
@@ -7171,29 +7303,25 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
 
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
+    def test_cells_unsupported_step_exception(self):
+        # This error happened because:
+        #  - we were generating cells into a list on the stack
+        #  - we encountered an unsupported step, resulting in a step graph break
+        #  - we encounter an exception, which pops the stack until it reaches a certain length;
+        #    the presence of the list of cells then messes things up.
 
+        cell = 0
+
+        @torch.compile(backend="eager")
         def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            with contextlib.nullcontext():
+                print(cell)
+                raise AssertionError
 
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
+        with self.assertRaises(AssertionError):
+            fn(torch.ones(3))
 
     def test_unbind_copy_out(self):
         def f(eye, out):
@@ -7261,6 +7389,249 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0264.html"
         )
         self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_issue164247(self, backend: str):
+        if backend == "inductor" and torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest(
+                "Skip only in dynamic-shapes wrapper (known issue #157612)"
+            )
+
+        class MixedFakeModeModel(nn.Module):
+            def __init__(self, dim=64):
+                super().__init__()
+                self.dim = dim
+                self.lin = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.shape
+
+                # Process input first - this creates fake tensors in export's fake mode
+                processed = self.lin(x)
+
+                # Create some computation that depends on processed tensor
+                intermediate = processed.sum(dim=-1).detach()  # Shape: (batch, seq_len)
+
+                def dynamic_mask_function(batch_idx, head_idx, q_idx, kv_idx):
+                    threshold = intermediate[
+                        batch_idx, q_idx % seq_len
+                    ]  # Access the captured tensor
+                    return (kv_idx <= q_idx) & (threshold > 0)
+
+                block_mask = create_block_mask(
+                    mask_mod=dynamic_mask_function,
+                    B=batch_size,
+                    H=None,
+                    Q_LEN=seq_len,
+                    KV_LEN=seq_len,
+                    device=x.device,
+                    _compile=False,
+                )
+                q = processed.view(batch_size, 1, seq_len, self.dim)
+                k = processed.view(batch_size, 1, seq_len, self.dim)
+                v = processed.view(batch_size, 1, seq_len, self.dim)
+
+                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+                out = flex_attention(q, k, v, block_mask=block_mask)
+
+                return out
+
+        backend_counter = CompileCounterWithBackend(backend)
+        model = MixedFakeModeModel()
+        compiled = torch.compile(model, backend=backend_counter, fullgraph=True)
+
+        if backend == "inductor":
+            # A known InductorError Issue https://github.com/pytorch/pytorch/issues/157612
+            with self.assertRaises(RuntimeError):
+                compiled(torch.randn(2, 128, 64))
+        else:
+            compiled(torch.randn(2, 128, 64))
+
+        # One graph, so no graph breaks
+        self.assertEqual(backend_counter.frame_count, 1)
+        self.assertEqual(len(backend_counter.graphs), 1)
+
+    # https://github.com/pytorch/pytorch/issues/164990
+    def test_guard_same_frame_fail_message(self):
+        import torch._dynamo.guards as g
+
+        # deterministically fail check on the same frame to verify error message correctness
+        # the other example of fail might be datetime.now() until patched - see issue #164990
+        compile_check_fn = g.CheckFunctionManager.compile_check_fn
+
+        def wrapper(self, builder, sorted_guards, guard_fail_fn):
+            compile_check_fn(self, builder, sorted_guards, guard_fail_fn)
+
+            def check(x):
+                return False
+
+            self.guard_manager.check = check
+
+        with mock.patch.object(g.CheckFunctionManager, "compile_check_fn", new=wrapper):
+
+            class Model(nn.Module):
+                def forward(self, x):
+                    return x + 1
+
+            model = Model()
+            x = torch.randn(5)
+
+            with self.assertRaises(AssertionError) as e:
+                torch.compile(model)(x)
+
+        msg = str(e.exception)
+        self.assertIn(
+            "Guard failed on the same frame it was created. This is a bug - please create an issue."
+            "Guard fail reason: ",
+            msg,
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit(self):
+        old_recursion_limit = sys.getrecursionlimit()
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            sys.setrecursionlimit(100)
+
+            with self.assertRaises(RecursionError):
+                fn(torch.ones(3), 500)
+
+            sys.setrecursionlimit(1000)
+
+            fn(torch.ones(3), 500)
+            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            sys.setrecursionlimit(20000)
+            with self.assertRaises(Exception):
+                opt_fn(torch.ones(3), 500)
+
+            torch._dynamo.set_recursion_limit(20000)
+            self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
+        finally:
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            sys.setrecursionlimit(old_recursion_limit)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit_usage(self):
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+            torch._dynamo.set_recursion_limit(500)
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+
+            @torch.compile(backend="eager", dynamic=False)
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            # a limit of 500 should be lower than the default limit
+            with self.assertWarnsRegex(RuntimeWarning, "new c_recursion limit"):
+                fn(torch.ones(3), 5)
+
+            with self.assertRaisesRegex(ValueError, "recursion limit"):
+                torch._dynamo.set_recursion_limit(0)
+
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+        finally:
+            torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+
+    @expectedFailureDynamic
+    def test_dynamo_default_lru_cache_behavior(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 10
+
+        torch._dynamo.reset()
+        assert not torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+
+        # Step 1: Compile a static shapes graph
+        x = torch.randn(10, 10)
+        fn(x)
+        a = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(a), 1)
+        static_shapes_cache_entry = a[0]
+
+        # Step 2: Compile a dynamic shapes graph
+        y = torch.randn(20, 20)
+        fn(y)
+        b = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(b), 2)
+        self.assertEqual(b[1], static_shapes_cache_entry)
+        dynamic_shapes_cache_entry = b[0]
+
+        # Step 3: Run with Step 1's inputs
+        # LRU cache will match against dynamic shape graph first
+        fn(x)
+        c = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(c), 2)
+        self.assertEqual(c[0], dynamic_shapes_cache_entry)
+        self.assertEqual(c[1], static_shapes_cache_entry)
+
+    @expectedFailureDynamic
+    def test_dynamo_disable_lru_cache_behavior(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 10
+
+        def run():
+            torch._dynamo.reset()
+            assert not torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+
+            # Step 1: Compile a static shapes graph
+            x = torch.randn(10, 10)
+            fn(x)
+            a = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(a), 1)
+            static_shapes_cache_entry = a[0]
+
+            # Step 2: Compile a dynamic shapes graph
+            y = torch.randn(20, 20)
+            fn(y)
+            b = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(b), 2)
+            self.assertEqual(b[0], static_shapes_cache_entry)
+            dynamic_shapes_cache_entry = b[1]
+
+            # Step 3: Run with Step 1's inputs
+            # LRU cache is disabled, we should still have static entry first
+            fn(x)
+            c = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(c), 2)
+            self.assertEqual(c[0], static_shapes_cache_entry)
+            self.assertEqual(c[1], dynamic_shapes_cache_entry)
+
+        try:
+            torch._C._dynamo.eval_frame._set_lru_cache(False)
+            run()
+        finally:
+            torch._C._dynamo.eval_frame._set_lru_cache(True)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -7864,6 +8235,168 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
+
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                fn = functools.partial(wrapped_fn, fn)
+                self._call_impl = fn
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
+
+    def test_current_accelerator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.accelerator.current_accelerator()
+            return x + 1
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_pytree_get_node_type_not_traced(self):
+        # Test that torch.utils._pytree._get_node_type is not traced into
+        # and doesn't cause excessive trace time overhead
+        from torch.utils._pytree import _get_node_type
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Call _get_node_type which is used internally by pytree operations
+            node_type = _get_node_type([x, y])
+            assert node_type is list
+            # Do some work with pytree structures
+            data = {"a": x, "b": y}
+            flat, spec = pytree.tree_flatten(data)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_get_node_type_with_namedtuple(self):
+        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
+        # without being traced into, even when is_namedtuple_class is True
+        from collections import namedtuple
+
+        from torch.utils._pytree import _get_node_type
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Create a namedtuple
+            point = Point(a, b)
+            # Call _get_node_type with a namedtuple instance
+            node_type = _get_node_type(point)
+            assert node_type is namedtuple
+            # Use pytree operations with namedtuples
+            flat, spec = pytree.tree_flatten(point)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_not_traced(self):
+        # Test that torch.utils._pytree.tree_is_leaf is not traced into
+        # when is_leaf parameter is None (the common case)
+        from torch.utils._pytree import tree_is_leaf
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Test with various types
+            # Tensors are leaves
+            is_leaf_tensor = tree_is_leaf(x)
+            assert is_leaf_tensor is True
+
+            # Lists are not leaves (they're in SUPPORTED_NODES)
+            is_leaf_list = tree_is_leaf([x, y])
+            assert is_leaf_list is False
+
+            # Dicts are not leaves
+            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
+            assert is_leaf_dict is False
+
+            return x + y
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True
+
+            return a + b
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
 
 
 instantiate_parametrized_tests(ReproTests)

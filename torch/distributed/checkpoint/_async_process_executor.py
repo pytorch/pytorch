@@ -1,16 +1,19 @@
 # pyre-strict
 # mypy: allow-untyped-defs
+import gc
 import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
 
+import psutil
+
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.distributed import PrefixStore, TCPStore
 from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
 from torch.distributed.checkpoint.logger import _dcp_method_logger, _init_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
@@ -56,15 +59,23 @@ class _ProcessGroupInitInfo:
     world_size: int
     tcp_store_master_addr: str
     tcp_store_master_port: int
+    use_prefix_store: bool
+    disable_automatic_gc: bool
+    disable_manual_gc: bool
 
     def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
+        self.use_prefix_store = os.environ.get("DCP_USE_PREFIX_STORE", "0") == "1"
+        self.disable_automatic_gc = (
+            os.environ.get("DCP_DISABLE_AUTOMATIC_GC", "0") == "1"
+        )
+        self.disable_manual_gc = os.environ.get("DCP_DISABLE_MANUAL_GC", "0") == "1"
 
-        # Let coordinator rank find a free port on the localhost.
-        # Broadcast the (master_addr, free_port) to all ranks; each rank in the
-        # checkpoint daemon process will use TCPStore (master_addr, master_port)
+        # Let coordinator rank find a port on the localhost.
+        # Broadcast the (master_addr, port) to all ranks; each rank in the
+        # checkpoint daemon process will use TCPStore (master_addr, port)
         # for collective communication.
         dist_wrapper: _DistWrapper = _DistWrapper(
             group=process_group,
@@ -73,10 +84,23 @@ class _ProcessGroupInitInfo:
         )
 
         def get_master_addr_and_port() -> tuple[str, int]:
-            master_addr = os.environ.get("MASTER_ADDR")
-            if master_addr is None:
-                master_addr = _get_fq_hostname()
-            return master_addr, get_free_port()
+            if self.use_prefix_store:
+                master_addr = os.environ.get("MASTER_ADDR")
+                master_port = os.environ.get("MASTER_PORT")
+                assert master_addr is not None, (
+                    "DCP needs MASTER_ADDR to use prefix store"
+                )
+                assert master_port is not None, (
+                    "DCP needs MASTER_PORT to use prefix store"
+                )
+                master_port = int(master_port)
+            else:
+                master_addr = os.environ.get("MASTER_ADDR")
+                if master_addr is None:
+                    master_addr = _get_fq_hostname()
+                master_port = get_free_port()
+
+            return master_addr, master_port
 
         self.tcp_store_master_addr, self.tcp_store_master_port = dist_wrapper.broadcast(
             step="get_master_addr_and_port",
@@ -110,7 +134,8 @@ class _AsyncCheckpointProcess:
         # Wait for the checkpoint background process to initialize.
         # Using default GLOO init timeout.
         response = self._wait_for_response(timeout=1800)
-        assert response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE
+        if not response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE:
+            raise AssertionError(f"Expected INIT_COMPLETE response, got {response}")
 
     def __del__(self) -> None:
         if self._save_process.is_alive():
@@ -176,7 +201,8 @@ class _AsyncCheckpointProcess:
         )
         self._send(async_cp_request)
         result = self._wait_for_response()
-        assert isinstance(result, Metadata)
+        if not isinstance(result, Metadata):
+            raise AssertionError(f"Expected Metadata response, got {type(result)}")
         return result
 
     @staticmethod
@@ -220,16 +246,39 @@ class _AsyncCheckpointProcess:
             os.environ["WORLD_SIZE"] = str(pg_init_info.world_size)
 
             logger.info(
-                "Initializing dist.ProcessGroup in checkpoint background process"
+                "Initializing dist.ProcessGroup in checkpoint background process on port %s",
+                pg_init_info.tcp_store_master_port,
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(
-                backend=dist.Backend.GLOO, timeout=timedelta(seconds=600)
-            )
+            if pg_init_info.use_prefix_store:
+                logger.info(
+                    "Initializing dist.ProcessGroup in checkpoint background process with prefix store"
+                )
+                store = PrefixStore(
+                    "AsyncCheckpointProcess/",
+                    TCPStore(
+                        pg_init_info.tcp_store_master_addr,
+                        pg_init_info.tcp_store_master_port,
+                    ),
+                )
+                dist.init_process_group(
+                    backend=dist.Backend.GLOO,
+                    store=store,
+                    world_size=pg_init_info.world_size,
+                    rank=pg_init_info.global_rank,
+                )
+            else:
+                dist.init_process_group(backend=dist.Backend.GLOO)
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")
             parent_conn.send(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+
+            if pg_init_info.disable_automatic_gc:
+                # Disable automatic garbage collection
+                # GC can optionally be called manually after each checkpoint
+                gc.disable()
+                logger.info("Disabled automatic garbage collection")
         except BaseException as e:  # noqa: B036
             logger.error(
                 f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
@@ -239,6 +288,7 @@ class _AsyncCheckpointProcess:
 
         # Phase 2: Serving Loop
         try:
+            first_request = True
             while True:
                 logger.info("Waiting for checkpoint save request...")
                 obj = parent_conn.recv()
@@ -248,12 +298,19 @@ class _AsyncCheckpointProcess:
                 ):
                     logger.info("Terminating the checkpoint background process.")
                     return
-                assert isinstance(obj, _AsyncCheckpointRequest)
+                if not isinstance(obj, _AsyncCheckpointRequest):
+                    raise AssertionError(
+                        f"Expected _AsyncCheckpointRequest, got {type(obj)}"
+                    )
                 logger.info(
                     f"Received async checkpoint request with id={obj.checkpoint_request_id.checkpoint_id}"  # noqa: G004
                 )
 
                 try:
+                    process = psutil.Process()
+                    mem_bytes = process.memory_info().rss
+                    logger.info(f"Current memory is {mem_bytes / (1024 * 1024):.2f} MB")  # noqa: G004
+
                     response = _AsyncCheckpointProcess._execute_save(
                         obj.staged_state_dict,
                         checkpoint_request_id=obj.checkpoint_request_id,
@@ -266,6 +323,38 @@ class _AsyncCheckpointProcess:
                     logger.info(
                         f"Completed checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
                     )
+
+                    # in theory this manual gc should not be needed as we shouldn't be leaking anything from checkpointing process
+                    if (
+                        pg_init_info.disable_automatic_gc
+                        and not pg_init_info.disable_manual_gc
+                    ):
+                        del obj
+                        # Measure memory before garbage collection
+                        process = psutil.Process()
+                        mem_before_bytes = process.memory_info().rss
+
+                        collected_objects = gc.collect()
+
+                        # Measure memory after garbage collection and calculate freed memory
+                        mem_after_bytes = process.memory_info().rss
+                        mem_freed_mb = (mem_before_bytes - mem_after_bytes) / (
+                            1024 * 1024
+                        )
+
+                        logger.info(
+                            f"Manual garbage collection completed - collected {collected_objects} objects, "  # noqa: G004
+                            f"freed {mem_freed_mb:.2f} MB"  # noqa: G004
+                        )
+                        if first_request:
+                            # Freeze GC to not check GC for large checkpoint save plans
+                            # After freezing, subsequent gc.collect() calls will only scan
+                            # NEW objects created after this point, not the frozen save plan
+                            logger.info(
+                                "First checkpoint request completed - freezing gc"
+                            )
+                            gc.freeze()
+                    first_request = False
                 except BaseException as e:  # noqa: B036
                     logger.error(
                         f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
@@ -299,7 +388,10 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
-            assert pg_init_info is not None
+            if pg_init_info is None:
+                raise AssertionError(
+                    "pg_init_info must not be None when _CHECKPOINT_PROCESS is None"
+                )
             ckpt_kwargs = {}
             if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
                 ckpt_kwargs["checkpoint_id"] = ckpt_id
@@ -308,11 +400,15 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             @_dcp_method_logger(**ckpt_kwargs)
             def create_checkpoint_daemon_process() -> None:
                 global _CHECKPOINT_PROCESS
+                # pyrefly: ignore [bad-argument-type]
                 _CHECKPOINT_PROCESS = _AsyncCheckpointProcess(pg_init_info=pg_init_info)
 
             create_checkpoint_daemon_process()
 
-        assert _CHECKPOINT_PROCESS is not None
+        if _CHECKPOINT_PROCESS is None:
+            raise AssertionError(
+                "_CHECKPOINT_PROCESS must not be None after initialization"
+            )
         staged_state_dict = (
             staging_future_or_state_dict.result()
             if isinstance(staging_future_or_state_dict, Future)
@@ -356,7 +452,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         global _CHECKPOINT_PROCESS
         pg_init_info: Optional[_ProcessGroupInitInfo] = None
         if _CHECKPOINT_PROCESS is None:
-            # Find a free port on coordinator rank and broadcast
+            # Find a port on coordinator rank and broadcast
             # to all ranks.
             pg_init_info = _ProcessGroupInitInfo(process_group)
 

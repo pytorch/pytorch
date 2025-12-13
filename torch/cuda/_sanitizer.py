@@ -200,7 +200,7 @@ class _TensorsAccessed:
         del self.accesses[data_ptr]
 
     def were_there_reads_since_last_write(self, data_ptr: DataPtr) -> bool:
-        return True if self.accesses[data_ptr].reads else False
+        return bool(self.accesses[data_ptr].reads)
 
     def get_allocation_stack_trace(
         self, data_ptr: DataPtr
@@ -303,7 +303,7 @@ class StreamSynchronizations:
 
     def all_streams_wait_for_event(self, event: EventId) -> None:
         self._ensure_event_exists(event)
-        for stream in self.current_sync_states.keys():
+        for stream in self.current_sync_states:
             self.stream_wait_for_event(stream, event)
 
         self._state_wait_for_other(

@@ -1,6 +1,6 @@
 import enum
-from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias
 
 import torch
 
@@ -222,16 +222,6 @@ class GuardManager:
     ) -> GuardManager: ...
     # Leaf guards
     def add_lambda_guard(
-        self,
-        user_lambda: Callable[..., Any],
-        required_locals: dict[str, int],
-        construct_partial_framelocals_dict: bool,
-        verbose_code_parts: list[str],
-    ) -> None: ...
-    def add_lambda_guard_no_args(
-        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
-    ) -> None: ...
-    def add_lambda_guard_no_framelocals(
         self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
     ) -> None: ...
     def add_id_match_guard(
@@ -359,8 +349,6 @@ class RootGuardManager(GuardManager):
     def add_epilogue_lambda_guard(
         self,
         guard: LeafGuard,
-        required_locals: dict[str, int],
-        construct_partial_framelocals_dict: bool,
         verbose_code_parts: list[str],
     ) -> None: ...
     def clone_manager(
@@ -461,3 +449,4 @@ def dict_version(d: dict[Any, Any]) -> int: ...
 def compute_overlapping_tensors(
     tensors: list[torch.Tensor], symbolic: bool = True
 ) -> set[int]: ...
+def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None: ...

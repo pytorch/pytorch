@@ -2,13 +2,14 @@
 # These load paths point to different files in internal and OSS environment
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//tools/build_defs:cell_defs.bzl", "get_fbsource_cell")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
+load("//tools/build_defs:platform_defs.bzl", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
 load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
@@ -156,7 +157,7 @@ ROOT = "//" if IS_OSS else "//xplat/caffe2"
 # for targets in subfolders
 ROOT_PATH = "//" if IS_OSS else "//xplat/caffe2/"
 
-C10 = "//c10:c10" if IS_OSS else ("//xplat/caffe2/c10:c10_ovrsource" if is_arvr_mode() else "//xplat/caffe2/c10:c10")
+C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
@@ -176,8 +177,8 @@ THIRD_PARTY_LIBS = {
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
-    "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
-    "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "pthreadpool": ["fbsource//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
+    "pthreadpool_header": ["fbsource//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
     "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
     "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
@@ -391,6 +392,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "ViewMetaClasses.h",
+        "ViewMetaClasses.cpp",
         "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
@@ -588,6 +591,9 @@ def pt_operator_query_codegen(
         pt_allow_forced_schema_registration = True,
         compatible_with = [],
         apple_sdks = None):
+    if get_fbsource_cell() == "fbcode":
+        return
+
     oplist_dir_name = name + "_pt_oplist"
 
     # @lint-ignore BUCKLINT
@@ -863,6 +869,9 @@ def define_buck_targets(
         pt_xplat_cxx_library = fb_xplat_cxx_library,
         c2_fbandroid_xplat_compiler_flags = [],
         labels = []):
+    if get_fbsource_cell() == "fbcode":
+        return
+
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
         name = "metal_build_srcs",
@@ -948,7 +957,6 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/csrc/**/*.hpp"),
                 ("", "torch/nativert/**/*.h"),
                 ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
@@ -971,6 +979,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":generated-version-header",
+            third_party("libkineto_headers"),
         ],
     )
 
@@ -1037,7 +1046,8 @@ def define_buck_targets(
         name = "generated-version-header",
         header_namespace = "torch",
         exported_headers = {
-            "version.h": ":generate-version-header[version.h]",
+            "headeronly/version.h": ":generate-version-header[version.h]",
+            "version.h": "torch/csrc/api/include/torch/version.h"
         },
         labels = labels,
     )
@@ -1046,19 +1056,27 @@ def define_buck_targets(
     fb_native.genrule(
         name = "generate-version-header",
         srcs = [
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "version.txt",
         ],
-        cmd = "$(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+        cmd = "mkdir -p $OUT/torch/headeronly && $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "--version-path",
             "version.txt",
             "--output-path",
-            "$OUT/version.h",
+            "$OUT/torch/headeronly/version.h",
+        ]),
+        cmd_exe = "md $OUT\\torch\\headeronly 2>nul & $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+            "--template-path",
+            "torch/headeronly/version.h.in",
+            "--version-path",
+            "version.txt",
+            "--output-path",
+            "$OUT\\torch\\headeronly\\version.h",
         ]),
         outs = {
-            "version.h": ["version.h"],
+            "version.h": ["torch/headeronly/version.h"],
         },
         default_outs = ["."],
     )
@@ -1080,7 +1098,7 @@ def define_buck_targets(
         srcs = [
             "caffe2/core/common.cc",
         ],
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = get_pt_compiler_flags(),
         labels = labels,
         # @lint-ignore BUCKLINT link_whole
@@ -1193,6 +1211,7 @@ def define_buck_targets(
             "NativeMetaFunctions.h": ":gen_aten[NativeMetaFunctions.h]",
             "Operators.h": ":gen_aten[Operators.h]",
             "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
+            "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
@@ -1718,8 +1737,10 @@ def define_buck_targets(
             "torch/csrc/jit/backends/backend_debug_info.cpp",
             "torch/csrc/jit/backends/backend_interface.cpp",
         ],
-        compiler_flags = get_pt_compiler_flags(),
-        fbandroid_compiler_flags = c2_fbandroid_xplat_compiler_flags,
+        compiler_flags = get_pt_compiler_flags() + select({
+            "DEFAULT": [],
+            "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags
+        }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -1998,7 +2019,24 @@ def define_buck_targets(
                     third_party("sleef_arm"),
                 ],
             }),
-            compiler_flags = get_aten_compiler_flags(),
+            compiler_flags = get_aten_compiler_flags() + select({
+                "DEFAULT": [],
+                "ovr_config//os:android-arm32": [
+                    "-mfpu=vfpv3-d16",
+                    "-march=armv7-a",
+                    "-mthumb",
+                    "-mfpu=neon",
+                ],
+                "ovr_config//os:android-x86_32": [
+                    "-mssse3",
+                ],
+                "ovr_config//os:android-x86_64": [
+                    "-mssse3",
+                ],
+            }) + select({
+                "DEFAULT": [],
+                "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags,
+            }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
                 ":aten_header",
@@ -2034,7 +2072,6 @@ def define_buck_targets(
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
-                ("", "torch/csrc/*.hpp"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
                 ("", "torch/csrc/autograd/*/*.h"),

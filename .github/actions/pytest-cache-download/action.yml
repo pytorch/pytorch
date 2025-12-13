@@ -38,9 +38,9 @@ runs:
       run: |
         python3 .github/scripts/pytest_cache.py \
           --download \
-          --cache_dir $GITHUB_WORKSPACE/$CACHE_DIR \
-          --pr_identifier $GITHUB_REF \
-          --job_identifier $JOB_IDENTIFIER \
-          --temp_dir $RUNNER_TEMP \
-          --repo $REPO \
-          --bucket $BUCKET \
+          --cache_dir "$GITHUB_WORKSPACE/$CACHE_DIR" \
+          --pr_identifier "$GITHUB_REF" \
+          --job_identifier "$JOB_IDENTIFIER" \
+          --temp_dir "$RUNNER_TEMP" \
+          --repo "$REPO" \
+          --bucket "$BUCKET" \

@@ -7,11 +7,11 @@ import logging
 import traceback
 import warnings
 import weakref
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from enum import auto, Enum
 from functools import partial
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, TYPE_CHECKING
+from typing import Any, cast, no_type_check, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -65,6 +65,7 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
+                # pyrefly: ignore [read-only]
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
@@ -202,9 +203,10 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamH
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
         if state._handle is None:
             return None
-        assert module in state._fully_sharded_module_to_handle, (
-            f"Expects a fully sharded module but got {module} on rank {state.rank}"
-        )
+        if module not in state._fully_sharded_module_to_handle:
+            raise AssertionError(
+                f"Expects a fully sharded module but got {module} on rank {state.rank}"
+            )
         return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -257,9 +259,10 @@ def _named_parameters_with_duplicates(
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
     """
-    assert "remove_duplicate" not in kwargs, (
-        "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
-    )
+    if "remove_duplicate" in kwargs:
+        raise AssertionError(
+            "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+        )
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
@@ -333,7 +336,8 @@ def _get_param_to_fqns(
                     warnings.warn(
                         "FlatParameter is being traversed more than once. "
                         "This case should only happen when using "
-                        "DistributedModelParallel with FullyShardedDataParallel."
+                        "DistributedModelParallel with FullyShardedDataParallel.",
+                        stacklevel=2,
                     )
                     param_to_fqns[param] = global_fqns
                 elif not dedup_shared_params:

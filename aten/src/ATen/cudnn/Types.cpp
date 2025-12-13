@@ -1,6 +1,7 @@
 #include <ATen/cudnn/Types.h>
 
-#include <ATen/ATen.h>
+
+#include <c10/util/Exception.h>
 
 namespace at::native {
 
@@ -20,9 +21,10 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
   } else if (dtype == at::kByte) {
     return CUDNN_DATA_UINT8;
   }
-  std::string msg("getCudnnDataTypeFromScalarType() not supported for ");
-  msg += toString(dtype);
-  throw std::runtime_error(msg);
+  TORCH_CHECK(false,
+    "getCudnnDataTypeFromScalarType() not supported for ",
+    toString(dtype)
+  );
 }
 
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor) {

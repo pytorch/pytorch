@@ -47,7 +47,7 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
     int64_t sgn = (xstep > 0) - (xstep < 0);
     size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
   } else {
-    size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
+    size_d = std::ceil((end.to<double>() - start.to<double>())
                         / step.to<double>());
   }
 

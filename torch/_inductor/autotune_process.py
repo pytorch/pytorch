@@ -14,10 +14,10 @@ import subprocess
 import sys
 import time
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -32,6 +32,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
 )
 from torch._inductor.utils import (
+    do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
     is_gpu,
@@ -78,11 +79,13 @@ class TuningProcess:
 
         def workloop():
             while True:
-                job = TuningProcess.recv(read_pipe)
+                job, extra_env = TuningProcess.recv(read_pipe)
                 if job is None:
                     # None is a sentinel for the child to shut down
                     break
                 try:
+                    if extra_env:
+                        os.environ.update(extra_env)
                     result = job()
                 except Exception as e:
                     result = e
@@ -95,8 +98,10 @@ class TuningProcess:
             pass
 
     @staticmethod
-    def send(obj: Any, write_pipe: IO[bytes]) -> None:
-        pickle.dump(obj, write_pipe)
+    def send(
+        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str] | None = None
+    ) -> None:
+        pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
 
     @staticmethod
@@ -158,13 +163,13 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any) -> None:
+    def put(self, req: Any, extra_env: dict[str, str] | None = None) -> None:
         """
         Push a work item to the child process.
         """
         if not self.alive():
             self.start()
-        TuningProcess.send(req, self.write_pipe)
+        TuningProcess.send(req, self.write_pipe, extra_env=extra_env)
 
     def get(self, timeout: float = 120.0) -> Any:
         """
@@ -174,7 +179,7 @@ class TuningProcess:
         try:
             if not self.selector.select(timeout):
                 raise TimeoutError(f"Timeout in autotune subprocess {self.process.pid}")
-            result = TuningProcess.recv(self.read_pipe)
+            result, _ = TuningProcess.recv(self.read_pipe)
         except TimeoutError:
             self.kill()
             raise
@@ -230,6 +235,13 @@ class TuningProcess:
             )
             self.process.kill()
         self.close()
+
+    def restart(self) -> None:
+        """
+        Gracefully restarts the child process.
+        """
+        self.shutdown(wait=True)
+        self.start()
 
 
 class TuningProcessPool:
@@ -298,8 +310,10 @@ class TuningProcessPool:
         """
         assert choice.bmreq is not None
 
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
         process = self.process_queue.get()
-        process.put(choice.bmreq.benchmark)
+        process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:
             return process.get(
                 config.max_autotune_subproc_result_timeout_seconds,
@@ -311,11 +325,16 @@ class TuningProcessPool:
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except Exception:
+        except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
+            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
+            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
+            # fail as well. The process must be restarted to restore CUDA functionality.
+            if "cudaErrorLaunchFailure" in str(process_exception):
+                process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
@@ -415,10 +434,11 @@ class BenchmarkRequest:
         self.kernel_name = kernel_name
 
         if isinstance(input_tensor_meta, TensorMeta):
-            input_tensor_meta = [input_tensor_meta]
-        self.input_tensor_meta = input_tensor_meta
+            self.input_tensor_meta: list[TensorMeta] = [input_tensor_meta]
+        else:
+            self.input_tensor_meta: list[TensorMeta] = input_tensor_meta
 
-        if isinstance(output_tensor_meta, (tuple, list)):
+        if output_tensor_meta and isinstance(output_tensor_meta, (tuple, list)):
             if len(output_tensor_meta) > 1:
                 # Each output with same meta for Grouped GEMM
                 assert all(
@@ -426,8 +446,9 @@ class BenchmarkRequest:
                     for x in output_tensor_meta
                     for attr in ["device", "dtype", "sizes", "strides", "offset"]
                 )
-            output_tensor_meta = output_tensor_meta[0]
-        self.output_tensor_meta = output_tensor_meta
+            self.output_tensor_meta = output_tensor_meta[0]
+        else:
+            self.output_tensor_meta: TensorMeta = output_tensor_meta
 
         self.extra_args = extra_args
 
@@ -458,6 +479,9 @@ class BenchmarkRequest:
 
         # create args and out tensor
         if out is None:
+            assert self.input_tensor_meta and self.output_tensor_meta, (
+                "Input and output tensor meta must be populated when input_tensors is empty"
+            )
             assert len(input_tensors) == 0
             input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
             out = self.output_tensor_meta.to_tensor()
@@ -667,6 +691,93 @@ class TritonGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, TritonBenchmarkRequest)
 
 
 class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
+    pass
+
+
+class ExternKernelBenchmarkRequest(BenchmarkRequest):
+    """
+    A class to handle extern kernel benchmark requests. This allows extern kernels
+    (like aten::mm) to be benchmarked in a subprocess, similar to Triton kernels.
+
+    Important: Instances of this class have to be serializable across
+    process boundaries. Do not put CUDA Tensors in here!
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        extra_args: Iterable[Any],
+        callable_path: str,  # Module path to the callable (e.g., "extern_kernels.mm")
+        kwargs: Optional[dict[str, Any]] = None,
+        has_out_variant: bool = True,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.callable_path = callable_path
+        self.kwargs = kwargs or {}
+        self.has_out_variant = has_out_variant
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        fn = self.to_callable()
+        if self.has_out_variant:
+            # For out=variant, pass output as keyword arg
+            return functools.partial(fn, *input_tensors, out=out)
+        else:
+            # For non-out variant, just call with inputs
+            return functools.partial(fn, *input_tensors)
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, out: Optional[torch.Tensor] = None
+    ):
+        if out is not None and out.numel() == 0:
+            # no need to run the kernel of do benchmarking
+            return 0.0
+        if self.has_out_variant or len(input_tensors) == 0:
+            return super().benchmark(*input_tensors, out=out)
+        else:
+            algo = self.to_callable()
+            out_new = algo(*input_tensors)
+            if out is not None:
+                torch._C._dynamo.guards.assert_size_stride(
+                    out_new, tuple(out.size()), tuple(out.stride())
+                )
+                out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*input_tensors))
+            return benchmarker.benchmark(algo, input_tensors, {})
+
+    def precompile(self) -> None:
+        # Extern kernels don't need precompilation - they're already compiled
+        pass
+
+    def to_callable(self):
+        # While ExternKernelChoice also has a to_callable method,
+        # we avoid calling the ExternKernelChoice version here to make sure
+        # this is picklable
+        from torch._inductor.select_algorithm import extern_kernels
+
+        fn = getattr(extern_kernels, self.kernel_name)
+        if self.kwargs:
+            return functools.partial(fn, **self.kwargs)
+
+        return fn
+
+    def __str__(self) -> str:
+        return f"ExternKernelBenchmarkRequest({self.callable_path})"
+
+
+class ExternKernelGPUBenchmarkRequest(
+    GPUDeviceBenchmarkMixin, ExternKernelBenchmarkRequest
+):
+    pass
+
+
+class ExternKernelCPUBenchmarkRequest(
+    CPUDeviceBenchmarkMixin, ExternKernelBenchmarkRequest
+):
     pass
 
 

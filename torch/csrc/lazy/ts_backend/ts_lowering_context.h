@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
@@ -26,8 +27,8 @@ class TORCH_API TSComputation : public Computation {
   }
 
   const std::vector<Shape>& parameter_shapes() const override {
-    throw std::runtime_error(
-        "TODO(whc) implement TS computation shapes or change interface");
+    TORCH_CHECK(
+        false, "TODO(whc) implement TS computation shapes or change interface");
     return parameter_shapes_;
   }
 
@@ -36,8 +37,8 @@ class TORCH_API TSComputation : public Computation {
   }
 
   const Shape& result_shape() const override {
-    throw std::runtime_error(
-        "TODO(whc) implement TS computation shapes or change interface");
+    TORCH_CHECK(
+        false, "TODO(whc) implement TS computation shapes or change interface");
     return result_shape_;
   }
 

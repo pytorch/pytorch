@@ -62,17 +62,7 @@ static const auto& getDispatchTableIndexToKey() {
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
-: name_(std::move(operator_name))
-, schema_()
-#ifndef C10_MOBILE
-, tags_()
-#endif
-, dispatchTable_()
-, dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, kernels_()
-, cpp_signature_()
-, sym_cpp_signature_()
-, is_observed_(ObservedOperators::isObserved(name_))
+: name_(std::move(operator_name)), dispatchTable_(), dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized()), is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created.
@@ -375,7 +365,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
   //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
-  //          its backends and ask backend extender to request a decicated Autograd key for the backend.
+  //          its backends and ask backend extender to request a dedicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
   //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
@@ -580,7 +570,7 @@ void OperatorEntry::checkInvariants() const {
 
 std::string OperatorEntry::listAllDispatchKeys() const {
   std::ostringstream str;
-  str << "[";
+  str << '[';
 
   bool has_kernels = false;
   for (auto k : allDispatchKeysInFullSet()) {
@@ -594,7 +584,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     str << k;
     has_kernels = true;
   }
-  str << "]";
+  str << ']';
   return str.str();
 }
 
@@ -693,12 +683,12 @@ void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> c
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
-  oss << "name: " << name_ << "\n";
+  oss << "name: " << name_ << '\n';
   if (schema_) {
-    oss << "schema: " << schema_->schema << "\n";
-    oss << "debug: " << schema_->debug << "\n";
+    oss << "schema: " << schema_->schema << '\n';
+    oss << "debug: " << schema_->debug << '\n';
     oss << "alias analysis kind: " << toString(schema_->schema.aliasAnalysis())
-        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
+        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << '\n';
   } else {
     oss << "schema: (none)\n";
   }

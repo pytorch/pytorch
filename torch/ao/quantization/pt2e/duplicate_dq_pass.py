@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 
@@ -31,7 +30,7 @@ _DEQUANTIZE_OPS = [
 
 def _maybe_duplicate_dq(
     gm: torch.fx.GraphModule, dq_node: torch.fx.Node, user: torch.fx.Node
-):
+) -> None:
     annotation = user.meta.get("quantization_annotation", None)
     if not _is_valid_annotation(annotation):  # type: ignore[arg-type]
         return
@@ -65,7 +64,7 @@ class DuplicateDQPass(PassBase):
                     if (
                         isinstance(getitem_node, torch.fx.node.Node)
                         and getitem_node.op == "call_function"
-                        and getitem_node.target == operator.getitem
+                        and getitem_node.target is operator.getitem
                     ):
                         choose_qparam_node = getitem_node.args[0]
                         if (

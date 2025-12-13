@@ -39,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
+    return _manual_seed_impl(seed)
+
+
+def _manual_seed_impl(seed) -> torch._C.Generator:
     seed = int(seed)
     import torch.cuda
 
@@ -184,7 +188,7 @@ def fork_rng(
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.{device_type}.device_count())`."
             )
-            warnings.warn(message)
+            warnings.warn(message, stacklevel=2)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:

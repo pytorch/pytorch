@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
 #include <ATen/core/interned_strings.h>
-#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -9,14 +8,11 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/utils/pybind.h>
-#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
-
-#include <Python.h>
 
 namespace torch::jit {
 
@@ -1225,7 +1221,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (obj.ptr() == py::module::import("torch").attr("_check").ptr()) {
     return std::make_shared<TorchCheckValue>();
 #ifdef USE_RPC
-    // This is not defined on WINDOWS
+    // RPC module is only available when build flag "USE_DISTRIBUTED" is on.
   } else if (
       isRpcAvailable &&
       obj.ptr() ==
@@ -1238,6 +1234,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::rpc_sync);
   } else if (
       isRpcAvailable &&
+      // RPC module is only available  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
           py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
     return SpecialFormValue::create(prim::rpc_remote);

@@ -1198,7 +1198,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
   ideep::tensor src(src_desc, act_contig.data_ptr());
   // weights & bias
-  ideep::tensor& weights = *(weight_.get());
+  ideep::tensor& weights = *(weight_);
   bool with_bias = bias_.has_value();
   const auto& kernel_size = weights.get_dims();
   // dst
@@ -1426,8 +1426,9 @@ static at::Tensor _fp8_convolution_onednn_ref(
   w_scales_new_shape[0] = -1;
   auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
   auto output_padding = std::vector<int64_t>(kSpatialDim, 0);
+  auto bias_float = bias.has_value() ? bias.value().to(at::kFloat) : bias;
   auto y_f32 = at::convolution(
-    dqx, dqw, bias, stride.vec(), padding.vec(), dilation.vec(), /* transposed */false, output_padding, groups
+    dqx, dqw, bias_float, stride.vec(), padding.vec(), dilation.vec(), /* transposed */false, output_padding, groups
   );
   if (!binary_attr.has_value() || binary_attr == "none") {
     if (unary_attr == "relu") {

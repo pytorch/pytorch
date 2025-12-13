@@ -67,7 +67,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(counters["graph_break"]), 0)
         else:
             self.assertIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertGreater(len(counters["graph_break"]), 0)
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):

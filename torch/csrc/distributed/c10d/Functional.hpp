@@ -58,6 +58,13 @@ C10_EXPORT at::Tensor reduce_scatter_tensor(
     int64_t group_size,
     std::string group_name);
 
+C10_EXPORT at::Tensor reduce_scatter_tensor_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name,
+    at::Tensor& output);
+
 C10_EXPORT at::Tensor all_to_all_single(
     const at::Tensor& input,
     at::SymIntArrayRef output_split_sizes,

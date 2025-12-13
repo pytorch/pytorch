@@ -19,6 +19,12 @@ def is_available():
     return torch._C._has_mkldnn
 
 
+def is_acl_available():
+    r"""Return whether PyTorch is built with MKL-DNN + ACL support."""
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._has_mkldnn_acl
+
+
 VERBOSE_OFF = 0
 VERBOSE_ON = 1
 VERBOSE_ON_CREATION = 2
@@ -104,9 +110,6 @@ def flags(enabled=False, deterministic=False, allow_tf32=True, fp32_precision="n
 
 
 class MkldnnModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     def is_available(self):
         return is_available()
 

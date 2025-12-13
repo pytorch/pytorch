@@ -27,7 +27,9 @@ runs:
             docker system prune -af
             diskspace_new=$(df -H --output=pcent ${docker_root_dir} | sed -n 2p | sed 's/%//' | sed 's/ //')
             if [[ "$diskspace_new" -gt "$diskspace_cutoff" ]] ; then
-                echo "Error: Available diskspace is less than $diskspace_cutoff percent. Not enough diskspace."
+                diskspace_cutoff_int=$((diskspace_cutoff + 0))
+                difference=$((100 - diskspace_cutoff_int))
+                echo "Error: Available diskspace is less than $difference percent. Not enough diskspace."
                 echo "$msg"
                 exit 1
             else
