@@ -49,6 +49,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable

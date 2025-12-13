@@ -2118,6 +2118,7 @@ def _cuda_record_memory_history_legacy(
     clear_history: _bool,
     compile_context: _bool,
     global_record_annotations: _bool,
+    skip_actions: list[str],
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2127,6 +2128,7 @@ def _cuda_record_memory_history(
     clear_history: _bool,
     compile_context: _bool,
     global_record_annotations: _bool,
+    skip_actions: list[str],
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 def _cuda_getAllocatorBackend() -> str: ...

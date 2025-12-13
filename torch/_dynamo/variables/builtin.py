@@ -1625,10 +1625,13 @@ class BuiltinVariable(VariableTracker):
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
             elif is_wrapper_or_member_descriptor(repr_method):
-                # C/C++ based repr method - not supported, return None to graph break
-                return None
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
-                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})

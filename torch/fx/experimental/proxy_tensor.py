@@ -2646,6 +2646,24 @@ class _MakefxTracer:
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
+    def trace_subgraph_custom_decomp(
+        self, f: Callable, decomp_table: Mapping[OpOverload, Callable], *args
+    ) -> GraphModule:
+        assert isinstance(decomp_table, Mapping)
+        # Create a new tracer based on parent's config, but use a different decomposition table
+        sub_tracer = _MakefxTracer(
+            decomp_table,
+            "real",
+            self._allow_non_fake_inputs,
+            self.pre_dispatch,
+            self.record_module_stack,
+            self._allow_fake_constant,
+            self._error_on_data_dependent_ops,
+            parent_tracer=self,
+        )
+        with sub_tracer._init_modes_from_parent(self):
+            return sub_tracer._trace_inner(f, *args)
+
 
 _CURRENT_MAKE_FX_TRACER: Optional[_MakefxTracer] = None
 
