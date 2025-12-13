@@ -963,10 +963,12 @@ class Redistribute(torch.autograd.Function):
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
+            ctx.forward_no_op = False
         else:
             # use the same local tensor if placements are the same.
             output = local_tensor
             target_spec = current_spec
+            ctx.forward_no_op = True
 
         # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
@@ -1003,27 +1005,33 @@ class Redistribute(torch.autograd.Function):
             local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
 
-        # for backward shard -> partial, we just do shard -> replicate
-        # for backward replicate -> partial, we skip the transformation
-        normalized_placements: list[Placement] = []
-        for current, target in zip(current_spec.placements, previous_spec.placements):
-            if (current.is_shard() or current.is_replicate()) and target.is_partial():
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(target)
+        if ctx.forward_no_op:
+            # if redistribute forward is a no-op, backward should also be no-op regardless
+            # of what grad_output's placement is
+            output = local_tensor
+            normalized_placements = list(current_spec.placements)
+        else:
+            # for backward shard -> partial, we just do shard -> replicate
+            # for backward replicate -> partial, we skip the transformation
+            normalized_placements: list[Placement] = []
+            for current, target in zip(current_spec.placements, previous_spec.placements):
+                if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                    normalized_placements.append(Replicate())
+                else:
+                    normalized_placements.append(target)
 
-        previous_spec = DTensorSpec(
-            previous_spec.device_mesh,
-            placements=tuple(normalized_placements),
-            tensor_meta=previous_spec.tensor_meta,
-        )
+            previous_spec = DTensorSpec(
+                previous_spec.device_mesh,
+                placements=tuple(normalized_placements),
+                tensor_meta=previous_spec.tensor_meta,
+            )
 
-        output = redistribute_local_tensor(
-            local_tensor,
-            current_spec,
-            previous_spec,
-            async_op=async_op,
-        )
+            output = redistribute_local_tensor(
+                local_tensor,
+                current_spec,
+                previous_spec,
+                async_op=async_op,
+            )
 
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
