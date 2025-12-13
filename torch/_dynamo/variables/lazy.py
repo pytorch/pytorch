@@ -167,6 +167,16 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
 
+    def get_handler_type_for_dispatch(self) -> type:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        For regular LazyVariableTracker (not LazyConstantVariable), we return
+        LazyVariableTracker itself so that _make_handler knows it needs to realize
+        the arguments before calling the handler. LazyConstantVariable overrides
+        this to return ConstantVariable since it can stay lazy.
+        """
+        return LazyVariableTracker
+
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
     __repr__ = __str__
@@ -368,6 +378,44 @@ class LazyConstantVariable(LazyVariableTracker):
         self._ensure_type_guard()
         return False
 
+    def _maybe_realize_for_type(self) -> type | None:
+        """Check if we need to realize to determine the VariableTracker type.
+
+        Returns None if we can determine the type without realization (and installs
+        TYPE_MATCH guard). Returns the realized type if realization was needed.
+
+        With specialize_int=False or specialize_float=False, ints/floats may become
+        either ConstantVariable or SymNodeVariable, so we must realize to know.
+        For bool/str, we always know it will be ConstantVariable.
+        """
+        if self.is_realized():
+            return type(self.realize())
+
+        value_type = self.peek_type()
+
+        # When specialize_int/specialize_float is False, ints/floats may become
+        # SymNodeVariable. Must realize to determine the actual type.
+        if not config.specialize_int and value_type is int:
+            return type(self.realize())
+        if not config.specialize_float and value_type is float:
+            return type(self.realize())
+
+        # For bool/str, or when specializing ints/floats, we know it will be
+        # ConstantVariable. Install TYPE_MATCH guard and return None.
+        self._ensure_type_guard()
+        return None
+
+    def get_handler_type_for_dispatch(self) -> type:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        This allows builtins like isinstance() and type() to find the correct
+        handler without triggering full realization of the lazy constant.
+        """
+        from .constant import ConstantVariable
+
+        realized_type = self._maybe_realize_for_type()
+        return realized_type if realized_type is not None else ConstantVariable
+
     def lazy_isinstance(self, cls: type) -> bool:
         """Check isinstance without triggering realization when possible.
 
@@ -529,6 +577,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         so we can always peek without installing guards.
         """
         if self.is_realized():
+            assert self._cache.vt is not None
             return (True, False, self._cache.vt.as_python_constant())
         return (True, True, self._cache.value)
 

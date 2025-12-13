@@ -359,41 +359,45 @@ class LazyConstantVariableTests(TestCase):
             self.assertTrue(lc2.lazy_isinstance(ConstantVariable))
             self.assertFalse(lc2.is_realized())
 
-    def test_isinstance_recompiles_on_value_change(self):
-        """Test that isinstance checks currently trigger recompilation on value change.
+    def test_isinstance_does_not_recompile_on_value_change(self):
+        """Test that isinstance checks do NOT trigger recompilation on value change.
 
-        This documents the current behavior: when isinstance() is called on a
-        LazyConstantVariable, it triggers realization which installs a CONSTANT_MATCH
-        guard. This means different values will cause recompilation, even if they
-        have the same type.
+        When isinstance() is called on a LazyConstantVariable, it only installs a
+        TYPE_MATCH guard (not CONSTANT_MATCH), so different values of the same type
+        do not cause recompilation.
 
-        Future optimization: we could make isinstance only install a TYPE_MATCH guard
-        instead of triggering full realization, which would avoid recompilation when
-        only the value changes but the type stays the same.
+        Note: We use string values here because with specialize_int=False (the default),
+        int values must be realized during handler dispatch to determine if they become
+        ConstantVariable or SymNodeVariable. Strings always become ConstantVariable.
         """
         tensor_input = torch.randn(3)
 
         def fn(t, val):
-            if isinstance(val, int):
+            if isinstance(val, str):
                 return t + 1
             return t - 1
 
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
 
-        # First call with int
-        eager1 = fn(tensor_input, 10)
-        compiled1 = opt_fn(tensor_input, 10)
+        # First call with string
+        eager1 = fn(tensor_input, "hello")
+        compiled1 = opt_fn(tensor_input, "hello")
         self.assertTrue(same(eager1, compiled1))
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with different int - currently recompiles because
-        # isinstance triggers realization which installs CONSTANT_MATCH guard
-        eager2 = fn(tensor_input, 20)
-        compiled2 = opt_fn(tensor_input, 20)
+        # Second call with different string - should NOT recompile since
+        # isinstance only installs TYPE_MATCH guard
+        eager2 = fn(tensor_input, "world")
+        compiled2 = opt_fn(tensor_input, "world")
         self.assertTrue(same(eager2, compiled2))
-        # Document current behavior: recompilation happens
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 1)  # No recompilation!
+
+        # Third call with int - should recompile due to type change
+        eager3 = fn(tensor_input, 42)
+        compiled3 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(counter.frame_count, 2)  # Recompile for type change
 
     def test_container_with_lazy_constant_no_recompile(self):
         """Test that returning containers with LazyConstantVariables works without realization.
