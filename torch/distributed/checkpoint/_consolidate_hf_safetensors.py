@@ -277,6 +277,7 @@ def _process_output_file(
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
+                # pyrefly: ignore [unsupported-operation]
                 fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
                     tensor_fqn
                 ]  # type: ignore[index]

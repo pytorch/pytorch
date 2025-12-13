@@ -128,7 +128,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -264,6 +264,12 @@ def get_supported_param_types():
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))

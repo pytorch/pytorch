@@ -2,6 +2,7 @@
 import collections
 import inspect
 import logging
+import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
@@ -660,12 +661,18 @@ class CustomOpDef:
                 # Handle view + mutation that are in the schema
                 return original_kernel.call_boxed(keyset, *args, **kwargs)
 
-            lib.impl(
-                self._name,
-                adinplaceorview_impl,
-                "ADInplaceOrView",
-                with_keyset=True,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Warning only once for all operators",
+                    category=UserWarning,
+                )
+                lib.impl(
+                    self._name,
+                    adinplaceorview_impl,
+                    "ADInplaceOrView",
+                    with_keyset=True,
+                )
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """

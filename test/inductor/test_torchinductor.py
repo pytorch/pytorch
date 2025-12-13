@@ -139,6 +139,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
+    RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -861,6 +862,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_pallas(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_pallas_backend(self.device):
+            raise unittest.SkipTest("pallas not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1023,6 +1034,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_dtype_device_layout(self):
@@ -1066,6 +1078,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_out(self):
@@ -1121,6 +1134,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_str(self):
@@ -1161,6 +1175,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_cache_hit(self):
@@ -1205,6 +1220,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_persistent_cache(self):
@@ -1252,6 +1268,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_scalar(self):
@@ -1325,6 +1342,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
+    @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_override_registration(self):
@@ -4275,7 +4293,6 @@ class CommonTemplate:
                 (v,),
             )
 
-    @skipIfRocm
     @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
@@ -4326,7 +4343,12 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check("convolution(").run(code[0])
+                if config.cpp_wrapper:
+                    # with cpp_wrapper, the pattern is .run( and then .convolution(
+                    FileCheck().check(".run(").check("convolution(").run(code[0])
+                else:
+                    # without cpp_wrapper, the pattern is .convolution( and then .run(
+                    FileCheck().check("convolution(").check(".run(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -5737,6 +5759,7 @@ class CommonTemplate:
             (weight, indices),
         )
 
+    @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
         def fn(x):
             return (
@@ -5763,6 +5786,7 @@ class CommonTemplate:
             {
                 "triton.prefer_nd_tiling": tile_reduction,
                 "triton.tile_reductions": tile_reduction,
+                "combo_kernels": True,
             }
         ):
             self.common(
@@ -6752,8 +6776,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         post_grad_graph = get_post_grad_graph(f, (x,))
         expected_graph = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
-        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = None
-        permute: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.permute.default(empty, [0, 1, 2]);  empty = permute = None
+        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = empty = None
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
         return (add_13,)"""  # noqa: B950
@@ -13711,6 +13734,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
+    @skipIfXpu(msg="_fused_rms_norm is not implemented on XPU yet")
     def test_lite_mode_not_decompose(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -14724,12 +14748,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
-        if torch.version.hip:
-            triton_str = "tl.minimum"
-        else:
-            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            triton_str,
+            "triton_helpers.minimum",
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
@@ -14902,6 +14922,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         if self.device.lower() == "cuda":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda_and_triton
+    @config.patch(combo_kernels=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_combo_kernel_store_mask(self):
+        def fn(x):
+            return (
+                x.mean(),
+                torch.mean(x, -2, keepdim=True),
+            )
+
+        x = torch.randn([1, 2, 4, 8], device=GPU_TYPE)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        expected = fn(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
     # end of class CommonTemplate - add new tests here
 
