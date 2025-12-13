@@ -208,13 +208,6 @@ class _FromTorchTensor(torch.autograd.Function):
         # local gradients directly
         if grad_output.placements != previous_placement:
             current_spec = grad_output._spec
-            # skip the replicate to partial transformation when we are in backward pass
-            # In this case we keep the grad as replicate, this is because we don't
-            # want to convert the replicated gradients back to partial, although
-            # that's logically conform with the same layout, converting the gradients
-            # back to partial is actually useless as you would have to do reduce later
-            # which would be more expensive than keeping it replicate! For this reason,
-            # we keep the replicate grad here.
 
             # for backward shard -> partial, we just do shard -> replicate
             # for backward replicate -> partial, we skip the transformation
