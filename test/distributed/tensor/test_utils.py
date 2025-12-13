@@ -1580,6 +1580,7 @@ class TestIsTensorShardable(LocalTensorTestBase):
     def test_is_tensor_shardable(self):
         spec = self._create_spec((4,), [Shard(0)])
         self.assertTrue(is_tensor_shardable([8], spec))
+        self.assertTrue(is_tensor_shardable([10], spec))
         self.assertFalse(is_tensor_shardable([2], spec))
 
         spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
@@ -1594,7 +1595,6 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertTrue(is_tensor_evenly_shardable([8], spec))
         self.assertFalse(is_tensor_evenly_shardable([10], spec))
 
-        # 2D mesh with _StridedShard
         spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
         self.assertTrue(is_tensor_evenly_shardable([16, 8], spec))
 

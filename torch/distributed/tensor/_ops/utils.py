@@ -123,22 +123,22 @@ def is_tensor_shardable(
     }[allow_unbacked_sharding]
 
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
         if isinstance(placement, Shard | _StridedShard):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
-            shards_map[shard_dim] *= spec.mesh.size(i)
+            num_shards[shard_dim] *= spec.mesh.size(i)
             if isinstance(placement, _StridedShard):
                 # make sure tensor dim `shard_dim` is shardable after splitting
                 # with split_factor
                 if guard_fn(
-                    shards_map[shard_dim] * placement.split_factor > shape[shard_dim]
+                    shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
                 ):
                     return False
             else:
-                if guard_fn(shards_map[shard_dim] > shape[shard_dim]):
+                if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
                     return False
 
     return True
@@ -147,21 +147,21 @@ def is_tensor_shardable(
 def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     """Check if the shape is evenly shardable according to the spec."""
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
         if isinstance(placement, Shard | _StridedShard):
             shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
-            shards_map[shard_dim] *= spec.mesh.size(i)
+            num_shards[shard_dim] *= spec.mesh.size(i)
             if isinstance(placement, _StridedShard):
                 if (
-                    shape[shard_dim] % (placement.split_factor * shards_map[shard_dim])
+                    shape[shard_dim] % (placement.split_factor * num_shards[shard_dim])
                     != 0
                 ):
                     return False
             else:
-                if shape[shard_dim] % shards_map[shard_dim] != 0:
+                if shape[shard_dim] % num_shards[shard_dim] != 0:
                     return False
     return True
 
