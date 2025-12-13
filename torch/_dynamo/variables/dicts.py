@@ -1372,7 +1372,7 @@ class OrderedSetClassVariable(VariableTracker):
         if len(args) == 0:
             items = []
         else:
-            items = args[0].unpack_var_sequence(tx)
+            items = args[0].force_unpack_var_sequence(tx)
         return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
 
 
