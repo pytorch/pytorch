@@ -28,7 +28,6 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _SingleDimStrategyFunc,
 )
-from torch.distributed.tensor._ops.utils import _args_schema_with_tensor_meta
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
@@ -485,12 +484,8 @@ class ShardingPropagator:
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                     mesh, strategy_schema, single_dim_strategy
                 )
-
-                args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-                    strategy_schema.args_schema, strategy_schema.kwargs_schema
-                )
                 strategy = _expanded_strategy_fn(
-                    op_schema.op, args_schema, kwargs_schema
+                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
                 )
             else:
                 raise NotImplementedError("NYI")

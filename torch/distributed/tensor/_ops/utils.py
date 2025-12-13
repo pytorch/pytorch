@@ -12,8 +12,6 @@ from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -30,38 +28,6 @@ from torch.distributed.tensor.placement_types import (
 
 
 logger = logging.getLogger(__name__)
-
-
-def _args_schema_with_tensor_meta(
-    args_schema: ArgsType, kwargs_schema: KwargsType
-) -> tuple[ArgsType, KwargsType]:
-    """
-    Replace DTensorSpec with TensorMeta in args_schema, for use with single-dim strategies
-    """
-
-    def spec_to_strategy(spec: object) -> object:
-        if isinstance(spec, DTensorSpec):
-            return spec.tensor_meta
-        elif (
-            isinstance(spec, (list, tuple))
-            and len(spec) > 0
-            and isinstance(spec[0], DTensorSpec)
-        ):
-            raise NotImplementedError("Tuples!")
-            #     # tensor list create tuple strategy
-            #     tuple_strategy = [spec_to_strategy(s) for s in spec]
-            #     tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
-            #     return TupleStrategy(
-            #         tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
-            #     )
-        else:
-            return spec
-
-    args_op_strategy = tuple([spec_to_strategy(a) for a in args_schema])
-
-    kwargs_op_strategy = {k: spec_to_strategy(v) for k, v in kwargs_schema.items()}
-
-    return args_op_strategy, kwargs_op_strategy
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
