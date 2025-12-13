@@ -14,8 +14,6 @@ from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -26,17 +24,17 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.utils import (
-    _args_schema_with_tensor_meta,
+from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _find_lowest_cost_sharding,
+    _SingleDimStrategyFunc,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 aten = torch.ops.aten
@@ -142,10 +140,7 @@ class ShardingPropagator:
         ] = {}
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
-            Callable[
-                [OpOverload, ArgsType, KwargsType],
-                list[list[Placement | _ShardingPlaceholder]],
-            ],
+            _SingleDimStrategyFunc,
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -190,10 +185,7 @@ class ShardingPropagator:
     def register_single_dim_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: Callable[
-            [OpOverload, ArgsType, KwargsType],
-            list[list[Placement | _ShardingPlaceholder]],
-        ],
+        strategy_func: _SingleDimStrategyFunc,
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
@@ -362,6 +354,7 @@ class ShardingPropagator:
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
 
+            # pyrefly: ignore [bad-argument-type]
             for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
@@ -469,15 +462,14 @@ class ShardingPropagator:
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
         if op_schema.op in self.op_single_dim_strategy_funcs:
             """
-            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications for the
-            operator over a single mesh dimension,
+            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
+            for the operator over a single mesh dimension,
 
             And the OpSchema, which includes information about the runtime input tensor placements, and the mesh,
 
-            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real sharding
-            types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy combination.
-
-            TODO: show example
+            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real
+            sharding types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy
+            combination.
             """
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
@@ -487,9 +479,6 @@ class ShardingPropagator:
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
             single_dim_expand_fully = True
             if single_dim_expand_fully:
-                # TODO: this codepath was mainly for initial testing, it would be removed once the lowest-cost path
-                # is validated
-
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
@@ -497,22 +486,15 @@ class ShardingPropagator:
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                     mesh, strategy_schema, single_dim_strategy
                 )
-
-                args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-                    strategy_schema.args_schema, strategy_schema.kwargs_schema
-                )
                 strategy = _expanded_strategy_fn(
-                    op_schema.op, args_schema, kwargs_schema
+                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
                 )
             else:
                 strategy = _find_lowest_cost_sharding(
                     mesh, strategy_schema, single_dim_strategy
                 )
-            # TODO: prefer to rename vars to match typing, this is an OpSpec. But matching naming from elif block
-            # for sanity for now
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
             output_strategy = _select_min_cost_strategy(strategy, op_schema)
-
             # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
             # but with a lot of special cases elided.  We'll see if this can be kept simple, or else
             # refactor to share code.
@@ -602,7 +584,10 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for p in output_strategy.output_spec.placements
+                    ):
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(

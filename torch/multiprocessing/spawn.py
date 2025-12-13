@@ -32,26 +32,18 @@ __all__ = [
 class ProcessException(Exception):
     __slots__ = ["error_index", "error_pid"]
 
-    def __init__(self, msg: str, error_index: int, pid: int):
+    def __init__(self, msg: str, error_index: int, error_pid: int):
         super().__init__(msg)
         self.msg = msg
         self.error_index = error_index
-        self.pid = pid
+        self.error_pid = error_pid
 
     def __reduce__(self):
-        return type(self), (self.msg, self.error_index, self.pid)
+        return type(self), (self.msg, self.error_index, self.error_pid)
 
 
 class ProcessRaisedException(ProcessException):
     """Exception raised when a process failed due to an exception raised by the code."""
-
-    def __init__(
-        self,
-        msg: str,
-        error_index: int,
-        error_pid: int,
-    ):
-        super().__init__(msg, error_index, error_pid)
 
 
 class ProcessExitedException(ProcessException):
@@ -74,7 +66,13 @@ class ProcessExitedException(ProcessException):
     def __reduce__(self):
         return (
             type(self),
-            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
+            (
+                self.msg,
+                self.error_index,
+                self.error_pid,
+                self.exit_code,
+                self.signal_name,
+            ),
         )
 
 

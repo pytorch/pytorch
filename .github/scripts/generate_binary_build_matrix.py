@@ -61,7 +61,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' | "
@@ -79,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
@@ -97,7 +97,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
@@ -196,14 +196,13 @@ def get_nccl_wheel_version(arch_version: str) -> str:
 
 
 def read_nccl_pin(arch_version: str) -> str:
-    nccl_pin_path = (
-        REPO_ROOT
-        / ".ci"
-        / "docker"
-        / "ci_commit_pins"
-        / f"nccl-cu{arch_version[:2]}.txt"
-    )
-    return nccl_pin_path.read_text().strip()
+    import sys
+
+    sys.path.append(str(REPO_ROOT / "tools"))
+    # Single source of truth for NCCL version
+    from optional_submodules import read_nccl_pin
+
+    return read_nccl_pin()
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
