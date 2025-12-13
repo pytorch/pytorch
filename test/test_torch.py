@@ -2258,7 +2258,7 @@ class TestTorchDeviceType(TestCase):
             ref = np.corrcoef(x.cpu().numpy())
             self.assertEqual(res, ref, atol=1e-04, rtol=1e-03, exact_dtype=False)
 
-    @skipRocmIfTorchInductor
+    @skipRocmIfTorchInductor()
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
@@ -2304,7 +2304,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
+    @skipRocmIfTorchInductor()
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -2331,7 +2331,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
+    @skipRocmIfTorchInductor()
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
@@ -2368,7 +2368,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
+    @skipRocmIfTorchInductor()
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
