@@ -565,9 +565,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
 
 class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     @with_comms
-    @patch(
-        "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
-    )
+    @patch("torch.distributed.tensor._sharding_prop._select_min_cost_strategy")
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 
