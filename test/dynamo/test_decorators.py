@@ -496,6 +496,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def __repr__(self):
                 return f"State({self.n})"
 
+            def __fx_repr__(self):
+                return f"State({self.n})", {"State": State}
+
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
