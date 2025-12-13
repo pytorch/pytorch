@@ -7663,6 +7663,47 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         finally:
             trace_rules.FORCE_SKIP_FILES = old_force_skip_files
 
+    @parametrize("set_type", [set, frozenset], name_fn=lambda t: t.__name__)
+    def test_set_doesnt_recompile_with_ac(self, set_type):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

@@ -59,7 +59,7 @@ from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
-from torch._ops import HigherOrderOperator
+from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -872,15 +872,18 @@ class VariableBuilder:
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
+                or
+                # For activation checkpointing, we could get a frozenset of torch ops.
+                isinstance(x, (OpOverload, OpOverloadPacket))
             )
             for x in value
         ):
             # For the limited cases of frozenset here, we know the items won't
             # change across runs, so we can safely create sourceless VTs for
-            # them and only guard on the frozenset id.
+            # them and guard on the frozenset contents via EQUALS_MATCH.
             # TODO support source for sets and remove the special logics here.
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
         elif isinstance(
             value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
