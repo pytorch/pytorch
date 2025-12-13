@@ -1064,7 +1064,6 @@ class CommonTemplate:
         # Check for 3D tiling
         self._assert_pointwise_ndims(code, 3)
 
-    @test_torchinductor.xfail_if_triton_cpu
     @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     @parametrize("num_tile_candidates", (1, 2))
     def test_unbacked_size_on_non_contig_dim(self, num_tile_candidates: int):
