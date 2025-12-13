@@ -734,8 +734,15 @@ class VariableBuilder:
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
             result = NamedTupleVariable(
-                output, tuple_cls=type(value), source=self.source
+                output,
+                tuple_cls=type(value),
+                source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -917,7 +924,11 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+            # Preserve cache_hash for SAC context_fn caching
+            original_cache_hash = getattr(value, "cache_hash", None)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original_cache_hash=original_cache_hash
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)

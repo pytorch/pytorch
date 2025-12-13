@@ -81,6 +81,7 @@ class Categorical(Distribution):
         batch_shape = (
             self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         )
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
