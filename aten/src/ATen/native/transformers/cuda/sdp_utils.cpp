@@ -85,7 +85,7 @@ bool check_prefer_cudnn_attention() {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
     return (major == 9 || major == 10) && !dprops->minor;
-  } catch (c10::Error const& e) {
+  } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
 #endif
