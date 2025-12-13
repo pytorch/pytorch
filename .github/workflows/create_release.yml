@@ -86,7 +86,7 @@ jobs:
           cd dist || exit 1
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b  # v2
         with:
           files: |
             ${{ env.PT_RELEASE_FILE }}
@@ -129,7 +129,7 @@ jobs:
         with:
           name: ${{ needs.release.outputs.pt_pep517_release_name }}
       - name: Configure AWS credentials(PyTorch account)
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708  # v5
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
           aws-region: us-east-1
