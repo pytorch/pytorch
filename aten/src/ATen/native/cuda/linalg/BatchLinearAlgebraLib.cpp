@@ -988,7 +988,7 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
 #ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
-  cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
+  cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
       params,
@@ -1346,7 +1346,7 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
 #ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
-  cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
+  cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
   at::cuda::solver::xsyevd_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
       params,

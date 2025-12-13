@@ -478,3 +478,51 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_optional_tensor_ref", TORCH_BOX(&my_optional_tensor_ref));
 }
+
+int64_t my_storage_offset(Tensor t) {
+  return t.storage_offset();
+}
+
+int64_t my_element_size(Tensor t) {
+  return static_cast<int64_t>(t.element_size());
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("my_storage_offset(Tensor t) -> int");
+  m.def("my_element_size(Tensor t) -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
+  m.impl("my_storage_offset", TORCH_BOX(&my_storage_offset));
+  m.impl("my_element_size", TORCH_BOX(&my_element_size));
+}
+
+Tensor my_unsqueeze(const Tensor& t, int64_t dim) {
+  return torch::stable::unsqueeze(t, dim);
+}
+
+Tensor my_squeeze(const Tensor& t, int64_t dim) {
+  return torch::stable::squeeze(t, dim);
+}
+
+Tensor my_select(const Tensor& t, int64_t dim, int64_t index) {
+  return torch::stable::select(t, dim, index);
+}
+
+Tensor my_matmul(const Tensor& self, const Tensor& other) {
+  return torch::stable::matmul(self, other);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("my_unsqueeze(Tensor t, int dim) -> Tensor");
+  m.def("my_squeeze(Tensor t, int dim) -> Tensor");
+  m.def("my_select(Tensor t, int dim, int index) -> Tensor");
+  m.def("my_matmul(Tensor self, Tensor other) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
+  m.impl("my_unsqueeze", TORCH_BOX(&my_unsqueeze));
+  m.impl("my_squeeze", TORCH_BOX(&my_squeeze));
+  m.impl("my_select", TORCH_BOX(&my_select));
+  m.impl("my_matmul", TORCH_BOX(&my_matmul));
+}

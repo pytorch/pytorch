@@ -1778,7 +1778,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
-    } catch (const std::exception& e) {
+    } catch ([[maybe_unused]]const std::exception& e) {
       TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
       at::globalContext().setUserEnabledMkldnn(false);
     }
