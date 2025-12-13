@@ -92,7 +92,7 @@ def _log_modified_bessel_fn(x, order=0):
 @torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore [bad-assignment, missing-attribute]
     while not done.all():
         u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()

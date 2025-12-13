@@ -16,10 +16,8 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
-from torch.distributed.tensor._ops.registration import (
-    register_op_strategy,
-    register_single_dim_strategy,
-)
+from torch.distributed.tensor._ops.registration import register_op_strategy
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -33,7 +31,6 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
 )
 from torch.distributed.tensor.placement_types import (
-    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
@@ -254,7 +251,7 @@ def dot_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("i,i->", mesh, op_schema)
 
 
-# @register_op_strategy(aten.mm.default)
+@register_op_strategy(aten.mm.default)
 def mm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
@@ -351,7 +348,9 @@ def gen_single_dim_einsum_strategies(
     return strategies_over_one_mesh_dim
 
 
-@register_single_dim_strategy(aten.mm.default)
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.mm.default)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:

@@ -11,23 +11,21 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
+    RuntimeSchemaInfo,
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops._pointwise_ops import single_mesh_dim_pointwise_strategy
-from torch.distributed.tensor._ops.utils import (
-    _args_schema_with_tensor_meta,
+from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
     _find_lowest_cost_sharding,
+    _insert_single_dim_replication_strategy,
+    _ShardingPlaceholder,
 )
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
-from torch.distributed.tensor.placement_types import (
-    _ShardingPlaceholder,
-    _StridedShard,
-    Placement,
-)
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -170,15 +168,13 @@ class TestExpandPlaceholder(TestCase):
                     dim,
                 ),
                 kwargs_schema={},
+                schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
             )
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                 mesh, op_schema, cat_single_dim_strategy
             )
-            args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-                op_schema.args_schema, op_schema.kwargs_schema
-            )
             strategy = expanded_strategy_fn(
-                torch.ops.aten.cat.default, args_schema, kwargs_schema
+                torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
             )
             assert isinstance(strategy, OpStrategy)
             return strategy
@@ -282,8 +278,9 @@ class TestExpandPlaceholder(TestCase):
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy
         )
-        args, kwargs = _args_schema_with_tensor_meta((left_meta, right_meta), {})
-        strategy = expanded_strategy_fn(torch.ops.aten.matmul.default, args, kwargs)
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
+        )
         assert isinstance(strategy, OpStrategy)
 
         # For a 3D mesh with 4 single-dim strategies (3 explicit + 1 implicit replicate),
@@ -349,7 +346,9 @@ class TestExpandPlaceholder(TestCase):
         expected_replicate = [
             [Replicate(), Replicate(), Replicate()],  # Implicit all-replicate
         ]
-
+        single_dim_strategies = _insert_single_dim_replication_strategy(
+            single_dim_strategies, num_input_tensors=2
+        )
         expanded_replicate = _fill_single_dim_strategy_placeholders(
             {Replicate()}, single_dim_strategies
         )

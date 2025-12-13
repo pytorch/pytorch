@@ -73,7 +73,7 @@ class DDPMeshInfo(DataParallelMeshInfo):
 
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
-    def __post_init__(self):
+    def __post_init__(self):  # pylint:disable=useless-parent-delegation
         # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
         super().__post_init__()
 
@@ -126,6 +126,7 @@ def _get_dim_chunked_size(
     if chunk.numel() > 0:
         return chunk.size()
     # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
+    # pyrefly: ignore [bad-return]
     return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
 
 

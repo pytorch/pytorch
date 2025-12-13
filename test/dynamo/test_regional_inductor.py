@@ -1,8 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+import sys
 import warnings
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._inductor.test_case
@@ -498,6 +499,58 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
         # flex in forward and flex_backward in backward
         self.assertEqual(len(codes), 2)
+
+    def test_refcounts(self):
+        """Tests that activations can be cleared before the end of graph"""
+
+        class RefcountCheckPassed(Exception):
+            pass
+
+        def regional_inductor_with_refcounting(gm, *example_args):
+            fn = regional_inductor(gm, *example_args)
+            assert fn._boxed_call
+
+            def run(args: Any) -> Any:
+                assert type(args) is list
+
+                # NOTE: sys.getrefcount adds a temporary reference to the object
+                # So sys.getrefcount(x) == 2 actually means we hold the single reference to x
+                # There should be one activation for `fn`.
+                self.assertTrue(
+                    2 in [sys.getrefcount(args[i]) for i in range(len(args))]
+                )
+                return fn(args)
+
+            run._boxed_call = True  # type: ignore[attr-defined]
+            return run
+
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):  # tensor of 1s
+                act = x + x  # tensor of 2s
+                ctx.save_for_backward(act)
+                return act
+
+            @staticmethod
+            def backward(ctx, grad_output):  # tensor of 1s
+                saved_act = ctx.saved_tensors  # tensor of 2s
+                return saved_act[0] + grad_output  # tensor of 3s
+
+        @torch.compile(
+            backend=aot_autograd(
+                fw_compiler=regional_inductor,
+                bw_compiler=regional_inductor_with_refcounting,
+            ),
+            fullgraph=True,
+        )
+        def fn(x):
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                return MyAutogradFunction.apply(x)
+
+        x = torch.ones(10, 10, requires_grad=True)
+
+        fn(x).sum().backward()
+        self.assertEqual(x.grad, x * 3)
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")

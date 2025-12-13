@@ -128,6 +128,7 @@ class CausalBias(torch.Tensor):
         Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
         assert isinstance(variant, CausalVariant)
+        super().__init__()
         self.variant = variant
         self.seq_len_q = seq_len_q
         self.seq_len_kv = seq_len_kv
