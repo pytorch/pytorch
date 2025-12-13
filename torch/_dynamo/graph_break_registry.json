@@ -2086,6 +2086,16 @@
       ]
     }
   ],
+  "GB9198": [
+    {
+      "Gb_type": "Attempted to call repr() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+      "Hints": [
+        "Write the repr method in Python"
+      ]
+    }
+  ],
   "GB0206": [
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
@@ -3802,16 +3812,6 @@
       "Gb_type": "Frozen dataclass with missing field",
       "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
       "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB0370": [
-    {
-      "Gb_type": "record_function escaped from compiled region",
-      "Context": "str(self)",
-      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
