@@ -347,6 +347,7 @@ def gen_single_dim_einsum_strategies(
 
     return strategies_over_one_mesh_dim
 
+
 # TODO enable in a separate PR along with more extensive validation.
 # currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
 # @register_single_dim_strategy(aten.mm.default)

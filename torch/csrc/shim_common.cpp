@@ -617,3 +617,12 @@ torch_string_c_str(StringHandle handle, const char** data) {
     *data = str_ptr->c_str();
   });
 }
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    t->set_requires_grad(requires_grad);
+  });
+}

@@ -197,7 +197,8 @@ def get_recursion_limit() -> int:
 
 def set_recursion_limit(limit: int) -> None:
     """
-    Sets an internal dynamo recursion limit. The limit must be >= 1.
+    Sets an internal dynamo recursion limit. The limit must be >= 1, or -1 to reset
+    to the default (unset) state.
 
     This is possibly needed in Python 3.12-3.13 since there is a separate C recursion limit
     that is not visible at the Python level. If you are getting RecursionErrors during
