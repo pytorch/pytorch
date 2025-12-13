@@ -256,6 +256,7 @@ def get_pw_red_splits(
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -281,6 +282,7 @@ def get_pw_red_splits(
     if none_if_not_divisible:
         return None
     else:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -301,6 +303,7 @@ class NodeSplitGetter:
         self.red_numel: sympy.Expr = node.group[1][1]
 
         self.pw_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
+        self.red_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
 
         self.reduction_split: Split = ()
         self.all_node_sizes: OrderedSet[tuple[Split, Split]] = OrderedSet()
@@ -330,13 +333,7 @@ class NodeSplitGetter:
             )
 
             self.pw_split_options[len(n_pw_splits)].add(tuple(n_pw_splits))
-
-            # initially, we are just going to do a single reduction split since
-            # reduction tiling is off by default. even if we miss a reduction split,
-            # we can recover it in the split var analysis.
-            # TODO: an earlier version for this code tried to iteratively try the maximum number
-            # of split vars, by iterating over both pointwise and reduction. but not worth
-            # the complexity yet.
+            self.red_split_options[len(n_red_splits)].add(tuple(n_red_splits))
 
             if n_red_splits != ():
                 self.reduction_split = (sympy_product(n_red_splits),)
@@ -355,20 +352,32 @@ class NodeSplitGetter:
             return next(iter(self.all_node_sizes))
 
         max_pw_split = max(self.pw_split_options.keys())
-        for pw_split_len in range(max_pw_split, 0, -1):
-            for pw_split in self.pw_split_options[pw_split_len]:
-                if out := self.try_split(pw_split, self.reduction_split):
-                    return out
+        max_red_split = max(self.red_split_options.keys())
 
-            # combine dims for next round
-            for pw_split in self.pw_split_options[pw_split_len]:
-                for i in range(len(pw_split) - 1):
+        def add_combined_split_options(
+            split_options: dict[int, OrderedSet[Split]], curr_length: int
+        ) -> None:
+            for split in split_options[curr_length]:
+                for i in range(len(split) - 1):
                     new_split = tuple(
-                        pw_split[0:i]
-                        + (sympy_product(pw_split[i : i + 2]),)
-                        + pw_split[i + 2 :]
+                        split[0:i] + (sympy_product(split[i : i + 2]),) + split[i + 2 :]
                     )
-                    self.pw_split_options[len(new_split)].add(new_split)
+                    split_options[len(new_split)].add(new_split)
+
+        max_total_splits = max_pw_split + max_red_split
+        for curr_iter, total_splits in enumerate(range(max_total_splits, 0, -1)):
+            for pw_split_len in range(total_splits, 0, -1):
+                for pw_split in self.pw_split_options[pw_split_len]:
+                    for red_split in self.red_split_options[
+                        total_splits - pw_split_len
+                    ]:
+                        if out := self.try_split(pw_split, red_split):
+                            return out
+
+            add_combined_split_options(self.pw_split_options, max_pw_split - curr_iter)
+            add_combined_split_options(
+                self.red_split_options, max_red_split - curr_iter
+            )
 
         # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
@@ -502,7 +511,7 @@ def extract_normalized_read_writes(
 
     # TODO - a few dynamic shapes issues to resolve
     if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
+        (isinstance(var, sympy.Expr) and var.free_symbols)
         for var in (pointwise_numel, red_numel)
     ):
         return None
@@ -705,7 +714,6 @@ def analyze_memory_coalescing(
             continue
 
         size = get_score(memory_expr, var_ranges, buf_names)
-
         if size == 0:
             continue
 

@@ -12,6 +12,7 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -153,6 +154,8 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.argmin.default: argmin_argmax_handler,
+            aten.argmax.default: argmin_argmax_handler,
         }
 
     # ********************************************************************************************
@@ -566,6 +569,7 @@ class OpDispatcher:
         )
         op_info = OpInfo(
             compute_mesh,
+            # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
                 (
@@ -605,6 +609,7 @@ class OpDispatcher:
             )
             res_list = []
             for e, s in zip(res, spec):
+                # pyrefly: ignore [bad-argument-type]
                 res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list

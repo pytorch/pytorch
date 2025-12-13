@@ -75,6 +75,15 @@ class DistributedVariable(VariableTracker):
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 def is_from_local(value: object) -> bool:
     if not DistributedVariable.is_available():

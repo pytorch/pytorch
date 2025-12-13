@@ -1288,10 +1288,9 @@ void Node::assignTopoPosition() {
 Node::Node(Graph* graph_, NodeKind kind_)
     : kind_(kind_),
       graph_(graph_),
-      owning_block_(nullptr),
+
       scope_(graph_->current_scope_),
-      callstack_(std::nullopt),
-      op_(nullptr) {
+      callstack_(std::nullopt) {
   graph_->all_nodes.emplace(this);
 }
 
