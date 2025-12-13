@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass, field
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch._C
@@ -590,7 +590,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
