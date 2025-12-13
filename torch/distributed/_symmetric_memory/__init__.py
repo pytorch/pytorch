@@ -1978,22 +1978,6 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
-def is_nccl_symmem_available() -> bool:
-    r"""
-    is_nccl_symmem_available() -> bool
-
-    Check if NCCL is available as a backend for symmetric memory.
-    """
-    try:
-        from torch._C._distributed_c10d import _is_nccl_symmem_available
-    except ImportError:
-        # Not all builds have NCCL built.
-        return False
-
-    # Check if NCCL is available as a backend for symmetric memory.
-    return _is_nccl_symmem_available()
-
-
 def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
