@@ -208,14 +208,35 @@ class _FromTorchTensor(torch.autograd.Function):
         # local gradients directly
         if grad_output.placements != previous_placement:
             current_spec = grad_output._spec
+            # skip the replicate to partial transformation when we are in backward pass
+            # In this case we keep the grad as replicate, this is because we don't
+            # want to convert the replicated gradients back to partial, although
+            # that's logically conform with the same layout, converting the gradients
+            # back to partial is actually useless as you would have to do reduce later
+            # which would be more expensive than keeping it replicate! For this reason,
+            # we keep the replicate grad here.
+
+            # for backward shard -> partial, we just do shard -> replicate
+            # for backward replicate -> partial, we skip the transformation
+            normalized_placements: list[Placement] = []
+            for current, target in zip(current_spec.placements, previous_placement):
+                if (
+                    current.is_shard() or current.is_replicate()
+                ) and target.is_partial():
+                    normalized_placements.append(Replicate())
+                else:
+                    normalized_placements.append(target)
+
             target_spec = DTensorSpec(
                 previous_device_mesh,
-                previous_placement,
+                tuple(normalized_placements),
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
