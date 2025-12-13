@@ -823,7 +823,7 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, [set, OrderedSet]):
+        elif istype(value, (set, OrderedSet)):
             if any(isinstance(x, torch.Tensor) for x in value):
                 unimplemented(
                     gb_type="Attempted to wrap a set with tensors",
