@@ -402,7 +402,14 @@ def cmp_eq(a, b):
 def cmp_ne(a, b):
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
-        return a.__ne__(b)
+        result = a.__ne__(b)
+        if result is not NotImplemented:
+            return result
+        # Fall through to try b.__ne__(a) or cmp_eq
+    if isinstance(type(b).__ne__, types.FunctionType):
+        result = b.__ne__(a)
+        if result is not NotImplemented:
+            return result
     return not cmp_eq(a, b)
 
 
