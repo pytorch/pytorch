@@ -57,6 +57,11 @@ def gen_nn_functionl_call_wrapper():
     )
 
 
+def gen_distinct_nn_module_wrapper():
+    # We need to create a new fn object for Dynamo to cache on
+    return lambda module, args, kwargs: module(*args, **kwargs)
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
     def test_simple(self):
@@ -3281,6 +3286,77 @@ class InvokeSubgraphNoRetracingTests(TestCase):
                     x = functional_call(
                         self._mods[idx],
                         self.get_params_and_buffer_dict(self._mods[idx]),
+                        (x,),
+                        {},
+                    )
+                return x
+
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        mod = LLM()
+        backend = AotEagerAndRecordGraphs()
+        opt_mod = torch.compile(mod, fullgraph=True, backend=backend)
+
+        ref = mod(x)
+        res = opt_mod(x_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(self.count_cache_hit_with_is_pure(backend.graphs[0]), 3)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+
+    def test_no_lifting(self):
+        """
+        A simple example of how to take a list of modules and functionalize them
+        in the init method. We also have to update the forward implementation
+        accordingly.
+        """
+
+        class SinBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                return torch.sin(self.linear(x))
+
+        class CosBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                return torch.cos(self.linear(x))
+
+        class LLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._mods = torch.nn.ModuleList(
+                    [
+                        SinBlock(),
+                        SinBlock(),
+                        SinBlock(),
+                        CosBlock(),
+                        CosBlock(),
+                        torch.nn.Linear(8, 8),
+                    ]
+                )
+                self.hashed_submods = {}
+                self._distinct_wrappers = []
+                for idx, submod in enumerate(self._mods):
+                    hash_submod = type(submod)
+                    if hash_submod not in self.hashed_submods:
+                        wrapper = gen_distinct_nn_module_wrapper()
+                        self.hashed_submods[hash_submod] = nested_compile_region(
+                            wrapper, is_pure=True
+                        )
+                    self._distinct_wrappers.append(self.hashed_submods[hash_submod])
+
+            def forward(self, x):
+                for idx, distinct_wrapper in enumerate(self._distinct_wrappers):
+                    x = distinct_wrapper(
+                        self._mods[idx],
                         (x,),
                         {},
                     )

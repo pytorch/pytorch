@@ -960,6 +960,8 @@ def validate_args_and_maybe_create_graph_inputs(
             ListVariable(flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
     elif set_subgraph_inputs == "flatten_automatic":
+        from torch._dynamo.external_utils import get_params_and_buffers_list
+
         # The goal of flatten_automatic is to extract all tensor variables from the
         # inputs, in the order of *args and **kwargs, and immediately lift them as
         # subgraph inputs. It's possible that a subgraph input might not actually be
@@ -969,6 +971,17 @@ def validate_args_and_maybe_create_graph_inputs(
         #   - local_map (TODO), which wants the same ordering as the original function args
         #   - invoke_subgraph's upcoming `is_pure` logic, which needs a stable, guaranteed
         #     ordering of subgraph inputs for a simpler implementation.
+        for arg in sub_args:
+            if isinstance(arg, variables.UnspecializedNNModuleVariable):
+                params_and_buffers = _make_inlined(tx, get_params_and_buffers_list)(
+                    arg
+                ).unpack_var_sequence(tx)
+                for param_or_buffer in params_and_buffers:
+                    if isinstance(param_or_buffer, variables.TensorVariable):
+                        tracer.maybe_lift_tracked_freevar_to_input(
+                            param_or_buffer.proxy
+                        )
+
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(list(sub_args))
         ).unpack_var_sequence(tx)
@@ -4959,6 +4972,17 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         to lift the subgraph args. We can follow the exact same process here.
 
         """
+        from torch._dynamo.external_utils import get_params_and_buffers_list
+
+        lifted_tensor_args = {}
+        for arg in args:
+            if isinstance(arg, variables.UnspecializedNNModuleVariable):
+                for param_buffer in _make_inlined(tx, get_params_and_buffers_list)(
+                    arg
+                ).unpack_var_sequence(tx):
+                    if isinstance(param_buffer, variables.TensorVariable):
+                        lifted_tensor_args[param_buffer] = None
+
         flat_args, _ = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(list(args))
         ).unpack_var_sequence(tx)
@@ -4971,12 +4995,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             ).unpack_var_sequence(tx)
             flat_kwargs = flat_kwargs.unpack_var_sequence(tx)
 
-        lifted_tensor_args = []
         for x in flat_args + flat_kwargs:
             if isinstance(x, variables.TensorVariable):
-                lifted_tensor_args.append(x)
+                lifted_tensor_args[x] = None
 
-        return lifted_tensor_args
+        return list(lifted_tensor_args.keys())
 
     def get_fake_outputs_for_subgraph_assuming_pure(self, tx, mod):
         # Get fake values by make a copy from the earlier traced submodule.

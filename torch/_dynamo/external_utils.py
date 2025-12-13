@@ -285,3 +285,13 @@ def insert_const_values_with_mask(
             out.append(tup[idx])
             idx += 1
     return tuple(out)
+
+
+def get_params_and_buffers_list(mod):
+    params = dict(mod.named_parameters(remove_duplicate=False))
+    buffers = dict(mod.named_buffers(remove_duplicate=False))
+    params_and_buffers = {
+        **dict(params),
+        **dict(buffers),
+    }
+    return list(params_and_buffers.values())
