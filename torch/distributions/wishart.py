@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -79,11 +78,11 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[Tensor, Number],
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        df: Tensor | Number,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
             precision_matrix is not None

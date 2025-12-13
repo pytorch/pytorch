@@ -581,3 +581,25 @@ def _skipped_function_for_test_reconstruct(
     f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
     return f(*args, **kwargs)
+
+
+_testing_invoke_subgraph_inductor_compile_captured_gms = None
+
+
+@contextlib.contextmanager
+def _testing_capture_invoke_subgraph_inductor_compile_gms():
+    """
+    Context manager to capture graph modules compiled by invoke_subgraph_inductor_compile.
+
+    Usage:
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            # code that triggers invoke_subgraph_inductor_compile
+            pass
+        # captured_gms will contain the list of captured graph modules
+    """
+    global _testing_invoke_subgraph_inductor_compile_captured_gms
+    _testing_invoke_subgraph_inductor_compile_captured_gms = []
+    try:
+        yield _testing_invoke_subgraph_inductor_compile_captured_gms
+    finally:
+        _testing_invoke_subgraph_inductor_compile_captured_gms = None

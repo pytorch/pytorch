@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 import torch
 from torch import Size, Tensor
@@ -52,7 +52,7 @@ class Independent(Distribution, Generic[D]):
         self,
         base_distribution: D,
         reinterpreted_batch_ndims: int,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
             raise ValueError(
