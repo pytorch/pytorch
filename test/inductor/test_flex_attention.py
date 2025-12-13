@@ -6807,8 +6807,9 @@ supports_learnable_bias = unittest.skipUnless(
     (
         (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
-    ),
-    "Requires Triton + A100 or Triton + ROCm",
+    )
+    or (torch.xpu.is_available() and has_triton()),
+    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
 )
 
 
@@ -6888,7 +6889,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_relative_1d_bias(self, device, params, mode: str):
@@ -6922,7 +6925,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_absolute_2d_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -6956,7 +6961,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_head_specific_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -6991,7 +6998,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_batch_head_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7027,7 +7036,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_multiplicative_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7060,7 +7071,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_local_window_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7095,7 +7108,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_global_tokens_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7128,7 +7143,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_weird_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7165,7 +7182,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_indirect_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7205,7 +7224,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_symmetric_bias(self, device, params, mode: str):
@@ -7243,7 +7264,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_flipped_indexed_bias(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7277,7 +7300,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_head_specific_gate(self, device, params, mode: str):
@@ -7311,7 +7336,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_distinct_biases(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
@@ -7360,7 +7387,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     @torch.compile
     def test_learnable_bias_global_compiled(self, device, params):
@@ -7439,7 +7468,9 @@ class TestLearnableBiases(InductorTestCase):
 
     @skip_on_cpu
     @common_utils.parametrize(
-        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+        "params",
+        get_params(device_configs[test_device[0]].dtypes),
+        name_fn=lambda x: f"{x}",
     )
     def test_relative_1d_bias_only_grad(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
