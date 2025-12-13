@@ -6042,8 +6042,13 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
+        # When graph_partition is enabled, skip - partitioning handles sparse outputs
         for t in example_out_li:
-            if isinstance(t, torch.Tensor) and t.is_sparse:
+            if (
+                isinstance(t, torch.Tensor)
+                and t.is_sparse
+                and not config.graph_partition
+            ):
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
                     msg = f"{msg} Found from : \n {stack_trace}"
@@ -8754,6 +8759,17 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """
+    IR node representing torch.cond
+
+    Attributes:
+        predicate: A boolean scalar tensor determining which branch to execute.
+        operands: Input tensors passed to both true and false subgraphs.
+        true_subgraph: Subgraph executed when predicate is True.
+        false_subgraph: Subgraph executed when predicate is False.
+        outputs: MultiOutput nodes representing the conditional's outputs.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -8812,6 +8828,27 @@ class Conditional(ExternKernel):
         assert isinstance(fx_operands, Sequence), type(fx_operands)
         assert all(isinstance(n, Node) for n in fx_operands)
         fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        fake_outputs = V.graph.current_node.meta["val"]
+
+        def _require_exact_strides(
+            graph_outputs: Sequence[IRNode],
+            fake_tensors: Sequence[torch.Tensor],
+        ) -> list[IRNode]:
+            ret = []
+            for output, fake in zip(graph_outputs, fake_tensors):
+                if isinstance(output, ShapeAsConstantBuffer):
+                    ret.append(output)
+                else:
+                    fake_strides = [
+                        s.node.expr if isinstance(s, torch.SymInt) else s
+                        for s in fake.stride()
+                    ]
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            TensorBox(output), fake_strides, allow_padding=False
+                        )
+                    )
+            return ret
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -8823,6 +8860,12 @@ class Conditional(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
+                    # Force subgraph outputs to have the expected strides from
+                    # FakeTensor metadata. This ensures both branches produce
+                    # outputs with consistent strides.
+                    subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs, fake_outputs
+                    )
 
         assert true_fn.graph is not None
         assert false_fn.graph is not None
