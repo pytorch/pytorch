@@ -1497,6 +1497,30 @@ class TestExplicitRedistribute(LocalTensorTestBase):
     def world_size(self):
         return 4
 
+    def test_message_fn_not_called_in_fastpath(self):
+        """Test that message_fn is not called when no ExplicitRedistributionContext is active.
+
+        This ensures that string formatting overhead is avoided in the common case.
+        """
+        from unittest.mock import patch
+
+        from torch.distributed.tensor._op_schema import OpSchema
+
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim, requires_grad=True)
+            A = torch.randn(dim, dim, requires_grad=True)
+
+            # Prepare DTensors that will trigger redistribution
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+            # Without ExplicitRedistributionContext, OpSchema.__str__ should NOT be called
+            with patch.object(OpSchema, "__str__", autospec=True) as mock_str:
+                torch.matmul(dx, dA)
+                mock_str.assert_not_called()
+
     def test_explicit_matmul(self):
         with LocalTensorMode(self.world_size):
             device_mesh = self.build_device_mesh()

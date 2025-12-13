@@ -70,6 +70,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
+    collect_cuda_data_ptrs,
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
@@ -1825,6 +1826,7 @@ def check_memory_pool(
     pool_id: tuple[int, int],
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
+    """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
     assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
@@ -1873,14 +1875,47 @@ def check_memory_pool(
         if not config.triton.cudagraph_trees_history_recording:
             history_hint = "- Set torch._inductor.config.triton.cudagraph_trees_history_recording = True for allocation origins\n"
 
+        objgraph_hint = (
+            (
+                "- Objgraph backrefs disabled; set torch._inductor.config.triton.cudagraph_trees_objgraph = True "
+                "(refs_live_tensor_{index}.svg)\n"
+            )
+            if not config.triton.cudagraph_trees_objgraph
+            else ""
+        )
+        objgraph_files_hint = ""
+
+        if config.triton.cudagraph_trees_objgraph:
+            # pyrefly: ignore  # import-error
+            import objgraph
+
+            generated_files: list[str] = []
+
+            tensors = objgraph.by_type("torch.Tensor")
+            for index, bad_dp in enumerate(allocated_not_in_live_storages):
+                bad_tensor = next(
+                    (t for t in tensors if bad_dp in collect_cuda_data_ptrs(t)), None
+                )
+                if bad_tensor is None:
+                    continue
+                filename = f"refs_live_tensor_{index}.svg"
+                objgraph.show_backrefs(bad_tensor, filename=filename, max_depth=5)
+                generated_files.append(filename)
+            if generated_files:
+                objgraph_files_hint = (
+                    f"- Objgraph backrefs written: {', '.join(generated_files)}\n"
+                )
+
         dangling_addrs = OrderedSet(allocated_not_in_live_storages.keys())
         msg = (
             f"Detected {len(allocated_not_in_live_storages)} tensor(s) in the cudagraph pool not tracked as outputs. "
             f"All live allocations must be tracked for correctness.\n"
             f"Debugging:\n"
             f"{history_hint}"
+            f"{objgraph_hint}"
             f"- Search gc.get_objects() for tensors with data_ptr() in {dangling_addrs}\n"
             f"- Use refcycle to find what is preventing cleanup\n"
+            f"{objgraph_files_hint}"
             f"Allocations:\n{formatted_s}"
         )
         raise RuntimeError(msg)

@@ -529,6 +529,11 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+        # check that nn_module doesn't graph break in compiled regions
+        fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            fn(inp)
+
     def test_record_function(self):
         def fn(x, y):
             z = x @ y
