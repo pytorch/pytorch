@@ -2767,16 +2767,18 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     }
     # Remove keys with None values (i.e., missing in sizes)
     config = {k: v for k, v in config.items() if v is not None}
-    # Validate that block product doesn't exceed Triton's maximum tensor numel
+    # Validate that block product doesn't exceed Triton's maximum tensor numel.
+    # This is a hard invariant that cannot be disabled - Triton will crash otherwise.
     block_numel = (
         config.get("XBLOCK", 1)
         * config.get("YBLOCK", 1)
         * config.get("ZBLOCK", 1)
         * config.get("R0_BLOCK", 1)
     )
-    assert block_numel <= TRITON_MAX_TENSOR_NUMEL, (
-        f"Block numel {block_numel} exceeds Triton maximum {TRITON_MAX_TENSOR_NUMEL}"
-    )
+    if block_numel > TRITON_MAX_TENSOR_NUMEL:
+        raise AssertionError(
+            f"Block numel {block_numel} exceeds Triton maximum {TRITON_MAX_TENSOR_NUMEL}"
+        )
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
