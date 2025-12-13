@@ -1240,6 +1240,7 @@ class DeviceCachingAllocator {
   std::vector<c10::DeviceIndex> devices_with_peer_access_;
 
   bool record_history = false;
+  std::unordered_set<TraceEntry::Action> skip_actions_list;
 
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
@@ -1293,10 +1294,32 @@ class DeviceCachingAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
+
+    // Convert string list to action enum set
+    skip_actions_list.clear();
+    for (const auto& action_str : skip_actions) {
+      if (action_str == "alloc") {
+        skip_actions_list.insert(TraceEntry::Action::ALLOC);
+      } else if (action_str == "free_requested") {
+        skip_actions_list.insert(TraceEntry::Action::FREE_REQUESTED);
+      } else if (action_str == "free_completed") {
+        skip_actions_list.insert(TraceEntry::Action::FREE_COMPLETED);
+      } else if (action_str == "segment_alloc") {
+        skip_actions_list.insert(TraceEntry::Action::SEGMENT_ALLOC);
+      } else if (action_str == "segment_free") {
+        skip_actions_list.insert(TraceEntry::Action::SEGMENT_FREE);
+      } else if (action_str == "oom") {
+        skip_actions_list.insert(TraceEntry::Action::OOM);
+      } else if (action_str == "snapshot") {
+        skip_actions_list.insert(TraceEntry::Action::SNAPSHOT);
+      }
+    }
+
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -3772,7 +3795,11 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertEntries(te);
+      // Skip if action is in the skip_actions set
+      bool should_skip = skip_actions_list.count(action) > 0;
+      if (!should_skip) {
+        alloc_buffer.insertEntries(te);
+      }
     }
   }
 };
@@ -3957,7 +3984,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) override {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) override {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
     annotation_buffer.clear();
@@ -3967,7 +3995,8 @@ class NativeCachingAllocator : public CUDAAllocator {
           context_recorder,
           alloc_buffer_max_entries,
           when,
-          clearHistory);
+          clearHistory,
+          skip_actions);
     }
   }
 
