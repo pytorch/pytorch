@@ -3924,7 +3924,24 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    from .utils import _fx_node_is_input_dependent_cudagraph_unsafe
+
     op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+
+    # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
+    # because boolean indices trigger .nonzero() during CUDA graph capture
+    # When graph_partition is enabled, skip - partitioning handles this
+    fx_node = V.graph.current_node
+    if (
+        not config.graph_partition
+        and fx_node is not None
+        and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
+    ):
+        msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
+        if stack_trace := fx_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
@@ -7285,6 +7302,8 @@ def triton_kernel_wrap_(
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(pred, true_fn, false_fn, operands):
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -7297,7 +7316,9 @@ def cond(pred, true_fn, false_fn, operands):
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    if any(
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
+    if not config.graph_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
