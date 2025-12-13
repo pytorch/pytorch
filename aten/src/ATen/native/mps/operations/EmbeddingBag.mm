@@ -73,6 +73,20 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   }
   int64_t feature_size = weight.size(1);
 
+  // Add offsets validation to match CPU behavior
+  AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_mps_impl", [&]() {
+    if (offsets.size(0) > 0) {
+      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
+      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
+      TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
+                                "in the mini-batch has to start from position 0. "
+                                "However, got ", offsets[0]);
+      TORCH_CHECK(offset_n <= indices.size(0), "offsets[-1] can not "
+                  "be greater than input's length ", indices.size(0), " but got offsets[-1] of ",
+                  offset_n);
+    }
+  });
+
   auto bag_size = at::empty({num_bags}, indices.options());
   auto offset2bag = at::empty({indices.size(0)}, indices.options());
   auto output = at::empty({num_bags, feature_size}, weight.options());
@@ -296,3 +310,4 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
 }
 
 } // namespace at::native
+
