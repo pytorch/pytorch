@@ -204,18 +204,28 @@ static TensorImpl* _resize_impl_(
   const auto itemsize = self->dtype().itemsize();
   const auto storage_offset = self->generic_storage_offset<T>();
   T storage_size = T(1);
+  
+  // Calculate required storage size first, before updating tensor metadata
   if (stride) {
-    self->set_sizes_and_strides(size, *stride);
     storage_size = at::detail::computeStorageNbytes(
         size, *stride, itemsize, storage_offset);
   } else {
-    self->generic_set_sizes_contiguous(size);
     storage_size = at::detail::computeStorageNbytesContiguous(
         size, itemsize, storage_offset);
   }
 
+  // Resize storage first (this may throw if storage is not resizable)
+  // Only update tensor metadata if storage resize succeeds
   if (resize_storage) {
     _maybe_resize_storage(self, std::move(storage_size));
+  }
+
+  // Update tensor metadata only after storage resize succeeds (or is not needed)
+  // This ensures exception safety - if storage resize fails, metadata remains unchanged
+  if (stride) {
+    self->set_sizes_and_strides(size, *stride);
+  } else {
+    self->generic_set_sizes_contiguous(size);
   }
 
   return self;
@@ -318,3 +328,4 @@ void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
 }
 
 } // namespace at::native
+

@@ -375,6 +375,13 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
@@ -964,7 +971,7 @@ class TestViewOps(TestCase):
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -975,7 +982,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_split_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.split(t, [1, 1, 1])
@@ -2021,6 +2028,47 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
 
+    @onlyCPU
+    def test_resize_exception_safety(self, device):
+        """Test for resize_ exception safety (issue #170298).
+        
+        Verifies that when resize_ fails due to non-resizable storage,
+        the tensor metadata is not updated, preventing "zombie" tensors.
+        """
+        import numpy as np
+        
+        # Create non-resizable storage (0 bytes) using NumPy array
+        locked_storage = torch.from_numpy(np.array([], dtype=np.int32)).untyped_storage()
+        
+        # Inject into a fresh tensor
+        t = torch.tensor([], dtype=torch.int32, device=device)
+        t.set_(locked_storage)
+        
+        # Record original state
+        original_shape = t.shape
+        original_storage_bytes = t.untyped_storage().nbytes()
+        
+        # Verify initial state
+        self.assertEqual(original_shape, torch.Size([0]))
+        self.assertEqual(original_storage_bytes, 0)
+        self.assertFalse(locked_storage.resizable())
+        
+        # Attempt to resize (should fail due to non-resizable storage)
+        with self.assertRaisesRegex(RuntimeError, "Trying to resize storage that is not resizable"):
+            t.resize_((5, 5, 5))
+        
+        # Verify exception safety: tensor metadata should NOT be updated
+        self.assertEqual(t.shape, original_shape)
+        self.assertEqual(t.untyped_storage().nbytes(), original_storage_bytes)
+        
+        # Verify tensor is still in consistent state (not "zombie")
+        self.assertEqual(t.numel(), 0)  # Shape indicates 0 elements
+        self.assertEqual(t.untyped_storage().nbytes(), 0)  # Storage has 0 bytes
+        
+        # Tensor should be safely accessible (no crash)
+        str_repr = str(t)  # Should not crash
+        self.assertIn("tensor([], dtype=torch.int32)", str_repr)
+
     @onlyNativeDeviceTypes
     def test_as_strided_overflow_storage_offset(self, device):
         t = torch.randn(2, 3, device=device)
@@ -2080,3 +2128,4 @@ instantiate_device_type_tests(TestOldViewOps, globals())
 
 if __name__ == "__main__":
     run_tests()
+
