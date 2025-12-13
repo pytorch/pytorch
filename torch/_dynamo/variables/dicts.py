@@ -1385,10 +1385,10 @@ class OrderedSetVariable(SetVariable):
                 "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
             )
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self) -> OrderedSet:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
 
-    def python_type(self) -> type:
+    def python_type(self) -> type[OrderedSet]:
         return OrderedSet
 
     def python_type_var(self):
