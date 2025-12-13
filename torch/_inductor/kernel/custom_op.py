@@ -103,7 +103,9 @@ __all__ = [
 
 
 def _extract_tensor_inputs(
-    args: tuple[Any, ...], kwargs: dict[str, Any]
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    op_overload: Optional[torch._ops.OpOverload] = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract tensor inputs from mixed args/kwargs.
     Separates tensors (for autotuning input_nodes) from non-tensor parameters.
@@ -112,6 +114,9 @@ def _extract_tensor_inputs(
     Args:
         args: Positional arguments (mix of tensors and scalars)
         kwargs: Keyword arguments (mix of tensors and scalars)
+        op_overload: Optional op overload to get parameter names from schema.
+                     If provided, non-tensor args will preserve their original
+                     parameter names instead of using generic "arg_N" names.
 
     Returns:
         Tuple of (tensor_inputs_list, non_tensor_kwargs)
@@ -119,13 +124,26 @@ def _extract_tensor_inputs(
     tensor_inputs = []
     non_tensor_kwargs = {}
 
+    # Get parameter names from op schema if available
+    param_names: Optional[list[str]] = None
+    if op_overload is not None:
+        try:
+            schema = op_overload._schema
+            param_names = [arg.name for arg in schema.arguments]
+        except (AttributeError, TypeError):
+            param_names = None
+
     # Process args and kwargs: separate tensor inputs and non tensor args
     for i, arg in enumerate(args):
         if isinstance(arg, (TensorBox, Buffer)):
             tensor_inputs.append(arg)
         else:
-            # Add non-tensor positional args to kwargs with generated names
-            non_tensor_kwargs[f"arg_{i}"] = arg
+            # Use the real parameter name from schema if available
+            if param_names is not None and i < len(param_names):
+                name = param_names[i]
+            else:
+                name = f"arg_{i}"
+            non_tensor_kwargs[name] = arg
 
     for key, value in kwargs.items():
         if isinstance(value, (TensorBox, Buffer)):
@@ -499,7 +517,9 @@ def register_custom_op_autotuning(
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
         """Inductor lowering function that replaces custom op calls with autotuned versions."""
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
-        tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
+        tensor_inputs, runtime_kwargs = _extract_tensor_inputs(
+            args, kwargs, op_overload
+        )
 
         # Get configs: either generate dynamically or use static configs
         if config_generator is not None:
