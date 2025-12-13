@@ -34,7 +34,6 @@ import operator
 import random
 import re
 import sys
-import traceback
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -204,7 +203,6 @@ from .functions import (
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
-    TracebackVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -1293,8 +1291,6 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
-        elif value is traceback.clear_frames:
-            return TracebackVariable(source=self.source)
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
@@ -3868,6 +3864,7 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        breakpoint()
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
