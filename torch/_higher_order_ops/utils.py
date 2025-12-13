@@ -225,6 +225,17 @@ def check_meta_consistency(
         )
 
 
+# Thread-local flag to indicate we're inside HOP internal compilation
+import threading
+
+
+_hop_compile_tls = threading.local()
+
+
+def _in_hop_compile() -> bool:
+    return getattr(_hop_compile_tls, "in_hop_compile", False)
+
+
 @contextmanager
 def setup_compilation_env():
     """
@@ -234,23 +245,29 @@ def setup_compilation_env():
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_modes,
     )
+    from torch._dynamo.backends.registry import lookup_backend
     from torch.fx.experimental.proxy_tensor import (
         _temp_remove_pre_dispatch_torch_function_mode,
     )
 
-    with (
-        _set_compilation_env(),
-        torch._dynamo.utils.disable_cache_limit(),
-        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
-        _temp_remove_metadata_torch_function_mode() as metadata_mode,
-    ):
-        modes = [
-            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
-        ]
-        if modes:
-            yield make_eager_backend_with_torch_function_modes(modes)
-        else:
-            yield "eager"
+    old_in_hop_compile = getattr(_hop_compile_tls, "in_hop_compile", False)
+    _hop_compile_tls.in_hop_compile = True
+    try:
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+            _temp_remove_metadata_torch_function_mode() as metadata_mode,
+        ):
+            modes = [
+                mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+            ]
+            if modes:
+                yield make_eager_backend_with_torch_function_modes(modes)
+            else:
+                yield lookup_backend("eager")
+    finally:
+        _hop_compile_tls.in_hop_compile = old_in_hop_compile
 
 
 @contextmanager

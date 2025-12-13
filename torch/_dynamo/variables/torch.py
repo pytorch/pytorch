@@ -41,7 +41,6 @@ import torch._refs
 import torch.fx
 import torch.nn
 from torch._guards import TracingContext
-from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -75,6 +74,7 @@ from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
+    ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
@@ -87,7 +87,6 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
-from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -413,12 +412,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
+        ):
+            return ProfilerRecordFunctionContextVariable.create(
+                func=self.value, record_args=args, record_kwargs=kwargs
+            )
+        elif self.value in (
+            torch.profiler.profile,
+            torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
@@ -558,7 +560,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not kwargs
             if self.value is torch._C._dispatch_keys:
                 assert len(args) == 1
-                assert isinstance(args[0], variables.TensorVariable)
+                assert args[0].is_tensor()
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
                 # Remove Python and PythonTLSSnapshot from the dispatch key set,
@@ -612,7 +614,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if len(args) != 3 or kwargs:
                     return None
 
-                if all(isinstance(arg, variables.TensorVariable) for arg in args):
+                if all(arg.is_tensor() for arg in args):
                     x, y, z = args
                     addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
                     return addcmul_fn.call_function(tx, [z, x, y], {})
@@ -634,7 +636,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(self, tx: "InstructionTranslator", arg):
-            if isinstance(arg, TensorVariable) or (
+            if arg.is_tensor() or (
                 self.value is torch.overrides.is_tensor_like
                 and isinstance(arg, UserDefinedObjectVariable)
                 and hasattr(arg.value, "__torch_function__")
@@ -649,7 +651,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         def handle_is_floating_point(self, tx: "InstructionTranslator", input):
             input_arg = input
-            if isinstance(input_arg, TensorVariable) and input_arg.dtype is not None:
+            if input_arg.is_tensor() and input_arg.dtype is not None:
                 if self.value is torch.is_floating_point:
                     return ConstantVariable.create(input_arg.dtype.is_floating_point)
                 elif self.value is torch.is_complex:
@@ -659,9 +661,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(self, tx: "InstructionTranslator", input):
-            if isinstance(input, TensorVariable) and input.valid_size():
+            if input.is_tensor() and input.valid_size():
                 return ConstantVariable.create(product(input.size))
-            elif isinstance(input, TensorVariable):
+            elif input.is_tensor():
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
 
@@ -683,7 +685,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
-            assert isinstance(input, TensorVariable)
+            assert input.is_tensor()
             return input.call_method(tx, "size", [], {})
 
         @register(
@@ -737,6 +739,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             return ConstantVariable.create(
                 not tx.symbolic_torch_function_state.torch_function_mode_enabled
+            )
+
+        @register(torch._C._is_torch_function_mode_enabled)
+        def handle_is_torch_function_mode_enabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            # _is_torch_function_mode_enabled returns True only if:
+            # 1. Torch function modes are not disabled (DisableTorchFunction not entered)
+            # 2. There are actually modes on the stack
+            return VariableTracker.build(
+                tx,
+                tx.symbolic_torch_function_state.torch_function_mode_enabled
+                and tx.symbolic_torch_function_state.in_torch_function_mode(),
             )
 
         @register(
@@ -812,7 +826,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             assert not extra, "Expect 1 input to cudnn.is_acceptable"
-            assert isinstance(tensor, TensorVariable), (
+            assert tensor.is_tensor(), (
                 "Expect input to cudnn.is_acceptable to be a tensor"
             )
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
@@ -856,7 +870,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.full)
         def handle_full(self, tx, size, fill_value, **kwargs):
-            if isinstance(fill_value, TensorVariable):
+            if fill_value.is_tensor():
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
@@ -869,6 +883,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -878,14 +895,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_pow)
         def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
-            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+            if len(args) == 2 and args[0].is_tensor() and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_pow_scalar),
                     args,
                     kwargs,
                 )
+
+        @register(torch._C._group_tensors_by_device_and_dtype)
+        def handle_group_tensors_by_device_and_dtype(
+            _, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
+                args,
+                kwargs,
+            )
 
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
@@ -934,11 +964,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # bake the result into the trace
                 if len(args) == 1:
                     # group or group name
-                    assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+                    assert (
+                        isinstance(args[0], ProcessGroupVariable)
+                        or args[0].is_python_constant()
+                    )
                 elif len(args) == 2:
                     # ranks + tag
-                    assert isinstance(args[0], ListVariable) and isinstance(
-                        args[1], ConstantVariable
+                    assert (
+                        isinstance(args[0], ListVariable)
+                        and args[1].is_python_constant()
                     )
                 else:
                     raise AssertionError(
@@ -1017,7 +1051,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             from .lists import BaseListVariable
 
-            if layout and layout.as_python_constant() == torch.strided:
+            if layout and layout.is_constant_match(torch.strided):
                 unimplemented(
                     gb_type="Attempted to use strided NestedTensor",
                     context=f"layout={layout}",
@@ -1041,9 +1075,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) == 1 or (
-                len(args) == 2
-                and args[1].is_python_constant()
-                and args[1].as_python_constant() == -1
+                len(args) == 2 and args[1].is_constant_match(-1)
             ):
                 unimplemented(
                     gb_type="Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
@@ -1065,7 +1097,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
@@ -1076,7 +1108,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return variables.ConstantVariable.create(
                     torch.fx.experimental.symbolic_shapes.guard_or_true(expr.sym_num)
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
@@ -1087,7 +1119,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return variables.ConstantVariable.create(
                     torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
@@ -1098,15 +1130,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif isinstance(expr, ConstantVariable):
-                val = expr.value
+            elif expr.is_python_constant():
+                val = expr.as_python_constant()
             else:
                 unimplemented(
                     gb_type="torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
@@ -1127,7 +1159,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.sym_and)
@@ -1156,8 +1188,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_has_static_value(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif isinstance(expr, ConstantVariable):
-                val = expr.value
+            elif expr.is_python_constant():
+                val = expr.as_python_constant()
             else:
                 return
 
@@ -1199,7 +1231,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_torch_tensor(self, tx: "InstructionTranslator", *args, **kwargs):
             def check_any_unspec(x):
                 # NB: This includes UnspecializedPythonVariable
-                if isinstance(x, (TensorVariable, SymNodeVariable)):
+                if x.is_tensor() or isinstance(x, SymNodeVariable):
                     return True
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return any(check_any_unspec(y) for y in x.items)
@@ -1215,7 +1247,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 data_arg = kwargs["data"]
 
             # NB: OK to pass torch.tensor(tensor), this will trace fine
-            if not isinstance(data_arg, TensorVariable) and check_any_unspec(data_arg):
+            if (
+                data_arg is not None
+                and not data_arg.is_tensor()
+                and check_any_unspec(data_arg)
+            ):
                 # This is slower and less canonical, so only use it if we
                 # have to
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
@@ -1357,7 +1393,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Running the graph will ensure that the DeviceContext mode is
             # at the correct position in the stack
             TorchFunctionModeStackVariable.register_mutation(tx)
-            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+            if args[0].is_constant_none():
                 TorchFunctionModeStackVariable.clear_default_device(tx)
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
@@ -1452,7 +1488,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, SymNodeVariable, TensorVariable
+        from . import ConstantVariable, SymNodeVariable
         from .builder import wrap_fx_proxy
 
         if self.nonstrict_traceable:
@@ -1487,7 +1523,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if self.is_tensor_method():
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
-            if args and isinstance(args[0], variables.TensorVariable):
+            if args and args[0].is_tensor():
                 tensor_var = args[0]
                 # Check if input tensor and inplace_view op specifically
                 if tensor_var.source is not None and hasattr(torch.ops.aten, name):
@@ -1509,27 +1545,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         )
             return self.call_tensor_method(tx, args, kwargs)
 
-        intermediate_opaques = [
-            type(x.value)
-            for x in args
-            if x.source is None
-            and isinstance(x, UserDefinedObjectVariable)
-            and is_opaque_type(type(x.value))
-        ]
-        if len(intermediate_opaques) > 0:
-            unimplemented(
-                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
-                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
-                explanation=(
-                    "Opaque objects cannot be created inside the torch.compile region. "
-                    "They must be created before entering the compiled function."
-                ),
-                hints=[
-                    "Please create the opaque object before calling torch.compile "
-                    "and pass it in as an argument or as a global variable."
-                ],
-            )
-
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1539,8 +1554,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 
         all_ints_or_floats = all(
-            isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
-            for x in args
+            isinstance(x, SymNodeVariable) or x.is_python_constant() for x in args
         )
         if (
             getattr(self.value, "__module__", "") == "torch"
@@ -1597,15 +1611,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
                 saved_out_shapes = []
                 for vt in out_kwarg_vt.items:
-                    if isinstance(vt, variables.TensorVariable):
-                        shape = vt.proxy.node.meta["example_value"].shape
+                    if vt.is_tensor():
+                        shape = vt.as_proxy().node.meta["example_value"].shape
                     else:
                         shape = None
                     saved_out_shapes.append(shape)
 
             # e.g., out=output_tensor
-            if isinstance(out_kwarg_vt, variables.TensorVariable):
-                saved_out_shapes = out_kwarg_vt.proxy.node.meta["example_value"].shape
+            if out_kwarg_vt.is_tensor():
+                saved_out_shapes = (
+                    out_kwarg_vt.as_proxy().node.meta["example_value"].shape
+                )
 
         tensor_variable = wrap_fx_proxy(
             tx=tx,
@@ -1618,7 +1634,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
-            isinstance(tensor_variable, TensorVariable)
+            tensor_variable.is_tensor()
             and "requires_grad" in kwargs
             and kwargs["requires_grad"].as_python_constant()
         ):
@@ -1657,7 +1673,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # torch methods.
                         continue
 
-                    assert isinstance(out_tensor_vt, TensorVariable)
+                    assert out_tensor_vt.is_tensor()
                     fake_out = out_tensor_vt.proxy.node.meta["example_value"]
                     if saved_out_shape != fake_out.shape:
                         # It's hard to get out variants with resizing on graph inputs work
@@ -1685,9 +1701,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             ],
                         )
             else:
-                assert isinstance(out_kwarg_vt, TensorVariable)
-                assert "example_value" in out_kwarg_vt.proxy.node.meta
-                fake_out = out_kwarg_vt.proxy.node.meta["example_value"]
+                assert out_kwarg_vt is not None and out_kwarg_vt.is_tensor()
+                assert "example_value" in out_kwarg_vt.as_proxy().node.meta
+                fake_out = out_kwarg_vt.as_proxy().node.meta["example_value"]
                 if saved_out_shapes != fake_out.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
@@ -1942,7 +1958,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     ],
                 )
 
-        if not isinstance(data, variables.TensorVariable):
+        if data is None or not data.is_tensor():
             unimplemented(
                 gb_type="`torch.nn.Parameter()` with unsupported data type",
                 context=f"data={data}",
@@ -2041,14 +2057,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # returned by the graph will be an alias.
             source=placeholder.source,
         )
-        assert isinstance(result, variables.TensorVariable)
-        result.class_type = torch.nn.Parameter
+        assert result.is_tensor()
+        result.class_type = torch.nn.Parameter  # type: ignore[union-attr]
 
         # TODO(jansel/bdhirsh) - There is some issue with
         # tracable_create_parameter. It does not seem to use the right
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
-        result.has_grad_fn = False
+        result.has_grad_fn = False  # type: ignore[union-attr]
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
