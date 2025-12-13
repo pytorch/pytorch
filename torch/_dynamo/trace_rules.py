@@ -3454,6 +3454,7 @@ MOD_INLINELIST = [
     "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
+    "torch.utils._ordered_set",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
