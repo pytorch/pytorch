@@ -3357,7 +3357,15 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
+    if device_hint(self) == "cpu":
+        return self.new_empty((size, self.dim()), dtype=torch.long)
+    else:
+        return torch.empty_strided(
+            (size, self.dim()),
+            (1, size),
+            dtype=torch.long,
+            device=self.device,
+        )
 
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
