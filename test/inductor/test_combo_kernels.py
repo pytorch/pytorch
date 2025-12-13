@@ -196,9 +196,9 @@ class ComboKernelTests(TestCase):
             return row_sum_reduced, col_sum, y_sum, z_sum
 
         inps = [
-            torch.rand(8192, 1024, device="cuda"),
-            torch.rand(2048, device="cuda"),
-            torch.rand(2048, device="cuda"),
+            torch.rand(8192, 1024, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)

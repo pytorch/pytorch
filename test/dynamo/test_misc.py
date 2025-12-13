@@ -2156,6 +2156,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(actual, expected)
 
+    def test_structseq_repr(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            result = torch.max(x, dim=0)
+            s = repr(result)
+            return result.values
+
+        x = torch.randn(3, 2)
+
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        result = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_range_input(self):
         def fn(a, rng):
             x = a
@@ -5910,6 +5929,61 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
+
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_foreach_tensor_scalar(self):
+        # Test that foreach ops with tensor scalar values can be traced fullgraph
+        # when capture_scalar_outputs is enabled. The scalar's .item() creates an
+        # unbacked symbol that should be properly ignored since it only affects
+        # tensor values, not shapes.
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        val = torch.tensor(0.5, dtype=torch.float64)
+
+        # Test _foreach_addcmul with value arg
+        def fn_addcmul(a, b, c, val):
+            return torch._foreach_addcmul([a], [b], [c], value=1 - val)
+
+        expected = fn_addcmul(a, b, c, val)
+        actual = torch.compile(fn_addcmul, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_addcdiv with value arg
+        def fn_addcdiv(a, b, c, val):
+            return torch._foreach_addcdiv([a], [b], [c], value=1 - val)
+
+        expected = fn_addcdiv(a, b, c, val)
+        actual = torch.compile(fn_addcdiv, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_add with scalar arg
+        def fn_add(a, val):
+            return torch._foreach_add([a], 1 - val)
+
+        expected = fn_add(a, val)
+        actual = torch.compile(fn_add, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_mul with scalar arg
+        def fn_mul(a, val):
+            return torch._foreach_mul([a], 1 - val)
+
+        expected = fn_mul(a, val)
+        actual = torch.compile(fn_mul, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_pow with scalar exponent
+        def fn_pow(a, val):
+            return torch._foreach_pow([a.abs()], 1 - val.item())
+
+        expected = fn_pow(a, val)
+        actual = torch.compile(fn_pow, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
     def test_cross_entropy_loss_fancy_ctor1(self):
@@ -10122,11 +10196,6 @@ def ___make_guard_fn():
 
         fn(torch.ones(2, 2, device="cpu"))
 
-    # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
-    # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
-    # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
-    # until we have a proper fix.
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
         class SillyCat(torch.autograd.Function):
