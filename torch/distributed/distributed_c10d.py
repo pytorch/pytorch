@@ -2038,12 +2038,11 @@ def _new_process_group_helper(
                     backend_class.size(),
                 )
                 pg._set_default_backend(backend_type)
-        elif _use_torchcomm:
-            torchcomm_backend = os.environ["TORCHCOMM_BACKEND"]
-            assert torchcomm_backend is not None, "Need to set TORCHCOMM_BACKEND for torchComm"   
+        elif _use_torchcomm: 
             from torchcomms._comms import _BackendWrapper, new_comm
             device = torch.device(os.environ.get("TORCHCOMM_DEVICE", "cuda"))
-            comm = new_comm(torchcomm_backend, device, name=group_name)
+            # TODO: How do we redirect nccl to ncclx
+            comm = new_comm(backend_str, device, name=group_name)
             group_name = GroupName(group_name)
             backend_class = _BackendWrapper(comm)
             backend_type = ProcessGroup.BackendType.CUSTOM
