@@ -82,7 +82,7 @@ namespace {
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
     using Quantization8BitTestedTypes = ::testing::Types<vqint8, vquint8>;
-#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
 #endif
