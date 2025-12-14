@@ -21,11 +21,14 @@ def extract_tb(tb, limit=None):
     while tb is not None:
         if limit:
             if len(frame_summary) < limit:
-                frame_summary.append(tb.frame_summary)
+                frame_summary.append(
+                    # pyrefly: ignore[missing-attribute]
+                    tb.frame_summary
+                )
             else:
                 break
         else:
-            frame_summary.append(tb.frame_summary)
+            frame_summary.append(tb.frame_summary)  # pyrefly: ignore[missing-attribute]
         tb = tb.tb_next
     return frame_summary
 
