@@ -101,12 +101,13 @@ def create_dual_buffer_bias(num_heads=4, seq_len=512, dtype=torch.float16):
 
 
 def create_test_tensors(
-    batch_size=2, num_heads=4, seq_len=512, dim=64, dtype=torch.float16, device="cuda"
+    batch_size=2, num_heads=4, seq_len=512, dim=64, dtype=torch.float16, device="cuda",
+    requires_grad=False,
 ):
     shape = (batch_size, num_heads, seq_len, dim)
-    q = torch.randn(shape, device=device, dtype=dtype, requires_grad=False)
-    k = torch.randn(shape, device=device, dtype=dtype, requires_grad=False)
-    v = torch.randn(shape, device=device, dtype=dtype, requires_grad=False)
+    q = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    k = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    v = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
     return q, k, v
 
 
@@ -407,79 +408,23 @@ class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_with_score_mod(self, device, dtype):
         """Test that score_mod backward works correctly with FLASH backend."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        q, k, v = create_test_tensors(dtype=dtype, seq_len=257, device=device, requires_grad=True)
 
         def score_mod_twice(score, b, h, q_idx, kv_idx):
             return score * 2
 
-        # Reference: Triton backend
-        q_ref, k_ref, v_ref = (
-            t.detach().clone().requires_grad_(True) for t in (q, k, v)
-        )
-        compiled_triton = torch.compile(flex_attention)
-        out_ref = compiled_triton(q_ref, k_ref, v_ref, score_mod=score_mod_twice)
-        grad_out = torch.randn_like(out_ref)
-        out_ref.backward(grad_out)
-
-        # Flash backend
-        q_flash, k_flash, v_flash = (
-            t.detach().clone().requires_grad_(True) for t in (q, k, v)
-        )
-        compiled_flash = torch.compile(flex_attention)
-        out_flash = compiled_flash(
-            q_flash,
-            k_flash,
-            v_flash,
-            score_mod=score_mod_twice,
-            kernel_options={"BACKEND": "FLASH"},
-        )
-        out_flash.backward(grad_out)
-
-        # Check gradients match
-        atol, rtol = 5e-2, 5e-2
-        self.assertTrue(torch.allclose(out_flash, out_ref, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(q_flash.grad, q_ref.grad, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(k_flash.grad, k_ref.grad, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(v_flash.grad, v_ref.grad, atol=atol, rtol=rtol))
+        flash_vs_triton(q, k, v, score_mod=score_mod_twice)
 
     @unittest.skip("NYI: score**2 bwd produces NaN due to 0*(-inf) at masked positions")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_with_score_squared(self, device, dtype):
         """Test score**2 backward - requires correct score value for gradient."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        q, k, v = create_test_tensors(dtype=dtype, seq_len=257, device=device, requires_grad=True)
 
         def score_mod_squared(score, b, h, q_idx, kv_idx):
-            return score * score  # score**2
+            return score * score
 
-        # Reference: Triton backend
-        q_ref, k_ref, v_ref = (
-            t.detach().clone().requires_grad_(True) for t in (q, k, v)
-        )
-        compiled_triton = torch.compile(flex_attention)
-        out_ref = compiled_triton(q_ref, k_ref, v_ref, score_mod=score_mod_squared)
-        grad_out = torch.randn_like(out_ref)
-        out_ref.backward(grad_out)
-
-        # Flash backend
-        q_flash, k_flash, v_flash = (
-            t.detach().clone().requires_grad_(True) for t in (q, k, v)
-        )
-        compiled_flash = torch.compile(flex_attention)
-        out_flash = compiled_flash(
-            q_flash,
-            k_flash,
-            v_flash,
-            score_mod=score_mod_squared,
-            kernel_options={"BACKEND": "FLASH"},
-        )
-        out_flash.backward(grad_out)
-
-        # Check gradients match
-        atol, rtol = 5e-2, 5e-2
-        self.assertTrue(torch.allclose(out_flash, out_ref, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(q_flash.grad, q_ref.grad, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(k_flash.grad, k_ref.grad, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(v_flash.grad, v_ref.grad, atol=atol, rtol=rtol))
+        flash_vs_triton(q, k, v, score_mod=score_mod_squared)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):
