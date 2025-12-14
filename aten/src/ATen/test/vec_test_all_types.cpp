@@ -121,7 +121,7 @@ namespace {
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_SUITE(Quantization8BitTests, Quantization8BitTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
-#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
         Quantization8BitWithTailTestedTypes);
@@ -1291,7 +1291,7 @@ namespace {
             return;
         } // trials;
     }
-#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
     // This test case aims to test at::vec::QuantizeAvx512 and
     // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
     TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
