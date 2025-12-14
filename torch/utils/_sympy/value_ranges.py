@@ -465,6 +465,7 @@ class SymPyValueRangeAnalysis:
                 if not isinstance(value, BooleanAtom):
                     raise AssertionError("expected BooleanAtom for bool dtype")
             elif dtype.is_floating_point:
+                # pyrefly: ignore [missing-attribute]
                 if value.is_finite and not value.is_real:
                     raise AssertionError(
                         "expected float-like sympy value for float dtype"
@@ -710,7 +711,17 @@ class SymPyValueRangeAnalysis:
     def floordiv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+
+        # TODO We shall assume division is always valid probably.
         if 0 in b:
+            if b.lower >= 0 and a.lower >= 0:
+                return ValueRanges(0, int_oo)
+            if b.upper <= 0 and a.upper <= 0:
+                return ValueRanges(0, int_oo)
+            if b.upper <= 0 and a.lower >= 0:
+                return ValueRanges(-int_oo, 0)
+            if b.lower >= 0 and a.upper <= 0:
+                return ValueRanges(-int_oo, 0)
             return ValueRanges.unknown_int()
         products = []
         for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
@@ -762,6 +773,23 @@ class SymPyValueRangeAnalysis:
             # Too difficult, we bail out
             upper = cls.abs(y).upper - 1
             return ValueRanges(-upper, upper)
+
+    @classmethod
+    def python_mod(cls, x, y):
+        """Python-style modulo: result has same sign as divisor.
+
+        Assumes valid input where y is never 0.
+        - When y > 0: result is in [0, y - 1]
+        - When y < 0: result is in [y + 1, 0]
+        """
+
+        x = ValueRanges.wrap(x)
+        y = ValueRanges.wrap(y)
+        if x.lower >= 0 and y.lower >= 0:
+            return SymPyValueRangeAnalysis.mod(x, y)
+        lower = y.lower + 1 if y.lower < 0 else 0
+        upper = y.upper - 1 if y.upper > 0 else 0
+        return ValueRanges(lower, upper)
 
     @classmethod
     def modular_indexing(cls, a, b, c):

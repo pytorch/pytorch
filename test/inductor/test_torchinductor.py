@@ -139,6 +139,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
+    RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -4292,7 +4293,6 @@ class CommonTemplate:
                 (v,),
             )
 
-    @skipIfRocm
     @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
@@ -4343,7 +4343,12 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check("convolution(").run(code[0])
+                if config.cpp_wrapper:
+                    # with cpp_wrapper, the pattern is .run( and then .convolution(
+                    FileCheck().check(".run(").check("convolution(").run(code[0])
+                else:
+                    # without cpp_wrapper, the pattern is .convolution( and then .run(
+                    FileCheck().check("convolution(").check(".run(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -5754,6 +5759,7 @@ class CommonTemplate:
             (weight, indices),
         )
 
+    @torch._inductor.config.patch("combo_kernels", True)
     def test_mean(self):
         def fn(x):
             return (
@@ -5780,6 +5786,7 @@ class CommonTemplate:
             {
                 "triton.prefer_nd_tiling": tile_reduction,
                 "triton.tile_reductions": tile_reduction,
+                "combo_kernels": True,
             }
         ):
             self.common(
@@ -6769,8 +6776,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
         post_grad_graph = get_post_grad_graph(f, (x,))
         expected_graph = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
-        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = None
-        permute: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.permute.default(empty, [0, 1, 2]);  empty = permute = None
+        empty: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.empty.memory_format([arg0_1, arg1_1, arg2_1], dtype = torch.float32, layout = torch.strided, device = {repr(x.device)}, pin_memory = False);  arg0_1 = arg1_1 = arg2_1 = empty = None
         add: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg3_1, 1);  arg3_1 = None
         add_13: "f32[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(add, 1);  add = None
         return (add_13,)"""  # noqa: B950
@@ -8693,6 +8699,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_fn = torch.compile(fn)
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
+
+    @skipIfMPS
+    def test_nonzero_static_stride(self):
+        from torch._subclasses import FakeTensorMode
+
+        L = 8
+        x = torch.eye(L, device=self.device)
+
+        eager_result = torch.nonzero_static(x, size=L)
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_result = torch.nonzero_static(fake_x, size=L)
+
+        self.assertEqual(eager_result.stride(), fake_result.stride())
 
     def test_like_channels_last(self):
         def foo():
@@ -13728,6 +13750,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
+    @skipIfXpu(msg="_fused_rms_norm is not implemented on XPU yet")
     def test_lite_mode_not_decompose(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -14741,15 +14764,66 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
-        if torch.version.hip:
-            triton_str = "tl.minimum"
-        else:
-            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            triton_str,
+            "triton_helpers.minimum",
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_dce(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            # CASE 1: The op should get wrapped with auto_functionalized, and
+            # FX's DCE should not remove it because this op is registered as
+            # effectful
+
+            log1 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger1",
+                mutates_args="unknown",
+            )
+            def my_logger1(s: str, t: torch.Tensor) -> torch.Tensor:
+                log1.append(s)
+                return torch.zeros(1)
+
+            @my_logger1.register_fake
+            def my_logger1(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger1("moo", b)
+                return x + x
+
+            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger1.default)
+            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
+            self.assertTrue(len(log1), 1)
+
+            # CASE 2: The op should not get DCEd by TorchInductor
+
+            log2 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger2",
+                mutates_args=(),
+            )
+            def my_logger2(s: str, t: torch.Tensor) -> torch.Tensor:
+                log2.append(s)
+                return torch.zeros(1)
+
+            @my_logger2.register_fake
+            def my_logger2(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger2("moo", b)
+                return x + x
+
+            torch.fx.node.has_side_effect(torch.ops.mylib.my_logger2.default)
+            torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
+            self.assertTrue(len(log2), 1)
 
     @skipIfMPS  # Accuracy issue on MPS
     def test_weight_norm_conv2d(self):
@@ -14864,6 +14938,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         if self.device.lower() == "cuda":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda_and_triton
+    @config.patch(combo_kernels=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_combo_kernel_store_mask(self):
+        def fn(x):
+            return (
+                x.mean(),
+                torch.mean(x, -2, keepdim=True),
+            )
+
+        x = torch.randn([1, 2, 4, 8], device=GPU_TYPE)
+        torch._inductor.metrics.reset()
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        expected = fn(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
     # end of class CommonTemplate - add new tests here
 

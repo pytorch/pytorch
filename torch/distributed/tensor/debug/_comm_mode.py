@@ -240,6 +240,7 @@ class CommDebugMode(TorchDispatchMode):
     """
 
     def __init__(self):
+        super().__init__()
         self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
