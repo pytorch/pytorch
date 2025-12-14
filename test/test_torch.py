@@ -2009,15 +2009,18 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
-    def test_scatter_add_one_dim_deterministic(self, device) -> None:
+    @dtypes(torch.float, torch.int)
+    def test_scatter_add_one_dim_deterministic(self, device, dtype) -> None:
         with DeterministicGuard(True):
             m = random.randint(20, 30)
             elems = random.randint(2000 * m, 3000 * m)
             dim = 0
-            src = torch.randn(elems, device=device)
+            # initialize in a way that would produce
+            # different ints
+            src = (torch.rand(elems, device=device) * 10).to(dtype)
             idx = torch.randint(m, (elems,), device=device)
 
-            x = torch.zeros(m, device=device)
+            x = torch.zeros(m, device=device, dtype=dtype)
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
@@ -2026,7 +2029,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
 
-            expected = torch.zeros(m, device=device)
+            expected = torch.zeros(m, device=device, dtype=dtype)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
