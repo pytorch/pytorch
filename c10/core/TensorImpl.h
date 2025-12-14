@@ -2170,6 +2170,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     version_counter_.bump();
   }
 
+  void unsafe_move_autograd(c10::TensorImpl *other) {
+    if (!(is_inference() && other->version_counter().enabled()))
+      this->set_version_counter(other->version_counter());
+    this->set_autograd_meta(std::move(other->autograd_meta_));
+  }
+
   impl::PyObjectSlot* pyobj_slot() {
     return &pyobj_slot_;
   }
