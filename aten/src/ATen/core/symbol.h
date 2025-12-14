@@ -140,7 +140,7 @@ inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualSt
 namespace std {
 template <>
 struct hash<c10::Symbol> {
-  size_t operator()(c10::Symbol s) const {
+  size_t operator()(c10::Symbol s) const noexcept {
     return std::hash<uint32_t>()(static_cast<uint32_t>(s));
   }
 };
