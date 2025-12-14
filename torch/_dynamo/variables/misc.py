@@ -428,7 +428,7 @@ class FrameSummaryVariable(VariableTracker):
 class TracebackVariable(VariableTracker):
     def __init__(
         self,
-        frame_summary: traceback.FrameSummary,
+        frame_summary: FrameSummaryVariable,
         tb_next,
         **kwargs,
     ) -> None:
@@ -496,7 +496,7 @@ class TracebackVariable(VariableTracker):
         if name == "tb_next":
             return self.tb_next
         elif name == "tb_lineno":
-            return variables.ConstantVariable.create(self.frame_summary.lineno)
+            return self.frame_summary.var_getattr(tx, "lineno")
         elif name == "frame_summary":
             return self.frame_summary
         elif name == "tb_lasti":
