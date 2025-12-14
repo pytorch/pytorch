@@ -7,6 +7,53 @@
     out_transposed = OUT.transpose(1, 2)
     d_out_transposed = D_OUT.transpose(1, 2)
 
+    {% if HAS_SCORE_MOD %}
+    @cute.jit
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+        {{unpack_buffers("aux_tensors", indent_width=8)}}
+        {{ modification(
+            subgraph_number=0,
+            output_name="tSrS_ssa",
+            score="tSrS_ssa",
+            b="b_idx",
+            h="h_idx",
+            m="q_idx",
+            n="kv_idx",
+            out="tSrS_ssa"
+        ) | indent_except_first(2) }}
+        return tSrS_ssa
+    {{ set_cute_hash("score_mod", "score") }}
+
+    @cute.jit
+    def score_mod_bwd(grad_score_mod_ssa, tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+        {{unpack_buffers("aux_tensors", indent_width=8)}}
+        {{ modification(
+            subgraph_number=1,
+            output_name="grad_score_mod_ssa_out",
+            score="tSrS_ssa",
+            grad_score_mod="grad_score_mod_ssa",
+            b="b_idx",
+            h="h_idx",
+            m="q_idx",
+            n="kv_idx"
+        ) | indent_except_first(2) }}
+        return grad_score_mod_ssa_out
+    {{ set_cute_hash("score_mod_bwd", "score_bwd") }}
+
+    # Collect any additional tensor buffers that were added during modifications
+    {% set tensor_buffers = get_tensor_buffers() -%}
+    {% if tensor_buffers -%}
+    buffers = [{% for buffer in tensor_buffers %}{{buffer}}{% if not loop.last %}, {% endif %}{% endfor %}]
+    buffers = list(buffers)
+    {% else -%}
+    buffers = None
+    {% endif -%}
+    {% else %}
+    score_mod = None
+    score_mod_bwd = None
+    buffers = None
+    {% endif %}
+
     dq_transposed, dk_transposed, dv_transposed = _flash_attn_bwd(
         q_transposed,
         k_transposed,
@@ -15,6 +62,9 @@
         d_out_transposed,
         LSE,
         softmax_scale={{SM_SCALE}},
+        score_mod=score_mod,
+        score_mod_bwd=score_mod_bwd,
+        aux_tensors=buffers,
     )
 
     dq = dq_transposed.transpose(1, 2)
