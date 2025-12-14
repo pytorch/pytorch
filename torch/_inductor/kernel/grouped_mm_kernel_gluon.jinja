@@ -333,8 +333,9 @@ def store_partition(pargs: PartitionArgs):
     )
 
     # Shared memory is always allocated with 2D shape [BLOCK_M, BLOCK_N]
+    # Always use 2D c_layout for shared memory, regardless of descriptor layout
     c_smem = gl.allocate_shared_memory(
-        pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_desc.layout
+        pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_layout
     )
 
     iterated_tiles = 0
@@ -435,6 +436,7 @@ def grouped_mm_kernel(
     a_layout: gl.constexpr,
     b_layout: gl.constexpr,
     c_layout: gl.constexpr,
+    c_layout_ragged: gl.constexpr,
     dtype: gl.constexpr,
     M: gl.constexpr,
     N: gl.constexpr,
@@ -491,12 +493,13 @@ def grouped_mm_kernel(
     max_int: gl.constexpr = 0x7fff0000
 
     # C tensor ragged descriptor: prepend 2 transformation dimensions
+    # Use 4D layout to match the 4D block_shape
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
         shape=[max_int, max_int, billion, N],
         strides=[2**34 - c_stride_0, c_stride_0, c_stride_0, c_stride_1],
         block_shape=[1, 1, BLOCK_M, BLOCK_N],
-        layout=c_layout,
+        layout=c_layout_ragged,
     )
 {%- endif %}
 

@@ -4293,7 +4293,6 @@ class CommonTemplate:
                 (v,),
             )
 
-    @skipIfRocm
     @xfail_if_mps  # Expected to find .run(
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
@@ -4344,7 +4343,12 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check("convolution(").run(code[0])
+                if config.cpp_wrapper:
+                    # with cpp_wrapper, the pattern is .run( and then .convolution(
+                    FileCheck().check(".run(").check("convolution(").run(code[0])
+                else:
+                    # without cpp_wrapper, the pattern is .convolution( and then .run(
+                    FileCheck().check("convolution(").check(".run(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -8695,6 +8699,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_fn = torch.compile(fn)
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
+
+    @skipIfMPS
+    def test_nonzero_static_stride(self):
+        from torch._subclasses import FakeTensorMode
+
+        L = 8
+        x = torch.eye(L, device=self.device)
+
+        eager_result = torch.nonzero_static(x, size=L)
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_result = torch.nonzero_static(fake_x, size=L)
+
+        self.assertEqual(eager_result.stride(), fake_result.stride())
 
     def test_like_channels_last(self):
         def foo():

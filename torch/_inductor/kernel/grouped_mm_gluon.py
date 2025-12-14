@@ -221,6 +221,8 @@ def grouped_mm(
     B_BLOCK_SHAPE = [1, BLOCK_N, BLOCK_K]
     b_layout = gl.NVMMASharedLayout.get_default_for(B_BLOCK_SHAPE, gl.bfloat16)
     c_layout = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_N], gl.bfloat16)
+    # 4D layout for ragged descriptor path
+    c_layout_ragged = gl.NVMMASharedLayout.get_default_for([1, 1, BLOCK_M, BLOCK_N], gl.bfloat16)
 
     M, N = C.shape[0], C.shape[1]
     K = A.shape[1]
@@ -249,6 +251,7 @@ def grouped_mm(
         a_layout=a_layout,
         b_layout=b_layout,
         c_layout=c_layout,
+        c_layout_ragged=c_layout_ragged,
         dtype=gl.bfloat16,
         M=M,
         N=N,
