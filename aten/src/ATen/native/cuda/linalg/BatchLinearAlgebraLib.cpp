@@ -78,12 +78,6 @@ void apply_ldl_factor_cusolver(
     const Tensor& pivots,
     const Tensor& info,
     bool upper) {
-#if !defined(USE_LINALG_SOLVER)
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
-      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
-#else
   auto batch_size = batchCount(A);
   auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
   auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
@@ -118,7 +112,6 @@ void apply_ldl_factor_cusolver(
         lwork,
         info_working_ptr);
   }
-#endif
 }
 
 template <typename scalar_t>
@@ -246,8 +239,6 @@ void ldl_solve_cusolver(
         apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
       });
 }
-
-#if defined(USE_LINALG_SOLVER)
 
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
@@ -1626,7 +1617,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 }
 
 // cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
-#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#if defined(CUSOLVER_VERSION)
 
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
@@ -1743,7 +1734,7 @@ void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvec
   });
 }
 
-#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#endif // defined(CUSOLVER_VERSION)
 
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
@@ -1835,7 +1826,5 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
     }
   });
 }
-
-#endif  // USE_LINALG_SOLVER
 
 } // namespace at::native
