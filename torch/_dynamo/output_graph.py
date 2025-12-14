@@ -2287,7 +2287,7 @@ class OutputGraph(OutputGraphCommon):
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
-                        "lambda guard",  # user_stack
+                        None,  # user_stack
                     )
 
                     log.debug(

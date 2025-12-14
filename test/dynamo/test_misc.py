@@ -7706,7 +7706,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [], None)
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), [], None
+        )
 
         def injected_bool(x: bool):
             return x + 102
@@ -7718,7 +7720,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
-guard_manager_tensor.add_lambda_guard(
+        guard_manager_tensor.add_lambda_guard(
             lambda L: isinstance(L["x"], torch.Tensor), [], None
         )
 
@@ -7802,7 +7804,7 @@ guard_manager_tensor.add_lambda_guard(
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-guard_manager_bool.add_lambda_guard(
+        guard_manager_bool.add_lambda_guard(
             lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
         )
 
