@@ -868,6 +868,9 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
             return torch.finfo(dtype).bits
+        elif dtype == torch.bool:
+            # torch.iinfo doesn't support bool; bools are stored as uint8 (8 bits)
+            return 8
         else:
             return torch.iinfo(dtype).bits
 

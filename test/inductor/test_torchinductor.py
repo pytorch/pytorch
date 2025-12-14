@@ -2954,6 +2954,31 @@ class CommonTemplate:
             self.assertEqual(y, y_ref)
             self.assertEqual(x.grad, x_ref.grad, atol=1e-4, rtol=1e-4)
 
+    def test_view_dtype_bool(self):
+        # Regression test for boolean dtype handling in view.dtype lowering
+        # torch.iinfo doesn't support bool, so we need special handling
+        def fn(x, mask):
+            # Create a computation that involves boolean tensors and where
+            result = torch.where(mask, x, torch.zeros_like(x))
+            return result.sum()
+
+        x = torch.rand(4, 8, device=self.device, requires_grad=True)
+        mask = torch.rand(4, 8, device=self.device) > 0.5
+
+        x_ref = x.clone().detach().requires_grad_(True)
+
+        # Eager
+        y_ref = fn(x_ref, mask)
+        y_ref.backward()
+
+        # Compiled
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        y = compiled_fn(x, mask)
+        y.backward()
+
+        self.assertEqual(y, y_ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
     def test_cumsum_inf(self):
         def fn(x):
             return x.cumsum(-1)
