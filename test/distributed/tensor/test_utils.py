@@ -17,6 +17,10 @@ from torch.distributed._local_tensor import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._ops.utils import (
+    is_tensor_evenly_shardable,
+    is_tensor_shardable,
+)
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     compute_global_tensor_info,
@@ -1584,6 +1588,43 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 # and re-enable
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
+
+
+class TestIsTensorShardable(LocalTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def _create_spec(
+        self, mesh_shape: tuple[int, ...], placements: list[Placement]
+    ) -> DTensorSpec:
+        mesh = init_device_mesh("cpu", mesh_shape)
+        return DTensorSpec(mesh=mesh, placements=tuple(placements))
+
+    def test_is_tensor_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_shardable([8], spec))
+        self.assertTrue(is_tensor_shardable([10], spec))
+        self.assertFalse(is_tensor_shardable([2], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_shardable([8, 8], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), _StridedShard(0, split_factor=2)])
+        # not shardable now because of the split_factor
+        self.assertFalse(is_tensor_shardable([8, 8], spec))
+
+    def test_is_tensor_evenly_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([8], spec))
+        self.assertFalse(is_tensor_evenly_shardable([10], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([16, 8], spec))
+
+        spec = self._create_spec((4, 2), [_StridedShard(0, split_factor=3), Shard(0)])
+        # not evenly shardable now because of the split_factor
+        self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
 UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
