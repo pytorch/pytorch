@@ -68,7 +68,7 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
 
   // TODO(qihqi): figure out if those are even useful
   // to python or not
-  c10::Device exchangeDevice(c10::Device device) const override {
+  c10::Device exchangeDevice(c10::Device /*device*/) const override {
     return getDevice();
   }
   c10::Device getDevice() const override {

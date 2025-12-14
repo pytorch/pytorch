@@ -108,13 +108,13 @@ static void THCPEvent_dealloc(THCPEvent* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* unused) {
+static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_event.event());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
+static PyObject* THCPEvent_get_device(THCPEvent* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   std::optional<at::Device> device = self->cuda_event.device();
   if (!device) {
@@ -146,7 +146,7 @@ static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
   return PyBool_FromLong(self->cuda_event.query());
@@ -161,7 +161,7 @@ static PyObject* THCPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
     pybind11::gil_scoped_release no_gil{};
@@ -171,7 +171,7 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
   cudaIpcEventHandle_t handle{};

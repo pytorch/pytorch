@@ -494,13 +494,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   std::vector<StreamSegmentSize> getExpandableSegmentSizes(
-      c10::DeviceIndex device) override {
+      c10::DeviceIndex /*device*/) override {
     TORCH_CHECK(
         false,
         "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
   }
 
-  void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
+  void emptyCache(/*unused*/ MempoolId_t /*mempool_id*/) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     for (int dev = 0; dev < device_count; dev++) {
@@ -634,14 +634,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
-  ShareableHandle shareIpcHandle(void* handle) override {
+  ShareableHandle shareIpcHandle(void* /*handle*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support shareIpcHandle. "
         "If you need it, please file an issue describing your use case.");
   }
 
-  std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
+  std::shared_ptr<void> getIpcDevPtr(std::string /*handle*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support getIpcDevPtr. "
@@ -649,26 +649,26 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   void recordHistory(
-      bool enabled,
-      CreateContextFn context_recorder,
-      size_t alloc_trace_max_entries,
-      RecordContext when,
-      bool clearHistory,
-      const std::vector<std::string>& skip_actions) override {
+      bool /*enabled*/,
+      CreateContextFn /*context_recorder*/,
+      size_t /*alloc_trace_max_entries*/,
+      RecordContext /*when*/,
+      bool /*clearHistory*/,
+      const std::vector<std::string>& /*skip_actions*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
         "If you need it, please file an issue describing your use case.");
   }
 
-  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
+  void attachOutOfMemoryObserver(OutOfMemoryObserver /*observer*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support attachOutOfMemoryObserver. "
         "If you need it, please file an issue describing your use case.");
   }
 
-  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+  void attachAllocatorTraceTracker(AllocatorTraceTracker /*tracker*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support attachAllocatorTraceTracker. "
@@ -676,8 +676,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   std::shared_ptr<AllocatorState> getCheckpointState(
-      c10::DeviceIndex device,
-      MempoolId_t id) override {
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*id*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support getCheckpointState. "
@@ -685,8 +685,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   CheckpointDelta setCheckpointPoolState(
-      c10::DeviceIndex device,
-      std::shared_ptr<AllocatorState> pps) override {
+      c10::DeviceIndex /*device*/,
+      std::shared_ptr<AllocatorState> /*pps*/) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support setCheckpointPoolState. "
@@ -783,7 +783,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
   }
 
-  SnapshotInfo snapshot(MempoolId_t mempool_id) override {
+  SnapshotInfo snapshot(MempoolId_t /*mempool_id*/) override {
     TORCH_CHECK(
         false,
         "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
@@ -796,8 +796,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // CUDAGraph interactions
   void beginAllocateToPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
       std::function<bool(cudaStream_t)> /*filter*/) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -808,7 +808,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
+  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t /*mempool_id*/)
       override {
     assertValidDevice(device);
 

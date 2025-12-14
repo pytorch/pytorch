@@ -142,7 +142,7 @@ at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
                 {{"name", fn.name()}, {"stage", "START"}});
             return nullptr;
           },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx_ptr*/) {
             c10::cuda::CUDACachingAllocator::recordAnnotation(
                 {{"name", fn.name()}, {"stage", "END"}});
           })
@@ -162,7 +162,7 @@ at::CallbackHandle _initCompileContexts() {
             }
             return nullptr;
           },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx_ptr*/) {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
             if (functionName.compare(

@@ -122,7 +122,7 @@ static void THPStream_dealloc(THPStream* self) {
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
-static PyObject* THPStream_get_device(THPStream* self, void* unused) {
+static PyObject* THPStream_get_device(THPStream* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return THPDevice_New(c10::Device(
       static_cast<c10::DeviceType>(self->device_type),
@@ -130,7 +130,7 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THPStream_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
 
@@ -143,7 +143,7 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THPStream_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     auto self = reinterpret_cast<THPStream*>(_self);
@@ -258,7 +258,7 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
+static PyObject* THPStream_enter(PyObject* _self, PyObject* /*unused*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
   c10::DeviceType stream_device_type =
@@ -302,7 +302,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
+static PyObject* THPStream_exit(PyObject* _self, PyObject* /*unused*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
   // No operation is performed if the stream does not belong to an accelerator.

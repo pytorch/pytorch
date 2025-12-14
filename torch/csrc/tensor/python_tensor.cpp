@@ -114,15 +114,15 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
+static PyObject* Tensor_dtype(PyTensorType* self, void* /*unused*/) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
-static PyObject* Tensor_layout(PyTensorType* self, void* unused) {
+static PyObject* Tensor_layout(PyTensorType* self, void* /*unused*/) {
   return torch::autograd::utils::wrap(self->layout);
 }
 
-static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_cuda(PyTensorType* self, void* /*unused*/) {
   if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
@@ -130,7 +130,7 @@ static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_xpu(PyTensorType* self, void* /*unused*/) {
   if (self->is_xpu) {
     Py_RETURN_TRUE;
   } else {
@@ -138,7 +138,7 @@ static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse(PyTensorType* self, void* /*unused*/) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
   } else {
@@ -146,7 +146,7 @@ static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* /*unused*/) {
   if (self->layout->layout == at::Layout::SparseCsr) {
     Py_RETURN_TRUE;
   } else {

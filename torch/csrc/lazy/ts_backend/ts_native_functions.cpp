@@ -54,7 +54,7 @@ std::optional<torch::lazy::BackendDevice> GetLtcDevice(
 // This should be safe to do, because every operator in the LT is functional.
 at::Tensor LazyNativeFunctions::clone(
     const at::Tensor& self,
-    std::optional<at::MemoryFormat> memory_format) {
+    std::optional<at::MemoryFormat> /*memory_format*/) {
   auto self_lt = torch::lazy::TryGetLtcTensor(self);
   return torch::lazy::CreateAtenFromLtcTensor(
       self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
@@ -63,7 +63,7 @@ at::Tensor LazyNativeFunctions::clone(
 at::Tensor LazyNativeFunctions::_copy_from(
     const at::Tensor& self,
     const at::Tensor& dst,
-    bool non_blocking) {
+    bool /*non_blocking*/) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);

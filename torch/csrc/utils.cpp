@@ -445,7 +445,7 @@ handle type_caster<at::SymIntArrayRef>::cast(
 }
 
 bool type_caster<at::ArrayRef<c10::SymNode>>::load(
-    handle src,
+    handle /*src*/,
     bool /*unused*/) {
   TORCH_INTERNAL_ASSERT(0, "NYI");
 }

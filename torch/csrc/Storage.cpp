@@ -434,14 +434,14 @@ PyTypeObject THPStorageType = {
     THPStorage_pynew, /* tp_new */
 };
 
-static PyObject* THPStorage_device(THPStorage* self, void* unused) {
+static PyObject* THPStorage_device(THPStorage* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return THPDevice_New(THPStorage_Unpack(self).device());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
+static PyObject* THPStorage_get_cdata(THPStorage* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THPStorage_Unpack(self).unsafeGetStorageImpl());
   END_HANDLE_TH_ERRORS

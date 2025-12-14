@@ -622,7 +622,7 @@ std::string Result::name() const {
 std::string Result::overload_name() const {
   return visit(c10::overloaded(
       ATTRIBUTE(TorchOp, std::string(e.overload_name_)),
-      [](const auto& e) -> std::string { return ""; }));
+      [](const auto& /*e*/) -> std::string { return ""; }));
 }
 
 libkineto::ActivityType Result::kinetoType() const {

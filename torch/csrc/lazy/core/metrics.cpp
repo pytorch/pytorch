@@ -167,7 +167,7 @@ void MetricsArena::ForEachCounter(
 
 std::vector<std::string> MetricsArena::GetMetricNames() {
   std::vector<std::string> names;
-  ForEachMetric([&names](const std::string& name, MetricData* data) {
+  ForEachMetric([&names](const std::string& name, MetricData* /*data*/) {
     names.push_back(name);
   });
   return names;
@@ -184,7 +184,7 @@ MetricData* MetricsArena::GetMetric(const std::string& name) {
 
 std::vector<std::string> MetricsArena::GetCounterNames() {
   std::vector<std::string> names;
-  ForEachCounter([&names](const std::string& name, CounterData* data) {
+  ForEachCounter([&names](const std::string& name, CounterData* /*data*/) {
     names.push_back(name);
   });
   return names;

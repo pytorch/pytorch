@@ -58,7 +58,7 @@ using namespace torch;
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
-PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THCPModule_setDevice_wrap(PyObject* /*self*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
   auto device = THPUtils_unpackLong(arg);
@@ -70,7 +70,7 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
+PyObject* THCPModule_exchangeDevice(PyObject* /*self*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
   auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -85,7 +85,7 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
+PyObject* THCPModule_maybeExchangeDevice(PyObject* /*self*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
   auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -100,7 +100,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
+PyObject* THCPModule_getDevice_wrap(PyObject* /*self*/, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   torch::utils::device_lazy_init(at::kCUDA);
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -109,7 +109,9 @@ PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
+PyObject* THCPModule_canDeviceAccessPeer_wrap(
+    PyObject* /*self*/,
+    PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* arg1 = nullptr;
   PyObject* arg2 = nullptr;
@@ -135,7 +137,9 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
+PyObject* THCPModule_getDeviceCount_wrap(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   // Note: This is distinct from initExtension because a stub cuda
   // implementation has some working functions (e.g. device_count) but cannot
@@ -145,7 +149,7 @@ PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
+PyObject* THCPModule_getArchFlags(PyObject* /*self*/, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   torch::utils::register_fork_handler_for_device_init(at::kCUDA);
 #ifdef CUDA_ARCH_FLAGS
@@ -157,7 +161,9 @@ PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_isInBadFork(PyObject* self, PyObject* noargs) {
+static PyObject* THCPModule_isInBadFork(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kCUDA));
   END_HANDLE_TH_ERRORS
@@ -218,7 +224,7 @@ PyObject* THCPModule_getDefaultStream_wrap(
 }
 
 PyObject* THCPModule_setStream_wrap(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -254,7 +260,9 @@ PyObject* THCPModule_setStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
+PyObject* THCPModule_getCompiledVersion(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
 #if defined(USE_ROCM)
   return THPUtils_packInt64((int64_t)ROCM_VERSION);
 #else
@@ -262,7 +270,9 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 #endif
 }
 
-PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_cudaHostAllocator(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   c10::Allocator* allocator = at::getHostAllocator(at::kCUDA);
   return PyLong_FromVoidPtr(allocator);
@@ -270,7 +280,7 @@ PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* size_o = nullptr;
@@ -320,7 +330,7 @@ at::Scalar as_scalar(PyObject* arg) {
 // Entrypoint for the callable created by torch.cuda.jiterator
 // See jiterator.py for more details
 PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
 
@@ -397,7 +407,7 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
 }
 
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
@@ -410,7 +420,7 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
 }
 
 PyObject* THCPModule_cudaCachingAllocator_enable(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -422,13 +432,17 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_getAllocatorBackend(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_cudaSynchronize(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     c10::cuda::device_synchronize();
@@ -437,14 +451,16 @@ PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaIPCCollect(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_cudaIPCCollect(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   torch::CudaIPCCollect();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
+PyObject* THCPModule_cudaSleep(PyObject* /*_unused*/, PyObject* cycles) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
@@ -457,7 +473,9 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_cudaBusyWaitForFlag(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::cuda::busy_wait_for_flag();
@@ -466,7 +484,9 @@ PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_cudaClearFlag(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::cuda::clear_flag();
@@ -483,7 +503,7 @@ PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
 // such thread).
 static PyGILState_STATE cudaMutexGILState;
 
-PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
+PyObject* THCPModule_cudaLockMutex(PyObject* /*module*/, PyObject* /*noargs*/) {
   auto mutex = c10::cuda::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
@@ -503,14 +523,16 @@ PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
+PyObject* THCPModule_cudaUnlockMutex(
+    PyObject* /*module*/,
+    PyObject* /*noargs*/) {
   auto mutex = c10::cuda::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_hasPrimaryContext(PyObject* /*_unused*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
@@ -523,7 +545,7 @@ PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_getMemoryFraction(PyObject* _unused, PyObject* args) {
+PyObject* THCPModule_getMemoryFraction(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* device_o = nullptr;
   if (!PyArg_ParseTuple(args, "O", &device_o)) {
@@ -537,7 +559,7 @@ PyObject* THCPModule_getMemoryFraction(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
+PyObject* THCPModule_setMemoryFraction(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* fraction_o = nullptr;
   PyObject* device_o = nullptr;
@@ -558,7 +580,9 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_hostEmptyCache(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::getHostAllocator(at::kCUDA)->empty_cache();
@@ -567,7 +591,7 @@ PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_emptyCache(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     c10::cuda::CUDACachingAllocator::emptyCache();
@@ -576,7 +600,7 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_memoryStats(PyObject* /*_unused*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -633,7 +657,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THCPModule_resetAccumulatedMemoryStats(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -645,7 +669,9 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_resetPeakMemoryStats(
+    PyObject* /*_unused*/,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
@@ -655,7 +681,9 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
 }
 
-PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_hostMemoryStats(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
 
   using at::HostStats;
@@ -702,8 +730,8 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_resetAccumulatedHostMemoryStats(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
   END_HANDLE_TH_ERRORS
@@ -711,8 +739,8 @@ PyObject* THCPModule_resetAccumulatedHostMemoryStats(
 }
 
 PyObject* THCPModule_resetPeakHostMemoryStats(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   at::getHostAllocator(at::kCUDA)->reset_peak_stats();
   END_HANDLE_TH_ERRORS
@@ -729,7 +757,7 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
-PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_memorySnapshot(PyObject* /*_unused*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
   if (arg && arg != Py_None) {
@@ -973,7 +1001,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THCPModule_attachOutOfMemoryObserver(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* observer) {
   HANDLE_TH_ERRORS
   Py_XINCREF(observer);
@@ -996,7 +1024,9 @@ PyObject* THCPModule_attachOutOfMemoryObserver(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_cudaSetSyncDebugMode(
+    PyObject* /*_unused*/,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_WARN_ONCE(
       "Synchronization debug mode is a prototype feature and does not yet detect all "
@@ -1026,7 +1056,9 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
+PyObject* THCPModule_cudaGetSyncDebugMode(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto debug_mode = c10::cuda::warning_state().get_sync_debug_mode();
   switch (debug_mode) {
@@ -1551,7 +1583,9 @@ static void bindGetDeviceProperties(PyObject* module) {
 
 // Callback for python part. Used for additional initialization of python
 // classes
-static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
+static PyObject* THCPModule_initExtension(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
 #if C10_ASAN_ENABLED
   TORCH_WARN(
       "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
@@ -1591,8 +1625,8 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
 }
 
 PyObject* THCPModule_getCurrentBlasHandle_wrap(
-    PyObject* self,
-    PyObject* noargs) {
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
@@ -1600,8 +1634,8 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
 }
 
 static PyObject* THCPModule_clearBlasWorkspaces_wrap(
-    PyObject* self,
-    PyObject* noargs) {
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   at::cuda::clearCublasWorkspaces();
   Py_RETURN_NONE;
@@ -1609,8 +1643,8 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
 }
 
 PyObject* THCPModule_rocm_is_backward_pass(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
 #if USE_ROCM
   if (at::ROCmBackwardPassGuard::is_backward_pass()) {
@@ -1624,7 +1658,9 @@ PyObject* THCPModule_rocm_is_backward_pass(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_enable(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_cuda_tunableop_enable(
+    PyObject* /*_unused*/,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkBool(arg),
@@ -1637,8 +1673,8 @@ PyObject* THCPModule_cuda_tunableop_enable(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THCPModule_cuda_tunableop_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
+    PyObject* /*_unused*/,
+    PyObject* /*noarg*/) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
     Py_RETURN_TRUE;
@@ -1649,7 +1685,7 @@ PyObject* THCPModule_cuda_tunableop_is_enabled(
 }
 
 PyObject* THCPModule_cuda_tunableop_tuning_enable(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1662,8 +1698,8 @@ PyObject* THCPModule_cuda_tunableop_tuning_enable(
 }
 
 PyObject* THCPModule_cuda_tunableop_tuning_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
+    PyObject* /*_unused*/,
+    PyObject* /*noarg*/) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsTuningEnabled()) {
     Py_RETURN_TRUE;
@@ -1674,7 +1710,7 @@ PyObject* THCPModule_cuda_tunableop_tuning_is_enabled(
 }
 
 PyObject* THCPModule_cuda_record_untuned_enable(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1688,8 +1724,8 @@ PyObject* THCPModule_cuda_record_untuned_enable(
 }
 
 PyObject* THCPModule_cuda_record_untuned_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
+    PyObject* /*_unused*/,
+    PyObject* /*noarg*/) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsRecordUntunedEnabled()) {
     Py_RETURN_TRUE;
@@ -1700,7 +1736,7 @@ PyObject* THCPModule_cuda_record_untuned_is_enabled(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_max_tuning_duration(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1714,8 +1750,8 @@ PyObject* THCPModule_cuda_tunableop_set_max_tuning_duration(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_max_tuning_duration(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetMaxTuningDurationMs());
@@ -1723,7 +1759,7 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_duration(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_max_tuning_iterations(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1737,8 +1773,8 @@ PyObject* THCPModule_cuda_tunableop_set_max_tuning_iterations(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetMaxTuningIterations());
@@ -1746,7 +1782,7 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_filename(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* obj_str = nullptr;
@@ -1772,8 +1808,8 @@ PyObject* THCPModule_cuda_tunableop_set_filename(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_filename(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
       at::cuda::tunable::getTuningContext()->GetFilename());
@@ -1781,7 +1817,7 @@ PyObject* THCPModule_cuda_tunableop_get_filename(
 }
 
 PyObject* THCPModule_cuda_tunableop_read_file(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* str = nullptr;
@@ -1807,8 +1843,8 @@ PyObject* THCPModule_cuda_tunableop_read_file(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_results(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto results =
       at::cuda::tunable::getTuningContext()->GetTuningResultsManager().Dump();
@@ -1850,8 +1886,8 @@ PyObject* THCPModule_cuda_tunableop_get_results(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_validators(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto validators = at::cuda::tunable::getTuningContext()
                         ->GetTuningResultsValidator()
@@ -1881,7 +1917,7 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_rotating_buffer_size(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1895,8 +1931,8 @@ PyObject* THCPModule_cuda_tunableop_set_rotating_buffer_size(
 }
 
 PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetRotatingBufferSize());
@@ -1904,7 +1940,7 @@ PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
-    PyObject* unused,
+    PyObject* /*unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
 
@@ -1962,8 +1998,8 @@ PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
 }
 
 static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
-    PyObject* self,
-    PyObject* noargs) {
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   // If there's no cuda context, at::cuda::currentStreamCaptureStatus returns
   // CaptureStatus::None without initializing a context.
@@ -1975,7 +2011,9 @@ static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_setBenchmarkLimitCuDNN(
+    PyObject* /*_unused*/,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg),
@@ -1992,7 +2030,9 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
+PyObject* THCPModule_benchmarkLimitCuDNN(
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 

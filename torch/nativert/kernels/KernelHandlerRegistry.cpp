@@ -71,9 +71,9 @@ void register_kernel_handlers() {
             },
             [](const Node& node,
                // NOLINTNEXTLINE(performance-unnecessary-value-param)
-               std::shared_ptr<Weights> weights,
-               const torch::nativert::ExecutorConfig& executorConfig,
-               caffe2::serialize::PyTorchStreamReader* packageReader)
+               std::shared_ptr<Weights> /*weights*/,
+               const torch::nativert::ExecutorConfig& /*executorConfig*/,
+               caffe2::serialize::PyTorchStreamReader* /*packageReader*/)
                 -> std::pair<OpKernelPtr, DelegateExecutorPtr> {
               updateNodeTargetIfNeeded(const_cast<Node&>(node));
 

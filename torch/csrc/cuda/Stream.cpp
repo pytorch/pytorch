@@ -85,21 +85,23 @@ static void THCPStream_dealloc(THCPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
+static PyObject* THCPStream_get_cuda_stream(
+    THCPStream* self,
+    void* /*unused*/) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_get_priority(THCPStream* self, void* unused) {
+static PyObject* THCPStream_get_priority(THCPStream* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(self->cuda_stream.priority());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THCPStream_priority_range(
-    PyObject* _unused,
-    PyObject* noargs) {
+    PyObject* /*_unused*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto [least_priority, greatest_priority] =
       at::cuda::CUDAStream::priority_range();
@@ -107,14 +109,14 @@ static PyObject* THCPStream_priority_range(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPStream_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPStream*)_self;
   return PyBool_FromLong(self->cuda_stream.query());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     auto self = (THCPStream*)_self;

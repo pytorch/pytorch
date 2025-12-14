@@ -122,7 +122,7 @@ py::handle type_caster<c10::SymBool>::cast(
   }
 }
 
-bool type_caster<c10::Scalar>::load(py::handle src, bool /*unused*/) {
+bool type_caster<c10::Scalar>::load(py::handle /*src*/, bool /*unused*/) {
   TORCH_INTERNAL_ASSERT(
       0, "pybind11 loading for c10::Scalar NYI (file a bug if you need it)");
 }

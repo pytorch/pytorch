@@ -19,7 +19,7 @@ PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
   return self.release();
 }
 
-static PyObject* THPQScheme_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPQScheme_reduce(PyObject* _self, PyObject* /*noargs*/) {
   auto self = reinterpret_cast<THPQScheme*>(_self);
   return THPUtils_packString(self->name);
 }

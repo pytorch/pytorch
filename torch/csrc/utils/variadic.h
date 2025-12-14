@@ -13,7 +13,7 @@ using at::IterArgs;
 
 struct CountTensors : IterArgs<CountTensors> {
   size_t out = 0;
-  void operator()(const at::Tensor& x) {
+  void operator()(const at::Tensor& /*x*/) {
     out += 1;
   }
   void operator()(const std::optional<at::Tensor>& x) {
@@ -31,7 +31,7 @@ size_t count_tensors(Args&&... args) {
 
 struct CountVariables : IterArgs<CountVariables> {
   size_t out = 0;
-  void operator()(const autograd::Variable& x) {
+  void operator()(const autograd::Variable& /*x*/) {
     out += 1;
   }
   void operator()(at::ArrayRef<autograd::Variable> xs) {

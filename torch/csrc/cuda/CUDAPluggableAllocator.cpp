@@ -150,7 +150,7 @@ bool CUDAPluggableAllocator::initialized() {
   return initialized_;
 }
 
-double CUDAPluggableAllocator::getMemoryFraction(c10::DeviceIndex device) {
+double CUDAPluggableAllocator::getMemoryFraction(c10::DeviceIndex /*device*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getMemoryFraction. "
@@ -166,22 +166,22 @@ void CUDAPluggableAllocator::setMemoryFraction(
 }
 
 std::vector<c10::cuda::CUDACachingAllocator::StreamSegmentSize>
-CUDAPluggableAllocator::getExpandableSegmentSizes(c10::DeviceIndex device) {
+CUDAPluggableAllocator::getExpandableSegmentSizes(c10::DeviceIndex /*device*/) {
   TORCH_CHECK(
       false,
       "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
 }
 
 void CUDAPluggableAllocator::emptyCache(
-    /*unused*/ c10::cuda::MempoolId_t mempool_id) {
+    /*unused*/ c10::cuda::MempoolId_t /*mempool_id*/) {
   if (reset_fn_) {
     return reset_fn_();
   }
 }
 
 void CUDAPluggableAllocator::cacheInfo(
-    c10::DeviceIndex device,
-    size_t* largestBlock) {
+    c10::DeviceIndex /*device*/,
+    size_t* /*largestBlock*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support cacheInfo. "
@@ -205,21 +205,22 @@ void CUDAPluggableAllocator::recordStream(
 }
 
 c10::CachingDeviceAllocator::DeviceStats CUDAPluggableAllocator::getDeviceStats(
-    c10::DeviceIndex device) {
+    c10::DeviceIndex /*device*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getDeviceStats. "
       "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::resetAccumulatedStats(c10::DeviceIndex device) {
+void CUDAPluggableAllocator::resetAccumulatedStats(
+    c10::DeviceIndex /*device*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support resetAccumulatedStats. "
       "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
+void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex /*device*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support resetPeakStats. "
@@ -227,7 +228,7 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
 }
 
 c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
-    c10::cuda::MempoolId_t mempool_id) {
+    c10::cuda::MempoolId_t /*mempool_id*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -235,14 +236,15 @@ c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
 }
 
 c10::cuda::CUDACachingAllocator::ShareableHandle CUDAPluggableAllocator::
-    shareIpcHandle(void* ptr) {
+    shareIpcHandle(void* /*ptr*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support shareIPcHandle. "
       "If you need it, please file an issue describing your use case.");
 }
 
-std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
+std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(
+    std::string /*handle*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getIpcDevPtr. "
@@ -276,12 +278,12 @@ void CUDAPluggableAllocator::releasePool(
 }
 
 void CUDAPluggableAllocator::recordHistory(
-    bool enabled,
-    c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
-    size_t alloc_trace_max_entries,
-    c10::cuda::CUDACachingAllocator::RecordContext when,
-    bool clearHistory,
-    const std::vector<std::string>& skip_actions) {
+    bool /*enabled*/,
+    c10::cuda::CUDACachingAllocator::CreateContextFn /*context_recorder*/,
+    size_t /*alloc_trace_max_entries*/,
+    c10::cuda::CUDACachingAllocator::RecordContext /*when*/,
+    bool /*clearHistory*/,
+    const std::vector<std::string>& /*skip_actions*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support recordHistory. "
@@ -289,7 +291,7 @@ void CUDAPluggableAllocator::recordHistory(
 }
 
 void CUDAPluggableAllocator::attachOutOfMemoryObserver(
-    c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) {
+    c10::cuda::CUDACachingAllocator::OutOfMemoryObserver /*observer*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support attachOutOfMemoryObserver. "
@@ -297,7 +299,7 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
 }
 
 void CUDAPluggableAllocator::attachAllocatorTraceTracker(
-    c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) {
+    c10::cuda::CUDACachingAllocator::AllocatorTraceTracker /*tracker*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not support attachAllocatorTraceTracker. "
@@ -306,8 +308,8 @@ void CUDAPluggableAllocator::attachAllocatorTraceTracker(
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
 CUDAPluggableAllocator::getCheckpointState(
-    c10::DeviceIndex device,
-    at::cuda::MempoolId_t id) {
+    c10::DeviceIndex /*device*/,
+    at::cuda::MempoolId_t /*id*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getCheckpointState. "
@@ -316,8 +318,9 @@ CUDAPluggableAllocator::getCheckpointState(
 
 c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
     setCheckpointPoolState(
-        c10::DeviceIndex device,
-        std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
+        c10::DeviceIndex /*device*/,
+        std::shared_ptr<
+            c10::cuda::CUDACachingAllocator::AllocatorState> /*pps*/) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "
@@ -339,12 +342,12 @@ void CUDAPluggableAllocator::enablePeerAccess(
 
 cudaError_t CUDAPluggableAllocator::memcpyAsync(
     void* dst,
-    int dstDevice,
+    int /*dstDevice*/,
     const void* src,
-    int srcDevice,
+    int /*srcDevice*/,
     size_t count,
     cudaStream_t stream,
-    bool p2p_enabled) {
+    bool /*p2p_enabled*/) {
   return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
 }
 

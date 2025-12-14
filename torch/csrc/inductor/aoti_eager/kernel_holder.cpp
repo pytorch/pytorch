@@ -22,14 +22,12 @@ namespace {
 
 inline void unpack_tensor_ivalue(
     const c10::IValue& ivalue,
-    const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   inputs.push_back(ivalue.toTensor());
 }
 
 inline void unpack_optional_tensor_ivalue(
     const c10::IValue& ivalue,
-    const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   auto ivalue_opt_tensor = ivalue.toOptional<at::Tensor>();
   if (ivalue_opt_tensor.has_value()) {
@@ -39,7 +37,6 @@ inline void unpack_optional_tensor_ivalue(
 
 inline void unpack_tensor_list_ivalue(
     const c10::IValue& ivalue,
-    const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   for (const auto& item : ivalue.toListRef()) {
     inputs.push_back(item.toTensor());
@@ -51,7 +48,7 @@ inline void unpack_optional_tensor_list_ivalue(
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   for (const auto& item : ivalue.toListRef()) {
-    unpack_optional_tensor_ivalue(item, device, inputs);
+    unpack_optional_tensor_ivalue(item, inputs);
   }
 }
 
@@ -64,16 +61,16 @@ std::vector<at::Tensor> unpack_tensors(
     const auto& ivalue = stack[idx];
     const auto& ivalue_arg = arguments[idx];
     if (ivalue.isTensor()) {
-      unpack_tensor_ivalue(ivalue, device, inputs);
+      unpack_tensor_ivalue(ivalue, inputs);
     } else if (ivalue.isTensorList()) {
-      unpack_tensor_list_ivalue(ivalue, device, inputs);
+      unpack_tensor_list_ivalue(ivalue, inputs);
     } else if (ivalue.isOptionalTensorList()) {
       unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
     } else if (
         *ivalue_arg.real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // ivalue is std::optional<at::Tensor>
-      unpack_optional_tensor_ivalue(ivalue, device, inputs);
+      unpack_optional_tensor_ivalue(ivalue, inputs);
     }
   }
   return inputs;
@@ -192,7 +189,7 @@ void AOTIPythonKernelHolder::operator()(
 
 bool AOTIPythonKernelHolder::cache_lookup(
     const c10::OperatorHandle& op,
-    const c10::DispatchKeySet& keyset,
+    const c10::DispatchKeySet& /*keyset*/,
     const torch::jit::Stack* stack,
     AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -217,7 +214,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
 void AOTIPythonKernelHolder::cache_hit(
     const AOTIKernelMetadata& aoti_kernel_metadata,
     const c10::OperatorHandle& op,
-    const c10::DispatchKeySet& keyset,
+    const c10::DispatchKeySet& /*keyset*/,
     torch::jit::Stack* stack) {
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   torch::jit::drop(*stack, op.schema().arguments().size());
@@ -460,7 +457,7 @@ void AOTIPythonKernelHolder::cache_miss(
 
 std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
     const c10::OperatorHandle& op,
-    const c10::DispatchKeySet& keyset,
+    const c10::DispatchKeySet& /*keyset*/,
     const torch::jit::Stack* stack) {
   auto arguments = torch::jit::last(*stack, op.schema().arguments().size());
 

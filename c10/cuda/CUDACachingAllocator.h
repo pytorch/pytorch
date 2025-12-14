@@ -256,7 +256,7 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/,
-      CUDAAllocator* allocator = nullptr) {
+      CUDAAllocator* /*allocator*/ = nullptr) {
     TORCH_CHECK(
         false,
         name(),
@@ -264,16 +264,18 @@ class CUDAAllocator : public DeviceAllocator {
         "If you need it, please file an issue describing your use case.");
   }
   virtual void setUseOnOOM(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      bool use_on_oom) {
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      bool /*use_on_oom*/) {
     TORCH_CHECK(
         false,
         name(),
         " does not yet support setUseOnOOM. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  virtual void setNoSplit(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/) {
     TORCH_CHECK(
         false,
         name(),

@@ -73,8 +73,8 @@ class TORCH_API LoweringContext {
 
   // Check if parameter shape matches result at index.
   virtual bool CheckResultShape(
-      const BackendDataPtr& parameter_data,
-      size_t result_idx) {
+      const BackendDataPtr& /*parameter_data*/,
+      size_t /*result_idx*/) {
     // Dummy default implementation to do nothing.
     return false;
   }
