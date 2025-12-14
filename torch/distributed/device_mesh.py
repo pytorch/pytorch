@@ -181,6 +181,8 @@ else:
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
+        # Flag to specify whether to use torchComms backend or not for a device mesh.
+        _use_torchcomm = False
 
         def __init__(
             self,
@@ -234,7 +236,6 @@ else:
             self._rank_map = _rank_map
             self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             self._root_mesh = _root_mesh
-            self._use_torchcomm = True if os.environ.get("TORCH_USE_COMMS_BACKEND") else False
 
             if backend_override is None:
                 backend_override = ((None, None),) * len(self._layout)
@@ -444,7 +445,6 @@ else:
                     pg_options=pg_options,
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
-                    _use_torchcomm=_use_torchcomm,
                 )
                 return dim_group.group_name  # type: ignore[union-attr]
 

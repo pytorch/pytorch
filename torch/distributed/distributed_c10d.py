@@ -5270,19 +5270,13 @@ def split_group(
     # PrefixStore prefix for initialization of splits. Thus, names have to be
     # unique to avoid key collisions.
     group_name = _process_group_name(my_group, use_hashed_name=True)
-    if _use_torchcomm:
-        parent_comm = parent_pg.get_comm()
-        split_comm = parent_comm.split(my_group, group_name)
-        from torchcomms._comms import _BackendWrapper, new_comm
-        split_pg = _BackendWrapper(split_comm)
-    else:
-        split_pg = parent_pg.split_group(
-            my_group,
-            timeout=timeout,
-            opts=pg_options,
-            group_name=group_name,
-            group_desc=group_desc,
-        )
+    split_pg = parent_pg.split_group(
+        my_group,
+        timeout=timeout,
+        opts=pg_options,
+        group_name=group_name,
+        group_desc=group_desc,
+    )
     if split_pg is None:
         return None
 
