@@ -350,24 +350,22 @@ def _can_use_flex_flash_attention_backward(
     if not is_trivial_mask_graph(mask_graph.graph_module):
         return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
 
-    # PR1 constraint: no captured buffers in score_mod (aux_tensors not yet supported in bwd)
     if score_mod_other_buffers:
         return (
             False,
-            "NYI: Flex Flash Attention doesn't support captured buffers in score_mod backward yet.",
+            "NYI: Flex Flash Attention bwd doesn't support captured buffers yet.",
         )
 
-    # PR1 constraint: no captured grads (aux tensor grads)
     if joint_outputs is not None:
         if joint_outputs.captured_grads_compute:
             return (
                 False,
-                "NYI: Flex Flash Attention doesn't support gradients for captured buffers yet.",
+                "NYI: Flex Flash Attention bwd doesn't support captured grads yet.",
             )
         if joint_outputs.mutated_grads:
             return (
                 False,
-                "NYI: Flex Flash Attention doesn't support mutated gradients yet.",
+                "NYI: Flex Flash Attention bwd doesn't support mutated grads yet.",
             )
 
     return True, ""
@@ -491,12 +489,8 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
-    # Determine if we have a non-trivial score_mod
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
-
-    subgraphs = []
-    if has_score_mod:
-        subgraphs = [fw_subgraph_buffer, joint_subgraph_buffer]
+    subgraphs = [fw_subgraph_buffer, joint_subgraph_buffer] if has_score_mod else []
 
     error = flash_attention_backward_cutedsl_template.maybe_append_choice(
         choices,

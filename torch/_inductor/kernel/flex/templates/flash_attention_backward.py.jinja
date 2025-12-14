@@ -40,7 +40,6 @@
         return grad_score_mod_ssa_out
     {{ set_cute_hash("score_mod_bwd", "score_bwd") }}
 
-    # Collect any additional tensor buffers that were added during modifications
     {% set tensor_buffers = get_tensor_buffers() -%}
     {% if tensor_buffers -%}
     buffers = [{% for buffer in tensor_buffers %}{{buffer}}{% if not loop.last %}, {% endif %}{% endfor %}]
