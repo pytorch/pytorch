@@ -78,7 +78,7 @@ class Joinable(ABC):
 
     @property
     @abstractmethod
-    def join_process_group(self) -> Any:
+    def join_process_group(self) -> dist.ProcessGroup:
         r"""Returns the process group for the collective communications needed by the join context manager itself."""
         ...
 
