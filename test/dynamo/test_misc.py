@@ -7736,7 +7736,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected(x):
             return x + 42
@@ -7761,27 +7761,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), [], None
+        )
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), []
+            lambda L: isinstance(L["x"], torch.Tensor), [], None
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [], None)
 
         def injected_str(x: str):
             return x + "1"
@@ -7858,7 +7860,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
         )
 
         def injected_bool(x: bool):
