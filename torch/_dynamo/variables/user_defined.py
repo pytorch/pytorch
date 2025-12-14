@@ -97,6 +97,7 @@ from ..utils import (
 )
 from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable
+from .lists import SizeVariable
 
 
 try:
@@ -741,16 +742,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
-            from .lists import NamedTupleVariable
 
-            return NamedTupleVariable(
+            return variables.NamedTupleVariable(
                 items, self.value, mutation_type=AttributeMutationNew()
             )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
-            from .lists import SizeVariable
-
             return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
@@ -1818,16 +1816,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
             try:
-                import optree
                 from optree.registry import _NODETYPE_REGISTRY
 
                 # Check if registered globally
-                # Namedtuples and structseqs are implicitly pytree nodes
-                is_registered = (
-                    self.value_type in _NODETYPE_REGISTRY
-                    or optree.is_namedtuple_class(self.value_type)
-                    or optree.is_structseq_class(self.value_type)
-                )
+                is_registered = self.value_type in _NODETYPE_REGISTRY
 
                 # Also check if registered with a namespace that's being used
                 if not is_registered:
@@ -1869,12 +1861,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Check pytorch's pytree registry
             import torch.utils._pytree as pytree
 
-            # Namedtuples and structseqs are implicitly pytree nodes
-            is_registered = (
-                self.value_type in pytree.SUPPORTED_NODES
-                or pytree.is_namedtuple_class(self.value_type)
-                or pytree.is_structseq_class(self.value_type)
-            )
+            is_registered = self.value_type in pytree.SUPPORTED_NODES
 
         # If not registered, it's a leaf and we should apply the map_fn directly
         if not is_registered:
@@ -2438,11 +2425,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         super().__init__(value, init_args=init_args, **kwargs)
-        if tuple_vt is None:
+        self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
             )
@@ -2457,9 +2443,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
-
-        else:
-            self._tuple_vt = tuple_vt
 
     def call_method(
         self,
