@@ -85,7 +85,7 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
 int64_t minimum_gemm_alignment(sdp::sdp_params const& params) {
   bool is_half = (params.query.dtype() == at::kHalf) ||
       (params.query.dtype() == at::kBFloat16);
-  constexpr int64_t matmul_alignment_mn = 4;
+  int64_t matmul_alignment_mn = 4;
   int64_t bits_per_scalar = is_half ? 16 : 32;
   matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
 
