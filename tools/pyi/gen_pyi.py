@@ -1785,12 +1785,12 @@ def gen_pyi(
                 defs(
                     "split",
                     ["self", "split_size: _int", "dim: _int = 0"],
-                    "Sequence[Tensor]",
+                    "tuple[Tensor, ...]",
                 ),
                 defs(
                     "split",
                     ["self", "split_size: tuple[_int, ...]", "dim: _int = 0"],
-                    "Sequence[Tensor]",
+                    "tuple[Tensor, ...]",
                 ),
             ],
             "div": [
