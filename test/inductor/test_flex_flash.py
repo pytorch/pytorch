@@ -394,7 +394,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"NYI: Flex Flash Attention doesn't support captured buffers in score_mod backward yet",
+            r"NYI: Flex Flash Attention bwd doesn't support captured buffers yet",
         ):
             compiled_fn(
                 q,
