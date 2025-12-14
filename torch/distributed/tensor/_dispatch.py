@@ -466,8 +466,7 @@ class OpDispatcher:
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema} "
-                        "while ExplicitRedistributionContext was active",
+                        op_info.schema,
                     )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
