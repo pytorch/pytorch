@@ -500,9 +500,7 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void _sparse_sum_backward_cuda_kernel(
     int64_t total_threads,
     const TensorInfo<int64_t, int64_t> grad_indices_ti,
@@ -671,7 +669,6 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-#if defined(USE_ROCM) || defined(CUSPARSE_VERSION)
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -741,7 +738,6 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   }
   return cuda_data_type;
 }
-#endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");

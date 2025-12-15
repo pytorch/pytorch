@@ -1035,6 +1035,7 @@ class ExprBuilder(Builder):
     def build_Compare(ctx, expr):
         operands = [build_expr(ctx, e) for e in [expr.left] + list(expr.comparators)]
         result = None
+        # pyrefly: ignore [bad-assignment]
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)

@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -2298,7 +2297,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
