@@ -124,11 +124,17 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   size_t stride[MIOPEN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
     size[i] = static_cast<size_t>(t.size(i));
-    stride[i] = static_cast<size_t>(t.stride(i));
   }
   for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
-    stride[i] = 1;
+  }
+
+  for (int i = pad; i >= dim; --i ) {
+      stride[i] = 1;
+  }
+  for (int i = dim-1 ; i >=0; --i ) {
+      // Pass-through
+      stride[i] = static_cast<size_t>(t.stride(i));
   }
 
   dim = std::max<int64_t>(dim, pad);
