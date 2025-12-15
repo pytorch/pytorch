@@ -21,6 +21,7 @@
 #include <mutex>
 #include <memory>
 
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
 namespace at::cuda { namespace {
@@ -75,8 +76,8 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     // intermediate point (ie, before any of them have exited).  We have no way to anticipate
     // or enforce that user threads will not attempt such intermediate synchronization.
     // The only way to ensure safety is to avoid imposing a cap on the number of handles.
-    std::unordered_map<int, std::vector<Handle>> created_handles;
-    std::unordered_map<int, std::vector<Handle_t>> available_handles;
+    std::unordered_map<c10::DeviceIndex, std::vector<Handle>> created_handles;
+    std::unordered_map<c10::DeviceIndex, std::vector<Handle_t>> available_handles;
 
     // PoolWindow lazily creates and caches the handles that a particular thread is using,
     // so in the common case handle access doesn't incur either handle creation or a mutex lock.
@@ -86,7 +87,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     PoolWindow(std::weak_ptr<DeviceThreadHandlePool> parent): weak_parent(std::move(parent)) {}
     ~PoolWindow(){ release(); }
 
-    Handle_t reserve(int device)
+    Handle_t reserve(c10::DeviceIndex device)
     {
         // If this thread already has a handle for this device, return it
         if(my_handles.find(device) != my_handles.end())
@@ -116,7 +117,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
 
     private:
     // Stores the per-device handles currently owned by this thread
-    std::unordered_map<int, Handle_t> my_handles;
+    std::unordered_map<c10::DeviceIndex, Handle_t> my_handles;
 
     std::weak_ptr<DeviceThreadHandlePool> weak_parent;
 
