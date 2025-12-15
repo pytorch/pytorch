@@ -26,6 +26,24 @@ from torch._inductor.fx_passes.bucketing import bucket_key
 from ..pattern_matcher import stable_topological_sort
 
 
+def estimate_runtime_analytical(n: torch.fx.Node) -> float:
+    """Estimate runtime using analytical roofline model for mm operations."""
+    if n.target != torch.ops.aten.mm.default:
+        return 0.0
+    import torch.utils._pytree as pytree
+    from torch.distributed._tools import RuntimeEstimator
+
+    def _val(node: Any) -> Any:
+        if not isinstance(node, torch.fx.Node):
+            return node
+        return node.meta["val"]
+
+    args = pytree.tree_map(_val, n.args)
+    kwargs = pytree.tree_map(_val, n.kwargs)
+    _, ms = RuntimeEstimator._roofline_estimate(n.target, args, kwargs)
+    return ms
+
+
 @dataclass
 class WhyNoOverlap:
     """Track reasons why a collective cannot overlap with compute."""
@@ -99,11 +117,6 @@ def is_compute_node(n: fx.Node) -> bool:
         getattr(n.target, "overloadpacket", None)
         in torch.utils.flop_counter.flop_registry
     )
-
-
-def is_reduce_scatter(n: fx.Node) -> bool:
-    """Check if node is a reduce_scatter collective."""
-    return "reduce_scatter" in str(n.target).lower()
 
 
 def get_hint(x: int | torch.SymInt) -> int | None:
@@ -271,6 +284,7 @@ class OverlapScheduler:
         collective_estimator: Literal["analytical", "benchmark"],
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
+        log_final_collectives_estimations: bool = False,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -282,6 +296,7 @@ class OverlapScheduler:
         self.insert_overlap_deps = insert_overlap_deps
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
+        self.log_final_collectives_estimations = log_final_collectives_estimations
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -335,7 +350,17 @@ class OverlapScheduler:
         self._identify_collectives()
         self.wasted_compute = 0.0
 
-        self.compute_index_domination = self._calculate_compute_node_domination_index()
+        # Calculate domination indices for both compute and reduce_scatter nodes
+        self.reduce_scatter_nodes = self.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.compute_index_domination = self._calculate_domination_index(
+            self.compute_nodes
+        )
+        self.reduce_scatter_domination = self._calculate_domination_index(
+            self.reduce_scatter_nodes
+        )
 
         # Scheduling state
         self.potentially_hidden_collectives = (
@@ -343,16 +368,29 @@ class OverlapScheduler:
         )
         self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
-        self.ready: list[tuple[object, fx.Node]] = []
+
+        # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
+        self.on_path_ready: list[tuple[object, fx.Node]] = []
+        self.off_path_ready: list[tuple[object, fx.Node]] = []
 
         for node in self.nodes:
             if self.in_degree[node] == 0:
-                heapq.heappush(self.ready, (self._compute_score(node), node))
+                self._add_to_ready_queue(node)
 
         self.in_flight: dict[fx.Node, CollectiveInfo] = {}  # start -> info
         self.in_flight_bytes = 0
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
+
+        self.last_on_path_node_idx = -1
+
+    def _add_to_ready_queue(self, node: fx.Node) -> None:
+        if self.off_compute_path(node):
+            score = self._compute_off_path_score(node)
+            heapq.heappush(self.off_path_ready, (score, node))
+        else:
+            score = self._compute_on_path_score(node)
+            heapq.heappush(self.on_path_ready, (score, node))
 
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
@@ -450,6 +488,10 @@ class OverlapScheduler:
         """Check if a node is off the compute path (doesn't block any compute)."""
         return self.compute_index_domination[n] == sys.maxsize
 
+    def dominates_reduce_scatter(self, n: fx.Node) -> bool:
+        """Check if a node dominates (blocks) any reduce_scatter."""
+        return self.reduce_scatter_domination[n] != sys.maxsize
+
     def _identify_collectives(self) -> None:
         """Identify all collective operations and process groups."""
         self.all_pgs: OrderedSet[str] = OrderedSet()
@@ -473,73 +515,31 @@ class OverlapScheduler:
                 self.unscheduled_collectives.add(start)
                 self.all_pgs.add(get_group_name(start))
 
-    def _calculate_compute_node_domination_index(self) -> dict[fx.Node, int]:
+    def _calculate_domination_index(
+        self, target_nodes: list[fx.Node]
+    ) -> dict[fx.Node, int]:
         """
-        Compute the topological index of the earliest compute node each node dominates.
+        Calculate the topological index of the earliest target node each node dominates.
 
-        Compute nodes are assigned indices based on their topological order (0, 1, 2, ...).
-        For each node, returns the minimum index of compute nodes it blocks/dominates.
-        Returns sys.maxsize if the node doesn't block any compute nodes.
+        target_nodes are assigned indices based on their topological order (0, 1, 2, ...).
+        For each node, returns the minimum index of target nodes it blocks/dominates.
+        Returns sys.maxsize if the node doesn't block any target nodes.
         """
-        compute_node_index: dict[fx.Node, int] = {}
+        target_node_index: dict[fx.Node, int] = {}
         for node in self.graph.nodes:
-            if is_compute_node(node):
-                compute_node_index[node] = len(compute_node_index)
+            if node in target_nodes:
+                target_node_index[node] = len(target_node_index)
 
         domination_index: dict[fx.Node, int] = {}
         for node in reversed(self.graph.nodes):
-            if node in compute_node_index:
-                # Compute nodes dominate themselves (return their own index)
-                domination_index[node] = compute_node_index[node]
+            if node in target_node_index:
+                domination_index[node] = target_node_index[node]
             else:
                 domination_index[node] = min(
                     (domination_index[succ] for succ in node.users), default=sys.maxsize
                 )
 
         return domination_index
-
-    def _log_collective_benchmarks(
-        self,
-        collective_nodes: list[fx.Node],
-        collective_keys: list[str],
-        benchmarked_medians: list[float],
-        world_size: int,
-    ) -> None:
-        """Log collective benchmarks with analytical comparisons for tlparse."""
-        collective_benchmarks = {}
-        for key, benchmarked_ms, coll_node in zip(
-            collective_keys, benchmarked_medians, collective_nodes
-        ):
-            # NCCL estimator (deterministic, no need to align)
-            nccl_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=True
-            )
-
-            # Inductor analytical (deterministic, no need to align)
-            inductor_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=False
-            )
-
-            collective_benchmarks[key] = {
-                "benchmarked_ms": benchmarked_ms,
-                "analytical_nccl_ms": nccl_ms,
-                "analytical_inductor_ms": inductor_ms,
-            }
-
-        # Emit tlparse artifact
-        from torch._logging import trace_structured
-
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "node_runtime_estimation",
-                "encoding": "json",
-            },
-            payload_fn=lambda: {
-                "world_size": world_size,
-                "collective_benchmarks": collective_benchmarks,
-            },
-        )
 
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
         self,
@@ -554,11 +554,30 @@ class OverlapScheduler:
         runtime_estimations: list[float] = []
         compute_key_count = 0
 
+        # Also collect analytical estimations for logging
+        runtime_estimations_analytical: list[float] = []
+
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+
+            # Analytical estimations
+            val_analytical = estimate_runtime_analytical(n)
+            runtime_estimations_analytical.append(val_analytical)
+
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
             compute_key_count += 1
+
+        # Log compute estimations
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+
+        _log_compute_estimations(
+            self.compute_nodes,
+            runtime_estimations,
+            runtime_estimations_analytical,
+        )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -585,7 +604,7 @@ class OverlapScheduler:
                     continue
 
                 # Benchmark actual size
-                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=2)
+                cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)
@@ -641,14 +660,45 @@ class OverlapScheduler:
 
         # Log benchmarks with analytical comparisons
         if collective_keys:
-            self._log_collective_benchmarks(
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            _log_collective_benchmarks(
                 benchmarked_collective_nodes,
                 collective_keys,
                 collective_medians,
                 world_size,
+                "fx_collectives_node_runtime_estimation",
             )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
+
+    def _get_next_node(self) -> fx.Node:
+        """Get next node: off-path nodes scheduled near original position, exposed waits deferred."""
+        if self.off_path_ready:
+            _, node = self.off_path_ready[0]
+
+            should_schedule = False
+            if not self.on_path_ready or node in self.scheduled:
+                should_schedule = True
+            elif _schedulable_wait_node(node):
+                # Defer exposed waits until hidden or over memory budget
+                info = self.collective_info[self.wait_to_start[node]]
+                over_budget = (
+                    self.memory_tracker.current_memory_bytes
+                    > self.allowed_peak_memory_bytes
+                )
+                should_schedule = not info.is_exposed or over_budget
+            elif self.dominates_reduce_scatter(node):
+                # Only schedule off-path nodes that dominate reduce_scatters after original position
+                should_schedule = self.node_idx[node] <= self.last_on_path_node_idx
+
+            if should_schedule:
+                heapq.heappop(self.off_path_ready)
+                return node
+
+        return heapq.heappop(self.on_path_ready)[1]
 
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
@@ -657,12 +707,12 @@ class OverlapScheduler:
         # For now we do benchmarking only for compute nodes.
         self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
-        while self.ready:
+        while self.on_path_ready or self.off_path_ready:
             if self._should_force_wait_for_memory():
                 self._force_oldest_wait()
                 continue
 
-            _, node = heapq.heappop(self.ready)
+            node = self._get_next_node()
 
             # we don't always remove nodes from the heap when we schedule them
             if node in self.scheduled:
@@ -677,6 +727,12 @@ class OverlapScheduler:
             else:
                 self._handle_compute_or_other(node)
 
+            # Track progress for off-path scheduling - only for nodes from main queue
+            if not self.off_compute_path(node):
+                self.last_on_path_node_idx = max(
+                    self.last_on_path_node_idx, self.node_idx[node]
+                )
+
         self._reorder_graph()
 
         if self.collective_bucketing:
@@ -684,6 +740,15 @@ class OverlapScheduler:
         elif self.insert_overlap_deps:
             # If not bucketing, add effect tokens to preserve hiding dependencies
             self._add_effect_tokens_for_overlap()
+
+        if self.log_final_collectives_estimations:
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_graph_collective_benchmarks,
+            )
+
+            _log_graph_collective_benchmarks(
+                self.gm, "fx_collectives_estimations_after_overlap_bucketing"
+            )
 
         return self.gm
 
@@ -803,11 +868,10 @@ class OverlapScheduler:
         for user in node.users:
             self.in_degree[user] -= 1
             if self.in_degree[user] == 0:
-                heapq.heappush(self.ready, (self._compute_score(user), user))
+                self._add_to_ready_queue(user)
 
-    def _compute_score(self, node: fx.Node) -> object:
-        """Compute priority score for a node"""
-
+    def _compute_on_path_score(self, node: fx.Node) -> object:
+        """Compute priority score for on-path nodes (domination-based)."""
         if _schedulable_wait_node(node):
             info = self.collective_info[self.wait_to_start[node]]
             # defer waits locally if they are exposed.
@@ -826,6 +890,16 @@ class OverlapScheduler:
             compute_local_priority,  # collective_start=-1, wait=1, or neither=0
             self.node_idx[node],  # Original order for stability
         )
+
+    def _compute_off_path_score(self, node: fx.Node) -> object:
+        """
+        Off-path priority scoring.
+
+        Nodes that dominate reduce_scatters are prioritized (lower score = higher priority)
+        to ensure they get scheduled eagerly for potential overlap.
+        """
+        dominates_rs = 0 if self.dominates_reduce_scatter(node) else 1
+        return (dominates_rs, self.node_idx[node])
 
     @staticmethod
     def is_cheap_fn(node: fx.Node) -> bool:
@@ -951,13 +1025,22 @@ class OverlapScheduler:
 
             candidates.append(collective)
 
-        # Sort candidates prioritizing:
-        # 1. reduce_scatter operations (reduce memory pressure)
-        # 2. Earlier domination index
-        # 3. Original order for stability
+        def get_priority(n: fx.Node) -> int:
+            dominates_next_compute = (
+                self.compute_index_domination[n] == self.current_compute_index + 1
+            )
+            if dominates_next_compute:
+                return 0  # Dominates next compute layer - most urgent
+            elif self.off_compute_path(n) and self.dominates_reduce_scatter(n):
+                return 1  # Off-path but blocks reduce_scatter
+            elif not self.off_compute_path(n):
+                return 2  # On-path but not immediate
+            else:
+                return 3  # Off-path, doesn't block reduce_scatter
+
         candidates.sort(
             key=lambda n: (
-                not is_reduce_scatter(n),  # reduce_scatter first
+                get_priority(n),
                 self.compute_index_domination[n],
                 self.node_idx[n],
             ),
@@ -1255,6 +1338,7 @@ def schedule_overlap_bucketing(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
+    log_final_collectives_estimations: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1290,6 +1374,7 @@ def schedule_overlap_bucketing(
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
+        log_final_collectives_estimations=log_final_collectives_estimations,
     ).run()
 
 
@@ -1318,6 +1403,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "compute_overlap_multipler",
         "max_in_flight_gb",
         "max_coll_distance",
+        "log_final_collectives_estimations",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

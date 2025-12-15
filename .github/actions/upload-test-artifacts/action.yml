@@ -19,48 +19,41 @@ inputs:
 runs:
   using: composite
   steps:
-    # Mac/Linux zip
-    - name: Zip JSONs for upload
+    - name: Setup uv
       if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous test jsons if they exist
-        rm -f test-jsons-*.zip
-        zip -r "test-jsons-${FILE_SUFFIX}.zip" test/test-reports -i '*.json'
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
 
-    - name: Zip test reports for upload
+    - name: Zip artifacts for upload
       if: runner.os != 'Windows' && !inputs.use-gha
       shell: bash
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
-        # Remove any previous test reports if they exist
-        rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test/test-reports -i '*.xml' -i '*.csv'
-
-    - name: Zip usage log for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous usage logs if they exist
-        rm -f logs-*.zip
-        zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' || true
-        zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log' || true
-
-    - name: Zip debugging artifacts for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous debugging artifacts if they exist
-        rm -f debug-*.zip
+        set -euo pipefail
+        rm -f test-jsons-*.zip test-reports-*.zip logs-*.zip debug-*.zip
+        ZIP_CMD='
+        import sys, zipfile, os
+        from pathlib import Path
+        d = Path(sys.argv[1])
+        o = Path(sys.argv[2])
+        p = sys.argv[3:]
+        with zipfile.ZipFile(o, "w", zipfile.ZIP_DEFLATED) as z:
+            for pat in p:
+                for f in d.glob(pat):
+                    if f.is_file():
+                        z.write(f, os.path.relpath(f, d))
+        '
+        uv run --no-project python -c "$ZIP_CMD" \
+          test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
+        uv run --no-project python -c "$ZIP_CMD" \
+          . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
+        uv run --no-project python -c "$ZIP_CMD" \
+          . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
-          zip -r "debug-${FILE_SUFFIX}.zip" test/debug
+          uv run --no-project python -c "$ZIP_CMD" \
+            test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
         fi
 
     # Windows zip
