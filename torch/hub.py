@@ -716,17 +716,6 @@ def download_url_to_file(
         ... )
 
     """
-    file_size = None
-    req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
-
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
@@ -742,33 +731,42 @@ def download_url_to_file(
         break
     else:
         raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
-
+    req = Request(url, headers={"User-Agent": "torch.hub"})
     try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
-        with tqdm(
-            total=file_size,
-            disable=not progress,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            while True:
-                buffer = u.read(READ_DATA_CHUNK)
-                if len(buffer) == 0:
-                    break
-                f.write(buffer)  # type: ignore[possibly-undefined]
-                if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
-                pbar.update(len(buffer))
+        with urlopen(req) as u:
+            meta = u.info()
+            if hasattr(meta, "getheaders"):
+                content_length = meta.getheaders("Content-Length")
+            else:
+                content_length = meta.get_all("Content-Length")
+            file_size = None
+            if content_length is not None and len(content_length) > 0:
+                file_size = int(content_length[0])
 
-        f.close()
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
+            sha256 = hashlib.sha256() if hash_prefix is not None else None
+            with tqdm(
+                total=file_size,
+                disable=not progress,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                while True:
+                    buffer = u.read(READ_DATA_CHUNK)
+                    if len(buffer) == 0:
+                        break
+                    f.write(buffer)
+                    if sha256 is not None:
+                        sha256.update(buffer)
+                    pbar.update(len(buffer))
+
+            f.close()
+            if sha256 is not None and hash_prefix is not None:
+                digest = sha256.hexdigest()
+                if digest[: len(hash_prefix)] != hash_prefix:
+                    raise RuntimeError(
+                        f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
+                    )
         shutil.move(f.name, dst)
     finally:
         f.close()

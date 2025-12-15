@@ -1863,7 +1863,7 @@ class TestFlexAttention(InductorTestCase):
             (2, 2, 128, 4),
             device=device,
             dtype=torch.float64,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decomposition_table is empty
@@ -4414,7 +4414,7 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -4438,7 +4438,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
                 "GPU_TYPE", torch.device(device).type
@@ -5022,11 +5022,11 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         kernel_options_1 = {
-            "BLOCK_M": 128,
-            "BLOCK_N": 128,
+            "BLOCK_M": 32,
+            "BLOCK_N": 32,
             "USE_TMA": False,
         }
-        kernel_options_2 = {"BLOCK_M": 128, "BLOCK_N": 128, "USE_TMA": True}
+        kernel_options_2 = {"BLOCK_M": 32, "BLOCK_N": 32, "USE_TMA": True}
 
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
         out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)

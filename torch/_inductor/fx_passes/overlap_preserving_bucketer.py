@@ -219,6 +219,9 @@ class OverlapPreservingBucketer:
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
+                # Wait for a different PG but hiding a collective on this PG
+                elif node in hiding_nodes:
+                    node_type = "compute"
             elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
