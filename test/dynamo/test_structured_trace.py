@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest.mock
 from contextlib import contextmanager
+from unittest import skipIf
 
 import torch
 import torch._dynamo.test_case
@@ -23,6 +24,9 @@ from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.inductor_utils import (
+    HAS_XPU_AND_TRITON,
+)
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -618,6 +622,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @skipIf(HAS_XPU_AND_TRITON, "No backend type associated with device type xpu")
     @requires_distributed()
     @requires_gpu_and_triton
     def test_ddp_graphs(self):
