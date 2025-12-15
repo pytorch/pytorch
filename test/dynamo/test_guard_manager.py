@@ -11,7 +11,8 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch.testing._internal.common_utils import set_default_dtype, TEST_XPU, TEST_CUDA
+from torch.testing._internal.common_utils import set_default_dtype, TEST_CUDA, TEST_XPU
+
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"

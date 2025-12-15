@@ -12,6 +12,7 @@ from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
+
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 

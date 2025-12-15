@@ -49,6 +49,7 @@ from torch.utils.checkpoint import (
     create_selective_checkpoint_contexts,
 )
 
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
