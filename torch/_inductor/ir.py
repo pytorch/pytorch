@@ -6,7 +6,6 @@ import functools
 import itertools
 import logging
 import operator
-import os
 import textwrap
 import traceback
 from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
@@ -150,9 +149,6 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-
-autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
-autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -5225,15 +5221,9 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
-        benchmark_configs = {
-            "warmup": autotune_warmup,
-            "rep": autotune_rep,
-        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]
-        return benchmarker.benchmark(
-            algo, args, {"out": out}, device=None, **benchmark_configs
-        )
+            return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
+        return benchmarker.benchmark(algo, args, {"out": out}, device=None)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -6052,8 +6042,13 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
+        # When graph_partition is enabled, skip - partitioning handles sparse outputs
         for t in example_out_li:
-            if isinstance(t, torch.Tensor) and t.is_sparse:
+            if (
+                isinstance(t, torch.Tensor)
+                and t.is_sparse
+                and not config.graph_partition
+            ):
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
                     msg = f"{msg} Found from : \n {stack_trace}"
@@ -7871,7 +7866,9 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
-                FallbackKernel.find_device(None, x) for x in example_output
+                # pyrefly: ignore [bad-argument-type]
+                FallbackKernel.find_device(None, x)
+                for x in example_output
             )
             # Remove None
             devices = [device for device in device_set if device]
@@ -8688,7 +8685,7 @@ class InvokeSubgraph(ExternKernel):
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
-        # pyrefly: ignore [annotation-mismatch]
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         operands: list[IRNode] = [cls.realize_input(x) for x in operands]
         new_operands: list[IRNode] = []
 
@@ -8762,6 +8759,17 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """
+    IR node representing torch.cond
+
+    Attributes:
+        predicate: A boolean scalar tensor determining which branch to execute.
+        operands: Input tensors passed to both true and false subgraphs.
+        true_subgraph: Subgraph executed when predicate is True.
+        false_subgraph: Subgraph executed when predicate is False.
+        outputs: MultiOutput nodes representing the conditional's outputs.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -8820,6 +8828,27 @@ class Conditional(ExternKernel):
         assert isinstance(fx_operands, Sequence), type(fx_operands)
         assert all(isinstance(n, Node) for n in fx_operands)
         fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        fake_outputs = V.graph.current_node.meta["val"]
+
+        def _require_exact_strides(
+            graph_outputs: Sequence[IRNode],
+            fake_tensors: Sequence[torch.Tensor],
+        ) -> list[IRNode]:
+            ret = []
+            for output, fake in zip(graph_outputs, fake_tensors):
+                if isinstance(output, ShapeAsConstantBuffer):
+                    ret.append(output)
+                else:
+                    fake_strides = [
+                        s.node.expr if isinstance(s, torch.SymInt) else s
+                        for s in fake.stride()
+                    ]
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            TensorBox(output), fake_strides, allow_padding=False
+                        )
+                    )
+            return ret
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -8831,6 +8860,12 @@ class Conditional(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
+                    # Force subgraph outputs to have the expected strides from
+                    # FakeTensor metadata. This ensures both branches produce
+                    # outputs with consistent strides.
+                    subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs, fake_outputs
+                    )
 
         assert true_fn.graph is not None
         assert false_fn.graph is not None
@@ -8877,6 +8912,7 @@ class Conditional(ExternKernel):
         outputs = [
             MultiOutput(
                 FixedLayout(
+                    # pyrefly: ignore [bad-argument-type]
                     device=output.get_device()
                     if output.get_device() is not None
                     else device,  # type: ignore[arg-type]
