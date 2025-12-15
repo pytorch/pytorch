@@ -111,6 +111,23 @@ def get_tunableop_untuned_filename():
     untuned_filename = f"{untuned_filename_base}{ordinal}.csv"
     return untuned_filename
 
+def _sort_complex_real_first(x):
+    """Sort complex values lexicographically by (real, imag) along the last dimension.
+    Intended for test comparisons only. Returns sorted x on CPU.
+    """
+
+    # move eigenvalues to CPU to ensure same sorting
+    x = x.cpu()
+
+    idx = torch.argsort(x.imag, dim=-1)
+    x = torch.gather(x, -1, idx)
+
+    idx = torch.argsort(x.real, dim=-1)
+    x = torch.gather(x, -1, idx)
+
+    return x
+
+
 class TestLinalg(TestCase):
     def setUp(self):
         super().setUp()
@@ -2231,21 +2248,8 @@ class TestLinalg(TestCase):
             expected = torch.linalg.eig(a.to(complementary_device))
 
             # sort eigenvalues because the order is not guaranteed
-            # move eigenvalues to CPU to ensure same sorting
-            actual_eigvals = actual[0].cpu()
-            expected_eigvals = expected[0].cpu()
-
-            idx = torch.argsort(actual_eigvals.imag, dim=-1)
-            actual_eigvals = torch.gather(actual_eigvals, -1, idx)
-
-            idx = torch.argsort(actual_eigvals.real, dim=-1)
-            actual_eigvals = torch.gather(actual_eigvals, -1, idx)
-
-            idx = torch.argsort(expected_eigvals.imag, dim=-1)
-            expected_eigvals = torch.gather(expected_eigvals, -1, idx)
-
-            idx = torch.argsort(expected_eigvals.real, dim=-1)
-            expected_eigvals = torch.gather(expected_eigvals, -1, idx)
+            actual_eigvals = _sort_complex_real_first(actual[0])
+            expected_eigvals = _sort_complex_real_first(expected[0])
 
             self.assertEqual(expected_eigvals, actual_eigvals)
 
@@ -2532,20 +2536,8 @@ class TestLinalg(TestCase):
 
                 # sort eigenvalues because the order is not guaranteed
                 # move eigenvalues to CPU to ensure same sorting
-                out = out.cpu()
-                expected = expected.cpu()
-
-                idx = torch.argsort(out.imag, dim=-1)
-                out = torch.gather(out, -1, idx)
-
-                idx = torch.argsort(out.real, dim=-1)
-                out = torch.gather(out, -1, idx)
-
-                idx = torch.argsort(expected.imag, dim=-1)
-                expected = torch.gather(expected, -1, idx)
-
-                idx = torch.argsort(expected.real, dim=-1)
-                expected = torch.gather(expected, -1, idx)
+                out = _sort_complex_real_first(out)
+                expected = _sort_complex_real_first(expected)
 
                 self.assertEqual(expected, out)
 
