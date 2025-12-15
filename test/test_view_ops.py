@@ -375,6 +375,13 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
@@ -964,7 +971,7 @@ class TestViewOps(TestCase):
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -975,7 +982,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_split_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.split(t, [1, 1, 1])
