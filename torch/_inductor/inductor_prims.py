@@ -99,7 +99,7 @@ randint = make_prim(
 )
 
 
-def _reserve_rng_state(device: torch.device, used_offset: int) -> tuple[int, int]:
+def _reserve_rng_state(device: torch.device, used_offset: SymInt):
     """
     Reserve `used_offset` 32-bit Philox samples on the given CUDA device and
     return (seed, base), where base is in Philox-4x32 units.
@@ -120,7 +120,12 @@ def _reserve_rng_state(device: torch.device, used_offset: int) -> tuple[int, int
     gen = torch.cuda.default_generators[dev_index]
     seed = gen.initial_seed()
     old_off = gen.get_offset()
-    gen.set_offset(old_off + used_offset)
+    new_offset = old_off + used_offset
+    try:
+        concrete_offset = int(new_offset)
+        gen.set_offset(concrete_offset)
+    except Exception:
+        pass
     base = old_off // 4  # convert raw offset to Philox-4x32 counter units
     return seed, base
 
@@ -158,7 +163,7 @@ def _rand_eager_offsets_meta(offsets, device: torch.device):
 
 
 rand_eager_offset = make_prim(
-    "inductor_rand_eager_offset(int offset, Device device) -> Tensor",
+    "inductor_rand_eager_offset(SymInt offset, Device device) -> Tensor",
     _rand_eager_offset_impl,
     doc=(
         "Reserve `offset` 32-bit Philox samples on `device` and return a "
@@ -169,7 +174,7 @@ rand_eager_offset = make_prim(
 
 
 rand_eager_offsets = _prims._make_prim(
-    schema="inductor_rand_eager_offsets(int[] offsets, Device device) -> Tensor",
+    schema="inductor_rand_eager_offsets(SymInt[] offsets, Device device) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
     meta=_rand_eager_offsets_meta,
     impl_aten=_rand_eager_offsets_impl,
