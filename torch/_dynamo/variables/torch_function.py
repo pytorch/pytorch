@@ -579,7 +579,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         tx: "InstructionTranslator",
         tensor_var: VariableTracker,
         class_type: type,
-        cls_source: Source | None,
+        cls_source: Source,
     ) -> "TensorWithTFOverrideVariable":
         # [Note: __torch_function__] coerce `tensor_var` into a
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
