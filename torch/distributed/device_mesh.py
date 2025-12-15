@@ -33,6 +33,7 @@ if not is_available():
         pass
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
+    # pyrefly: ignore [missing-attribute]
     sys.modules[
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
@@ -47,6 +48,7 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupName,
         init_process_group,
         is_initialized,
         new_group,
@@ -65,7 +67,7 @@ else:
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
-    BackendConfig = tuple[Optional[str], Optional[C10dBackend.Options]]
+    BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
 
     class _MeshEnv(threading.local):
@@ -175,7 +177,7 @@ else:
 
         _device_type: str
         _rank_map: torch.Tensor
-        _mesh_dim_names: Optional[tuple[str, ...]]
+        _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
@@ -184,16 +186,20 @@ else:
         def __init__(
             self,
             device_type: str,
-            mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
+            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
             *,
-            mesh_dim_names: Optional[tuple[str, ...]] = None,
-            backend_override: Optional[tuple[BackendConfig, ...]] = None,
+            mesh_dim_names: tuple[str, ...] | None = None,
+            backend_override: tuple[BackendConfig, ...] | None = None,
             _init_backend: bool = True,
-            _rank: Optional[int] = None,
-            _layout: Optional[_MeshLayout] = None,
-            _rank_map: Optional[torch.Tensor] = None,
+            _rank: int | None = None,
+            _layout: _MeshLayout | None = None,
+            _rank_map: torch.Tensor | None = None,
             _root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
+            # no-op in OSS, logs API usage metrics in meta-internal runs
+            torch._C._log_api_usage_once(
+                "torch.distributed.device_mesh.DeviceMesh.__init__"
+            )
             if mesh is not None:
                 if _layout is not None or _rank_map is not None:
                     raise TypeError(
@@ -237,10 +243,31 @@ else:
                     f"backend_override should have the same length as the number of mesh dimensions, "
                     f"but got {len(backend_override)} and {len(self._layout)}."
                 )
+            # Internal bookkeeping for the device mesh.
+            self._layout = (
+                _layout
+                if _layout
+                else _MeshLayout(self.mesh.size(), self.mesh.stride())
+            )
+            if not self._layout.check_non_overlap():
+                raise AssertionError(
+                    "Please use a non-overlapping layout when creating a DeviceMesh."
+                )
+            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
+            if self._layout.numel() != self.mesh.numel():
+                raise AssertionError(
+                    "Please use a valid layout when creating a DeviceMesh."
+                    f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
+                )
+
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
+            self._thread_id = None
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
@@ -263,15 +290,13 @@ else:
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == _rank).nonzero()
-                assert rank_coords.size(0) in (0, 1)
-                self._coordinate_on_dim: Optional[list[int]] = (
+                if rank_coords.size(0) not in (0, 1):
+                    raise AssertionError(
+                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
+                    )
+                self._coordinate_on_dim: list[int] | None = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(self._rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
@@ -294,7 +319,7 @@ else:
             )
 
         @property
-        def mesh_dim_names(self) -> Optional[tuple[str, ...]]:
+        def mesh_dim_names(self) -> tuple[str, ...] | None:
             """Returns the names of mesh dimensions."""
             return self._mesh_dim_names
 
@@ -355,7 +380,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> Optional[str]:
+        ) -> GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -448,24 +473,26 @@ else:
         def _init_process_groups(
             layout: _MeshLayout,
             rank_map: torch.Tensor,
-            mesh_dim_names: Optional[tuple[str, ...]],
+            mesh_dim_names: tuple[str, ...] | None,
             backend_override: tuple[BackendConfig, ...],
-        ) -> list[str]:
+        ) -> list[GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            dim_group_names: list[str] = []
+            dim_group_names: list[GroupName | None] = []
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
-                    DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
+                    DeviceMesh._init_one_process_group(
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
-            if any(n is None for n in dim_group_names):
-                assert all(n is None for n in dim_group_names)
-                return []
-            return dim_group_names
+            # Filter out None values. If any are None then they should all be None.
+            dim_non_none_group_names = [n for n in dim_group_names if n is not None]
+            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+                dim_group_names
+            )
+            return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self
@@ -520,16 +547,14 @@ else:
                 and self._thread_id == other._thread_id
             )
 
-        def __getitem__(
-            self, mesh_dim_names: Union[str, tuple[str, ...]]
-        ) -> "DeviceMesh":
+        def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
             The submesh created consists of the dimensions and the communicators indicated by
             ``mesh_dim_names``
 
             Args:
-                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh_dim_names (Union[str, tuple[str, ...]]): the name or the tuple of names of the
                 mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
@@ -590,7 +615,7 @@ else:
                     submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
-        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
+        def get_group(self, mesh_dim: int | str | None = None) -> ProcessGroup:
             """
             Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
             DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
@@ -619,7 +644,7 @@ else:
 
             root_mesh = self._get_root_mesh()
             root_to_flatten_mapping = root_mesh._flatten_mapping
-            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
@@ -630,7 +655,10 @@ else:
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-                assert isinstance(mesh_dim, int)
+                if not isinstance(mesh_dim, int):
+                    raise AssertionError(
+                        f"mesh_dim must be an int, got {type(mesh_dim)}"
+                    )
                 return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
@@ -679,7 +707,7 @@ else:
 
         def _create_flatten_mesh(
             self,
-            mesh_dim_name: Optional[str] = None,
+            mesh_dim_name: str | None = None,
             backend_override: BackendConfig = (None, None),
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
@@ -728,7 +756,7 @@ else:
 
             return res_flattened_mesh
 
-        def _get_root_mesh_dim(self) -> Optional[int]:
+        def _get_root_mesh_dim(self) -> int | None:
             """
             Returns the index of the mesh dim in the root mesh.
             The device_mesh passed in needs to be sliced out from the root mesh
@@ -737,9 +765,8 @@ else:
             root_mesh = self._get_root_mesh()
             child_mesh_dim_names = self._mesh_dim_names
             if root_mesh and child_mesh_dim_names:
-                assert len(child_mesh_dim_names) == 1, (
-                    "The submesh can only be a 1D mesh."
-                )
+                if len(child_mesh_dim_names) != 1:
+                    raise AssertionError("The submesh can only be a 1D mesh.")
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return root_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
             return None
@@ -868,11 +895,11 @@ else:
 
         @staticmethod
         def from_group(
-            group: Union[ProcessGroup, list[ProcessGroup]],
+            group: ProcessGroup | list[ProcessGroup],
             device_type: str,
-            mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
+            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
             *,
-            mesh_dim_names: Optional[tuple[str, ...]] = None,
+            mesh_dim_names: tuple[str, ...] | None = None,
         ) -> "DeviceMesh":
             """
             Constructs a :class:`DeviceMesh` with ``device_type`` from an
@@ -899,7 +926,7 @@ else:
                 mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
                     integer tensor describing the layout of devices, where the IDs are global IDs
                     of the default process group. Default is None.
-                mesh_dim_names (tuple[str], optional): A tuple of mesh dimension names to assign
+                mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign
                     to each dimension of the multi-dimensional array describing the layout of devices.
                     Its length must match the length of `mesh_shape`. Each string in `mesh_dim_names`
                     must be unique. Default is None.
@@ -961,7 +988,7 @@ else:
             device_mesh._dim_group_names = [group.group_name for group in groups]
             return device_mesh
 
-        def size(self, mesh_dim: Optional[int] = None) -> int:
+        def size(self, mesh_dim: int | None = None) -> int:
             if mesh_dim is not None:
                 return self._layout[mesh_dim].numel()
             return self._layout.numel()
@@ -980,7 +1007,7 @@ else:
             """
             return get_rank()
 
-        def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
+        def get_local_rank(self, mesh_dim: int | str | None = None) -> int:
             """
             Returns the local rank of the given mesh_dim of the DeviceMesh.
 
@@ -1018,12 +1045,13 @@ else:
                 mesh_dim = 0
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
-            assert isinstance(mesh_dim_group, ProcessGroup), (
-                "We expect ProcessGroup before calling `get_rank`!"
-            )
+            if not isinstance(mesh_dim_group, ProcessGroup):
+                raise AssertionError(
+                    "We expect ProcessGroup before calling `get_rank`!"
+                )
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> Optional[list[int]]:
+        def get_coordinate(self) -> list[int] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
@@ -1032,10 +1060,11 @@ else:
 
         def _flatten(
             self,
-            mesh_dim_name: Optional[str] = None,
-            backend_override: Union[
-                None, str, C10dBackend.Options, tuple[str, C10dBackend.Options]
-            ] = None,
+            mesh_dim_name: str | None = None,
+            backend_override: None
+            | str
+            | C10dBackend.Options
+            | tuple[str, C10dBackend.Options] = None,
         ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
@@ -1069,7 +1098,7 @@ else:
             mesh_sizes: tuple[int, ...],
             mesh_dim_names: tuple[str, ...],
             backend_override: tuple[
-                tuple[Optional[str], Optional[C10dBackend.Options]], ...
+                tuple[str | None, C10dBackend.Options | None], ...
             ] = ((None, None),),
         ) -> "DeviceMesh":
             inner_layout = _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
@@ -1114,15 +1143,13 @@ else:
 
         def _unflatten(
             self,
-            dim: Union[int, str],
+            dim: int | str,
             mesh_sizes: tuple[int, ...],
             mesh_dim_names: tuple[str, ...],
-            backend_override: Optional[
-                dict[
-                    str,
-                    Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
-                ]
-            ] = None,
+            backend_override: dict[
+                str, str | C10dBackend.Options | tuple[str, C10dBackend.Options]
+            ]
+            | None = None,
         ) -> "DeviceMesh":
             """
             Returns a DeviceMesh by unflatten the current DeviceMesh.
@@ -1181,7 +1208,7 @@ else:
             concat_dim_names: list[str] = []
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
-            concat_dim_group_name: list[str] = []
+            concat_dim_group_name: list[GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
@@ -1213,11 +1240,11 @@ else:
 
     def _normalize_backend_override(
         backend_override: dict[
-            Union[int, str],
-            Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+            int | str,
+            str | C10dBackend.Options | tuple[str, C10dBackend.Options],
         ],
         ndim: int,
-        mesh_dim_names: Optional[tuple[str, ...]] = None,
+        mesh_dim_names: tuple[str, ...] | None = None,
     ) -> Iterator[BackendConfig]:
         if mesh_dim_names is None:
             mesh_dim_names = ()
@@ -1252,13 +1279,11 @@ else:
         device_type: str,
         mesh_shape: tuple[int, ...],
         *,
-        mesh_dim_names: Optional[tuple[str, ...]] = None,
-        backend_override: Optional[
-            dict[
-                Union[int, str],
-                Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
-            ]
-        ] = None,
+        mesh_dim_names: tuple[str, ...] | None = None,
+        backend_override: dict[
+            int | str, str | C10dBackend.Options | tuple[str, C10dBackend.Options]
+        ]
+        | None = None,
     ) -> DeviceMesh:
         """
         Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
@@ -1280,7 +1305,7 @@ else:
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
-            mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
+            mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign to each dimension
                 of the multi-dimensional array describing the layout of devices. Its length must match the length
                 of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
             backend_override (Dict[int | str, tuple[str, Options] | str | Options], optional): Overrides for some or all of

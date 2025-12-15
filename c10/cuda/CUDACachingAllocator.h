@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -262,11 +263,21 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support createOrIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  virtual void setUseOnOOM(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      bool use_on_oom) {
     TORCH_CHECK(
         false,
         name(),
         " does not yet support setUseOnOOM. "
+        "If you need it, please file an issue describing your use case.");
+  }
+  virtual void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setNoSplit. "
         "If you need it, please file an issue describing your use case.");
   }
 
@@ -295,7 +306,8 @@ class CUDAAllocator : public DeviceAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when,
-      bool clearHistory) = 0;
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
@@ -344,6 +356,13 @@ class CUDAAllocator : public DeviceAllocator {
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
+    c10::DeviceGuard device_guard({at::kCUDA, device});
+    size_t free = 0;
+    size_t total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&free, &total));
+    return {free, total};
+  }
 };
 
 // Allocator object, statically initialized
@@ -457,9 +476,15 @@ inline void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled,
+      context_recorder,
+      alloc_trace_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 inline void recordAnnotation(
@@ -504,10 +529,15 @@ inline void createOrIncrefPool(
     CUDAAllocator* allocator_ptr = nullptr) {
   get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
-inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  get()->setUseOnOOM(device, mempool_id);
+inline void setUseOnOOM(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    bool use_on_oom) {
+  get()->setUseOnOOM(device, mempool_id, use_on_oom);
 }
-
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
+}
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }
@@ -554,41 +584,7 @@ inline std::string getUserMetadata() {
 } // namespace c10::cuda::CUDACachingAllocator
 
 namespace c10::cuda {
-
 // Keep BC only
 using c10::CaptureId_t;
 using c10::MempoolId_t;
-
-// MemPool represents a pool of memory in a caching allocator. Currently,
-// it's just the ID of the pool object maintained in the CUDACachingAllocator.
-//
-// An allocator pointer can be passed to the MemPool to define how the
-// allocations should be done in the pool. For example: using a different
-// system allocator such as ncclMemAlloc.
-struct C10_CUDA_API MemPool {
-  MemPool(
-      CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true,
-      bool use_on_oom = false);
-  MemPool(const MemPool&) = delete;
-  MemPool(MemPool&&) = default;
-  MemPool& operator=(const MemPool&) = delete;
-  MemPool& operator=(MemPool&&) = default;
-  ~MemPool();
-
-  MempoolId_t id();
-  CUDACachingAllocator::CUDAAllocator* allocator();
-  int use_count();
-  c10::DeviceIndex device();
-  static MempoolId_t graph_pool_handle(bool is_user_created = true);
-
- private:
-  static std::atomic<CaptureId_t> uid_;
-  static std::atomic<CaptureId_t> uuid_;
-  CUDACachingAllocator::CUDAAllocator* allocator_;
-  bool is_user_created_;
-  MempoolId_t id_;
-  c10::DeviceIndex device_;
-};
-
 } // namespace c10::cuda

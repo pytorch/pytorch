@@ -10,7 +10,7 @@ from collections.abc import Sequence
 # targets fail to typecheck with:
 #     TypeError: Cannot create a consistent method resolution order (MRO) for
 #     bases Iterable, Generic
-from typing import cast, Generic, Iterable, Optional, TypeVar, Union  # noqa: UP035
+from typing import cast, Generic, Iterable, TypeVar  # noqa: UP035
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
@@ -205,7 +205,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.tensors[0].size(0)
 
 
@@ -228,7 +228,7 @@ class StackDataset(Dataset[_T_stack]):
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
 
-    datasets: Union[tuple, dict]
+    datasets: tuple | dict
 
     def __init__(self, *args: Dataset[_T_co], **kwargs: Dataset[_T_co]) -> None:
         if args:
@@ -292,7 +292,7 @@ class StackDataset(Dataset[_T_stack]):
         tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._length
 
 
@@ -327,7 +327,7 @@ class ConcatDataset(Dataset[_T_co]):
                 raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
@@ -374,7 +374,7 @@ class ChainDataset(IterableDataset):
                 raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
-    def __len__(self):
+    def __len__(self) -> int:
         total = 0
         for d in self.datasets:
             if not isinstance(d, IterableDataset):
@@ -387,6 +387,22 @@ class Subset(Dataset[_T_co]):
     r"""
     Subset of a dataset at specified indices.
 
+    .. note::
+        When subclassing `Subset` and overriding `__getitem__`, you **must** also
+        override `__getitems__` to ensure `DataLoader` works correctly with your
+        custom logic. If you override only `__getitem__`, a `NotImplementedError`
+        will be raised when using `DataLoader`.
+
+        A simple implementation of `__getitems__` can delegate to `__getitem__`:
+
+        .. code-block:: python
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        For better performance, consider implementing batch-aware logic in
+        `__getitems__` instead of calling `__getitem__` multiple times.
+
     Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
@@ -398,6 +414,20 @@ class Subset(Dataset[_T_co]):
     def __init__(self, dataset: Dataset[_T_co], indices: Sequence[int]) -> None:
         self.dataset = dataset
         self.indices = indices
+
+        # Check if __getitem__ is overridden but __getitems__ is not
+        if (
+            type(self).__getitem__ is not Subset.__getitem__
+            and type(self).__getitems__ is Subset.__getitems__
+        ):
+            raise NotImplementedError(
+                f"{type(self).__name__} overrides __getitem__ but not __getitems__. "
+                "When subclassing Subset and overriding __getitem__, you must also override "
+                "__getitems__ to ensure DataLoader works correctly with your custom logic. "
+                "A simple implementation:\n\n"
+                "def __getitems__(self, indices):\n"
+                "    return [self.__getitem__(idx) for idx in indices]"
+            )
 
     def __getitem__(self, idx):
         if isinstance(idx, list):
@@ -412,14 +442,14 @@ class Subset(Dataset[_T_co]):
         else:
             return [self.dataset[self.indices[idx]] for idx in indices]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
 def random_split(
     dataset: Dataset[_T],
-    lengths: Sequence[Union[int, float]],
-    generator: Optional[Generator] = default_generator,
+    lengths: Sequence[int | float],
+    generator: Generator | None = default_generator,
 ) -> list[Subset[_T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.

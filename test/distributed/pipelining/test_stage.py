@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
 )
 from torch.utils._pytree import tree_map_only
 
@@ -34,7 +35,6 @@ chunks = 8
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
 
 torch.manual_seed(0)
 

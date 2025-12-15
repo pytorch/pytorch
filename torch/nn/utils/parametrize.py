@@ -5,7 +5,6 @@ import copyreg
 from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -26,7 +25,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: dict[tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[tuple[int, str], Tensor | None] = {}
 
 
 @contextmanager
@@ -72,7 +71,7 @@ def cached():
             _cache = {}
 
 
-def _register_parameter_or_buffer(module, name, X):
+def _register_parameter_or_buffer(module, name, X) -> None:
     if isinstance(X, Parameter):
         module.register_parameter(name, X)
     else:
@@ -122,7 +121,7 @@ class ParametrizationList(ModuleList):
     def __init__(
         self,
         modules: Sequence[Module],
-        original: Union[Tensor, Parameter],
+        original: Tensor | Parameter,
         unsafe: bool = False,
     ) -> None:
         # We require this because we need to treat differently the first parametrization
@@ -644,7 +643,7 @@ def register_parametrization(
     return module
 
 
-def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
+def is_parametrized(module: Module, tensor_name: str | None = None) -> bool:
     r"""Determine if a module has a parametrization.
 
     Args:
@@ -776,7 +775,7 @@ def type_before_parametrizations(module: Module) -> type:
 def transfer_parametrizations_and_params(
     from_module: Module,
     to_module: Module,
-    tensor_name: Optional[str] = None,
+    tensor_name: str | None = None,
 ) -> Module:
     r"""Transfer parametrizations and the parameters they parametrize from :attr:`from_module` to :attr:`to_module`.
 
@@ -796,7 +795,7 @@ def transfer_parametrizations_and_params(
         assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
 
         # get list of all params or the single param to transfer
-        parameters_to_transfer: Union[list, ModuleDict] = (
+        parameters_to_transfer: list | ModuleDict = (
             from_module.parametrizations if tensor_name is None else [tensor_name]
         )
 

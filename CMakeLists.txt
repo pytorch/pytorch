@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
-    11
+    17
     CACHE STRING
           "The C standard whose features are requested to build this target.")
 
@@ -171,6 +171,7 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 set(CPU_POWER OFF)
+set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
@@ -178,6 +179,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(riscv64)")
+  set(CPU_RISCV ON)
 endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
@@ -212,7 +215,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
@@ -234,7 +237,17 @@ option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
+
+# Track whether USE_CUDA was explicitly set by the user (before option() is called)
+# If USE_CUDA is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_CUDA})
+  set(_USE_CUDA_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_CUDA_EXPLICITLY_SET FALSE)
+endif()
+
 option(USE_CUDA "Use CUDA" ON)
+
 option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
@@ -317,8 +330,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
@@ -726,6 +739,44 @@ if(NOT DEFINED USE_BLAS)
   set(USE_BLAS ON)
 endif()
 
+# Prioritized Text Linker Optimization
+if(USE_PRIORITIZED_TEXT_FOR_LD)
+
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+
+  execute_process(
+    COMMAND ${Python_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
+            --filein "${LINKER_SCRIPT_FILE_IN}"
+            --fout  "${LINKER_SCRIPT_FILE_OUT}"
+    RESULT_VARIABLE _gen_result
+    OUTPUT_VARIABLE _gen_output
+    ERROR_VARIABLE  _gen_error
+  )
+
+  if(NOT _gen_result EQUAL 0)
+    message(FATAL_ERROR
+      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
+  endif()
+
+  append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
+  append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
+  append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
+
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+
+else()
+  if(LINUX AND CPU_AARCH64)
+    message(WARNING [[
+    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+    ]])
+  endif()
+endif()
+
 # Build libtorch mobile library, which contains ATen/TH ops and native support
 # for TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE)
@@ -849,9 +900,9 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
-    "x64 operating system is required for FBGEMM. "
+    "x86_64 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -1166,41 +1217,6 @@ else()
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  vst1q_f32_x2(a, v);
-  return 0;
-}"
-    HAS_VST1)
-
-  if(NOT HAS_VST1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  vld1q_f32_x2(a);
-  return 0;
-}"
-    HAS_VLD1)
-
-  if(NOT HAS_VLD1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
-  endif()
-endif()
-
 # Add code coverage flags to supported compilers
 if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
@@ -1392,9 +1408,6 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
-include(cmake/Summary.cmake)
-caffe2_print_configuration_summary()
-
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
   string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
@@ -1434,56 +1447,5 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-if(USE_PRIORITIZED_TEXT_FOR_LD)
-  add_compile_options(
-    $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
-    $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
-  )
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
-  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
-
-  add_custom_command(
-    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py --filein "${LINKER_SCRIPT_FILE_IN}" --fout "${LINKER_SCRIPT_FILE_OUT}"
-    DEPENDS ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py "${LINKER_SCRIPT_FILE_IN}"
-    COMMENT "Generating prioritized text linker files"
-    VERBATIM
-  )
-
-  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
-
-  if(BUILD_PYTHON)
-    set(LINKER_OPT_TARGETS torch_python)
-  endif()
-
-  if(NOT BUILD_LIBTORCHLESS)
-    list(APPEND LINKER_OPT_TARGETS torch_cpu c10)
-    if(USE_CUDA)
-      list(APPEND LINKER_OPT_TARGETS torch_cuda c10_cuda)
-    endif()
-    if(USE_XPU)
-      list(APPEND LINKER_OPT_TARGETS torch_xpu c10_xpu)
-    endif()
-    if(USE_ROCM)
-      list(APPEND LINKER_OPT_TARGETS torch_hip c10_hip)
-    endif()
-  endif()
-
-  foreach(tgt IN LISTS LINKER_OPT_TARGETS)
-    if(TARGET ${tgt})
-      add_dependencies("${tgt}" generate_linker_script)
-      target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
-      set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
-    else()
-       message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
-    endif()
-  endforeach()
-
-else()
-  if(LINUX AND CPU_AARCH64)
-    message(WARNING [[
-    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
-    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-    ]])
-  endif()
-endif()
+include(cmake/Summary.cmake)
+caffe2_print_configuration_summary()

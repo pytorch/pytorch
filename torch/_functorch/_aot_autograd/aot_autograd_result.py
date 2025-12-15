@@ -22,9 +22,10 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
@@ -510,6 +511,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
         )
+        compiled_fw_func._boxed_call = True
         disable_amp = torch._C._is_any_autocast_enabled()
 
         if needs_autograd:

@@ -75,7 +75,7 @@ class TestPrioritizations:
             return  # We don't need this test
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores.keys() if tr & test_run and tr != test_run
+            tr for tr in self._test_scores if tr & test_run and tr != test_run
         ]
 
         # Set the score of all the tests that are covered by test_run to the same score
@@ -95,7 +95,7 @@ class TestPrioritizations:
             return
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores.keys() if tr & test_run
+            tr for tr in self._test_scores if tr & test_run
         ]
 
         for relevant_test_run in relevant_test_runs:

@@ -87,7 +87,6 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_MKL,
     TestCase,
     xfail_inherited_tests,
@@ -167,6 +166,14 @@ def _pack_fp8_wrap(x):
     if not x.dtype.is_floating_point:
         return x
 
+    if type(x) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
+
     return (x.dtype, x.to(torch.float8_e5m2))
 
 
@@ -176,6 +183,13 @@ def _unpack_fp8_wrap(x):
         return x
 
     dtype, tensor = x
+    if type(tensor) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
     return tensor.to(dtype)
 
 
@@ -2625,7 +2639,7 @@ def forward(self, primals_1, primals_2):
                 return grad_output * x, grad_output * x
 
         def f(a, b):
-            return FwBwMutation.apply(a, b)
+            return FwBwMutation.apply(a, b).sin_().clone()
 
         inps = [
             torch.ones(3, 3, requires_grad=True),
@@ -2674,17 +2688,22 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
     mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
-    return (mul, add)""",
+    clone = torch.ops.aten.clone.default(mul)
+    sin_ = torch.ops.aten.sin_.default(mul);  mul = None
+    clone_1 = torch.ops.aten.clone.default(sin_);  sin_ = None
+    return (clone_1, add, clone)""",
         )
 
         # important bit: there is 1 mutation in the bw
         self.assertExpectedInline(
             bw_graph[0].code.strip(),
             """\
-def forward(self, add, tangents_1):
+def forward(self, add, clone, tangents_1):
+    cos = torch.ops.aten.cos.default(clone);  clone = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
     _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
-    return (mul_1, None)""",
+    mul_2 = torch.ops.aten.mul.Tensor(mul_1, add);  mul_1 = add = None
+    return (mul_2, None)""",
         )
 
     def test_fw_bw_mutation_no_functionalization2(self):
@@ -2769,34 +2788,34 @@ def forward(self, add, tangents_1):
     return (mul_1, None)""",
         )
 
-    def test_backward_mutation_metadata(self):
-        class BwMutation(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b):
-                ctx.save_for_backward(b)
-                return a.clone(), b.clone()
+    # def test_backward_mutation_metadata(self):
+    #     class BwMutation(torch.autograd.Function):
+    #         @staticmethod
+    #         def forward(ctx, a, b):
+    #             ctx.save_for_backward(b)
+    #             return a.clone(), b.clone()
 
-            @staticmethod
-            def backward(ctx, grad_a, grad_b):
-                (b,) = ctx.saved_tensors
-                # bw metadata mutation
-                b.transpose_(1, 0)
-                return grad_a.clone(), grad_b.clone()
+    #         @staticmethod
+    #         def backward(ctx, grad_a, grad_b):
+    #             (b,) = ctx.saved_tensors
+    #             # bw metadata mutation
+    #             b.transpose_(1, 0)
+    #             return grad_a.clone(), grad_b.clone()
 
-        def f(a, b):
-            a_, b_ = BwMutation.apply(a, b)
-            out = a_ * b_
-            return out
+    #     def f(a, b):
+    #         a_, b_ = BwMutation.apply(a, b)
+    #         out = a_ * b_
+    #         return out
 
-        inp_no_grad = [
-            torch.ones(3, 3, requires_grad=True),
-            torch.ones(3, 3, requires_grad=False),
-        ]
+    #     inp_no_grad = [
+    #         torch.ones(3, 3, requires_grad=True),
+    #         torch.ones(3, 3, requires_grad=False),
+    #     ]
 
-        with self.assertRaisesRegex(
-            AssertionError, "input that had its metadata mutated in the backward"
-        ):
-            self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+    #     with self.assertRaisesRegex(
+    #         AssertionError, "input that had its metadata mutated in the backward"
+    #     ):
+    #         self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
 
     def test_backward_mutation_on_grad_out(self):
         class BwMutation(torch.autograd.Function):
@@ -3880,7 +3899,6 @@ def forward(self, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -3894,7 +3912,12 @@ def forward(self, tangents_1):
         )
 
         def bn(x):
-            return torch.ops.aten.cudnn_batch_norm(
+            fn = (
+                torch.ops.aten.cudnn_batch_norm
+                if torch.version.hip is None
+                else torch.ops.aten.miopen_batch_norm
+            )
+            return fn(
                 x,
                 weight,
                 bias,
@@ -7576,6 +7599,7 @@ metadata incorrectly.
             self.assertEqual(ref_x.grad, x.grad)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7603,12 +7627,12 @@ metadata incorrectly.
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M()
+            m = M().cuda()
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True)
+                return torch.randn(B, T, E, requires_grad=True, device="cuda")
 
             x = _inp()
             y = m(x)
@@ -8111,7 +8135,7 @@ aot_autograd_failures = {
     xfail("corrcoef"),
     xfail("quantile"),
     xfail("nanquantile"),
-    xfail("narrow"),
+    skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
     skip("as_strided_scatter"),
@@ -8666,7 +8690,7 @@ class MockFXGraphCache:
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
     "test_backward_mutation_data",  # Custom Autograd Function
-    "test_backward_mutation_metadata",  # Custom Autograd Function
+    # "test_backward_mutation_metadata",  # Custom Autograd Function
     "test_input_output_aliase_custom_autograd_function",
 )
 

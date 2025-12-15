@@ -149,7 +149,7 @@ def create_torch_export_error_report(
     *,
     export_status: ExportStatus,
     profile_result: str | None,
-):
+) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# PyTorch ONNX Conversion Error Report\n\n")
         f.write(_format_export_status(export_status))
@@ -175,7 +175,7 @@ def create_onnx_export_report(
     model: ir.Model | None = None,
     registry: _registration.ONNXRegistry | None = None,
     verification_result: str | None = None,
-):
+) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# PyTorch ONNX Conversion Report\n\n")
         f.write(_format_export_status(export_status))

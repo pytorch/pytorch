@@ -109,18 +109,18 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 # Ok to skip, the file will be removed by tempfile
                 pass
     args = [flamegraph_script, "--countname", "bytes"]
-    p = subprocess.Popen(
+    with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
-    )
-    assert p.stdin is not None
-    assert p.stdout is not None
-    p.stdin.write(flamegraph_lines)
-    p.stdin.close()
-    result = p.stdout.read()
-    p.stdout.close()
-    p.wait()
-    assert p.wait() == 0
-    return result
+    ) as p:
+        assert p.stdin is not None
+        assert p.stdout is not None
+        p.stdin.write(flamegraph_lines)
+        p.stdin.close()
+        result = p.stdout.read()
+        p.stdout.close()
+        p.wait()
+        assert p.wait() == 0
+        return result
 
 
 def _write_blocks(f, prefix, blocks):
@@ -751,10 +751,10 @@ if __name__ == "__main__":
 
     def _read(name):
         if name == "-":
-            f = sys.stdin.buffer
+            data = pickle.load(sys.stdin.buffer)
         else:
-            f = open(name, "rb")
-        data = pickle.load(f)
+            with open(name, "rb") as f:
+                data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data

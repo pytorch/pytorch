@@ -4,7 +4,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/hip/HIPBlas.h>
 #include <ATen/native/hip/ck_types.h>
-
+#include <c10/util/Exception.h>
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
@@ -151,12 +151,7 @@ void bgemm_kernel_impl(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
     b_element_op,
     cde_element_op
   );
-  if(!gemm.IsSupportedArgument(argument))
-  {
-      throw std::runtime_error(
-          "wrong! device_gemm with the specified compilation parameters does "
-          "not support this GEMM problem");
-  }
+  TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
   auto stream = at::cuda::getCurrentHIPStream().stream();
   invoker.Run(argument, StreamConfig{stream, false});
 }

@@ -14,8 +14,9 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
-from collections.abc import Callable
-from typing import Any, Sequence, TYPE_CHECKING, Union
+import sys
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -28,7 +29,7 @@ from ..exc import (
     handle_observed_exception,
     ObservedUserStopIteration,
     raise_observed_exception,
-    unimplemented_v2,
+    unimplemented,
     UserError,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -63,8 +64,8 @@ class ItertoolsVariable(VariableTracker):
         # See also: module `torch._dynamo.polyfills.itertools`
 
         if self.value is itertools.product:
-            if any(kw != "repeat" for kw in kwargs.keys()):
-                unimplemented_v2(
+            if any(kw != "repeat" for kw in kwargs):
+                unimplemented(
                     gb_type="Unsupported kwargs for itertools.product",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation=f"Expected kwargs: 'repeat', but got "
@@ -72,7 +73,7 @@ class ItertoolsVariable(VariableTracker):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
-            if "repeat" in kwargs.keys():
+            if "repeat" in kwargs:
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
@@ -82,7 +83,8 @@ class ItertoolsVariable(VariableTracker):
                 for item in itertools.product(*seqs, repeat=r)
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value is itertools.combinations
@@ -98,11 +100,12 @@ class ItertoolsVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.groupby:
-            if any(kw != "key" for kw in kwargs.keys()):
-                unimplemented_v2(
+            if any(kw != "key" for kw in kwargs):
+                unimplemented(
                     gb_type="Unsupported kwargs for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation=f"Expected kwargs: 'key', but got "
@@ -113,10 +116,10 @@ class ItertoolsVariable(VariableTracker):
             def retrieve_const_key(key: VariableTracker) -> Any:
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
-                elif isinstance(key, variables.ConstantVariable):
+                elif key.is_python_constant():
                     return key.as_python_constant()
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Unsupported key type for itertools.groupby",
                         context=f"call_function {self} {args} {kwargs}",
                         explanation="Dynamo does not know how to trace "
@@ -128,7 +131,7 @@ class ItertoolsVariable(VariableTracker):
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Dynamo does not know how to trace "
@@ -173,7 +176,7 @@ class ItertoolsVariable(VariableTracker):
                         )
                     )
             except Exception as e:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unexpected failure during itertools.groupby() iteration",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Unexpected failure in invoking function during groupby",
@@ -181,7 +184,8 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(
-                result, mutation_type=ValueMutationNew()
+                result,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.repeat:
             if len(args) < 2:
@@ -212,7 +216,8 @@ class ItertoolsVariable(VariableTracker):
                 )
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         else:
             return super().call_function(tx, args, kwargs)
@@ -223,7 +228,7 @@ class IteratorVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unimplemented next() call",
             context=f"next({self})",
             explanation="This abstract method must be implemented",
@@ -258,7 +263,7 @@ class IteratorVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
@@ -518,12 +523,21 @@ class MapVariable(ZipVariable):
         )
         codegen(self.fn)
         self.reconstruct_items(codegen)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(self.iterables) + 1),
-                *create_call_function_ex(False, False),
-            ]
-        )
+        codegen.append_output(create_build_tuple(len(self.iterables) + 1))
+        if self.strict:
+            assert sys.version_info >= (3, 14), (
+                "Unexpected bug: map(strict=True) requires Python 3.14+"
+            )
+            codegen.extend_output(
+                [
+                    codegen.create_load_const("strict"),
+                    codegen.create_load_const(self.strict),
+                    create_instruction("BUILD_MAP", arg=1),
+                    *create_call_function_ex(True, False),
+                ]
+            )
+        else:
+            codegen.extend_output(create_call_function_ex(False, False))
 
 
 class FilterVariable(IteratorVariable):
@@ -581,12 +595,12 @@ class FilterVariable(IteratorVariable):
         while True:
             item = _next()
             self.index += 1
-            if isinstance(self.fn, ConstantVariable) and self.fn.value is None:
+            if self.fn.is_constant_none():
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})
             pred_res = variables.UserFunctionVariable(
-                polyfills.predicate
+                polyfills.predicate  # type: ignore[arg-type]
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item

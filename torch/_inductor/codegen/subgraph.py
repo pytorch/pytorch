@@ -1,6 +1,7 @@
 import itertools
 import logging
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch._inductor.config as config
@@ -21,6 +22,22 @@ from torch._inductor.virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+
+def inline_subgraph_to_ir_nodes(
+    gm: torch.fx.GraphModule, inputs: list[Any], name: str
+) -> Any:
+    """Inline a subgraph by converting its FX operations to individual IR nodes.
+
+    This converts a subgraph to multiple ComputedBuffer nodes (fusable),
+    enabling epilogue fusion with subsequent operations.
+
+    Returns:
+        TensorBox containing the final operation result as individual IR nodes
+    """
+    from torch._inductor.lowering import process_subgraph_nodes
+
+    return process_subgraph_nodes(gm, inputs)
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -54,15 +71,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
 
+        # Cache compiled module to avoid recompiling on every benchmark call
+        self._compiled_module: Any = None
+        self._compiled_sym_inputs: list[Any] | None = None
+
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        # Codegen Subgraph for benchmarking
-        # Need GraphLowering instead of SubgraphLowering to generate
-        # fully callable module
-        import torch._inductor.config as inductor_config
+    def _compile_for_benchmarking(self, *args: list[Any]) -> tuple[Any, list[Any]]:
+        """
+        Compile the subgraph for benchmarking and return (module, sym_inputs).
+
+        TODO: Add precompile() method to enable parallel compilation of all choices
+        before benchmarking.
+        """
         from torch._inductor.graph import GraphLowering
+
+        safe_name = self.name.replace("::", "_").replace(".", "_")
 
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
@@ -73,7 +98,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=f"benchmark_{safe_name}",
         )
 
         for sym_inp in self.sym_inputs:
@@ -99,23 +124,55 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(
+            with config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
-                bm_func = mod.call
 
-                bm_func([*sym_inputs, *args])
+        return mod, sym_inputs
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """
+        Regular benchmarking: compile and use benchmarker with warmup/rep.
+        """
+        if self._compiled_module is None:
+            mod, sym_inputs = self._compile_for_benchmarking(*args)
+            self._compiled_module = mod
+            self._compiled_sym_inputs = sym_inputs
+        else:
+            mod = self._compiled_module
+            sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
+
+        bm_func = mod.call
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+        return benchmarker.benchmark(
+            # Shallow clone args since bm_func may clear args
+            lambda: bm_func([*sym_inputs, *args]),
+            device=benchmarker.infer_device(*sym_inputs, *args),
+        )
 
-        if self.layout.device.type == "cpu":
-            return benchmarker.benchmark_cpu(lambda: bm_func([*sym_inputs, *args]))
+    def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
+        """
+        Only run once with cached compiled module.
+        Called by benchmark_collective_choice which handles warmup
+        and timing with barrier synchronization across all ranks.
+        """
+        if self._compiled_module is None:
+            mod, sym_inputs = self._compile_for_benchmarking(*args)
+            self._compiled_module = mod
+            self._compiled_sym_inputs = sym_inputs
         else:
-            return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
+            mod = self._compiled_module
+            sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
+
+        bm_func = mod.call
+        bm_func([*sym_inputs, *args])
 
     def hash_key(self) -> str:
         return "-".join(
@@ -211,7 +268,7 @@ class SubgraphTemplate(KernelTemplate):
         decompositions: list[Callable[..., Any]],
         input_nodes: list[Buffer],
         non_tensor_args: list[dict[str, Any]],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -260,7 +317,14 @@ class SubgraphTemplate(KernelTemplate):
                 # decomp_kwargs contains all merged parameters: CustomOpConfig params + runtime kwargs
                 from torch.fx.experimental.proxy_tensor import make_fx
 
-                return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
+                from ..decomposition import select_decomp_table
+
+                decomposition_table = select_decomp_table()
+
+                return make_fx(
+                    functools.partial(decomp, **decomp_kwargs),
+                    decomposition_table=decomposition_table,
+                )(*args)
 
             # Generate descriptive name for this variant
             variant_name = self._generate_variant_name(decomp, decomp_kwargs)
@@ -326,7 +390,7 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         function_decomposition: Callable[..., Any],
         kwargs: dict[str, Any],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available.
         Note that the Subgraph assumes custom ops return exactly one tensor output.

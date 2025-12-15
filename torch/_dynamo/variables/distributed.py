@@ -20,7 +20,8 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from typing import Any, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -28,7 +29,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -56,7 +57,7 @@ class DistributedVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="torch.distributed package is not available!",
                 context="",
                 explanation="The PyTorch package doesn't include torch.distributed when building from source.",
@@ -73,6 +74,15 @@ class DistributedVariable(VariableTracker):
     def is_available() -> bool:
         # check if the distributed package is available or not
         return torch.distributed.is_available()
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 def is_from_local(value: object) -> bool:
@@ -211,7 +221,7 @@ class PlacementVariable(DistributedVariable):
             try:
                 value_type = type(self.value)
                 if inspect.getattr_static(value_type, "__getattr__", None) is not None:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Placement with custom __getattr__ not supported",
                         context=f"{value_type.__name__} with custom __getattr__",
                         explanation="Dynamo does not support Placement types with custom __getattr__ methods",
@@ -317,6 +327,14 @@ class DeviceMeshVariable(DistributedVariable):
             )
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
+        if name == "_flatten":
+            from .builder import SourcelessBuilder
+
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return SourcelessBuilder.create(
+                tx, self.value._flatten(*const_args, **const_kwargs)
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -393,7 +411,7 @@ class BackwardHookVariable(VariableTracker):
         user_pre_hooks: VariableTracker,
     ) -> "BackwardHookVariable":
         if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Module-level backwards hooks require compiled autograd.",
                 context="",
                 explanation="",

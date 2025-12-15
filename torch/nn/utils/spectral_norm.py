@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 import torch
 import torch.nn.functional as F
@@ -268,7 +268,7 @@ def spectral_norm(
     name: str = "weight",
     n_power_iterations: int = 1,
     eps: float = 1e-12,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> T_module:
     r"""Apply spectral normalization to a parameter in the given module.
 

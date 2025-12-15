@@ -1,6 +1,7 @@
 import contextlib
 import logging
-from typing import Any, Callable, cast, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, cast, Optional, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -369,7 +370,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         cur_idx = bias_start_idx
         for inp_idx in range(self.gemm_grouped_num):
             inp = None
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             if self.has_bias[inp_idx]:
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1

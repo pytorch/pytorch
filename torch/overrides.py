@@ -25,11 +25,12 @@ import __future__  # noqa: F404
 import collections
 import contextlib
 import functools
+import sys
 import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -119,7 +120,7 @@ def get_ignored_functions() -> set[Callable]:
     False
     """
     Tensor = torch.Tensor
-    return {
+    functions = {
         torch.typename,
         torch.is_tensor,
         torch.is_storage,
@@ -221,8 +222,11 @@ def get_ignored_functions() -> set[Callable]:
         torch.ones,
         torch.promote_types,
         torch.rand,
+        torch.rand_like,
         torch.randn,
+        torch.randn_like,
         torch.randint,
+        torch.randint_like,
         torch.randperm,
         torch.range,
         torch.result_type,
@@ -249,6 +253,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.grouped_mm,
         torch.nn.functional.scaled_grouped_mm,
         torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
@@ -379,6 +384,11 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.to_padded_tensor,
         Tensor._use_count,
     }
+
+    if sys.version_info >= (3, 14):
+        functions.add(Tensor.__annotate__)
+
+    return functions
 
 
 @functools.cache
@@ -1075,9 +1085,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.rad2deg: lambda input, out=None: -1,
-        torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
@@ -1602,7 +1609,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Optional[Callable[[Any], type]] = None,
+    get_type_fn: Callable[[Any], type] | None = None,
 ) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 

@@ -32,18 +32,7 @@
  * This header adds some polyfills with C++17 functionality
  */
 
-namespace c10 {
-
-// std::is_pod is deprecated in C++20, std::is_standard_layout and
-// std::is_trivial are introduced in C++11, std::conjunction has been introduced
-// in C++17.
-template <typename T>
-using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-
-template <typename T>
-constexpr bool is_pod_v = is_pod<T>::value;
-
-namespace guts {
+namespace c10::guts {
 
 #if defined(__HIP__)
 
@@ -72,8 +61,6 @@ C10_HOST_DEVICE constexpr auto apply(F&& f, Tuple&& t) {
 
 #endif
 
-} // namespace guts
-
-} // namespace c10
+} // namespace c10::guts
 
 #endif // C10_UTIL_CPP17_H_

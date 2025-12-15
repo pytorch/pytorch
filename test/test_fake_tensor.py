@@ -1862,7 +1862,7 @@ class FakeTensorPropTest(TestCase):
             for k in sd:
                 _read_tensor_and_check(k, sd_loaded, all_bytes, "cuda")
 
-        for k in sd.keys():
+        for k in sd:
             sd[k] = sd[k].to("cuda")
 
         with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
@@ -2482,7 +2482,7 @@ class FakeTensorDispatchCache(TestCase):
 
         def count_invoke_subgraph_keys():
             invoke_subgraph_keys = 0
-            for cache_key in FakeTensorMode.cache.keys():
+            for cache_key in FakeTensorMode.cache:
                 if isinstance(cache_key.key[0], torch._ops.HigherOrderOperator):
                     invoke_subgraph_keys += 1
             return invoke_subgraph_keys

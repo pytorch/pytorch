@@ -155,7 +155,7 @@ class NaNChecker:
 
         self.output_names = [node.name for node in output_nodes]
 
-    def prep_with_inputs(self, inputs: tuple[torch.Tensor]) -> None:
+    def prep_with_inputs(self, inputs: tuple[torch.Tensor, ...]) -> None:
         if not self.accumulate_grad:
             # Using .grad, nothing to prep
             return
@@ -171,7 +171,7 @@ class NaNChecker:
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
 
-    def check(self, out: tuple[torch.Tensor]) -> None:
+    def check(self, out: tuple[torch.Tensor, ...]) -> None:
         if self.accumulate_grad:
             # Using .backward, graph outputs are empty
             assert not out
@@ -419,6 +419,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
+        # pyrefly: ignore [bad-return]
         return (
             str(CompileContext.current_compile_id()),
             inputs,
@@ -755,7 +756,6 @@ class AutogradCompilerInstance:
         self, fn: Callable[..., Any], args: Any, output_metadata: Sequence[Any]
     ) -> Sequence[torch.Tensor]:
         """Proxies a call to fn(*args) into the graph"""
-        flat_args, _ = pytree.tree_flatten(args)
         proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", fn, args=proxy_args, kwargs={}
@@ -996,7 +996,7 @@ class AutogradCompilerInstance:
         sizes_node = next(it)
         assert sizes_node.name == "sizes"
 
-        for getitem_node in sizes_node.users.keys():
+        for getitem_node in sizes_node.users:
             assert getitem_node.target is operator.getitem
             if getitem_node.users:
                 used_sizes.append(getitem_node)

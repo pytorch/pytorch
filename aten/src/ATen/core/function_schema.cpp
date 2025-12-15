@@ -7,7 +7,7 @@
 namespace c10 {
 
 void FunctionSchema::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) const {
@@ -210,9 +210,9 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
 
   out << schema.name();
   if (!schema.overload_name().empty()) {
-    out << "." << schema.overload_name();
+    out << '.' << schema.overload_name();
   }
-  out << "(";
+  out << '(';
 
   bool seen_kwarg_only = false;
   for (const auto i : c10::irange(schema.arguments().size())) {
@@ -273,7 +273,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   }
 
   if (need_paren) {
-    out << "(";
+    out << '(';
   }
   for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
@@ -288,7 +288,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
     out << "...";
   }
   if (need_paren) {
-    out << ")";
+    out << ')';
   }
   return out;
 }
@@ -471,7 +471,7 @@ bool FunctionSchema::isForwardCompatibleWith(
     if (!arguments().at(i).isForwardCompatibleWith(old.arguments().at(i))) {
       if (why_not) {
         why_not
-            << "'" << arguments().at(i).name() << "'"
+            << '\'' << arguments().at(i).name() << '\''
             << " is not forward compatible with the older version of the schema";
       }
       return false;
@@ -511,7 +511,7 @@ bool FunctionSchema::isForwardCompatibleWith(
              .isForwardCompatibleWith(old.arguments().at(i))) {
       if (why_not) {
         why_not << "Out argument '"
-                << "'" << arguments().at(i).name()
+                << '\'' << arguments().at(i).name()
                 << " is not FC with the older version of the schema";
       }
       return false;

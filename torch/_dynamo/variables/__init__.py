@@ -49,6 +49,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -64,6 +65,8 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
@@ -113,7 +116,6 @@ from .misc import (
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -197,7 +199,6 @@ __all__ = [
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",

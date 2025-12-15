@@ -37,7 +37,6 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "linux.c7i.12xlarge"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '9.0'
@@ -53,7 +52,7 @@ jobs:
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist.outputs.test-matrix }}
     secrets: inherit

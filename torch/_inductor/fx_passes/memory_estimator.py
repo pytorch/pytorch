@@ -1,8 +1,8 @@
 import itertools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import torch
 import torch.fx as fx
@@ -202,6 +202,7 @@ def build_memory_profile(
         memory_profile.append(current_memory)
 
         # Process deallocations
+        # pyrefly: ignore [bad-assignment]
         for storage_key in alias_info.get_storages_last_used(node):
             allocator = alias_info.storage_to_allocator[storage_key]
             if is_releasable(allocator):

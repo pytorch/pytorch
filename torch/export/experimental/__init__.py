@@ -86,14 +86,10 @@ def _export_forward_backward(
 
 def _sticky_export(
     forward_func: typing.Callable[_InputT, _RetT],
-    dynamic_shapes_callback: typing.Optional[
-        typing.Callable[
-            _InputT,
-            typing.Union[
-                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
-            ],
-        ]
-    ] = None,
+    dynamic_shapes_callback: typing.Callable[
+        _InputT, list[typing.Any] | dict[str, typing.Any] | tuple[typing.Any, ...]
+    ]
+    | None = None,
 ) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
@@ -399,7 +395,7 @@ class _ExportPackage:
         ):
             zip_ref.extractall(base_directory)
 
-        example_inputs_map: typing.Optional[dict[str, int]] = (
+        example_inputs_map: dict[str, int] | None = (
             {} if package_example_inputs else None
         )
         use_cuda = False
@@ -420,13 +416,15 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
+        # Detect if ROCm is being used
+        is_hip = torch.version.hip is not None
+        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map
+            package_name, model_names, use_cuda, example_inputs_map, is_hip
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)

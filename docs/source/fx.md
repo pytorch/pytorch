@@ -1096,6 +1096,10 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. autofunction:: torch.fx.traceback.annotate
 ```
+```{eval-rst}
+.. autofunction:: torch.fx.passes.tools_common.stable_topological_sort
+```
+
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1124,7 +1128,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_generator
 .. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_transformation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.operation
-.. py:module:: torch.fx.experimental.migrate_gradual_types.transform_to_z3
 .. py:module:: torch.fx.experimental.migrate_gradual_types.util
 .. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
 .. py:module:: torch.fx.experimental.normalize
@@ -1134,7 +1137,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
-.. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.experimental.unification.match
@@ -1144,7 +1146,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
 .. py:module:: torch.fx.experimental.unification.multipledispatch.utils
 .. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
-.. py:module:: torch.fx.experimental.unification.unification_tools
 .. py:module:: torch.fx.experimental.unification.utils
 .. py:module:: torch.fx.experimental.unification.variable
 .. py:module:: torch.fx.experimental.unify_refinements

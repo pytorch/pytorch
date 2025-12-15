@@ -54,13 +54,11 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.pruning.scheduler
 .. py:module:: torch.ao.pruning.sparsifier
 .. py:module:: torch.ao.nn.intrinsic.modules.fused
-.. py:module:: torch.ao.nn.intrinsic.qat.modules.conv_fused
 .. py:module:: torch.ao.nn.intrinsic.qat.modules.linear_fused
 .. py:module:: torch.ao.nn.intrinsic.qat.modules.linear_relu
 .. py:module:: torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu
 .. py:module:: torch.ao.nn.intrinsic.quantized.modules.bn_relu
 .. py:module:: torch.ao.nn.intrinsic.quantized.modules.conv_add
-.. py:module:: torch.ao.nn.intrinsic.quantized.modules.conv_relu
 .. py:module:: torch.ao.nn.intrinsic.quantized.modules.linear_relu
 .. py:module:: torch.ao.nn.qat.dynamic.modules.linear
 .. py:module:: torch.ao.nn.qat.modules.conv

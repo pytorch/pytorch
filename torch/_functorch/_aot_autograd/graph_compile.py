@@ -25,6 +25,9 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+import threading
+from contextlib import contextmanager
+
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -97,6 +100,54 @@ from .utils import (
 )
 
 
+_thread_local = threading.local()
+
+
+@contextmanager
+def maybe_skip_decompose(aot_config: AOTConfig):
+    old_decomp = aot_config.decompositions
+    try:
+        if config.selective_decompose:
+            aot_config.decompositions = {}
+        yield
+    finally:
+        aot_config.decompositions = old_decomp
+
+
+# Saved tensor hooks context
+# Compiled saved tensor hooks are convenient way to inline some logic in the graphs
+# for saved nodes from forward to backward. (E.g. activations quantization)
+# In base implementation user does not have any additional information about saved value
+# in the hook, except FakeTensor shape, dtype, device etc.
+# _get_saved_tensor_hook_context gives additional graph information about that saved value,
+# that can be used to make a decisions which pack/unpack to apply for particular saved value.
+# This allows user to reuse saved tensors hooks api to apply selective pack/unpack in
+# graph aware way.
+# Alternative to this will be making user to write a custom pass that mucks with forward outputs,
+# backward input metadata, which requires significantly more effort.
+#
+# As for now in context we expose forward graph, backward graph and current saved node,
+# which contains node.meta with additional information about that fx.Node.
+# Warning: This API may change without backward compatibility.
+@contextmanager
+def _saved_tensor_hook_context(state: dict[str, Any]):
+    previous_state = getattr(_thread_local, "state", None)
+    try:
+        _thread_local.state = state
+        yield
+    finally:
+        # Clean up: restore previous state or remove attribute
+        if previous_state is not None:
+            _thread_local.state = previous_state
+        else:
+            if hasattr(_thread_local, "state"):
+                delattr(_thread_local, "state")
+
+
+def _get_saved_tensor_hook_context() -> dict[str, Any] | None:
+    return getattr(_thread_local, "state", None)
+
+
 zip = strict_zip
 
 log = logging.getLogger(__name__)
@@ -156,11 +207,28 @@ def aot_stage1_graph_capture(
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
-    if aot_state.needs_autograd and not aot_config.pre_dispatch:
-        # FYI: this being moved to trigger in export is new, seems fine!
-        with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+
+    with maybe_skip_decompose(aot_config):
+        # if config.selective_decompose, skip decomposition and apply selective_decompose
+        # after we get the joint graph. See [Note: Selective Decomposition] for details.
+        if aot_state.needs_autograd and not aot_config.pre_dispatch:
+            # FYI: this being moved to trigger in export is new, seems fine!
+            with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+                (
+                    graph,
+                    updated_flat_args,
+                    updated_flat_args_descs,
+                    maybe_subclass_meta,
+                ) = aot_dispatch_autograd_graph(
+                    flat_fn,
+                    aot_state.flat_args,
+                    aot_state.flat_args_descs,
+                    aot_config,
+                    fw_metadata=aot_state.fw_metadata,
+                )
+        else:
             graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-                aot_dispatch_autograd_graph(
+                aot_dispatch_base_graph(
                     flat_fn,
                     aot_state.flat_args,
                     aot_state.flat_args_descs,
@@ -168,15 +236,24 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
-    else:
-        graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-            aot_dispatch_base_graph(  # type: ignore[assignment]
-                flat_fn,
-                aot_state.flat_args,
-                aot_state.flat_args_descs,
-                aot_config,
-                fw_metadata=aot_state.fw_metadata,
-            )
+            # Apply AC rematerialization to forward+loss+bwd graph
+            if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
+                from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
+                    remat_using_tags_for_fwd_loss_bwd_graph,
+                )
+
+                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
+
+    if config.selective_decompose:
+        from torch.fx.experimental.proxy_tensor import selective_decompose
+        from torch.fx.passes.regional_inductor import _needs_inductor_compile
+
+        graph = selective_decompose(
+            graph,
+            *updated_flat_args,
+            decomposition=aot_config.decompositions,
+            should_decompose=_needs_inductor_compile,
+            trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
         )
 
     return AOTGraphCapture(
@@ -203,7 +280,10 @@ def aot_stage2_export(
     # We still run these wrappers to make sure that they're not needed pre compile,
     # but we technically don't need to run them post compile at all here.
     compiled_fn, aot_state.fw_metadata = post_compile(
-        wrappers, graph, aot_config, runtime_metadata=aot_state.fw_metadata
+        wrappers,
+        graph,  # pyrefly: ignore [bad-argument-type]
+        aot_config,
+        runtime_metadata=aot_state.fw_metadata,
     )
 
     # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
@@ -605,6 +685,48 @@ def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
     return out
 
 
+def _get_partition_fn(fw_hop_node, aot_config):
+    """
+    Return either the default `partition_fn` in aot_config or a HOP specific partition
+    function.
+
+    If a HOP specific partition function is returned, used_hop_custom_partition is True.
+
+    See Note [InvokeSubgraphHOP Partitioner]
+    """
+    used_hop_custom_partition = False
+    partition_fn: Callable[..., tuple[torch.fx.GraphModule, torch.fx.GraphModule]] = (
+        aot_config.partition_fn
+    )
+    if (
+        fw_hop_node.target == torch._higher_order_ops.invoke_subgraph
+        and "custom" in fw_hop_node.meta
+        and "nested_region_config" in fw_hop_node.meta["custom"]
+    ):
+        hop_partition_fn = fw_hop_node.meta["custom"][
+            "nested_region_config"
+        ].partitioner
+        if hop_partition_fn is None:
+            # inherit the parent paritioner
+            return used_hop_custom_partition, partition_fn
+
+        if callable(hop_partition_fn):
+            partition_fn = hop_partition_fn  # pyrefly: ignore [bad-assignment]
+            used_hop_custom_partition = True
+        else:
+            assert isinstance(hop_partition_fn, str)
+            match hop_partition_fn:
+                case "default_partition":
+                    partition_fn = torch._functorch.partitioners.default_partition
+                case "min_cut_rematerialization_partition":
+                    partition_fn = torch._functorch.partitioners.min_cut_rematerialization_partition
+                case _:
+                    raise ValueError(
+                        f"Unknown HOP partitioner config: {hop_partition_fn}"
+                    )
+    return used_hop_custom_partition, partition_fn
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -709,13 +831,26 @@ def run_joint_graph_passes_on_hops(
         # TODO: invoke_subgraph should track which of its inputs static indices
         # so it can propagate them to the partitioner (and use in cudagraphs)
         static_lifetime_input_indices: list[int] = []
-        # Step 2) and 3) - Run joint graph passes and partitioner
-        new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
-            joint_hop_gm,
-            [],
-            num_fwd_outputs=num_fw_outputs,
-            static_lifetime_input_indices=static_lifetime_input_indices,
+
+        used_hop_custom_partition, partition_fn = _get_partition_fn(
+            fw_hop_node, aot_config
         )
+
+        # Step 2) and 3) - Run joint graph passes and partitioner
+        try:
+            new_fw_hop_gm, new_bw_hop_gm = partition_fn(
+                joint_hop_gm,
+                [],
+                num_fwd_outputs=num_fw_outputs,
+                static_lifetime_input_indices=static_lifetime_input_indices,
+            )
+        except Exception as e:
+            if used_hop_custom_partition:
+                raise RuntimeError(
+                    f"Error in custom partition function for invoke_subgraph node {fw_hop_node.name}: {e}"
+                ) from e
+            else:
+                raise
 
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
@@ -1097,7 +1232,11 @@ def maybe_inline_graph_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        pack_out_val = pack_hook_gm(val)
+        def _get_extra_info() -> dict[str, Any]:
+            return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
+
+        with _saved_tensor_hook_context(_get_extra_info()):
+            pack_out_val = pack_hook_gm(val)
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1109,16 +1248,17 @@ def maybe_inline_graph_saved_tensors_hooks(
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
 
-        pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-        pack_g = pack_gm.graph
-        maybe_log_graph(
-            pack_gm,
-            f"saved_tensors_pack_hook {saved.name}",
-            aot_config,
-            lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
-            structured_logs,
-        )
-        pack_out_val = pack_gm(val)
+        with _saved_tensor_hook_context(_get_extra_info()):
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
+                structured_logs,
+            )
+            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
@@ -1188,15 +1328,16 @@ def maybe_inline_graph_saved_tensors_hooks(
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
         # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-        unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
-        unpack_g = unpack_gm.graph
-        maybe_log_graph(
-            unpack_gm,
-            f"saved_tensors_unpack_hook {saved.name}",
-            aot_config,
-            lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
-            structured_logs,
-        )
+        with _saved_tensor_hook_context(_get_extra_info()):
+            unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
+            unpack_g = unpack_gm.graph
+            maybe_log_graph(
+                unpack_gm,
+                f"saved_tensors_unpack_hook {saved.name}",
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
+                structured_logs,
+            )
 
         def find_saved_in_bw_inputs(bw_inputs):
             for n in bw_inputs:
@@ -1873,6 +2014,7 @@ def _aot_stage2b_bw_compile(
             saved_compile_context = CompileContext.try_get()
 
             lazy_backward_info = AutogradLazyBackwardCompileInfo(
+                # pyrefly: ignore [bad-argument-type]
                 bw_module,
                 placeholder_list,
                 saved_context,

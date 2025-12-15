@@ -6,8 +6,9 @@ import os
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
