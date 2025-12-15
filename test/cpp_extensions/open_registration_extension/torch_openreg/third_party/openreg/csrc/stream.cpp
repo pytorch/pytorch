@@ -110,9 +110,6 @@ orError_t orEventRecord(orEvent_t event, orStream_t stream) {
   if (!event || !stream)
     return orErrorUnknown;
 
-  if (event->impl->device_index != stream->device_index)
-    return orErrorUnknown;
-
   auto event_impl = event->impl;
   event_impl->completed.store(false);
   auto record_task = [event_impl]() {
@@ -267,9 +264,6 @@ orError_t orStreamSynchronize(orStream_t stream) {
 
 orError_t orStreamWaitEvent(orStream_t stream, orEvent_t event, unsigned int) {
   if (!stream || !event)
-    return orErrorUnknown;
-
-  if (event->impl->device_index != stream->device_index)
     return orErrorUnknown;
 
   auto event_impl = event->impl;

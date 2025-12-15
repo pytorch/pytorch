@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import logging
 from enum import Enum
@@ -270,7 +269,7 @@ def propagate_addmm(addmm_node):
         if not (meta := get_chunking_meta(addmm_node)):
             return PropagateStatus.SUCCEED_NO_CHANGE
 
-        if meta.chunk_by_dim(0):
+        if meta.chunked_by_dim(0):
             # if the output is chunked by the batch dimension, then
             # bias and input should as well
             changed = (

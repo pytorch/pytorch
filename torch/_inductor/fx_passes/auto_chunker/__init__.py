@@ -28,10 +28,20 @@ prims = torch.ops.prims
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 
+def decide_num_chunks(gm: GraphModule) -> int:
+    # TODO: this is just a placeholder for now.
+    # We should either create heuristics or do autotuning to
+    # decide the number of chunks.
+    return 8
+
+
 def chunk(gm: GraphModule) -> GraphModule:
     """
-    Chunk input tensor for operations that amplifies the tensor size significantly.
-    Only chunk across the batch dimension of the tensor.
+    Chunk input tensors for operations that amplify the tensor size significantly.
+    The chunking operation is propagated thru the fx graph until a point we should
+    re-generate non-chunked tensors.
+
+    Only chunk across the batch dimension of the tensor for now.
     """
     graph = gm.graph
 
@@ -40,8 +50,7 @@ def chunk(gm: GraphModule) -> GraphModule:
         return gm
 
     if len(get_tangent_nodes(gm.graph)) == 0:
-        # no tangents. Can be the optimizer graph
-        # skip
+        # no tangents. Can be the optimizer graph. Skip chunking
         return gm
 
     if log.isEnabledFor(logging.DEBUG):
@@ -52,7 +61,7 @@ def chunk(gm: GraphModule) -> GraphModule:
         raise CantChunk("Skip chunking due to no amplifier node found")
 
     if not all(isinstance(s, int) for s in amplifier_node.meta["val"].shape):
-        raise CantChunk("Can ot chunk due to dynamic shape")
+        raise CantChunk("Can't chunk due to dynamic shape")
 
     propagate(amplifier_node)
     if not tangent_has_chunking_meta(gm):
@@ -61,6 +70,8 @@ def chunk(gm: GraphModule) -> GraphModule:
             "because the chunking metadata does not propagate to the backward "
             "(e.g. due to too trivial loss function)"
         )
-    out_gm = ChunkingApplier(gm, config.auto_chunker.num_chunk or 8).apply()
+
+    num_chunks = config.auto_chunker.num_chunk or decide_num_chunks(gm)
+    out_gm = ChunkingApplier(gm, num_chunks).apply()
     metrics.num_auto_chunking += 1
     return out_gm

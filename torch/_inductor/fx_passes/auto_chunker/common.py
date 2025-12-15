@@ -1,8 +1,11 @@
-# mypy: allow-untyped-defs
-import dataclasses
-from typing import Optional
+from __future__ import annotations
 
-from torch.fx import Node
+import dataclasses
+from typing import Any, Optional, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from torch.fx import Node
 
 
 class CantChunk(RuntimeError):
@@ -11,8 +14,8 @@ class CantChunk(RuntimeError):
 
 @dataclasses.dataclass
 class ChunkingMeta:
-    # The value of the node should be scaled by the specified scalar
-    # tensor. Need this sine we pretend tangent to be 1 first and
+    # The value of the current node having this ChunkingMeta should be scaled by the specified scalar
+    # tensor in the `scale_by` field. Need this since we pretend tangent to be 1 first and
     # scale the affected tensor later. Need propagate such information
     # to downstream.
     scale_by: Optional[Node] = None
@@ -25,30 +28,38 @@ class ChunkingMeta:
     # chunk at the 'chunk_dim' dimension.
     chunk_dim: Optional[int] = None
 
-    # The original tensor is the sum of each tensor in the chunk subgraph.
-    # chunk_dim should be None if need_sum is True
+    # The original tensor is the sum of each tensor in the chunking subgraph.
+    # `chunk_dim` and `need_sum` are exclusive! A node can not have both a non
+    # None chunk_dim and a need_sum with True value.
     #
     # Note for some special cases like the tangent placeholder node, both
     # chunk_dim can be None and need_sum can be false, but scale_by
     # in that case is the tangent node itself.
     need_sum: bool = False
 
-    def copy(self, **kwargs):
+    def __post_init__(self) -> None:
+        assert self.chunk_dim is None or not self.need_sum, (
+            f"Can not have both a non-None chunk_dim and a true need_sum: {self.chunk_dim}"
+        )
+
+    def copy(self, **kwargs: Any) -> ChunkingMeta:
         meta = ChunkingMeta(**self.__dict__)
         for k, v in kwargs.items():
             setattr(meta, k, v)
         return meta
 
     @staticmethod
-    def equal(lhs_meta, rhs_meta, skip_scale_by=False):
+    def equal(
+        lhs_meta: ChunkingMeta, rhs_meta: ChunkingMeta, skip_scale_by: bool = False
+    ) -> bool:
         if skip_scale_by:
             lhs_meta = lhs_meta.copy(scale_by=None)
             rhs_meta = rhs_meta.copy(scale_by=None)
         return lhs_meta == rhs_meta
 
-    def chunk_by_dim(self, dim: int):
+    def chunked_by_dim(self, dim: int) -> bool:
         return self.chunk_dim == dim
 
     @staticmethod
-    def is_nop(meta):
+    def is_nop(meta: ChunkingMeta) -> bool:
         return meta is None or meta == ChunkingMeta()

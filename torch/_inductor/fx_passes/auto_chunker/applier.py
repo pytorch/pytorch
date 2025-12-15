@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-# mypy: disable-error-code=union-attr
 import copy
 import logging
 import operator

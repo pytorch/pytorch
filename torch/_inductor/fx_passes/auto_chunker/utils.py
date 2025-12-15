@@ -159,7 +159,7 @@ def is_chunked_by_dim(node: Node, dim: int) -> bool:
     from .core import get_chunking_meta
 
     meta = get_chunking_meta(node)
-    return meta and meta.chunk_by_dim(dim)
+    return meta and meta.chunked_by_dim(dim)
 
 
 def tangent_has_chunking_meta(gm: GraphModule) -> bool:
