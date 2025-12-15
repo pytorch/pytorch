@@ -273,13 +273,14 @@ def _base_worker_loop(
     shared_rng=None,
     worker_method="multiprocessing",
     watchdog_constructor=None,
-    pin_memory=False,
+    post_fetch_fn=None,
 ) -> None:
     """
     Base worker loop with common functionality for both process and thread workers.
 
     Args:
         worker_method: The worker method ("multiprocessing", "thread")
+        post_fetch_fn: Optional callback to process data after fetching (e.g., pin_memory for thread workers)
     """
     try:
         torch.set_num_threads(1)
@@ -369,17 +370,15 @@ def _base_worker_loop(
                 try:
                     data = fetcher.fetch(data_index)  # type: ignore[possibly-undefined]
 
-                    # Pin memory after fetching if enabled (for thread workers only)
-                    if (
-                        pin_memory
-                        and worker_method == "thread"
-                        and not isinstance(data, ExceptionWrapper)
+                    # Apply post-fetch processing if provided (e.g., pin_memory for thread workers)
+                    if post_fetch_fn is not None and not isinstance(
+                        data, ExceptionWrapper
                     ):
                         try:
-                            data = pin_memory_module.pin_memory(data)
+                            data = post_fetch_fn(data)
                         except Exception:
                             data = ExceptionWrapper(
-                                where=f"in pin_memory for DataLoader {error_prefix} {worker_id}"
+                                where=f"in {post_fetch_fn.__name__} for DataLoader {error_prefix} {worker_id}"
                             )
                 except Exception as e:
                     if (
@@ -558,6 +557,11 @@ def _thread_worker_loop(
 
     _thread_local_worker_info.worker_info = worker_info
 
+    # Create a post-fetch function for pin_memory if enabled
+    post_fetch_fn = None
+    if pin_memory:
+        post_fetch_fn = pin_memory_module.pin_memory
+
     # Use the common base worker loop with thread-specific settings
     _base_worker_loop(
         dataset_kind=dataset_kind,
@@ -576,5 +580,5 @@ def _thread_worker_loop(
         shared_rng=None,  # Not used for thread workers
         worker_method="thread",
         watchdog_constructor=None,  # No watchdog needed for threads
-        pin_memory=pin_memory,
+        post_fetch_fn=post_fetch_fn,
     )
