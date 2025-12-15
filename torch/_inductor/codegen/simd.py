@@ -2680,7 +2680,10 @@ class SIMDScheduling(BaseScheduling):
                 )
                 for snode in node_schedule:
                     if isinstance(snode, scheduler.SchedulerNode):
-                        snode.apply_new_loop_order([1, 0])
+                        # Only swap if node has exactly 2 pointwise dimensions
+                        pw_ranges, _ = snode.get_ranges()
+                        if len(pw_ranges) == 2:
+                            snode.apply_new_loop_order([1, 0])
 
         tiling_var: Optional[sympy.Expr] = (
             None

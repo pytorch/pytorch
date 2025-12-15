@@ -637,14 +637,10 @@ def extract_normalized_read_writes(
         )
 
         # Detect variables that indirect accesses are broadcast over
+        # We'll map them to normalized vars after computing var_map
+        indirect_broadcast: OrderedSet[sympy.Symbol] = OrderedSet()
         if body.indirect_vars:
             indirect_broadcast = find_indirect_broadcast_vars(body, list(iter_vars))
-            # Map the broadcast vars from the node's iter_vars to the normalized vars
-            # We need to find which normalized var corresponds to each iter_var
-            # For now, we track these and will map them later
-            for i, v in enumerate(iter_vars):
-                if v in indirect_broadcast and i < len(norm_pw_vars):
-                    all_indirect_broadcast_vars.add(norm_pw_vars[i])
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))
@@ -673,6 +669,17 @@ def extract_normalized_read_writes(
             new_ranges,
             return_getters_groups,
         )
+
+        # Map indirect broadcast vars to normalized vars using var_map
+        # Only add when there's a direct 1:1 mapping (single normalized var)
+        if indirect_broadcast:
+            norm_pw_var_set = OrderedSet(norm_pw_vars)
+            for v in indirect_broadcast:
+                if v in var_map:
+                    mapped_expr = var_map[v]
+                    norm_vars_in_expr = mapped_expr.free_symbols & norm_pw_var_set
+                    if len(norm_vars_in_expr) == 1:
+                        all_indirect_broadcast_vars.update(norm_vars_in_expr)
 
         # We create Identity sympy.Functions to prevent expansion to int64,
         # unwrap for tiling analysis.
