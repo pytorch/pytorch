@@ -1165,18 +1165,24 @@ class DebugMode(TorchDispatchMode):
                 for i, a in enumerate(func._schema.arguments):
                     # Annoying, async_op is not a kwarg in the non-functional collectives.
                     # I'm using OpOverload._schema to figure out if it exists
-                    if (
-                        a.name == "async_op"
-                        and type(a.type) is torch.BoolType
-                        and i < len(args)
-                        and args[i]
-                    ):
-                        for t in tree_leaves(result):
+                    if a.name == "async_op" and type(a.type) is torch.BoolType:
+                        # Determine async_op value from args, kwargs, or default
+                        if i < len(args):
+                            async_op_value = args[i]
+                        elif "async_op" in kwargs:
+                            async_op_value = kwargs["async_op"]
+                        elif a.has_default_value():
+                            async_op_value = a.default_value
+                        else:
+                            async_op_value = False
+
+                        if async_op_value:
                             for item in result:
                                 if isinstance(item, torch.ScriptObject) and hasattr(
                                     item, "wait"
                                 ):
                                     item.wait()
+                        break
             out["hash"] = _tree_hash(result)
 
             if tree_all(lambda x: x is None, out.values()):
