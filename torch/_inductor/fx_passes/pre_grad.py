@@ -342,7 +342,6 @@ def pre_grad_passes(
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
             config.pre_grad_custom_pass
         )
-
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
