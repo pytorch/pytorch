@@ -29,10 +29,12 @@ from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 def maybe_dupe_op(x):
     y = x + 1
     z = x + 2
+    y_clone = y.clone()
+    z_clone = z.clone()
     if x.numel() < 5:
-        return y.clone(), y.clone()
+        return y_clone, y_clone
     else:
-        return y.clone(), z.clone()
+        return y_clone, z_clone
 
 
 def is_dynamic_shape_test(test_name):
