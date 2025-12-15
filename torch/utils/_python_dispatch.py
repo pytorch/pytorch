@@ -797,7 +797,10 @@ def autograd_would_have_decomposed(
             backend_key = torch._C._parse_dispatch_key(
                 torch._C._dispatch_key_for_device(a.device.type)
             )
-            assert backend_key is not None
+            if backend_key is None:
+                raise AssertionError(
+                    f"failed to parse dispatch key for device {a.device.type}"
+                )
             # TODO: use func.has_kernel_for_dispatch_key(backend_key)
             # but this one checks py_impl and CompositeImplicitAutograd
             # incorrectly shows up as has backend reg here
