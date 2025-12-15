@@ -30,7 +30,7 @@ static const std::unordered_map<
     };
 
 
-// This is the heursitic to choose a kernel based on inputs
+// This is the heuristic to choose a kernel based on inputs
 BGEMMKernel_BFloat16 dispatch_bfloat16_bgemm(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // Optional/future use: directly lookup shape tuples to map to instances
   /*

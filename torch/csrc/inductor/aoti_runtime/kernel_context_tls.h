@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdio>
+#include <filesystem>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -8,9 +11,42 @@ namespace torch::aot_inductor {
 struct KernelContext {
   std::string kernel_name;
   std::string python_stack;
+  std::string compressed_python_stack;
 
   KernelContext(std::string name, std::string stack)
-      : kernel_name(std::move(name)), python_stack(std::move(stack)) {}
+      : kernel_name(std::move(name)), python_stack(std::move(stack)) {
+    compressed_python_stack = compress_python_stack(python_stack);
+  }
+
+  KernelContext(const KernelContext&) = default;
+  KernelContext& operator=(const KernelContext&) = default;
+  KernelContext(KernelContext&&) = default;
+  KernelContext& operator=(KernelContext&&) = default;
+
+ private:
+  static std::string compress_python_stack(const std::string& stack) {
+    namespace fs = std::filesystem;
+    char func[129];
+    char path[1025];
+    uint32_t line;
+    int ret;
+    std::string compressed_stack;
+    std::stringstream stream{stack};
+    std::string str;
+    std::string fmt = "File \"%1024[^\"]\", line %u, in %128[^\n]\n";
+    while (std::getline(stream, str)) {
+      ret = sscanf(str.c_str(), fmt.c_str(), path, &line, func);
+      if (ret == 3) {
+        compressed_stack += func;
+        compressed_stack += ' ';
+        compressed_stack += fs::path{path}.filename();
+        compressed_stack += ':';
+        compressed_stack += std::to_string(line);
+        compressed_stack += '\n';
+      }
+    }
+    return compressed_stack;
+  }
 };
 
 // Thread-local pointer

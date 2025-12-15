@@ -1355,11 +1355,11 @@ static bool get_local_results(
             " in DTensor op is not supported");
         result.push_back(default_tensor(item));
       }
-      stack->push_back(std::move(result));
+      stack->emplace_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->push_back(default_tensor(spec));
+      stack->emplace_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
     } else if (PyTuple_Check(spec.ptr())) {
@@ -1426,6 +1426,17 @@ py::object dispatchDTensorOp(
 
   torch::jit::Stack saved_args = *stack;
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
+  // In the original Python implementation of DTensor dispatch, the creation
+  // of OpInfo (which includes the OpSchema computed here) never fails. However,
+  // C++ support for all the features of OpSchema are not supported; in this
+  // case opt_native_op_schema is nullopt.  In this case, we need to fallback
+  // to the Python logic for doing so.  If you are comparing against the old
+  // Python code, this is a bit tricky, since the Python 'dispatch' function
+  // has been completely deleted.
+
+  // First, we will try to short-circuit Python entirely using the fast path.
+  // Here, we never materialize OpInfo, we generate a gimped NativeOpSchema
+  // object which has exactly the information you need to do a hash lookup.
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
@@ -1433,42 +1444,40 @@ py::object dispatchDTensorOp(
     cached_sharding =
         native_sharding_propagator_cache->find(opt_native_op_schema->first);
   }
+
   py::object py_op_info;
   if (!cached_sharding) {
+    // OK, the C++ fastpath failed.  Let's use the Python path to generate the
+    // OpInfo (which is guaranteed to work), which we will need to either
+    // redo the cache lookup or compute the value for real.
     py_op_info = checked_vectorcall(
         op_dispatcher.attr("unwrap_to_op_info").ptr(),
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr());
 
-    // Use Python-side LRU cache when native cache is not available
-    if (!opt_native_op_schema.has_value()) {
-      py::object sharding_propagator =
-          op_dispatcher.attr("sharding_propagator");
-      checked_vectorcall(
-          sharding_propagator.attr("propagate").ptr(), py_op_info.ptr());
-      cached_sharding =
-          py_op_info.attr(dtensor_interned_strings.output_sharding);
-    } else {
-      // Use non-cached path for native cache (will be cached after this call)
-      py::object sharding = checked_vectorcall(
-          op_dispatcher
-              .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
-              .ptr(),
-          py_op.ptr(),
-          args.ptr(),
-          kwargs.ptr(),
-          py_op_info.ptr());
-      if (!py::isinstance(sharding, get_output_sharding_class())) {
-        stack->clear();
-        return sharding;
-      }
-      cached_sharding = sharding;
+    py::object sharding = checked_vectorcall(
+        op_dispatcher.attr("_propagate_op_sharding_dispatch_slow_path").ptr(),
+        py_op.ptr(),
+        args.ptr(),
+        kwargs.ptr(),
+        py_op_info.ptr(),
+        /*try_cache*/ !opt_native_op_schema.has_value() ? Py_True : Py_False);
+    // This is a hack, because the dispatch slow path sometimes returns
+    // a sharding result (in which case we need to keep going) but it
+    // will sometimes just decompose and directly return a Tensor result,
+    // in which case we should return immediately.  In this case, sharding
+    // is not a sharding at all; it's the real result!
+    if (!py::isinstance(sharding, get_output_sharding_class())) {
+      stack->clear();
+      return sharding;
+    }
+    cached_sharding = sharding;
+    if (opt_native_op_schema.has_value()) {
       native_sharding_propagator_cache->insert(
           std::move(opt_native_op_schema->first), std::move(sharding));
-      py_op_info.attr(dtensor_interned_strings.output_sharding) =
-          cached_sharding;
     }
+    py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
   }
 
   const auto get_py_op_info_if_needed = [&, &args = args, &kwargs = kwargs]() {
@@ -1854,9 +1863,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
     const auto& cpp_placement = placement.cast<const distributed::Placement&>();
-    if (const auto* cpp_shard =
-            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
-      const auto shard_dim = cpp_shard->dim;
+    if (typeid(cpp_placement) == typeid(distributed::Shard) ||
+        typeid(cpp_placement) == typeid(distributed::StridedShard)) {
+      const auto shard_dim = py::cast<int64_t>(placement.attr("dim"));
       TORCH_CHECK(
           shard_dim >= 0,
           "Shard placements should have negative dims normalized in the user-facing APIs: ",
