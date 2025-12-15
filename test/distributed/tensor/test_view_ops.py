@@ -987,6 +987,14 @@ class TestViewOps(DTensorTestBase):
             nelem_flatten = math.prod(tensor_dims_unflatten[flatten_start:flatten_end])
             tensor_dims_flatten = tensor_dims_unflatten[0:flatten_start] + [nelem_flatten] + tensor_dims_unflatten[flatten_end:]
             yield tensor_dims_unflatten, local_tensor_dims_unflatten, tensor_dims_flatten
+    
+    def generate_tensor_dims_1d_after_flatten(self, tensor_ndim, unflatten_dim, shard_dim, mesh):
+        tensor_dims = [mesh.size(0) * mesh.size(0)] * tensor_ndim
+        for unflatten_dim_value in [mesh.size(0) * mesh.size(0) - 1, mesh.size(0) * mesh.size(0), mesh.size(0) * mesh.size(0) + 1]:
+            for shard_dim_value in [mesh.size(0) * mesh.size(0) - 1, mesh.size(0) * mesh.size(0), mesh.size(0) * mesh.size(0) + 1]:
+                tensor_dims[unflatten_dim] = unflatten_dim_value
+                tensor_dims[shard_dim] = shard_dim_value
+            yield tensor_dims
 
 
     @with_comms
@@ -1003,6 +1011,7 @@ class TestViewOps(DTensorTestBase):
         # )
         # return
 
+        # flatten -> view -> unflatten
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
                 for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
@@ -1023,6 +1032,20 @@ class TestViewOps(DTensorTestBase):
                                     expected_placements,
                                     mesh,
                                 )
+        
+        # any factoring on unflatten_dim
+        for tensor_ndim in [2, 3, 4]:
+            for unflatten_dim in range(tensor_ndim):
+                for shard_dim in range(tensor_ndim):
+                    for tensor_dims in self.generate_tensor_dims_1d_after_flatten(tensor_ndim, unflatten_dim, shard_dim, mesh):
+                        placements = (Shard(shard_dim), )
+                        self._test_dtensor_unflatten_1d_shard_arbitrary(
+                            tensor_dims,
+                            unflatten_dim,
+                            placements,
+                            mesh,
+                        )
+
 
     def _test_dtensor_unflatten_1d_shard(self, tensor_dims_unflatten, local_tensor_dims_unflatten, tensor_dims_flatten, flatten_start, expected_placements, mesh):
         shard_dim = expected_placements[0].dim
@@ -1039,8 +1062,25 @@ class TestViewOps(DTensorTestBase):
         inps = distribute_tensor(global_inps, mesh, (Replicate(),)).redistribute(
             mesh, placements
         )
-        print(f"coordinate={mesh.get_coordinate()} inps._local_tensor: {inps._local_tensor.shape}", flush=True)
-        torch.distributed.barrier()
+        inps_viewed = inps.view(tensor_dims_unflatten)
+        self.assertEqual(inps_viewed.placements, expected_placements)
+    
+    def _test_dtensor_unflatten_1d_shard_arbitrary(self, tensor_dims, unflatten_dim, placement, mesh):
+        shard_dim = placements[0].dim
+        assert isinstance(placements[0], Shard) and not isinstance(placements[0], _StridedShard)
+        split_factor = math.prod(local_tensor_dims_unflatten[flatten_start:shard_dim])
+        if split_factor == 1:
+            assert shard_dim == flatten_start
+            placements = (Shard(flatten_start),)
+        else:
+            placements = (_StridedShard(flatten_start, split_factor=split_factor),)
+        nelem = math.prod(tensor_dims_flatten)
+        global_inps = torch.arange(nelem).view(
+            tensor_dims_flatten
+        )
+        inps = distribute_tensor(global_inps, mesh, (Replicate(),)).redistribute(
+            mesh, placements
+        )
         inps_viewed = inps.view(tensor_dims_unflatten)
         self.assertEqual(inps_viewed.placements, expected_placements)
 
