@@ -74,6 +74,7 @@ def pin_memory(data, device=None):
                 )
                 return clone
             else:
+                # pyrefly: ignore [bad-instantiation]
                 return type(data)(
                     # pyrefly: ignore [bad-argument-count]
                     {k: pin_memory(sample, device) for k, sample in data.items()}

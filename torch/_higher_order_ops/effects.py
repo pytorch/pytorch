@@ -91,6 +91,7 @@ class WithEffects(HigherOrderOperator):
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(token, op, *args, **kwargs)
 
 
@@ -112,11 +113,6 @@ def has_aliasing(op: OpType):
 
 
 def has_effects(op) -> bool:
-    # Skip over the profiler's RecordFunction as they should not show up in the graph
-    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
-    if op in _skip_ops:
-        return False
-
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
