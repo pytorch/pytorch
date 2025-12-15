@@ -77,7 +77,7 @@ dtype                                      description
   The `torch.float4_e2m1fn_x2` dtype represents two 4-bit values packed into a byte.
   Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
   operate at the byte boundary and will **not** unpack/repack sub-byte values.
-  
+
 
 **Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``,
 ``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``,
