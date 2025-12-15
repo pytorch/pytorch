@@ -14,7 +14,7 @@
 
     {% if HAS_SCORE_MOD %}
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=0,
@@ -30,7 +30,7 @@
     {{ set_cute_hash("score_mod", "score") }}
 
     @cute.jit
-    def score_mod_bwd(grad_score_mod_ssa, tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def score_mod_bwd(grad_score_mod_ssa, tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=1,
