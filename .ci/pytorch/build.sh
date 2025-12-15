@@ -237,7 +237,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
-  export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+  # TODO: toggling to off to see if it fixes linking issues.
+  export BUILD_STATIC_RUNTIME_BENCHMARK=OFF
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
