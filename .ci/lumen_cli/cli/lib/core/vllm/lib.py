@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
 
+
 def _load_vllm_test_library_yaml() -> dict[str, Any]:
     """
     Load the VLLM test library configuration from YAML file.
