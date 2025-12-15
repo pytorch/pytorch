@@ -19,6 +19,10 @@ Tensor mv_tensor_accessor_cpu(Tensor m, Tensor v) {
   STD_TORCH_CHECK(m.size(1) == v.size(0), "m.shape[1] == v.shape[0] must hold");
   STD_TORCH_CHECK(m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
   STD_TORCH_CHECK(m.device() == v.device(), "m and v must be on the same device");
+  // Test HeaderOnlyArrayRef equality operator on sizes()
+  STD_TORCH_CHECK(m.sizes() == m.sizes(), "sizes equality check failed");
+  STD_TORCH_CHECK(!(m.sizes() != m.sizes()), "sizes inequality check failed");
+  STD_TORCH_CHECK(m.sizes() != v.sizes(), "sizes of different shapes should not be equal");
   Tensor res = new_empty(m, {m.size(0)});
   THO_DISPATCH_V2(m.scalar_type(), "mv_tensor_accessor_cpu",
                   AT_WRAP(([&]() {
