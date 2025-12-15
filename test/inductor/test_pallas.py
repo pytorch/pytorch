@@ -853,6 +853,27 @@ if test_torchinductor.RUN_TPU and has_tpu_pallas():
                     fn, backend="inductor", options={"cpu_backend": "pallas"}
                 )(torch.randn(16), torch.randn(16))
 
+        def test_intentional_failure_for_cicd_verification(self):
+            """Intentionally failing test to verify CI/CD test execution.
+
+            This test is designed to fail to confirm that:
+            1. TPU Pallas tests are actually running in CI/CD
+            2. Test failures are properly detected and reported
+
+            Once CI/CD verification is complete, this test should be removed.
+            """
+            def fn(x):
+                return x + 1.0
+
+            compiled = self._compile(fn)
+
+            x = torch.randn(16, device=self.DEVICE)
+            result = compiled(x)
+
+            # Intentionally use wrong expected value to make test fail
+            wrong_expected = torch.zeros_like(x)
+            self.assertEqual(result, wrong_expected, msg="This test is intentionally failing for CI/CD verification")
+
 
 if __name__ == "__main__":
     run_tests(needs="filelock")
