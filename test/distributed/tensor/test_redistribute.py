@@ -547,15 +547,14 @@ class RedistributeTest(DTensorTestBase):
         debug_str = debug_mode.debug_string()
 
         # Verify optimization behavior
+        # The new _maybe_view_chunk_cat uses view operations (unflatten, movedim, flatten)
+        # and only adds a clone when the result would not be contiguous.
         if should_use_view:
-            # Should see 'view' but not 'split' or 'cat'
-            self.assertIn("aten::view", debug_str)
-            self.assertNotIn("aten::split", debug_str)
-            self.assertNotIn("aten::cat", debug_str)
+            # Should not see 'clone' (pure view path, no copy needed)
+            self.assertNotIn("aten::clone", debug_str)
         else:
-            # Should see 'split' and 'cat'
-            self.assertIn("aten::split", debug_str)
-            self.assertIn("aten::cat", debug_str)
+            # Should see 'clone' (need copy to make result contiguous)
+            self.assertIn("aten::clone", debug_str)
 
         # Verify correctness: result should have the right placements
         self.assertEqual(result.placements, placements_dst)
