@@ -500,8 +500,12 @@ class TracebackVariable(VariableTracker):
         elif name == "frame_summary":
             return self.frame_summary
         elif name == "tb_lasti":
-            # Not tracked for now, return a dummy value
-            return variables.ConstantVariable.create(-1)
+            unimplemented(
+                gb_type="traceback.tb_lasti not supported",
+                context=f"{self} accessing 'tb_lasti'",
+                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         return super().var_getattr(tx, name)
 
     def call_method(

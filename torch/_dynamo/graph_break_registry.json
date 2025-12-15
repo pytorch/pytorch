@@ -942,6 +942,17 @@
       "Hints": []
     }
   ],
+  "GB0095": [
+    {
+      "Gb_type": "Set Exception object `__traceback__` attribute to not-`None`",
+      "Context": "call_setattr {self} {name}",
+      "Explanation": "Dynamo does not support setting the attribute '__traceback__' on tracked exception objects to anything other than None.",
+      "Hints": [
+        "Avoid setting '__traceback__' on exception objects ",
+        "within traced code, or set it to None."
+      ]
+    }
+  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",
@@ -3254,6 +3265,16 @@
       "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB9625": [
+    {
+      "Gb_type": "traceback.tb_lasti not supported",
+      "Context": "{self} accessing 'tb_lasti'",
+      "Explanation": "Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
