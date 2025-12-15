@@ -4,7 +4,6 @@ import math
 import operator
 import weakref
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -97,7 +96,7 @@ class Transform:
 
     def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
-        self._inv: Optional[weakref.ReferenceType[Transform]] = None
+        self._inv: weakref.ReferenceType[Transform] | None = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -757,8 +756,8 @@ class AffineTransform(Transform):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
+        loc: Tensor | float,
+        scale: Tensor | float,
         event_dim: int = 0,
         cache_size: int = 0,
     ) -> None:
@@ -813,7 +812,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
+    def sign(self) -> Tensor | int:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -1087,7 +1086,7 @@ class CatTransform(Transform):
         self,
         tseq: Sequence[Transform],
         dim: int = 0,
-        lengths: Optional[Sequence[int]] = None,
+        lengths: Sequence[int] | None = None,
         cache_size: int = 0,
     ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1284,7 +1283,7 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
+    def domain(self) -> constraints.Constraint | None:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):
