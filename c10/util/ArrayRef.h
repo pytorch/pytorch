@@ -278,19 +278,18 @@ ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }
 
-// WARNING: Template instantiation will NOT be willing to do an implicit
-// conversions to get you to an c10::ArrayRef, which is why we need so
-// many overloads.
-
-template <typename T>
-bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
-  return a1.equals(a2);
-}
-
-template <typename T>
-bool operator!=(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
-  return !a1.equals(a2);
-}
+// NOTE: operator== and operator!= for ArrayRef<T> vs ArrayRef<T> are inherited
+// from HeaderOnlyArrayRef. ArrayRef implicitly converts to HeaderOnlyArrayRef,
+// so the base class operators work for ArrayRef comparisons as well.
+//
+// The std::vector comparison operators are also defined in HeaderOnlyArrayRef
+// for header-only users. However, we need these more specific ArrayRef
+// overloads to avoid ambiguity with OptionalArrayRef operators. When comparing
+// ArrayRef<T> with std::vector<T>, both the HeaderOnlyArrayRef operators (which
+// require ArrayRef->HeaderOnlyArrayRef conversion) and the OptionalArrayRef
+// operators (which require std::vector->OptionalArrayRef conversion) would be
+// equally good matches. These ArrayRef overloads are more specific (exact match
+// for ArrayRef) and thus preferred by overload resolution.
 
 template <typename T>
 bool operator==(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
