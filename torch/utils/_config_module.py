@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import pickle
+import threading
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -224,6 +225,7 @@ def install_config_module(module: ModuleType) -> None:
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
+    module._tl_overrides = threading.local()  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -344,6 +346,7 @@ class ConfigModule(ModuleType):
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
     # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
     _config: dict[str, _ConfigEntry]
+    _tl_overrides: threading.local
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
     _is_dirty: bool
@@ -379,6 +382,12 @@ class ConfigModule(ModuleType):
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
+
+            if (
+                getattr(self._tl_overrides, name, _UNSET_SENTINEL)
+                is not _UNSET_SENTINEL
+            ):
+                return getattr(self._tl_overrides, name)
 
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
@@ -734,11 +743,11 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override for k in changes}
             for k, v in changes.items():
-                self._config[k].user_override = v
+                setattr(self._tl_overrides, k, v)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    self._config[k].user_override = v
+                    setattr(self._tl_overrides, k, v)
 
             return revert
 

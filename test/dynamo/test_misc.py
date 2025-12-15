@@ -44,6 +44,7 @@ import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
+from torch._dynamo.comptime import comptime
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -6305,6 +6306,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         test_recompile(foo, exp_frame_count=1)
         torch._dynamo.reset()
         test_recompile(foo_graph_break, exp_frame_count=2)
+
+    def test_multithread_compile_dynamic(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x):
+            comptime.assert_static(x.shape[0])
+            return x * x
+
+        success = True
+
+        def run(offset):
+            for i in range(20):
+                print(f(torch.randn(i * 2 + offset)))
+
+        t1 = threading.Thread(target=run, args=[0])
+        t2 = threading.Thread(target=run, args=[1])
+
+        def exc_hook(x):
+            nonlocal success
+            success = False
+
+        try:
+            threading.excepthook = exc_hook
+            t1.start()
+            t2.start()
+
+            t1.join()
+            t2.join()
+        finally:
+            threading.excepthook = threading.__excepthook__
+        self.assertTrue(success)
 
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
