@@ -101,7 +101,12 @@ def create_dual_buffer_bias(num_heads=4, seq_len=512, dtype=torch.float16):
 
 
 def create_test_tensors(
-    batch_size=2, num_heads=4, seq_len=512, dim=64, dtype=torch.float16, device="cuda",
+    batch_size=2,
+    num_heads=4,
+    seq_len=512,
+    dim=64,
+    dtype=torch.float16,
+    device="cuda",
     requires_grad=False,
 ):
     shape = (batch_size, num_heads, seq_len, dim)
@@ -408,18 +413,21 @@ class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_with_score_mod(self, device, dtype):
         """Test that score_mod backward works correctly with FLASH backend."""
-        q, k, v = create_test_tensors(dtype=dtype, seq_len=257, device=device, requires_grad=True)
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
 
         def score_mod_twice(score, b, h, q_idx, kv_idx):
             return score * 2
 
         flash_vs_triton(q, k, v, score_mod=score_mod_twice)
 
-    @unittest.skip("NYI: score**2 bwd produces NaN due to 0*(-inf) at masked positions")
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_with_score_squared(self, device, dtype):
         """Test score**2 backward - requires correct score value for gradient."""
-        q, k, v = create_test_tensors(dtype=dtype, seq_len=257, device=device, requires_grad=True)
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
 
         def score_mod_squared(score, b, h, q_idx, kv_idx):
             return score * score
