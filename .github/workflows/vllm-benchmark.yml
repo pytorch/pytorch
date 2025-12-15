@@ -116,6 +116,7 @@ jobs:
 
       - name: Install benchmark dependencies
         shell: bash
+        run: |
           set -eux
           uv pip install pip
 
