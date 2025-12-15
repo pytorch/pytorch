@@ -299,6 +299,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
             )
 
+    def test_dynamo_side_effect(self):
+        class GlobalContext:
+            def __init__(self):
+                self._tensors = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                with GlobalContext() as ctx:
+                    z = x + 1
+                    ctx._tensors["6"] = x + 2
+                return z, ctx
+
+        mod = Module()
+        inp = torch.randn(4, 4)
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="warn"
+        ):
+            val = torch.compile(mod)(inp)
+            # Verify new object is properly initialized
+            self.assertIn("6", val[1]._tensors)
+            self.assertEqual(val[1]._tensors["6"], inp + 2)
+
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
         cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()

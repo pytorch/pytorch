@@ -1359,7 +1359,7 @@ class UserMethodVariable(UserFunctionVariable):
         self,
         fn: Callable[..., Any],
         obj: VariableTracker,
-        source_fn: Callable[..., Any] | None = None,
+        source_fn: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
