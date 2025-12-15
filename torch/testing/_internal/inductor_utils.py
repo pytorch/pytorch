@@ -180,12 +180,14 @@ requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires h
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
         if (
-            not torch.cuda.is_available()
-            or torch.cuda.get_device_properties().total_memory < min_mem_required
+            not torch.accelerator.is_available()
+            or torch.xpu.get_device_properties().total_memory if torch.xpu.is_available() else
+            torch.cuda.get_device_properties().total_memory < min_mem_required
         ):
             return unittest.skip(
                 f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
             )(fn)
+
         else:
             return fn
 

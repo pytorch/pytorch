@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 import inspect
 import contextlib
 import os
@@ -107,6 +107,8 @@ def evaluate_platform_supports_bf16():
     if torch.version.cuda:
         return SM80OrLater
     elif torch.version.hip:
+        return True
+    elif TEST_XPU:
         return True
     return False
 

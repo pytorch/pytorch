@@ -14,8 +14,10 @@ from torch._inductor.kernel.custom_op import (
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 
 
 torch.set_float32_matmul_precision("high")
@@ -27,8 +29,14 @@ class TestCustomOpAutoTune(TestCase):
     def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
-        self.device = "cuda" if HAS_GPU else "cpu"
-        self.dtype = torch.float16 if self.device == "cuda" else torch.float32
+        self.device = (
+            "cuda" if HAS_CUDA_AND_TRITON else "xpu" if HAS_XPU_AND_TRITON else "cpu"
+        )
+        self.dtype = (
+            torch.float16
+            if self.device == "cuda" or self.device == "xpu"
+            else torch.float32
+        )
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -142,7 +150,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return input_tensor, gate_weight, up_weight, down_weight
 
-    @skipIfXpu
     def test_rmsnorm_custom_op_autotune_with_dynamic_shape(self):
         """Test RMSNorm autotuning with multiple decomposition variants and dynamic shapes.
 
@@ -232,7 +239,6 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
-    @skipIfXpu
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
         dynamic config generation based on matmul input shapes.
@@ -353,7 +359,6 @@ class TestCustomOpAutoTune(TestCase):
                 msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
-    @skipIfXpu
     def test_multi_parameter_tuning(self):
         """Test autotuning with multiple parameters for combinatorial parameter exploration.
 

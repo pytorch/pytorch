@@ -2752,7 +2752,12 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    is_tf32 = (
+        torch.backends.cuda.matmul.allow_tf32
+        if torch.cuda.is_available()
+        else torch.xpu.is_tf32_supported()
+    )
+    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 

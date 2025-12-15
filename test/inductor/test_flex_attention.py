@@ -198,6 +198,7 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 device_configs = {}
@@ -225,11 +226,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda", "xpu"
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
