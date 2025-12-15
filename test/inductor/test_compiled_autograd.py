@@ -2353,7 +2353,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_basic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_basic",
+            name=f"test_autograd_cpp_node_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2430,7 +2430,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_id",
+            name=f"test_autograd_cpp_node_id_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2547,7 +2547,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_basic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_basic",
+            name=f"test_autograd_cpp_node_saved_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2613,7 +2613,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_dynamic",
+            name=f"test_autograd_cpp_node_saved_dynamic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2681,7 +2681,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_int",
+            name=f"test_autograd_cpp_node_saved_int_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2748,7 +2748,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_float",
+            name=f"test_autograd_cpp_node_saved_float_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2851,7 +2851,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_data_dependent",
+            name=f"test_autograd_cpp_node_data_dependent_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -5104,11 +5104,29 @@ def wrap_test_class(orig_cls):
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
-        orig_cls.__bases__,
+        (orig_cls,),
         dct,
     )
     cls.__file__ = __file__
     return cls
+
+
+class WrapTestClassTests(TestCase):
+    def test_wrap_preserves_inheritance_and_super(self):
+        class DummyTest(unittest.TestCase):
+            def runTest(self):
+                pass
+
+            def tearDown(self):
+                self.super_called = True
+                super().tearDown()
+
+        wrapped = wrap_test_class(DummyTest)
+        self.assertTrue(issubclass(wrapped, DummyTest))
+        test = wrapped("runTest")
+        test.setUp()
+        test.tearDown()
+        self.assertTrue(getattr(test, "super_called", False))
 
 
 known_graph_breaks_tests = {

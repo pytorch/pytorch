@@ -104,7 +104,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               return toPyObject(self->contains(
                   toIValue(std::move(elem), self->type()->getElementType())));
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -115,7 +115,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               auto value = self->getItem(idx);
               return toPyObject(value);
-            } catch (const std::out_of_range& e) {
+            } catch (const std::out_of_range&) {
               throw py::index_error();
             }
           },
@@ -151,9 +151,9 @@ void initScriptListBindings(PyObject* module) {
               self->setItem(
                   idx,
                   toIValue(std::move(value), self->type()->getElementType()));
-            } catch (const std::out_of_range& e) {
+            } catch (const std::out_of_range&) {
               throw py::index_error();
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -179,7 +179,7 @@ void initScriptListBindings(PyObject* module) {
                 self->setItem(
                     static_cast<ptrdiff_t>(start),
                     toIValue(value[i], self->type()->getElementType()));
-              } catch (const py::cast_error& e) {
+              } catch (const py::cast_error&) {
                 throw py::type_error();
               }
               start += step;
@@ -191,7 +191,7 @@ void initScriptListBindings(PyObject* module) {
              ScriptList::diff_type idx) {
             try {
               self->delItem(idx);
-            } catch (const std::out_of_range& e) {
+            } catch (const std::out_of_range&) {
               throw py::index_error();
             }
           })
@@ -207,7 +207,7 @@ void initScriptListBindings(PyObject* module) {
               return self->count(
                   toIValue(std::move(value), self->type()->getElementType()));
 
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -217,7 +217,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               return self->remove(
                   toIValue(std::move(value), self->type()->getElementType()));
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -227,7 +227,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               return self->append(
                   toIValue(std::move(value), self->type()->getElementType()));
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -239,7 +239,7 @@ void initScriptListBindings(PyObject* module) {
           [](const std::shared_ptr<ScriptList>& self, py::list list) {
             try {
               self->extend(toIValue(std::move(list), self->type()));
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })
@@ -255,7 +255,7 @@ void initScriptListBindings(PyObject* module) {
                     py::reinterpret_borrow<py::object>(obj),
                     self->type()->getElementType()));
               }
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
 
@@ -279,7 +279,7 @@ void initScriptListBindings(PyObject* module) {
               self->insert(
                   toIValue(std::move(obj), self->type()->getElementType()),
                   idx);
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
           })

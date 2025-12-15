@@ -7,18 +7,18 @@ import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
-import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
 def my_custom_function(x):
     return x + 1
 
 
-class DecoratorTests(torch._dynamo.test_case.TestCase):
+class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -44,31 +44,38 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         from torch.library import Library
 
         foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("custom(Tensor self) -> Tensor")
+        try:
+            foo.define("custom(Tensor self) -> Tensor")
 
-        # Dynamic shape data dependent operator. For static shape compilation, Dynamo
-        # should graph break on it. But, the meta kernel is not implemented properly.
-        @torch.library.impl(foo, "custom", "CPU")
-        def foo_cpu(x):
-            return x.nonzero()
+            # Dynamic shape data dependent operator. For static shape compilation, Dynamo
+            # should graph break on it. But, the meta kernel is not implemented properly.
+            @torch.library.impl(foo, "custom", "CPU")
+            def foo_cpu(x):
+                return x.nonzero()
 
-        # Disallow does not work because of extra python frames with torch.library python API
-        torch.ops.foo.custom = torch._dynamo.disable(torch.ops.foo.custom)
+            # Disallow does not work because of extra python frames with torch.library python API
+            orig_custom = torch.ops.foo.custom
+            try:
+                torch.ops.foo.custom = torch._dynamo.disable(torch.ops.foo.custom)
 
-        def fn(x):
-            a = torch.nn.functional.relu(x)
-            b = torch.ops.foo.custom(a)
-            c = torch.cos(b)
-            return c
+                def fn(x):
+                    a = torch.nn.functional.relu(x)
+                    b = torch.ops.foo.custom(a)
+                    c = torch.cos(b)
+                    return c
 
-        x = torch.randint(2, (100,))
-        ref = fn(x)
+                x = torch.randint(2, (100,))
+                ref = fn(x)
 
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        res = opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(ref, res)
+                cnts = torch._dynamo.testing.CompileCounter()
+                opt_fn = torch.compile(fn, backend=cnts)
+                res = opt_fn(x)
+                self.assertEqual(cnts.frame_count, 2)
+                self.assertEqual(ref, res)
+            finally:
+                torch.ops.foo.custom = orig_custom
+        finally:
+            foo._destroy()
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
@@ -329,10 +336,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -360,10 +368,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -396,10 +405,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -438,16 +448,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.p, pt.t), ()),
             lambda pt, _: PointTensor(pt[0], pt[1]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         def trace_point(p):
@@ -488,10 +500,16 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def __hash__(self):
                 return hash(self.n)
 
+            def __repr__(self):
+                return f"State({self.n})"
+
+            def __fx_repr__(self):
+                return f"State({self.n})", {"State": State}
+
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="value")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -592,10 +610,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
                 return t + self.n
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Num,
             lambda num: ((num.n,), ()),
             lambda n, _: Num(n[0]),
+            serialized_type_name=f"{Num.__module__}.{Num.__qualname__}",
         )
 
         def fn(x, n):
@@ -709,10 +728,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.p, pt.t), ()),
             lambda pt, _: PointTensor(pt[0], pt[1]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
         def trace_point(p):
@@ -784,7 +804,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="reference")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -802,7 +822,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn(
-                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                "An opaque object was created in the middle of the program.",
                 str(e),
             )
 
@@ -823,10 +843,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.t,), pt.p),
             lambda ts, p: PointTensor(p, ts[0]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace

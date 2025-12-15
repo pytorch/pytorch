@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -132,7 +132,7 @@ inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
-def cur_node_has_non_foreach_users():
+def cur_node_has_non_foreach_users() -> bool:
     for node in V.graph.current_node.users:
         for user in node.users:
             if not (user.op == "call_function" and (user.target in foreach_ops)):
@@ -144,7 +144,9 @@ def cur_node_has_non_foreach_users():
 # group by device, whether any of the inputs are dynamic
 # note arg_pairs may or may not be a pair
 # foreach_map for example just passes output buffers here
-def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
+def group_foreach_args(
+    arg_pairs: Iterable[Any],
+) -> defaultdict[tuple[Any, bool], list[tuple[int, Any]]]:
     out = defaultdict(list)
     unpack_args = False
     for i, args in enumerate(arg_pairs):
@@ -181,7 +183,9 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     return None
 
 
-def tag_to_layout_constraint(tag):
+def tag_to_layout_constraint(
+    tag: torch._C.Tag,
+) -> Optional[Callable[..., tuple[Any, Any]]]:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
     if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
@@ -193,22 +197,34 @@ def tag_to_layout_constraint(tag):
     raise AssertionError(f"Unknown layout constraint tag: {tag}")
 
 
-def assert_nyi(cond, msg):
+def assert_nyi(cond: bool, msg: str) -> None:
     if not cond:
         raise NotImplementedError(f"inductor does not support {msg}")
 
 
-def add_needs_realized_inputs(fn):
+def add_needs_realized_inputs(
+    fn: Union[
+        Collection[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
+        torch._ops.OpOverload,
+        torch._ops.OpOverloadPacket,
+    ],
+) -> Optional[list[Any]]:
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
+        # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
-    needs_realized_inputs.add(fn)
-    if isinstance(fn, torch._ops.OpOverloadPacket):
+    if isinstance(fn, torch._ops.OpOverload):
+        needs_realized_inputs.add(fn)
+    elif isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
             getattr(fn, overload) for overload in fn.overloads()
         )
+    return None
 
 
-def add_layout_constraint(fn, constraint):
+def add_layout_constraint(
+    fn: Union[torch._ops.OpOverloadPacket, torch._ops.OpOverload],
+    constraint: Callable[..., tuple[Any, Any]],
+) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
             _maybe_layout_constraints[getattr(fn, overload)] = constraint
@@ -260,7 +276,7 @@ DTYPE_ID_LOOKUP = {
 }
 
 
-def decode_dtype(dtype: int):
+def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
@@ -269,7 +285,7 @@ def decode_dtype(dtype: int):
     return dtype
 
 
-def is_integer_type(x):
+def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -278,15 +294,17 @@ def is_integer_type(x):
         return isinstance(x, int)
 
 
-def is_boolean_type(x):
+def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
 
 
-def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
-    def construct_input(inp):
+def get_promoted_dtype(
+    *args: Any, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+) -> torch.dtype:
+    def construct_input(inp: Any) -> Any:
         if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
@@ -315,7 +333,9 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
-def in_namespace(op, namespace):
+def in_namespace(
+    op: Union[Any, torch._ops.OpOverloadPacket, torch._ops.OpOverload], namespace: str
+) -> bool:
     if isinstance(op, torch._ops.OpOverloadPacket):
         return namespace in op._qualified_op_name
     elif isinstance(op, torch._ops.OpOverload):
@@ -388,7 +408,7 @@ def transform_args(
             kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
-        def promote(arg):
+        def promote(arg: Any) -> Any:
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
@@ -425,7 +445,9 @@ def transform_args(
     return args, kwargs
 
 
-def _register_foreach_lowering(aten_fn, decomp_fn):
+def _register_foreach_lowering(
+    aten_fn: torch._ops.OpOverload, decomp_fn: Callable[..., Any]
+) -> Callable[..., Any]:
     """
     Add a foreach lowering to lowerings dict.
 
@@ -438,7 +460,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
     """
 
     @functools.wraps(decomp_fn)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
@@ -452,11 +474,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 def _register_lowering(
     aten_fn,
-    decomp_fn,
-    broadcast,
+    decomp_fn: Callable[..., Any],
+    broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
-    convert_input_to_bool,
-    lowering_dict,
+    convert_input_to_bool: bool,
+    lowering_dict: dict[Union[Callable[..., Any], str], Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
@@ -2705,6 +2727,8 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if fake_arg is None:
+        return arg
     if isinstance(fake_arg, FakeScriptObject):
         return arg
     if isinstance(arg, ir.IRNode):
@@ -2902,6 +2926,10 @@ if torch.xpu.is_available():
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
 
+if torch.mtia._is_compiled():
+    make_fallback(
+        aten.native_layer_norm, warn=False
+    )  # (MTIA-only and faster than decomp)
 
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
@@ -4113,6 +4141,7 @@ def scatter_fallback(
         reduce,
         self.get_dtype(),
         cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
+        # pyrefly: ignore [missing-attribute]
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -7445,26 +7474,90 @@ def _sink_tokens(tokens):
     return None
 
 
+@register_lowering(torch.ops.prims._make_token.default)
+def _make_token():
+    return None
+
+
 @register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
-    result = ir.EffectfulKernel.create(op, *args, **kwargs)
+    """
+    We lower the operator directly, and then we add StarDep dependencies to all
+    the newly created nodes in the graph.
+    """
+    from torch._higher_order_ops.effects import _get_effect, _get_schema
 
-    from torch._higher_order_ops.effects import _get_effect
-
+    # Get effect type
     effect_type = _get_effect(op)
-    assert effect_type is not None
-    effectful_kernel = V.graph.effectful_ops[effect_type]
+    if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
+        from torch._guards import InvokeSubgraphCache, TracingContext
 
-    if result is None:
-        return (effectful_kernel,)
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx:
+            invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+                torch.ops.higher_order.invoke_subgraph
+            )
+            if invoke_subgraph_cache:
+                assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                # args[1] is identifier
+                effects = invoke_subgraph_cache.get_effects(args[1])
+                if effects:
+                    assert len(effects) == 1, "Multiple effects NYI"
+                    effect_type = next(iter(effects))
 
-    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    # See [NOTE: with_effects return type]
-    # Only return `result` if it is a tuple, not list.
-    if not isinstance(result, tuple):
-        return (effectful_kernel, result)
+    # Track operations before
+    operation_len = len(V.graph.operations)
+
+    # Lower the op
+    if op in lowerings:
+        result = lowerings[op](*args, **kwargs)
+        # Realize so that we can get the ops to show up in V.graph.operations
+        pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
     else:
-        return (effectful_kernel, *result)
+
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
+        result = pytree.tree_map(
+            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+        )
+
+    # Get all the operations created during the lowering above, and add StarDeps
+    # to the previous node with the same effect
+    assert len(V.graph.operations[operation_len:]) > 0, (
+        f"No operation nodes were generated when lowering effectful operator {op}."
+    )
+    if effect_type:
+        prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
+        for new_op in V.graph.operations[operation_len:]:
+            # Patch has_side_effects to return True
+            new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
+            if prev_effect_buffer:
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+        # Update the effectful ops chain to point to the latest operation
+        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+            new_op  # pyrefly: ignore[unsupported-operation]
+        )
+
+    try:
+        args, kwargs = pytree.tree_map_only(
+            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+        )
+        schema = _get_schema(op, args, kwargs)
+    except RuntimeError as e:
+        error_msg = str(e)
+        log.warning(
+            "Failed to get schema for %s: %s. Assuming list output", op, error_msg
+        )
+        return (token, *result)
+
+    if len(schema.returns) == 0:
+        return (token, result)
+    elif len(schema.returns) == 1:
+        return (token, result)
+    else:
+        return (token, *result)
 
 
 from .comm_lowering import register_comm_lowerings
