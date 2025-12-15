@@ -178,15 +178,19 @@ __all__ = [
 
 
 def _extract_tensor_inputs(
-    args: tuple[Any, ...], kwargs: dict[str, Any]
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    op_overload: Optional[torch._ops.OpOverload] = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract tensor inputs from mixed args/kwargs.
     Separates tensors (for autotuning input_nodes) from non-tensor parameters.
-    Non-tensor kwargs are later functools.partial'd into decomposition functions.
 
     Args:
         args: Positional arguments (mix of tensors and scalars)
         kwargs: Keyword arguments (mix of tensors and scalars)
+        op_overload: Optional op overload to get parameter names from schema.
+                     If provided, non-tensor args will preserve their original
+                     parameter names instead of using generic "arg_N" names.
 
     Returns:
         Tuple of (tensor_inputs_list, non_tensor_kwargs)
@@ -194,13 +198,26 @@ def _extract_tensor_inputs(
     tensor_inputs = []
     non_tensor_kwargs = {}
 
+    # Get parameter names from op schema if available
+    param_names: Optional[list[str]] = None
+    if op_overload is not None:
+        try:
+            schema = op_overload._schema
+            param_names = [arg.name for arg in schema.arguments]
+        except (AttributeError, TypeError):
+            param_names = None
+
     # Process args and kwargs: separate tensor inputs and non tensor args
     for i, arg in enumerate(args):
         if isinstance(arg, (TensorBox, Buffer)):
             tensor_inputs.append(arg)
         else:
-            # Add non-tensor positional args to kwargs with generated names
-            non_tensor_kwargs[f"arg_{i}"] = arg
+            # Use the real parameter name from schema if available
+            if param_names is not None and i < len(param_names):
+                name = param_names[i]
+            else:
+                name = f"arg_{i}"
+            non_tensor_kwargs[name] = arg
 
     for key, value in kwargs.items():
         if isinstance(value, (TensorBox, Buffer)):
@@ -529,6 +546,16 @@ def autotune_custom_op(
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
     if winning_choice.gm is not None:
+        # Skip inlining when return_choice=True since caller only needs choice metadata
+        # (e.g., range-based dispatch builds its own torch.cond from winning choices)
+        if return_choice:
+            log.debug(
+                "Skipping inline for return_choice: %s (name=%s)",
+                getattr(winning_choice, "name", type(winning_choice).__name__),
+                name,
+            )
+            return selected_result, winning_choice
+
         log.debug(
             "Inlining winning choice: %s (name=%s)",
             getattr(winning_choice, "name", type(winning_choice).__name__),
@@ -537,8 +564,6 @@ def autotune_custom_op(
         from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
         result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
-        if return_choice:
-            return result, winning_choice
         return result
 
     log.debug(
@@ -898,7 +923,9 @@ def _create_autotuning_lowering(
         # Standard autotuning path
         @functools.wraps(op_overload)
         def standard_lowering_wrapper(*args: Any, **kwargs: Any) -> Any:
-            tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
+            tensor_inputs, runtime_kwargs = _extract_tensor_inputs(
+                args, kwargs, op_overload
+            )
             return _standard_lowering_fn(
                 processed_configs=processed_configs,
                 default_impl=default_impl,
@@ -920,7 +947,9 @@ def _create_autotuning_lowering(
 
     @functools.wraps(op_overload)
     def range_based_lowering_wrapper(*args: Any, **kwargs: Any) -> Any:
-        tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
+        tensor_inputs, runtime_kwargs = _extract_tensor_inputs(
+            args, kwargs, op_overload
+        )
         return _range_based_lowering_fn(
             processed_configs=processed_configs,
             default_impl=default_impl,
