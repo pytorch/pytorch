@@ -356,6 +356,9 @@ IF(USE_FBGEMM_GENAI)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
   endif()
+
+  # Ensure torch_cpu is built before fbgemm_genai to avoid race conditions
+  add_dependencies(fbgemm_genai torch_cpu)
 endif()
 
 # XNNPACK

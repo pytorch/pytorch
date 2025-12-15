@@ -106,6 +106,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -941,7 +942,7 @@ def getitem_on_dict_manager(
             example_value=source.index,
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         ).add_equals_match_guard(
-            source.index, [f"{key_source} == {key_example_value!r}"]
+            source.index, [f"{key_source} == {key_example_value!r}"], None
         )
 
     return base_guard_manager.get_value_manager(
@@ -1126,11 +1127,14 @@ class GuardBuilder(GuardBuilderBase):
                     get_verbose_code_parts(
                         f"__check_obj_id({key_source}, {id_val})", guard
                     ),
+                    guard.user_stack,
                 )
             else:
                 # Install EQUALS_MATCH guard
                 key_manager.add_equals_match_guard(
-                    key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
+                    key,
+                    get_verbose_code_parts(f"{key_source} == {key!r}", guard),
+                    guard.user_stack,
                 )
 
     @staticmethod
@@ -1198,7 +1202,7 @@ class GuardBuilder(GuardBuilderBase):
                     source=key_source,
                     example_value=key,
                     guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"])
+                ).add_equals_match_guard(key, [f"{key_source} == {key!r}"], None)
 
                 # Install the value manager
                 return mgr.get_value_manager(
@@ -1791,10 +1795,12 @@ class GuardBuilder(GuardBuilderBase):
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                verbose_code_parts,
+                None,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts, None)
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -1915,7 +1921,9 @@ class GuardBuilder(GuardBuilderBase):
                     guard_manager_enum=guard_manager_enum,
                 )
         else:
-            base_manager.add_no_hasattr_guard(attr, get_verbose_code_parts(code, guard))
+            base_manager.add_no_hasattr_guard(
+                attr, get_verbose_code_parts(code, guard), guard.user_stack
+            )
         self.already_added_code_parts.add(code)
 
     def NOT_PRESENT_IN_GENERIC_DICT(
@@ -1939,7 +1947,10 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         mod_generic_dict_manager.add_dict_contains_guard(
-            False, attr, get_verbose_code_parts(code, guard)
+            False,
+            attr,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
         self.already_added_code_parts.add(code)
 
@@ -1962,7 +1973,11 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
-            obj_id, get_verbose_code_parts(code, guard)
+            obj_id,
+            get_verbose_code_parts(
+                code, guard, recompile_hint=f"type {t.__qualname__}"
+            ),
+            guard.user_stack,
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
@@ -1976,7 +1991,7 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Delete this when DictGuardManager uses tags
         # for dicts.
         self.get_guard_manager(guard).add_dict_version_guard(
-            val, get_verbose_code_parts(code, guard)
+            val, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool) -> None:
@@ -1989,7 +2004,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
-            not invert, key, get_verbose_code_parts(code, guard)
+            not invert,
+            key,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
         self.already_added_code_parts.add(code)
 
@@ -2005,7 +2023,10 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
-            contains, item, get_verbose_code_parts(code, guard)
+            contains,
+            item,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
         self.already_added_code_parts.add(code)
 
@@ -2019,11 +2040,11 @@ class GuardBuilder(GuardBuilderBase):
 
         if val:
             self.get_guard_manager(guard).add_true_match_guard(
-                get_verbose_code_parts(code, guard)
+                get_verbose_code_parts(code, guard), guard.user_stack
             )
         else:
             self.get_guard_manager(guard).add_false_match_guard(
-                get_verbose_code_parts(code, guard)
+                get_verbose_code_parts(code, guard), guard.user_stack
             )
 
     def NONE_MATCH(self, guard: Guard) -> None:
@@ -2035,7 +2056,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         self.get_guard_manager(guard).add_none_match_guard(
-            get_verbose_code_parts(code, guard)
+            get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
@@ -2069,7 +2090,9 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
-            id_val, get_verbose_code_parts(code, guard, recompile_hint)
+            id_val,
+            get_verbose_code_parts(code, guard, recompile_hint),
+            guard.user_stack,
         )
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
@@ -2092,7 +2115,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_not_none_guard(
-            get_verbose_code_parts(code, guard)
+            get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def DISPATCH_KEY_SET_MATCH(self, guard: Guard) -> None:
@@ -2102,7 +2125,9 @@ class GuardBuilder(GuardBuilderBase):
         code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
 
         self.get_guard_manager(guard).add_dispatch_key_set_guard(
-            val, get_verbose_code_parts(code_parts, guard)
+            val,
+            get_verbose_code_parts(code_parts, guard),
+            guard.user_stack,
         )
 
     def DUAL_LEVEL(self, guard: Guard) -> None:
@@ -2113,7 +2138,9 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, code)
         self.guard_manager.root.add_dual_level_match_guard(
-            dual_level, get_verbose_code_parts(code, guard)
+            dual_level,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:
@@ -2132,7 +2159,7 @@ class GuardBuilder(GuardBuilderBase):
             return compare_fn(states)
 
         self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard)
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
@@ -2160,7 +2187,7 @@ class GuardBuilder(GuardBuilderBase):
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard)
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
@@ -2182,7 +2209,9 @@ class GuardBuilder(GuardBuilderBase):
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
-            metadata_checker, get_verbose_code_parts(global_name, guard)
+            metadata_checker,
+            get_verbose_code_parts(global_name, guard),
+            guard.user_stack,
         )
 
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
@@ -2195,7 +2224,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = f"__dtensor_spec_{id(guard_fn)}"
         self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard)
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
@@ -2260,9 +2289,11 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
-            f"Unexpected type {type(val)}"
-        )
+        assert (
+            isinstance(val, ok_types)
+            or pytree.is_constant_class(type(val))
+            or is_opaque_value_type(type(val))
+        ), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -2271,6 +2302,7 @@ class GuardBuilder(GuardBuilderBase):
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
                 get_verbose_code_parts(code, guard),
+                guard.user_stack,
             )
             return
 
@@ -2282,6 +2314,7 @@ class GuardBuilder(GuardBuilderBase):
 
             self.get_guard_manager(guard).add_complex_is_nan_guard(
                 get_verbose_code_parts(code, guard),
+                guard.user_stack,
             )
             return
 
@@ -2299,7 +2332,9 @@ class GuardBuilder(GuardBuilderBase):
                 f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
             ]
 
-        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts)
+        self.get_guard_manager(guard).add_equals_match_guard(
+            val, verbose_code_parts, guard.user_stack
+        )
         self._set_guard_export_info(guard, code)
         return
 
@@ -2396,11 +2431,15 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         if isinstance(value, dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard)
+                len(value),
+                get_verbose_code_parts(code, guard),
+                guard.user_stack,
             )
         else:
             self.get_guard_manager(guard).add_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard)
+                len(value),
+                get_verbose_code_parts(code, guard),
+                guard.user_stack,
             )
 
     def TUPLE_ITERATOR_LEN(self, guard: Guard) -> None:
@@ -2416,7 +2455,10 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
+            tuple_iterator_len(value),
+            obj_id,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     def RANGE_ITERATOR_MATCH(self, guard: Guard) -> None:
@@ -2434,11 +2476,21 @@ class GuardBuilder(GuardBuilderBase):
 
         start, stop, step = normalized_range_iter
         self.get_guard_manager(guard).add_range_iterator_match_guard(
-            start, stop, step, obj_id, get_verbose_code_parts(code, guard)
+            start,
+            stop,
+            step,
+            obj_id,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        if is_from_skip_guard_source(
+            guard.originating_source
+        ) or is_from_skip_guard_source(source_b):
+            return
+
         if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
@@ -2476,6 +2528,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
+                guard.user_stack,
             )
 
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
@@ -2483,7 +2536,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_not_none_guard(
-            get_verbose_code_parts(code, guard)
+            get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
@@ -2494,7 +2547,9 @@ class GuardBuilder(GuardBuilderBase):
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
         self._set_guard_export_info(guard, code)
-        self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
+        self.get_guard_manager(guard).add_mapping_keys_guard(
+            value, code, guard.user_stack
+        )
 
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
@@ -2542,8 +2597,12 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
+        code = [
+            f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
+        ]
+
         self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
+            global_state, code, guard.user_stack
         )
 
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
@@ -2556,6 +2615,7 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_manager.root.add_torch_function_mode_stack_guard(
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
+            guard.user_stack,
         )
 
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
@@ -2569,7 +2629,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         self.get_guard_manager(guard).add_default_device_guard(
-            get_verbose_code_parts(code, guard)
+            get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
@@ -2806,6 +2866,7 @@ class GuardBuilder(GuardBuilderBase):
                     cguard,
                     clib,
                     verbose_code_parts.exprs,
+                    guard.user_stack,
                 )
                 return
 
@@ -2938,12 +2999,14 @@ class GuardBuilder(GuardBuilderBase):
                     ),
                     guard,
                 )
+                user_stack = guard.user_stack
                 guard_manager.add_tensor_match_guard(
                     value,
                     size,  # type: ignore[arg-type]
                     stride,  # type: ignore[arg-type]
                     tensor_name,
                     verbose_code_parts,
+                    user_stack,
                     pytype,
                     dispatch_keys,
                 )
@@ -2992,7 +3055,9 @@ class GuardBuilder(GuardBuilderBase):
                     code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
-                        dynamic_indices, get_verbose_code_parts(code_part, guard)
+                        dynamic_indices,
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -3004,6 +3069,7 @@ class GuardBuilder(GuardBuilderBase):
                     self.get_guard_manager(guard).add_no_hasattr_guard(
                         "_dynamo_dynamic_indices",
                         get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
                     )
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
@@ -3879,6 +3945,7 @@ class CheckFunctionManager:
         }
         global_scope_state[builtins_dict_name] = {
             k: v
+            # pyrefly: ignore [missing-attribute]
             for k, v in output_graph_guards_state.global_scope[
                 builtins_dict_name
             ].items()  # type: ignore[attr-defined]
@@ -4070,6 +4137,7 @@ class CheckFunctionManager:
                 builder.no_tensor_aliasing_guard_managers,
                 no_tensor_aliasing_names,
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+                None,
             )
 
         # Note - On Lambda guarding of object aliasing
@@ -4108,6 +4176,7 @@ class CheckFunctionManager:
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
                     [code_part],
+                    None,
                 )
                 add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlap):
@@ -4128,6 +4197,7 @@ class CheckFunctionManager:
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
                     [code_part],
+                    None,
                 )
                 add_code_part(code_part, None, True)
             else:
