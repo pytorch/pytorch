@@ -1320,7 +1320,14 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     args, kwargs = args_kwargs_fn()
     from torch._inductor.runtime.benchmarking import benchmarker
 
-    ms = benchmarker.benchmark(bench_fn, args, kwargs)  # type: ignore[arg-type]
+    ms = benchmarker.benchmark(
+        bench_fn,
+        args,  # pyrefly: ignore[bad-argument-type]
+        kwargs,
+        memory_warmup_iters=5,
+        benchmark_iters=10,
+        max_benchmark_duration=10,
+    )  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
@@ -2392,6 +2399,13 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d grouped nodes are filtered",
                 len(grouped),
             )
+        mix_order = [x for x in nodes if isinstance(x, FusedMixOrderReductions)]
+        if mix_order:
+            log.debug(
+                "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
+                len(mix_order),
+            )
+
         filtered_nodes = [
             x
             for x in nodes
@@ -2401,6 +2415,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     NopKernelSchedulerNode,
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
+                    FusedMixOrderReductions,
                 ),
             )
         ]
@@ -2432,6 +2447,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = 8
+
+        excluded_buffer_names: OrderedSet[str] = OrderedSet(
+            [
+                buf_name
+                for group in sorted_nodes
+                for node in group
+                if isinstance(node, FusedMixOrderReductions)
+                for buf_name in node.get_buffer_names()
+            ]
+        )
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
             device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
@@ -2440,6 +2465,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for node in nodes:
                 device = node.get_device()
                 if device and (device.type == "mps" or device.type == "cpu"):
+                    continue
+
+                # exclude nodes that read from FusedMixOrderReductions output buffers'
+                if node.used_buffer_names() & excluded_buffer_names:
                     continue
                 device_groups[device].append(node)
 
@@ -2451,7 +2480,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                         for i in range(0, len(device_nodes), max_num_nodes)
                     ]
                 )
-
         return grouped_nodes
 
     group_algorithm_for_combo_kernels: Callable[

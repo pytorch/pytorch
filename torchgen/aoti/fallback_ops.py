@@ -190,4 +190,5 @@ aten_shimified_ops: dict[str, dict[str, list[str]]] = {
     "aten.new_empty.default": {},
     "aten.new_zeros.default": {},
     "aten.full.default": {},
+    "aten.subtract.Tensor": {},
 }
