@@ -569,28 +569,20 @@ def common_pointwise_strategy(
                 else:
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
-                safe_avoid_redistribution = False
-                is_scalar_arg = False
-                is_non_neg_scalar = False
-                if op in (
-                    norm_partial_avoidable_redistribute_ops | redistribute_partial_ops
-                ):
-                    is_scalar_arg = isinstance(args_schema[1], _Number)
-                    is_non_neg_scalar = (
-                        is_scalar_arg
+                is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
+                keep_partial = False
+                keep_norm_partial = False
+
+                if isinstance(placement, _NormPartial):
+                    keep_norm_partial = (
+                        op in norm_partial_avoidable_redistribute_ops
                         and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
                     )
 
-                if isinstance(placement, _NormPartial):
-                    if (
-                        op in norm_partial_avoidable_redistribute_ops
-                        and is_non_neg_scalar
-                    ):
-                        safe_avoid_redistribution = True
-
                 elif isinstance(placement, Partial):
-                    if op not in redistribute_partial_ops or not is_scalar_arg:
-                        safe_avoid_redistribution = True
+                    keep_partial = (
+                        op not in redistribute_partial_ops or not is_scalar_arg
+                    )
 
                 # Check if this partial type should be preserved
                 if preserve_partial is not None and placement.is_partial(
@@ -601,7 +593,7 @@ def common_pointwise_strategy(
                 elif (
                     linearity >= 0
                     and (placement.is_partial("sum") or placement.is_partial("avg"))
-                    and safe_avoid_redistribution
+                    and (keep_partial or keep_norm_partial)
                 ):
                     # propagate the partial placement
                     out_placements.append(placement)
