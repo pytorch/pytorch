@@ -1,3 +1,4 @@
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
 import gc

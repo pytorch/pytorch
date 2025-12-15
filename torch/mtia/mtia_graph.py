@@ -1,3 +1,4 @@
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
 from typing import Optional, Union
@@ -13,6 +14,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
     """
     Return an opaque token representing the id of a graph memory pool.
     """
+    # pyrefly: ignore [missing-attribute]
     return torch._C._mtia_graphPoolHandle()
 
 
