@@ -368,20 +368,17 @@ def _create_range_input_gen_fn(
     range_start: int,
     range_end: Union[int, float],
 ) -> Callable[[torch.Tensor], torch.Tensor]:
-    """Create input generator that produces tensor with dimension at top of range.
-    Preserves the memory layout pattern by extracting fill order from original
-    strides and recomputing dense strides for the new shape.
-    """
+    """Create input generator that modifies target dimension to top of range."""
     from torch._inductor.ir import get_fill_order
     from torch._inductor.kernel.flex.common import construct_strides
+
+    target_dim = (
+        int(range_start + 1024) if range_end == float("inf") else int(range_end)
+    )
 
     def constrained_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
         result = base_gen_fn(fake_tensor)
         shape = list(result.shape)
-
-        target_dim = (
-            int(range_start + 1024) if range_end == float("inf") else int(range_end)
-        )
         shape[dim_index] = target_dim
 
         fill_order = get_fill_order(result.stride(), shape_env=None)
@@ -392,6 +389,13 @@ def _create_range_input_gen_fn(
         return storage.as_strided(shape, tuple(new_stride))
 
     return constrained_gen_fn
+
+
+def _default_input_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
+    """Default input generator that creates a real tensor matching the fake tensor's shape."""
+    return torch.randn(
+        fake_tensor.shape, dtype=fake_tensor.dtype, device=fake_tensor.device
+    )
 
 
 def _create_fallback_choice(
@@ -750,13 +754,15 @@ def _range_based_lowering_fn(
 
     # Benchmark each range and collect winning implementations
     for range_start, range_end in ranges:
-        range_input_gen_fns = None
         if input_gen_fns and tensor_name in input_gen_fns:
             base_gen_fn = input_gen_fns[tensor_name]
-            range_gen_fn = _create_range_input_gen_fn(
-                base_gen_fn, dim_index, range_start, range_end
-            )
-            range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}
+        else:
+            base_gen_fn = _default_input_gen_fn
+
+        range_gen_fn = _create_range_input_gen_fn(
+            base_gen_fn, dim_index, range_start, range_end
+        )
+        range_input_gen_fns = {**(input_gen_fns or {}), tensor_name: range_gen_fn}
 
         range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
 

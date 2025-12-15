@@ -96,17 +96,29 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def _compile_for_benchmarking(self, *args: list[Any]) -> tuple[Any, list[Any]]:
         """
         Compile the subgraph for benchmarking and return (module, sym_inputs).
-
-        TODO: Add precompile() method to enable parallel compilation of all choices
-        before benchmarking.
         """
         from torch._inductor.graph import GraphLowering
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
 
+        # Use shapes from args for compilation if provided
+        if args:
+            benchmark_inputs = []
+            with V.fake_mode:
+                for arg in args:
+                    if isinstance(arg, torch.Tensor):
+                        fake_tensor = torch.empty(
+                            arg.shape, dtype=arg.dtype, device=arg.device
+                        )
+                        benchmark_inputs.append(fake_tensor)
+                    else:
+                        benchmark_inputs.append(arg)
+        else:
+            benchmark_inputs = self.example_inputs
+
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
-            example_inputs=self.example_inputs,
+            example_inputs=benchmark_inputs,
             shape_env=V.graph._shape_env,
             cpp_wrapper=V.graph.cpp_wrapper,
             aot_mode=V.graph.aot_mode,
@@ -120,22 +132,32 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
-        sym_inputs = [
-            # pyrefly: ignore [no-matching-overload]
-            int(V.graph.sizevars.shape_env.size_hint(sym_var))
-            for sym_var in self.sym_inputs
-        ]
+        # Build mapping from symbolic variable names to actual sizes from benchmark inputs
+        # This allows us to get concrete values for symbolic shapes from the actual tensors
+        sym_name_to_value: dict[str, int] = {}
+        for inp_node, arg in zip(self.input_nodes, benchmark_inputs):
+            if isinstance(arg, torch.Tensor):
+                node_size = inp_node.get_size()
+                for sym_dim, actual_dim in zip(node_size, arg.shape):
+                    # If the node dimension is symbolic, map it to the actual value
+                    if hasattr(sym_dim, "name"):
+                        sym_name_to_value[sym_dim.name] = int(actual_dim)
+                    elif hasattr(sym_dim, "__str__"):
+                        # Handle sympy expressions
+                        sym_str = str(sym_dim)
+                        if sym_str.startswith("s"):
+                            sym_name_to_value[sym_str] = int(actual_dim)
 
-        if len(sym_inputs) == 0:
-            # Sanity check that args are same layout as example inputs
-            # Only do it if there are no symbolic inputs, otherwise
-            # the dynamic dim will be realized to the same size as args
-            for ar, example_inp in zip(args, self.example_inputs):
-                # Sanity check that args are same layout as example inputs
-                if isinstance(ar, torch.Tensor):
-                    assert isinstance(example_inp, torch.Tensor)
-                    assert ar.shape == example_inp.shape
-                    assert ar.stride() == example_inp.stride()
+        # Get sym_inputs values: use actual tensor values if available, else fallback to size_hint
+        sym_inputs = []
+        for sym_var in self.sym_inputs:
+            sym_name = sym_var.name if hasattr(sym_var, "name") else str(sym_var)
+            if sym_name in sym_name_to_value:
+                sym_inputs.append(sym_name_to_value[sym_name])
+            else:
+                # Fallback to size_hint for symbols not found in tensor shapes
+                hint = V.graph.sizevars.shape_env.size_hint(sym_var)
+                sym_inputs.append(int(hint) if hint is not None else 1)
 
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
@@ -144,7 +166,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
-                bm_graph_lowering.run(*self.example_inputs)
+                bm_graph_lowering.run(*benchmark_inputs)
                 mod = bm_graph_lowering.compile_to_module()
 
         return mod, sym_inputs
