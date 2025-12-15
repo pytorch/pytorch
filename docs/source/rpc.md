@@ -269,7 +269,7 @@ rpc/distributed_autograd
 
 ## Distributed Optimizer
 
-See the [torch.distributed.optim](https://pytorch.org/docs/main/distributed.optim.html) page for documentation on distributed optimizers.
+See the [torch.distributed.optim](https://pytorch.org/docs/stable/distributed.optim.html) page for documentation on distributed optimizers.
 
 ## Design Notes
 

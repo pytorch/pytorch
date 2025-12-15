@@ -495,7 +495,7 @@ def fn(y):
         return y - x
 ```
 
-- Use higher-order ops like `torch.cond` (<https://pytorch.org/docs/main/cond.html>) in place of data-dependent control flow
+- Use higher-order ops like `torch.cond` (<https://pytorch.org/docs/stable/cond.html>) in place of data-dependent control flow
 
 ```py
 # old

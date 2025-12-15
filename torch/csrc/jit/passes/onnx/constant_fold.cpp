@@ -482,7 +482,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
     // at::index_select only supports indices with rank <= 1.
-    // See https://pytorch.org/docs/main/generated/torch.index_select.html
+    // See https://pytorch.org/docs/stable/generated/torch.index_select.html
     if (q > 1) {
       return std::nullopt;
     }

@@ -661,7 +661,7 @@ with torch.profiler():
     dist.all_reduce(tensor)
 ```
 
-Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
+Please refer to the [profiler documentation](https://pytorch.org/docs/stable/profiler.html) for a full overview of profiler features.
 
 ## Multi-GPU collective functions
 

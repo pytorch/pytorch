@@ -192,7 +192,7 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
         "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
         "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
         "We suggest only using the new API to set the TF32 flag(s). See also: ",
-        "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+        "https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
@@ -319,7 +319,7 @@ bool Context::allowTF32CuBLAS() const {
       "PyTorch is checking whether allow_tf32_new is enabled for cuBlas matmul,",
       "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
-      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+      "https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return allow_tf32_new;
 }
 
@@ -342,7 +342,7 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
       "PyTorch is checking the matmul precision without a specific backend name,",
       "Current status indicate that you have used mix of the legacy and new APIs to set the matmul precision. ",
       "We suggest only using the new API for matmul precision. See also: ",
-      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+      "https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return float32_matmul_precision;
 }
 
