@@ -148,9 +148,14 @@ struct Workspace {
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&& other) noexcept
-      : size(std::exchage(other.size, 0)),
-      data(std::exchange(other.data, nullptr)) {}
-  Workspace& operator=(Workspace&&) = delete;
+      : size(std::exchange(other.size, 0)),
+        data(std::exchange(other.data, nullptr)) {}
+  Workspace& operator=(const Workspace& other) = delete;
+  Workspace& operator=(Workspace&& other) noexcept {
+    size = std::exchange(other.size, 0);
+    data = std::exchange(other.data, nullptr);
+    return *this;
+  }
   ~Workspace() {
     if (data) {
       c10::cuda::CUDACachingAllocator::raw_delete(data);
