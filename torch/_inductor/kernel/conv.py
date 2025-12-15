@@ -13,6 +13,7 @@ from ..lowering import (
     constrain_to_fx_strides,
     lowerings as L,
     register_lowering,
+    fallback_handler,
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -1107,6 +1108,9 @@ conv2d_bwd_input_template = TritonTemplate(
 )
 
 
+aten_convolution_backward_fallback = fallback_handler(aten.convolution_backward.default)
+
+
 @register_lowering(aten.convolution_backward.default)
 def convolution_backward_lowering(
     grad_output: TensorBox,
@@ -1160,6 +1164,8 @@ def convolution_backward_lowering(
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
+
+    has_triton_dw_choices = False
     dw = None
     if output_mask[1]:
         choices_dw = []
@@ -1194,6 +1200,7 @@ def convolution_backward_lowering(
                 dtype_size=dtype_size,
             ):
                 if ndim == 2:
+                    has_triton_dw_choices = True
                     conv2d_bwd_weight_template.maybe_append_choice(
                         choices_dw,
                         input_nodes=(input, grad_output),
@@ -1215,39 +1222,7 @@ def convolution_backward_lowering(
 
                 # TODO: backward weight 3D
 
-        if (
-            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
-            or len(choices_dw) == 0
-        ):
-            choices_dw.append(
-                ext_kn_aten_dw.bind(
-                    input_nodes=args_w,
-                    layout=layout_dw,
-                    ordered_kwargs_for_cpp_kernel=[
-                        "w_shape",
-                        "stride",
-                        "padding",
-                        "dilation",
-                        "transposed",
-                        "output_padding",
-                        "groups",
-                    ],
-                    w_shape=weight.get_size(),
-                    stride=stride,
-                    padding=padding,
-                    dilation=dilation,
-                    transposed=transposed,
-                    output_padding=output_padding,
-                    groups=groups,
-                )
-            )
-
-        # TODO: use_ck_conv_template for bwd conv
-
-        dw = autotune_select_algorithm(
-            "convolution_bwd_weight", choices_dw, args_w, layout_dw
-        )
-
+    has_triton_dx_choices = False
     dx = None
     if output_mask[0]:
         choices_dx = []
@@ -1284,6 +1259,7 @@ def convolution_backward_lowering(
                 dtype_size=dtype_size,
             ):
                 if ndim == 2:
+                    has_triton_dx_choices = True
                     conv2d_bwd_input_template.maybe_append_choice(
                         choices_dx,
                         input_nodes=(grad_output, weight),
@@ -1305,6 +1281,56 @@ def convolution_backward_lowering(
 
                 # TODO: backward input 3D
 
+    if not has_triton_dx_choices and not has_triton_dw_choices:
+        return aten_convolution_backward_fallback(
+            grad_output,
+            input,
+            weight,
+            bias_sizes,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask,
+        )
+
+    if output_mask[1]:
+        if (
+            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
+            or len(choices_dw) == 0
+        ):
+            choices_dw.append(
+                ext_kn_aten_dw.bind(
+                    input_nodes=args_w,
+                    layout=layout_dw,
+                    ordered_kwargs_for_cpp_kernel=[
+                        "w_shape",
+                        "stride",
+                        "padding",
+                        "dilation",
+                        "transposed",
+                        "output_padding",
+                        "groups",
+                    ],
+                    w_shape=weight.get_size(),
+                    stride=stride,
+                    padding=padding,
+                    dilation=dilation,
+                    transposed=transposed,
+                    output_padding=output_padding,
+                    groups=groups,
+                )
+            )
+
+        # TODO: use_ck_conv_template for bwd conv
+
+        dw = autotune_select_algorithm(
+            "convolution_bwd_weight", choices_dw, args_w, layout_dw
+        )
+
+    if output_mask[0]:
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
             or len(choices_dx) == 0
