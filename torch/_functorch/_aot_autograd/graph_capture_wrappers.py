@@ -27,6 +27,7 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
+    get_proxy_mode,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
 )
@@ -295,6 +296,10 @@ def create_joint(
             (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
                 fn, primals
             )
+        mode = get_proxy_mode()
+        assert mode is not None, "Expected non-None proxy mode"
+        for node in mode.tracer.graph.nodes:
+            node.meta["partitioner_tag"] = "is_forward"
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
@@ -956,6 +961,7 @@ def create_functionalized_fn(
                 if f_args_mutation_counters_after_forward is not None:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                        # pyrefly: ignore [no-matching-overload]
                         zip(
                             f_args_after_forward,  # type: ignore[arg-type]
                             primals_before,  # type: ignore[arg-type]
@@ -1272,15 +1278,18 @@ def aot_dispatch_subclass(
 
         args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
+        remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+            args[0], meta.static_input_indices
+        )
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
             args,  # type: ignore[arg-type]
             args_descs,  # type: ignore[arg-type]
             append_symints=True,
         )
-    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-        args, meta.static_input_indices
-    )
+        remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+            args, meta.static_input_indices
+        )
 
     if is_joint_structure:
         primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]

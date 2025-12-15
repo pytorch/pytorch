@@ -18,7 +18,7 @@ class SymbolicTensor(ir.Value):
         type: ir.TypeProtocol | None = None,
         doc_string: str | None = None,
         const_value: ir.TensorProtocol | None = None,
-    ):
+    ) -> None:
         super().__init__(
             name=name,
             shape=shape,

@@ -34,7 +34,7 @@ def max_storage_offset(
 
     # Require the full extent of the largest dimension to fit
     # For each dimension, the extent is size[i] * stride[i]
-    max_extent = max(sz * max(st, 0) for sz, st in zip(size, stride))
+    max_extent = max(sz * max(st, 0) for sz, st in zip(size, stride, strict=True))
     max_offset = base_numel - max_extent
     return max(0, max_offset)
 

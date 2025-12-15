@@ -961,6 +961,38 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     desc='zero_batch')]
 
 
+def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    if module_info.module_cls == torch.nn.BatchNorm1d:
+        input_shape = (2, 10)
+    elif module_info.module_cls == torch.nn.BatchNorm2d:
+        input_shape = (2, 10, 5, 5)
+    else:
+        input_shape = (2, 10, 4, 4, 4)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, eps=-1.0),
+                forward_input=FunctionInput(make_input(input_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="eps must be positive"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, eps=0.0),
+                forward_input=FunctionInput(make_input(input_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="eps must be positive"
+        ),
+    ]
+
+
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
     lazy = kwargs.get('lazy', False)
@@ -1734,6 +1766,32 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             constructor_input=FunctionInput(1, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
             desc='2d_no_affine_LN'),
+    ]
+
+
+def module_error_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for GroupNorm that test error messages include actual values.
+    """
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 10),  # num_groups=3, num_channels=10
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(10\) must be divisible by num_groups \(3\)"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(5, 13),  # num_groups=5, num_channels=13
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(13\) must be divisible by num_groups \(5\)"
+        ),
     ]
 
 
@@ -3296,6 +3354,44 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
         ),
+        # Test bias parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias="True")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: str"
+        ),
+        # Test batch_first parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first="False")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: str"
+        ),
     ]
     return samples
 
@@ -3430,6 +3526,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm1d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
@@ -3448,6 +3545,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm2d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # See https://github.com/pytorch/pytorch/issues/134580
                    DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format', active_if=operator.itemgetter('training')),
@@ -3468,6 +3566,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),
@@ -3923,6 +4022,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
+               module_error_inputs_func=module_error_inputs_torch_nn_GroupNorm,
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089

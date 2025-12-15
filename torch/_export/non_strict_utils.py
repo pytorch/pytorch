@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -97,6 +99,7 @@ class _KeyPathTrie:
 
     def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
         node = self.root
+        # pyrefly: ignore [bad-assignment]
         while not isinstance(node, Source):
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
@@ -167,7 +170,11 @@ def fakify(
     sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
-    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
+    if (
+        _is_constant_argument(t)
+        or isinstance(t, (torch.ScriptObject, torch.nn.Module))
+        or is_opaque_type(type(t))
+    ):
         return t
 
     if isinstance(t, _IntWrapper):
@@ -278,7 +285,7 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name] = constraint.name  # type: ignore[assignment]
 
     return symbolic_context
 
@@ -421,6 +428,14 @@ def make_fake_inputs(
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
+        elif (
+            sys.version_info >= (3, 14)
+            and (fwd := getattr(nn_module.forward, "__func__", None))
+            and isinstance(fwd, functools.partial)
+        ):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            code = fwd.func.__code__
         else:
             code = nn_module.forward.__code__
         co_fields = {
@@ -577,7 +592,12 @@ def produce_guards_and_solve_constraints(
     )
 
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:
@@ -946,7 +966,9 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if torch._library.fake_class_registry._is_script_object(
+                obj
+            ) or is_opaque_type(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -1087,7 +1109,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)

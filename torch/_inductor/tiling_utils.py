@@ -1,7 +1,8 @@
 import dataclasses
 import itertools
 from collections import Counter, defaultdict
-from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -144,6 +145,41 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     return None
 
 
+def find_broadcast_var(
+    index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
+) -> Optional[sympy.Expr]:
+    """
+    Try to find the variable that this index is broadcast over.
+    A broadcast pattern is one where consecutive values of a variable
+    access the same memory location (e.g., x // 10).
+    """
+    # Approximate analysis by evaluating at 1 and 0
+    variables: dict[sympy.Symbol, int] = {}
+    for v in index.free_symbols:
+        if v in var_ranges:
+            variables[v] = 0
+        else:
+            variables[v] = get_hint(v)
+
+    zero_index = sympy_subs(index, variables)
+    for v in var_ranges:
+        if v not in index.free_symbols:
+            continue
+
+        variables[v] = 1
+        try:
+            new_val = sympy_subs(index, variables)
+        except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
+            continue
+        # Broadcast means the value doesn't change when the variable increments
+        if new_val == zero_index:
+            return v
+        variables[v] = 0
+
+    return None
+
+
 def find_coalesced_var(
     index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
 ) -> Optional[sympy.Expr]:
@@ -164,7 +200,7 @@ def find_coalesced_var(
             variables[v] = get_hint(v)
 
     zero_index = sympy_subs(index, variables)
-    for v in var_ranges.keys():
+    for v in var_ranges:
         variables[v] = 1
         try:
             new_val = sympy_subs(index, variables)
@@ -220,6 +256,7 @@ def get_pw_red_splits(
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -245,6 +282,7 @@ def get_pw_red_splits(
     if none_if_not_divisible:
         return None
     else:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -265,6 +303,7 @@ class NodeSplitGetter:
         self.red_numel: sympy.Expr = node.group[1][1]
 
         self.pw_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
+        self.red_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
 
         self.reduction_split: Split = ()
         self.all_node_sizes: OrderedSet[tuple[Split, Split]] = OrderedSet()
@@ -294,13 +333,7 @@ class NodeSplitGetter:
             )
 
             self.pw_split_options[len(n_pw_splits)].add(tuple(n_pw_splits))
-
-            # initially, we are just going to do a single reduction split since
-            # reduction tiling is off by default. even if we miss a reduction split,
-            # we can recover it in the split var analysis.
-            # TODO: an earlier version for this code tried to iteratively try the maximum number
-            # of split vars, by iterating over both pointwise and reduction. but not worth
-            # the complexity yet.
+            self.red_split_options[len(n_red_splits)].add(tuple(n_red_splits))
 
             if n_red_splits != ():
                 self.reduction_split = (sympy_product(n_red_splits),)
@@ -319,20 +352,32 @@ class NodeSplitGetter:
             return next(iter(self.all_node_sizes))
 
         max_pw_split = max(self.pw_split_options.keys())
-        for pw_split_len in range(max_pw_split, 0, -1):
-            for pw_split in self.pw_split_options[pw_split_len]:
-                if out := self.try_split(pw_split, self.reduction_split):
-                    return out
+        max_red_split = max(self.red_split_options.keys())
 
-            # combine dims for next round
-            for pw_split in self.pw_split_options[pw_split_len]:
-                for i in range(len(pw_split) - 1):
+        def add_combined_split_options(
+            split_options: dict[int, OrderedSet[Split]], curr_length: int
+        ) -> None:
+            for split in split_options[curr_length]:
+                for i in range(len(split) - 1):
                     new_split = tuple(
-                        pw_split[0:i]
-                        + (sympy_product(pw_split[i : i + 2]),)
-                        + pw_split[i + 2 :]
+                        split[0:i] + (sympy_product(split[i : i + 2]),) + split[i + 2 :]
                     )
-                    self.pw_split_options[len(new_split)].add(new_split)
+                    split_options[len(new_split)].add(new_split)
+
+        max_total_splits = max_pw_split + max_red_split
+        for curr_iter, total_splits in enumerate(range(max_total_splits, 0, -1)):
+            for pw_split_len in range(total_splits, 0, -1):
+                for pw_split in self.pw_split_options[pw_split_len]:
+                    for red_split in self.red_split_options[
+                        total_splits - pw_split_len
+                    ]:
+                        if out := self.try_split(pw_split, red_split):
+                            return out
+
+            add_combined_split_options(self.pw_split_options, max_pw_split - curr_iter)
+            add_combined_split_options(
+                self.red_split_options, max_red_split - curr_iter
+            )
 
         # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
@@ -466,7 +511,7 @@ def extract_normalized_read_writes(
 
     # TODO - a few dynamic shapes issues to resolve
     if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
+        (isinstance(var, sympy.Expr) and var.free_symbols)
         for var in (pointwise_numel, red_numel)
     ):
         return None
@@ -567,11 +612,12 @@ def extract_normalized_read_writes(
     return fused_out
 
 
-def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
+def get_score(
+    addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int], buf_names: OrderedSet[str]
+) -> int:
     """
-    Score addr according to its approximate size
+    Score addr according to its approximate size.
     """
-
     # TODO - deduplicate with candidate_tilings
     var_sizes = []
     for v in addr.free_symbols:
@@ -583,6 +629,15 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
 
     return V.graph.sizevars.atomically_apply_size_hint(
         sympy_product(var_sizes), fallback=config.unbacked_symint_fallback
+    )
+
+
+def try_get_buf_size(buf_name: str) -> Optional[int]:
+    buf = V.graph.try_get_buffer(buf_name)
+    if not buf:
+        return None
+    return V.graph.sizevars.atomically_apply_size_hint(
+        sympy_product(buf.get_size()), fallback=config.unbacked_symint_fallback
     )
 
 
@@ -610,6 +665,8 @@ class CoalesceVarAnalysis:
     # because we multiply writes x2
     # TODO: separate into dataclass that olds mem, dtype, is_write
     coalesced_by_var: dict[sympy.Expr, int]
+
+    uncoalesced_addrs: dict[sympy.Expr, int]
 
     norm_read_writes: FusedNormalizedReadsWrites
 
@@ -656,28 +713,39 @@ def analyze_memory_coalescing(
         if indirect_expr:
             continue
 
-        size = get_score(memory_expr, var_ranges)
+        size = get_score(memory_expr, var_ranges, buf_names)
         if size == 0:
             continue
 
         maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+        # while broadcasting vars are not technically coalesced,
+        # accesses at least stay in cache, so they provide most of the benefit.
+        # treat the same for now.
+        if maybe_coalesced_var is None:
+            maybe_coalesced_var = find_broadcast_var(memory_expr, var_ranges)
 
-        byte_multipler = 0
+        total_score = 0
         for buf_name in buf_names:
-            if buf := V.graph.try_get_buffer(buf_name):
-                byte_multipler += buf.dtype.itemsize
+            if (buf := V.graph.try_get_buffer(buf_name)) and (
+                buf_size := try_get_buf_size(buf_name)
+            ):
+                # constrain by buf size since we'll read at most that many elements
+                # score could be more through either masking or by broadcasting (e.g. x // 16)
+                total_score += min(buf_size, size) * buf.dtype.itemsize
 
         # coalesced writes more important
-        byte_multipler *= 1 if is_read else 2
+        total_score *= 1 if is_read else 2
 
         if maybe_coalesced_var:
-            coalesced_by_var[maybe_coalesced_var] += size * byte_multipler
+            coalesced_by_var[maybe_coalesced_var] += total_score
         else:
-            uncoalesced_addrs[memory_expr] += size * byte_multipler
+            uncoalesced_addrs[memory_expr] += total_score
 
     if not uncoalesced_addrs:
         return CoalesceVarAnalysis(
-            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+            coalesced_by_var=coalesced_by_var,
+            uncoalesced_addrs=uncoalesced_addrs,
+            norm_read_writes=norm_read_writes,
         )
 
     # map from var -> tiling -> total_score
@@ -721,7 +789,9 @@ def analyze_memory_coalescing(
 
     if len(tiling_scores) == 0:
         return CoalesceVarAnalysis(
-            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+            coalesced_by_var=coalesced_by_var,
+            uncoalesced_addrs=uncoalesced_addrs,
+            norm_read_writes=norm_read_writes,
         )
 
     best_tiling: Optional[tuple[sympy.Expr, int]] = None
@@ -735,7 +805,9 @@ def analyze_memory_coalescing(
 
     if best_tiling is None:
         return CoalesceVarAnalysis(
-            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+            coalesced_by_var=coalesced_by_var,
+            uncoalesced_addrs=uncoalesced_addrs,
+            norm_read_writes=norm_read_writes,
         )
 
     # TODO - for strictly pointwise fusions,
@@ -744,6 +816,7 @@ def analyze_memory_coalescing(
     # TODO - could also prefer index var splits to reduction, better tested
     return CoalesceVarAnalysis(
         coalesced_by_var=coalesced_by_var,
+        uncoalesced_addrs=uncoalesced_addrs,
         norm_read_writes=norm_read_writes,
         suggested_split=VarTiling(best_tiling[0], best_tiling[1], best_tiling_score),
     )

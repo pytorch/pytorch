@@ -110,9 +110,6 @@ def flags(enabled=False, deterministic=False, allow_tf32=True, fp32_precision="n
 
 
 class MkldnnModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     def is_available(self):
         return is_available()
 

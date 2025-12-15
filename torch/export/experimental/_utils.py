@@ -1,5 +1,4 @@
 import logging
-import typing
 
 from torch._inductor.utils import IndentedBuffer
 
@@ -12,7 +11,8 @@ def _get_main_cpp_file(
     package_name: str,
     model_names: list[str],
     cuda: bool,
-    example_inputs_map: typing.Optional[dict[str, int]],
+    example_inputs_map: dict[str, int] | None,
+    is_hip: bool,
 ) -> str:
     """
     Generates a main.cpp file for AOTInductor standalone models in the specified package.
@@ -43,12 +43,20 @@ def _get_main_cpp_file(
         ]
     )
     if cuda:
-        ib.writelines(
-            [
-                "#include <cuda.h>",
-                "#include <cuda_runtime_api.h>",
-            ]
-        )
+        if is_hip:
+            ib.writelines(
+                [
+                    "#include <hip/hip_runtime.h>",
+                ]
+            )
+
+        else:
+            ib.writelines(
+                [
+                    "#include <cuda.h>",
+                    "#include <cuda_runtime_api.h>",
+                ]
+            )
 
     for model_name in model_names:
         ib.writeline(
@@ -181,7 +189,9 @@ def _get_main_cpp_file(
     return ib.getvalue()
 
 
-def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str:
+def _get_make_file(
+    package_name: str, model_names: list[str], cuda: bool, is_hip: bool
+) -> str:
     ib = IndentedBuffer()
 
     ib.writelines(
@@ -200,7 +210,10 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
         ib.writeline("find_package(Torch REQUIRED)")
 
     if cuda:
-        ib.writeline("find_package(CUDA REQUIRED)")
+        if is_hip:
+            ib.writeline("find_package(hip REQUIRED)")
+        else:
+            ib.writeline("find_package(CUDA REQUIRED)")
 
     ib.newline()
     for model_name in model_names:
@@ -208,12 +221,18 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
 
     ib.writeline("\nadd_executable(main main.cpp)")
     if cuda:
-        ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
+        if is_hip:
+            ib.writeline("target_compile_definitions(main PRIVATE USE_HIP)")
+        else:
+            ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
 
     model_libs = " ".join(model_names)
     ib.writeline(f"target_link_libraries(main PRIVATE torch {model_libs})")
 
     if cuda:
-        ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
+        if is_hip:
+            ib.writeline("target_link_libraries(main PRIVATE hip::host)")
+        else:
+            ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
 
     return ib.getvalue()

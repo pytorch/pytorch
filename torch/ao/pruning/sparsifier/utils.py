@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 from torch import nn
 from torch.nn.utils.parametrize import is_parametrized, type_before_parametrizations
@@ -67,9 +67,7 @@ def swap_module(
         return mod
 
 
-def module_to_fqn(
-    model: nn.Module, module: nn.Module, prefix: str = ""
-) -> Optional[str]:
+def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> str | None:
     """
     Returns the fqn for a module or None if module not a descendent of model.
     """
@@ -82,7 +80,7 @@ def module_to_fqn(
     return None
 
 
-def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
+def fqn_to_module(model: nn.Module | None, path: str) -> nn.Module | None:
     """
     Given an fqn, returns the corresponding module or tensor or None if the fqn given by `path`
     doesn't correspond to anything. Similar to model.get_submodule(path) but works for tensors.

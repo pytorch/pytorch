@@ -479,6 +479,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     for (n, p), (n_prev, p_prev) in zip(
                         fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
                     ):
+                        self.assertEqual(n, n_prev)
                         self.assertNotEqual(
                             p,
                             p_prev,

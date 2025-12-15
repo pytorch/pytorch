@@ -131,6 +131,12 @@ import types
 import torch
 
 
+def _check_invariant(cond: bool, msg: str = "") -> None:
+    """Internal invariant check. Not an assertion - these are algorithmic invariants."""
+    if not cond:
+        raise RuntimeError(f"Internal invariant violated: {msg}" if msg else "Internal invariant violated")
+
+
 def _canonicalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """
     Canonicalize a tensor by:
@@ -154,9 +160,7 @@ def _canonicalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
     result = result.squeeze()
 
     # Permute so strides are in descending order
-    stride_order = sorted(
-        range(result.ndim), key=lambda i: result.stride(i), reverse=True
-    )
+    stride_order = sorted(range(result.ndim), key=result.stride, reverse=True)
     if stride_order != list(range(result.ndim)):
         result = result.permute(stride_order)
 
@@ -172,12 +176,12 @@ def _canonicalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return result
 
 
-def _equal_significant_size_strides(lsize, lstride, rsize, rstride):
+def _equal_significant_size_strides(lsize, lstride, rsize, rstride) -> bool:
     if lsize != rsize:
         return False
     if any(s == 0 for s in lsize):
         return True
-    for s, l, r in zip(lsize, lstride, rstride):
+    for s, l, r in zip(lsize, lstride, rstride, strict=True):
         if s == 1:
             continue
         if l != r:
@@ -203,15 +207,16 @@ def _unexpand_target_then(result: torch.Tensor, size, stride, storage_offset, cb
     result = cb(result, new_size, new_stride, storage_offset)
     if result is NotImplemented:
         return NotImplemented
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(
             result.size(), result.stride(), new_size, new_stride
         )
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after unexpand callback",
     )
 
     # Expand the stride-0 dimensions back
-    for i, orig_size in zip(stride0_dims, stride0_sizes):
+    for i, orig_size in zip(stride0_dims, stride0_sizes, strict=True):
         # Because we expand left-to-right, result's dims get shifted so we
         # need to unsqueeze at position i then expand
         result = torch.unsqueeze(result, i)
@@ -220,9 +225,10 @@ def _unexpand_target_then(result: torch.Tensor, size, stride, storage_offset, cb
         expand_size[i] = orig_size
         result = result.expand(expand_size)
 
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(result.size(), result.stride(), size, stride)
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after unexpand",
     )
     return result
 
@@ -234,46 +240,50 @@ def _squeeze_target_then(result: torch.Tensor, size, stride, storage_offset, cb)
     result = cb(result, new_size, new_stride, storage_offset)
     if result is NotImplemented:
         return NotImplemented
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(
             result.size(), result.stride(), new_size, new_stride
         )
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after squeeze callback",
     )
     for i in dims:
         # Because we unsqueeze left-to-right result's dims get shifted so we
         # put dims in the right spot as we go
         result = torch.unsqueeze(result, i)
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(result.size(), result.stride(), size, stride)
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after squeeze",
     )
     return result
 
 
 def _permute_target_then(result: torch.Tensor, size, stride, storage_offset, cb):
     perm, sorted_stride = zip(
-        *sorted(enumerate(stride), key=lambda x: x[1], reverse=True)
+        *sorted(enumerate(stride), key=lambda x: x[1], reverse=True), strict=True
     )
     sorted_size = tuple(size[i] for i in perm)
 
     result = cb(result, sorted_size, sorted_stride, storage_offset)
     if result is NotImplemented:
         return NotImplemented
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(
             result.size(), result.stride(), sorted_size, sorted_stride
         )
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after permute callback",
     )
 
     inv = [0] * len(perm)
     for i, p in enumerate(perm):
         inv[p] = i
     result = result.permute(inv)
-    assert (
+    _check_invariant(
         _equal_significant_size_strides(result.size(), result.stride(), size, stride)
-        and result.storage_offset() == storage_offset
+        and result.storage_offset() == storage_offset,
+        "size/stride mismatch after permute",
     )
     return result
 
@@ -312,7 +322,6 @@ def _process_canonical_dims(
     current_dim = 0
 
     for canonical_dim in range(len(canonical_sizes)):
-        canonical_size = canonical_sizes[canonical_dim]
         canonical_stride = canonical_strides[canonical_dim]
 
         # Collect all target dims that map to this canonical dim

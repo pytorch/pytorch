@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -143,7 +142,7 @@ def conv_backward(func, ctx, grad_output):
     kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
-    results: list[Optional[torch.Tensor]] = []
+    results: list[torch.Tensor | None] = []
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 

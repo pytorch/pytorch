@@ -7,7 +7,7 @@ import sys
 import traceback
 import weakref
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -19,6 +19,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.effects import EffectType
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
@@ -97,7 +98,7 @@ class Library:
 
         frame = traceback.extract_stack(limit=2)[0]
         filename, lineno = frame.filename, frame.lineno
-        self.m: Optional[Any] = torch._C._dispatch_library(
+        self.m: Any | None = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
         )
         self.ns = ns
@@ -398,6 +399,22 @@ class Library:
 
         self.m.fallback(dispatch_key, fn, with_keyset)
 
+    def _register_effectful_op(self, op_name: str, effect: EffectType | None):
+        """
+        Registers an effect to an operator. This is used to register an op that
+        has side effects that is not capturable by the schema.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            effect: The effect of the op.
+        """
+        from torch._higher_order_ops.effects import (
+            _register_effectful_op as hoo_register_effect,
+        )
+
+        handle = hoo_register_effect(op_name, effect)
+        self._registration_handles.append(handle)
+
     def _destroy(self):
         if self.m is not None:
             self.m.reset()
@@ -553,20 +570,20 @@ def _(lib: Library, schema, alias_analysis=""):
 @overload
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: None = None,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ) -> Callable[[Callable[..., object]], None]: ...
 
 
 @overload
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Callable[..., object],
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ) -> None: ...
 
 
@@ -582,10 +599,10 @@ def impl(
 @functools.singledispatch
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
-    func: Optional[Callable[_P, _T]] = None,
+    types: str | Sequence[str],
+    func: Callable[_P, _T] | None = None,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ) -> object:
     """Register an implementation for a device type for this operator.
 
@@ -666,10 +683,10 @@ if not TYPE_CHECKING:
 @overload
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: None = None,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
     disable_dynamo: bool = False,
 ) -> Callable[[Callable[..., object]], None]: ...
 
@@ -677,22 +694,22 @@ def _impl(
 @overload
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Callable[..., object],
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
     disable_dynamo: bool = False,
 ) -> None: ...
 
 
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
-    func: Optional[Callable[..., object]] = None,
+    types: str | Sequence[str],
+    func: Callable[..., object] | None = None,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
     disable_dynamo: bool = False,
-) -> Optional[Callable[[Callable[..., object]], None]]:
+) -> Callable[[Callable[..., object]], None] | None:
     # See impl()
     if isinstance(types, str):
         types = (types,)
@@ -769,10 +786,10 @@ _op_identifier = Union[
 def register_kernel(
     op: _op_identifier,
     device_types: device_types_t,
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     /,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ):
     """Register an implementation for a device type for this operator.
 
@@ -840,7 +857,7 @@ def register_autocast(
     cast_inputs: _dtype,
     /,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ):
     r"""Register an autocast dispatch rule for this custom op.
 
@@ -931,10 +948,10 @@ def register_autocast(
 
 def register_fake(
     op: _op_identifier,
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     /,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
     _stacklevel: int = 1,
     allow_override: bool = False,
 ):
@@ -1065,12 +1082,50 @@ def register_fake(
         return register(func)
 
 
+def _register_effectful_op(
+    op: _op_identifier,
+    effect: EffectType | None,
+    *,
+    lib: Library | None = None,
+) -> None:
+    r"""
+    To specify that an operator has side-effects, we must register an effect
+    type for the operator. This will prevent graph passes in torch.compile from
+    reordering operations with the same effect type.
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        effect: Effect type to register. None means the operator is not effectful.
+    """
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            f"register_effectful_op({op}): got unexpected type for op: {type(op)}"
+        )
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        opdef.register_effect(effect)
+    assert isinstance(op, str)
+
+    namespace, _ = torch._library.utils.parse_namespace(op)
+    if lib is None:
+        use_lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(use_lib)
+    else:
+        use_lib = lib
+    use_lib._register_effectful_op(op, effect)
+
+
 def register_autograd(
     op: _op_identifier,
     backward: Callable,
     /,
     *,
-    setup_context: Optional[Callable] = None,
+    setup_context: Callable | None = None,
     lib=None,
 ) -> None:
     r"""Register a backward formula for this custom op.
@@ -1198,10 +1253,10 @@ def register_autograd(
 def register_torch_dispatch(
     op: _op_identifier,
     torch_dispatch_class: Any,
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     /,
     *,
-    lib: Optional[Library] = None,
+    lib: Library | None = None,
 ):
     r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
 
@@ -1278,7 +1333,7 @@ def register_torch_dispatch(
 
 def register_vmap(
     op: _op_identifier,
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     /,
     *,
     lib=None,
@@ -1470,7 +1525,7 @@ def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
 
 
 def get_kernel(
-    op: _op_identifier, dispatch_key: Union[str, torch.DispatchKey]
+    op: _op_identifier, dispatch_key: str | torch.DispatchKey
 ) -> torch._C._SafeKernelFunction:
     """Returns the computed kernel for a given operator and dispatch key.
 
@@ -1552,11 +1607,11 @@ _OPCHECK_DEFAULT_UTILS = (
 
 
 def opcheck(
-    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    op: torch._ops.OpOverload | torch._ops.OpOverloadPacket | CustomOpDef,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
-    test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
+    test_utils: str | Sequence[str] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
     atol=None,
     rtol=None,

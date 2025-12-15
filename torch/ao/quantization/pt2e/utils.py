@@ -2,7 +2,7 @@
 import operator
 import types
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
@@ -211,7 +211,7 @@ def _is_bn_node(n: Node):
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
-    conv_bias_node: Optional[Node],
+    conv_bias_node: Node | None,
     bn_node: Node,
     m: GraphModule,
 ) -> None:
@@ -421,7 +421,7 @@ def _is_literal(arg):
 def _replace_literals_with_new_placeholders(
     gm: torch.fx.GraphModule,
     merge_dup: bool = False,
-    exclude_literals: Optional[list[Any]] = None,
+    exclude_literals: list[Any] | None = None,
 ):
     """Replace the literals in the graph with placeholder nodes that's created on the fly while we
     traverse the graph, so that the literal arguments in the graph can be matched and replaced
@@ -472,7 +472,7 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    literal_to_ph: dict[Union[float, bool, int, torch.dtype], Node] = {}
+    literal_to_ph: dict[float | bool | int | torch.dtype, Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -513,8 +513,8 @@ def _replace_literals_with_new_placeholders(
 
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
-    exclude_literals: Optional[list[Any]] = None,
-    literal_to_ph_idx: Optional[dict[Union[float, int, bool, torch.dtype], int]] = None,
+    exclude_literals: list[Any] | None = None,
+    literal_to_ph_idx: dict[float | int | bool | torch.dtype, int] | None = None,
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced

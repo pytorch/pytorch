@@ -173,6 +173,7 @@ class PostGradBatchLinearFusion(BatchFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
         # pyre-fixme[7]: Incompatible return type
         return (
+            # pyrefly: ignore [bad-return]
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
             and node.kwargs.get("alpha", DEFAULT_ALPHA) == DEFAULT_ALPHA  # type: ignore[return-value]
         )
@@ -198,7 +199,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         # get the user of the node
         if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-            users = [user.target for user in node.users.keys()]
+            users = [user.target for user in node.users]
         else:
             users = ""  # type: ignore[assignment]
         # only handle the cases where inputs are 2D tensors
@@ -627,7 +628,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-                users = [user.target for user in node.users.keys()]
+                users = [user.target for user in node.users]
             else:
                 users = ""  # type: ignore[assignment]
             group_key = (
@@ -742,7 +743,7 @@ class BatchLayernormFusion(BatchFusion):
             weight = get_arg_value(node, 2, "weight")
             bias = get_arg_value(node, 3, "bias")
             if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-                users = [user.target for user in node.users.keys()]
+                users = [user.target for user in node.users]
             else:
                 users = ""  # type: ignore[assignment]
             group_key = (
@@ -1425,7 +1426,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         }
         non_fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]
-            for fusion in config.post_grad_fusion_options.keys()
+            for fusion in config.post_grad_fusion_options
             if fusion not in fbgemm_fusion_keys
         }
         fusions += generate_fusion_from_config(non_fbgemm_fusions, pre_grad=False)

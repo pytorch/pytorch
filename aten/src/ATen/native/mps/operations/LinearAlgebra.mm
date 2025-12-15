@@ -5,6 +5,7 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -28,7 +29,9 @@
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
+#include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
@@ -121,7 +124,7 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.toDouble() == 0 && alpha.toDouble() == 1) {
+  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
     return do_metal_mm(self, other, output);
   }
   auto stream = getCurrentMPSStream();
@@ -147,13 +150,15 @@ Tensor& do_metal_addmm(const Tensor& self,
         std::array<int64_t, 2> i64;
         std::array<int32_t, 2> i32;
         std::array<float, 2> f32;
-      } alpha_beta;
+        std::array<c10::complex<float>, 2> c64;
+      } alpha_beta{};
       if (output.scalar_type() == kLong) {
         alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
       } else if (c10::isIntegralType(output.scalar_type(), true)) {
         alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+      } else if (c10::isComplexType(output.scalar_type())) {
+        alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
       } else {
-        TORCH_INTERNAL_ASSERT(c10::isFloatingType(output.scalar_type()));
         alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
       }
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
@@ -190,8 +195,14 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
+  constexpr auto max_complex_inner_size = 2048;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
+  // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
+  if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
     return true;
   }
   return !is_macos_14_4_or_newer &&
@@ -232,7 +243,7 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
-  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
+  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
               "linalg.lu_factor(): MPS doesn't support complex types.");
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
@@ -356,8 +367,7 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                                       const Tensor& info) {
   using namespace mps;
 
-  TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
-              "linalg.lu_factor(): MPS doesn't support complex types.");
+  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat, "linalg.lu_factor(): MPS only supports floats.");
   Tensor A_t, B_t;
   // If 'left' is false, reinterpret the problem so that Ax = B becomes A^T ⋅ (x^T) = B^T
   // Then we solve the normal "left" case on the transposed matrices and transpose x finally to get the output
@@ -1050,7 +1060,8 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
-  TORCH_CHECK(!A.is_complex() && !B.is_complex(), "linalg.solve.triangular(); Not supported for complex yet!");
+  TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
+              "linalg.solve.triangular(); Only float is supported!");
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());
@@ -1135,52 +1146,39 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
-static void lu_unpack_mps_impl(const Tensor& LU_data,
-                               const Tensor& LU_pivots,
-                               bool unpack_data,
-                               bool unpack_pivots,
-                               const Tensor& P,
-                               const Tensor& L,
-                               const Tensor& U) {
-  const auto ndim = LU_data.dim();
-  TORCH_CHECK(ndim >= 2, "LU_data must have at least 2 dimensions");
-
-  const auto r = LU_data.size(-2);
-  const auto c = LU_data.size(-1);
-  const auto k = std::min<int64_t>(r, c);
-
-  const auto batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
-
-  if (unpack_data) {
-    Tensor L_part = r < c ? slice(LU_data, -1, 0, k) : LU_data;
-    L.copy_(L_part.tril());
-    (ndim == 2 ? L.diagonal() : L.diagonal(0, -2, -1)).fill_(1);
-
-    Tensor U_part = r < c ? LU_data : slice(LU_data, -2, 0, k);
-    U.copy_(U_part.triu());
+static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
+  if (iter.numel() == 0 || dim_size == 0) {
+    return;
   }
 
-  if (unpack_pivots) {
-    // P as an identity matrix for pivots
-    P.fill_(0);
-    LU_pivots.dim() == 1 ? P.diagonal().fill_(1) : P.diagonal(0, -2, -1).fill_(1);
+  auto perm = iter.tensor(0);
+  auto pivots = iter.tensor(1);
 
-    auto stream = getCurrentMPSStream();
-    auto device = MPSDevice::getInstance()->device();
-    auto applyPivotsPSO = lib.getPipelineStateForFunc("applyPivots");
-    uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
+  // TODO: Perhaps this should be disabled since it requires a sync?
+  TORCH_CHECK_TENSOR_ALL(pivots.le(max_pivot).logical_and(pivots.ge(1)),
+                         "pivots passed to lu_unpack must be between 1 and LU.size(-2) inclusive."
+                         "Did you properly pass the result of lu_factor?");
 
-    auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
+  auto num_threads = iter.numel();
+  MPSStream* stream = getCurrentMPSStream();
 
+  UnpackPivotsParams params;
+  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
+  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
+  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      dispatch_sync_with_rethrow(stream->queue(), ^() {
-        auto computeEncoder = stream->commandEncoder();
-        mtl_setArgs(computeEncoder, P, pivots, r, k);
-        [computeEncoder setComputePipelineState:applyPivotsPSO];
-        mtl_dispatch1DJob(computeEncoder, applyPivotsPSO, batchSize * maxThreadsPerGroup);
-      });
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state = lib.getPipelineStateForFunc(
+          fmt::format("unpack_pivots_{}_{}", scalarToMetalTypeString(perm), scalarToMetalTypeString(pivots)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "unpack_pivots", {pivots});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(compute_encoder, perm, pivots, params);
+      mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
-  }
+  });
 }
 
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
@@ -1517,17 +1515,6 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
   mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
 }
 
-TORCH_IMPL_FUNC(lu_unpack_out_mps)
-(const Tensor& LU_data,
- const Tensor& LU_pivots,
- bool unpack_data,
- bool unpack_pivots,
- const Tensor& P,
- const Tensor& L,
- const Tensor& U) {
-  mps::lu_unpack_mps_impl(LU_data, LU_pivots, unpack_data, unpack_pivots, P, L, U);
-}
-
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
@@ -1538,6 +1525,7 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
+REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 
 } // namespace at::native

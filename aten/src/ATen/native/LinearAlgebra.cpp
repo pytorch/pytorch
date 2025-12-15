@@ -1778,7 +1778,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
-    } catch (const std::exception& e) {
+    } catch ([[maybe_unused]]const std::exception& e) {
       TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
       at::globalContext().setUserEnabledMkldnn(false);
     }
@@ -2909,13 +2909,26 @@ Tensor linalg_matrix_norm(
   // Check A, dim, and dtype
   _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/abs_ord != 2.);
 
-  auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
+  auto max_min_wrapper = [ord, keepdim](const Tensor &A, int64_t dim) {
+    if (A.size(dim) == 0 && ord > 0) {
+      auto new_shape(DimVector(A.sizes()));
+      auto dim_ = maybe_wrap_dim(dim, A.dim());
+      if (keepdim) {
+        new_shape[dim_] = 1;
+      } else {
+        new_shape.erase(std::begin(new_shape) + dim_);
+      }
+      return at::zeros(new_shape, A.options());
+    } else {
+      return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim);
+    }
+  };
   if (abs_ord == 2.) {
     // Move dims to the end
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A.dim());
 
     auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-    auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1);
+    auto result = max_min_wrapper(at::linalg_svdvals(A_.permute(permutation)), -1);
     if (keepdim) {
       auto permutation_reverse = create_reverse_permutation(std::move(permutation));
       result = result.unsqueeze(-1).permute(permutation_reverse);
@@ -2932,7 +2945,7 @@ Tensor linalg_matrix_norm(
     if (!keepdim && (dim_[0] < dim_[1])) {
       dim_[1]--;
     }
-    return max_min(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
+    return max_min_wrapper(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
   }
 }
 
@@ -3541,9 +3554,9 @@ Tensor _dyn_quant_matmul_4bit_cpu(
     const int64_t out_features) {
   auto M = inp.size(0);
   TORCH_CHECK(
-      inp.dtype() == kFloat,
+      inp.dtype() == kFloat || (inp.dtype() == kBFloat16 && block_size == in_features),
       __func__,
-      " : expect input to be 32-bit float tensor.");
+      " : expect input to be float32 or bfloat16 tensor.");
   TORCH_CHECK(
       block_size == in_features ||
           (!(block_size % 32) && !(in_features % block_size)),

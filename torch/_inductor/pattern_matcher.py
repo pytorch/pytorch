@@ -49,9 +49,9 @@ import textwrap
 import typing
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
+from typing import Any, NoReturn, Optional, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -306,6 +306,7 @@ class Match:
 
                 # second graph
                 example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                # pyrefly: ignore [bad-argument-type]
                 replacement = trace_fn(graph_with_eager_vals, example_vals)
 
                 # propagate metadata from first graph to second
@@ -751,7 +752,10 @@ class _TargetArgsExpr(_TargetExpr):
                 m.extend(child_match)
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
                 return FailedMatch(
-                    "constant_args: {} {!r}!={pattern!r}", node, child_node
+                    "constant_args: {} {!r}!={pattern!r}",
+                    node,
+                    child_node,
+                    pattern=pattern,
                 )
         m.nodes.append(node)
         m.targets[self] = node.target
@@ -1442,6 +1446,13 @@ def register_replacement(
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
+    if inspect.ismethod(search_fn):
+        search_fn = _wrap_bound_method(search_fn, argnames_static)
+
+    if inspect.ismethod(replace_fn):
+        replace_argnames = [*inspect.signature(replace_fn).parameters.keys()]
+        replace_fn = _wrap_bound_method(replace_fn, replace_argnames)
+
     def check_fn(match: Match) -> bool:
         """
         Often shapes get burned into the pattern, so our initial match ran with
@@ -1545,6 +1556,15 @@ def register_replacement(
             node = match.output_nodes()[0]
             assert node is not None
             specific_pattern_match = specific_pattern.match(node)
+
+            if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                log.warning(
+                    "Specific pattern match: %s%s %s %s",
+                    node,
+                    node.args,
+                    specific_pattern_match,
+                    specific_pattern,
+                )
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
@@ -1931,6 +1951,22 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
+
+
+def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
+    """
+    Wrap a bound method to remove 'self' from its signature for FX tracing.
+    """
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    params = [
+        inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for name in argnames
+    ]
+    wrapper.__signature__ = inspect.Signature(params)  # type: ignore[attr-defined]
+    return wrapper
 
 
 class PatternMatcherPass:

@@ -7,10 +7,11 @@ import inspect
 import itertools
 import math
 import operator
+import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple, Optional, Union
+from typing import Literal, NamedTuple, TypeAlias
 
 import torch
 from torch import Tensor
@@ -27,12 +28,8 @@ except ImportError:
     from typing_extensions import NotRequired
 
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
-from torch._higher_order_ops.utils import _set_compilation_env
+from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
-from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
-)
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
 
@@ -82,6 +79,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -219,12 +217,18 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    force_flash: NotRequired[bool]
-    """ If True, forces use of the cute-dsl flash attention kernel.
+    BACKEND: NotRequired[_Backend]
+    """Selects a specific kernel backend.
 
-    Raises an error if flash attention cannot be used instead of falling back
-    to the default implementation. Useful for ensuring flash attention is used
-    when expected.
+    Options:
+        - "AUTO": Use current heuristics (typically Triton-based kernels with
+          automatic selection between flex_attention and flex_decoding)
+        - "TRITON": Standard Triton flex_attention kernel
+        - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
+        - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+
+    This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
+    Raises an error if the requested backend cannot be used. Default: "AUTO"
     """
 
 
@@ -244,8 +248,8 @@ class AuxOutput(NamedTuple):
     Fields will be None if not requested, or contain the tensor if requested.
     """
 
-    lse: Optional[Tensor] = None
-    max_scores: Optional[Tensor] = None
+    lse: Tensor | None = None
+    max_scores: Tensor | None = None
 
 
 class _ModificationType(Enum):
@@ -293,9 +297,9 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
 # Need to define it here so that Dynamo doesn't skip it
 def _vmap_for_bhqkv(
     fn: Callable,
-    prefix: tuple[Optional[int], ...],
-    suffix: tuple[Optional[int], ...] = (),
-    out_dims: Union[int, list[Optional[int]]] = 0,
+    prefix: tuple[int | None, ...],
+    suffix: tuple[int | None, ...] = (),
+    out_dims: int | list[int | None] = 0,
     group_dim: bool = False,
 ):
     """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
@@ -510,12 +514,12 @@ class BlockMask:
     seq_lengths: tuple[int, int]
     kv_num_blocks: Tensor
     kv_indices: Tensor
-    full_kv_num_blocks: Optional[Tensor]
-    full_kv_indices: Optional[Tensor]
-    q_num_blocks: Optional[Tensor]
-    q_indices: Optional[Tensor]
-    full_q_num_blocks: Optional[Tensor]
-    full_q_indices: Optional[Tensor]
+    full_kv_num_blocks: Tensor | None
+    full_kv_indices: Tensor | None
+    q_num_blocks: Tensor | None
+    q_indices: Tensor | None
+    full_q_num_blocks: Tensor | None
+    full_q_indices: Tensor | None
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
@@ -542,15 +546,15 @@ class BlockMask:
         seq_lengths: tuple[int, int],
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Optional[Tensor],
-        full_kv_indices: Optional[Tensor],
-        q_num_blocks: Optional[Tensor],
-        q_indices: Optional[Tensor],
-        full_q_num_blocks: Optional[Tensor],
-        full_q_indices: Optional[Tensor],
+        full_kv_num_blocks: Tensor | None,
+        full_kv_indices: Tensor | None,
+        q_num_blocks: Tensor | None,
+        q_indices: Tensor | None,
+        full_q_num_blocks: Tensor | None,
+        full_q_indices: Tensor | None,
         BLOCK_SIZE: tuple[int, int],
         mask_mod: _mask_mod_signature,
-    ):
+    ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
@@ -579,11 +583,11 @@ class BlockMask:
         cls,
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Optional[Tensor] = None,
-        full_kv_indices: Optional[Tensor] = None,
-        BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-        mask_mod: Optional[_mask_mod_signature] = None,
-        seq_lengths: Optional[tuple[int, int]] = None,
+        full_kv_num_blocks: Tensor | None = None,
+        full_kv_indices: Tensor | None = None,
+        BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
+        mask_mod: _mask_mod_signature | None = None,
+        seq_lengths: tuple[int, int] | None = None,
         compute_q_blocks: bool = True,
     ):
         """
@@ -682,7 +686,7 @@ class BlockMask:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
         s += mask_str
@@ -760,8 +764,8 @@ class BlockMask:
             compute_q_blocks=self.q_indices is not None,
         )
 
-    def __repr__(self):
-        def shape_or_none(x: Optional[torch.Tensor]):
+    def __repr__(self) -> str:
+        def shape_or_none(x: torch.Tensor | None):
             return x.shape if x is not None else None
 
         return (
@@ -864,7 +868,7 @@ class BlockMask:
 
             vis = ", ".join(reversed(descriptors)) + "\n"
 
-            def summarize_section(section):
+            def summarize_section(section) -> str:
                 percentage = section.float().mean().item()
                 if percentage == 1:
                     return "█"
@@ -907,7 +911,7 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device: Union[torch.device, str]) -> "BlockMask":
+    def to(self, device: torch.device | str) -> "BlockMask":
         """Moves the BlockMask to the specified device.
 
         Args:
@@ -973,7 +977,7 @@ def _convert_mask_to_block_mask(
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
-) -> tuple[Tensor, Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
 
@@ -1057,8 +1061,8 @@ def _convert_block_mask_to_mask(
 
 
 def _create_sparse_block_from_block_mask(
-    block_mask: tuple[Tensor, Optional[Tensor]],
-    mask_mod: Optional[Callable],
+    block_mask: tuple[Tensor, Tensor | None],
+    mask_mod: Callable | None,
     seq_lengths: tuple[int, int],
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -1067,9 +1071,7 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm: tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
-            full_blocks
-        )
+        full_bm: tuple[Tensor | None, Tensor | None] = _dense_to_ordered(full_blocks)
     else:
         full_bm = (None, None)
 
@@ -1085,12 +1087,12 @@ def _create_sparse_block_from_block_mask(
 
 
 def create_mask(
-    mod_fn: Union[_score_mod_signature, _mask_mod_signature],
-    B: Optional[int],
-    H: Optional[int],
+    mod_fn: _score_mod_signature | _mask_mod_signature,
+    B: int | None,
+    H: int | None,
     Q_LEN: int,
     KV_LEN: int,
-    device: Optional[DeviceLikeType] = None,
+    device: DeviceLikeType | None = None,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -1137,12 +1139,12 @@ def create_mask(
 
 def create_block_mask(
     mask_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
+    B: int | None,
+    H: int | None,
     Q_LEN: int,
     KV_LEN: int,
-    device: Optional[DeviceLikeType] = None,
-    BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    device: DeviceLikeType | None = None,
+    BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
@@ -1240,10 +1242,29 @@ def _apply_kernel_options(
     value: Tensor,
     return_lse: bool,
     kernel_options,
-    return_aux: Optional[AuxRequest] = None,
+    return_aux: AuxRequest | None = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
+    if "BACKEND" in kernel_options and kernel_options.get(
+        "FORCE_USE_FLEX_ATTENTION", False
+    ):
+        # TODO: remove FORCE_USE_FLEX_ATTENTION once BACKEND is fully adopted.
+        raise RuntimeError(
+            "BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
+            "BACKEND supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
+            "and only specify the desired BACKEND."
+        )
+
+    if "BACKEND" in kernel_options:
+        valid_backends = typing.get_args(_Backend)
+        if kernel_options["BACKEND"] not in valid_backends:
+            raise ValueError(
+                f"Invalid BACKEND value '{kernel_options['BACKEND']}'. "
+                f"Must be one of {valid_backends}"
+            )
+
+    kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
@@ -1289,7 +1310,7 @@ def _apply_kernel_options(
     return kernel_options
 
 
-def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor) -> None:
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
@@ -1297,10 +1318,16 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
-def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
+    if query.device.type == "cpu" and (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    ):
+        raise NotImplementedError(
+            "FlexAttention does not support backward on CPU. Please set the input requires_grad to False or use another device."
+        )
     supported_devices = {"cuda", "cpu", "xpu", "hpu"}
     if query.device.type not in supported_devices:
         raise ValueError(
@@ -1372,15 +1399,15 @@ def flex_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    score_mod: Optional[_score_mod_signature] = None,
-    block_mask: Optional[BlockMask] = None,
-    scale: Optional[float] = None,
+    score_mod: _score_mod_signature | None = None,
+    block_mask: BlockMask | None = None,
+    scale: float | None = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[FlexKernelOptions] = None,
+    kernel_options: FlexKernelOptions | None = None,
     *,
-    return_aux: Optional[AuxRequest] = None,
-) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
+    return_aux: AuxRequest | None = None,
+) -> Tensor | tuple[Tensor, Tensor] | tuple[Tensor, AuxOutput]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1552,7 +1579,7 @@ def flex_attention(
         lse,
         max_scores,
         *,
-        return_aux: Optional[AuxRequest],
+        return_aux: AuxRequest | None,
         return_lse: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""
@@ -1610,42 +1637,28 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_mode,
-    )
-
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
-    with _set_compilation_env():
-        with torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_pre_dispatch_torch_function_mode():
-                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                    if metadata_mode:
-                        backend: Union[str, Callable[..., Any]] = (
-                            make_eager_backend_with_torch_function_mode(metadata_mode)
-                        )
-                    else:
-                        backend = "eager"
+    with setup_compilation_env() as backend:
+        if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+            flex_fn = _flex_attention_hop_wrapper
+        else:
+            flex_fn = torch.compile(
+                _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+            )
 
-                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
-                        flex_fn = _flex_attention_hop_wrapper
-                    else:
-                        flex_fn = torch.compile(
-                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                        )
-
-                    out, lse, max_scores = flex_fn(
-                        query,
-                        key,
-                        value,
-                        score_mod,
-                        block_mask.as_tuple(),  # type: ignore[union-attr]
-                        scale,
-                        kernel_options,
-                    )
+        out, lse, max_scores = flex_fn(
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),  # type: ignore[union-attr]
+            scale,
+            kernel_options,
+        )
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )

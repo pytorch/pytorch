@@ -4,8 +4,8 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -678,6 +678,7 @@ class FxConverter:
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
+        assert device
         dtype = buffer.get_dtype()
         shape = self._generate_sym_nodes(buffer.get_size())
         stride = self._generate_sym_nodes(buffer.get_stride())
@@ -685,7 +686,7 @@ class FxConverter:
         node = self.gm.graph.call_function(
             torch.empty_strided,
             args=(shape, stride),
-            kwargs={"dtype": dtype, "device": device},
+            kwargs={"dtype": dtype, "device": device.type},
         )
         assert name
         node.name = name

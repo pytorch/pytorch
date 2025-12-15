@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import FunctionID
+from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -1768,6 +1768,56 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.num_checkpoints(), 1)
             self.assertEqual(self.get_root_children(), [2])
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_rerecording_logs_reason(self):
+            import logging
+
+            from torch.testing._internal.logging_utils import log_settings
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x + 1, x + 2
+
+            inp = torch.rand([4], device="cuda")
+            inp_list = [inp]
+            # Create placeholder info for the input
+            foo_placeholders = (PlaceholderInfo("arg0", None, [], None),)
+            foo_cg = self.cudagraphify_impl(
+                foo, inp_list, (), placeholders=foo_placeholders
+            )
+            x1, x2 = foo_cg(inp_list)
+
+            def foo2(args):
+                x = args[0]
+                args.clear()
+                return [x * x * x]
+
+            inp_list = [x1]
+            foo2_placeholders = (PlaceholderInfo("arg0", None, [], None),)
+            foo2_cg = self.cudagraphify_impl(
+                foo2, inp_list, (), placeholders=foo2_placeholders
+            )
+            foo2_cg(inp_list)
+
+            del x1, x2
+
+            x1, x2 = foo_cg([inp])
+
+            # With cudagraphs logging enabled, we should see the re-recording debug log
+            with log_settings("cudagraphs"):
+                with self.assertLogs(
+                    logger="torch._inductor.cudagraph_trees", level=logging.DEBUG
+                ) as log:
+                    foo2_cg([torch.zeros_like(x1)])
+
+            self.assertTrue(
+                any(
+                    "re-recording due to" in record.getMessage()
+                    for record in log.records
+                )
+            )
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_checkpoint_shared_output_storage_deallocation(self):
@@ -4100,6 +4150,78 @@ if HAS_CUDA_AND_TRITON:
             eager_out = foo(x)
             compiled_out = compiled_foo(x)
             self.assertEqual(eager_out, compiled_out)
+
+        # Use autotune_at_compile_time=True to test standalone_compile
+        @parametrize("autotune_at_compile_time", [True, False])
+        @config.patch("graph_partition", True)
+        def test_graph_partition_kernel_reuse(self, autotune_at_compile_time):
+            def foo(x):
+                # partition 1
+                x1 = x @ x
+                y1 = x1 + 1
+                z_cpu = y1.cpu() + 1
+                # partition 2
+                # partition 2 should reuse the fused triton kernel generated
+                # in partition 1
+                x2 = z_cpu.to("cuda") @ z_cpu.to("cuda")
+                y2 = x2 + 1
+                return y1, y2
+
+            with config.patch(
+                "triton.autotune_at_compile_time", autotune_at_compile_time
+            ):
+                compiled_foo = torch.compile(foo)
+                x = torch.randn((20, 20), device="cuda")
+                eager_out = foo(x)
+                compiled_out, code = run_and_get_code(compiled_foo, x)
+                self.assertEqual(eager_out, compiled_out)
+
+                if autotune_at_compile_time:
+                    # auto-tuning block should only appear once. We generate auto-tuning code
+                    # for all the kernels no matter if they are defined in the main graph or
+                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
+                    FileCheck().check_count(
+                        "Compile-time auto-tuning block", 1, exactly=True
+                    ).run(code[0])
+                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
+                    # and then in the main code block
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 2, exactly=True
+                    ).run(code[0])
+                    # cpu kernel definition should only appence once, not in the auto-tuning block
+                    FileCheck().check_count(
+                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    # triton_poi_fused_add_ should appear once, because of kernel reuse
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 1, exactly=True
+                    ).run(code[0])
+
+        @config.patch("graph_partition", True)
+        def test_graph_partition_user_defined_triton_kernel_reuse(self):
+            from torch.testing._internal.triton_utils import add_kernel
+
+            def foo(x, y):
+                # partition 1
+                output1 = torch.empty_like(x)
+                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                output1_cpu = output1.cpu() + 1
+                # partition 2 should reuse the user-defined kernel
+                x2 = output1_cpu.to("cuda")
+                output2 = torch.empty_like(x)
+                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                return output1, output2
+
+            compiled_foo = torch.compile(foo)
+            x = torch.randn(128, device="cuda")
+            y = torch.randn(128, device="cuda")
+            eager_out = foo(x, y)
+            compiled_out, code = run_and_get_code(compiled_foo, x, y)
+            self.assertEqual(eager_out, compiled_out)
+            FileCheck().check_count(
+                "async_compile.triton('add_kernel',", 1, exactly=True
+            ).run(code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):

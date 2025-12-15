@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -22,6 +21,9 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#ifdef USE_ROCM
+#include <ATen/native/hip/ck_group_gemm.h>
+#endif
 #include <ATen/ceil_div.h>
 
 #ifdef USE_FBGEMM_GENAI
@@ -75,9 +77,9 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
-        const SwizzleType& swizzle_a,
+        const SwizzleType swizzle_a,
         const Tensor& scale_b,
-        const SwizzleType& swizzle_b,
+        const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
     const bool a_is_2d = mat_a.dim() == 2;
@@ -519,13 +521,13 @@ _scaled_grouped_mm_cuda_v2(
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
-    if (contraction_dim.size() > 0) {
+    if (!contraction_dim.empty()) {
       const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
       TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
           "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
           mat_b.size(dim_b));
       // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Curently contraction dims must be (-1, -2) only");
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
     } else {
       TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
     }
@@ -604,6 +606,8 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      // swizze checks
+      TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,
@@ -666,12 +670,26 @@ std::optional<c10::ScalarType> out_dtype) {
   // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
   // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
   bool use_fast_path = false;
+  // On non CK system(w/ ROCm), make sure use_fast_path is false
+#if defined(USE_ROCM_CK_GEMM)
+  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+    use_fast_path = true;
+  }
+#endif //USE_ROCM_CK_GEMM
 #endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
+#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+#else
+#if defined(USE_ROCM_CK_GEMM)
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+#else
+    TORCH_WARN("ROCm: Group Gemm through CK not selected.");
+#endif //USE_ROCM_CK_GEMM
+#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }

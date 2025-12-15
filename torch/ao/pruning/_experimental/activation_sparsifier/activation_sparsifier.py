@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -251,7 +251,7 @@ class ActivationSparsifier:
         # or sparsify_hook()
         self.data_groups[name]["hook_state"] = "aggregate"  # aggregate hook is attached
 
-    def get_mask(self, name: Optional[str] = None, layer: Optional[nn.Module] = None):
+    def get_mask(self, name: str | None = None, layer: nn.Module | None = None):
         """
         Returns mask associated to the layer.
 

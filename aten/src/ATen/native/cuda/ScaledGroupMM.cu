@@ -7,7 +7,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-// Two warninngs in Cutlass included header files
+// Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
@@ -364,9 +364,9 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   //       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
   //           stride_output_h + group_count);
 
-  //   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << "
+  //   std::cout << "PTRS " << mat_a.data_ptr() << ' ' << mat_b.data_ptr() << "
   //   "
-  //             << out.data_ptr() << " " << scale_a.data_ptr() << " "
+  //             << out.data_ptr() << ' ' << scale_a.data_ptr() << ' '
   //             << scale_b.data_ptr() << "\n";
   //   for (int i = 0; i < group_count; i++) {
   //     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";

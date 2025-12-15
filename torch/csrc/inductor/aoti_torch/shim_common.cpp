@@ -29,6 +29,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/FileSystem.h>
+#include <torch/headeronly/version.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -194,12 +195,9 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
-#ifndef C10_MOBILE
-#include <torch/version.h>
 uint64_t aoti_torch_abi_version() {
   return TORCH_ABI_VERSION;
 }
-#endif // C10_MOBILE
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
@@ -1263,7 +1261,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 
   // Display message
-  std::cout << "[";
+  std::cout << '[';
   if (msg) {
     std::cout << "  " << msg;
   }
@@ -1272,7 +1270,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
   if (numel <= AOTI_TORCH_MAX_NUMEL_TO_PRINT) {
-    std::cout << *t << "\n";
+    std::cout << *t << '\n';
   }
 
   // Print summary stats of the tensor
@@ -1318,7 +1316,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
         std::cout
             << "[INFO] Aten built-in function `min_all_cuda/max_all_cuda` not implemented for current dtype: "
             << t->dtype() << ". Printing out the whole value:\n"
-            << *t << "\n";
+            << *t << '\n';
       }
     }
   }
@@ -1341,14 +1339,13 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        proxy_executor != nullptr,
-        "Unable to find a proxy executor to run custom ops.",
-        "Please check if there is a json file generated",
-        "in the same directory as the so,",
-        "or use torch._inductor.aoti_compile_and_package",
-        "to package everything into a PT2 artifact.");
-
+    if (!proxy_executor) {
+      throw std::runtime_error(
+          "Unable to find a proxy executor to run custom ops. Please check if "
+          "there is a json file generated in the same directory as the so, or use "
+          "torch._inductor.aoti_compile_and_package to package everything into a "
+          "PT2 artifact.");
+    }
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
         extern_node_index,
@@ -1357,6 +1354,17 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         num_tensors,
         flatten_tensor_args);
   });
+}
+
+void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  if (C10_UNLIKELY_OR_CONST(!cond)) {
+    ::c10::detail::torchCheckFail(func, file, line, msg);
+  }
 }
 
 void aoti_torch_warn(

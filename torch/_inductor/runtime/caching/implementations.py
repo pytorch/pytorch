@@ -7,6 +7,7 @@ appropriate locking mechanisms.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
@@ -14,7 +15,7 @@ from io import BufferedReader, BufferedWriter
 from os import PathLike
 from pathlib import Path
 from threading import Lock
-from typing import Any, Generator
+from typing import Any
 from typing_extensions import override
 
 from filelock import FileLock
@@ -54,9 +55,9 @@ class _CacheImpl(ABC):
     It provides thread-safe operations through a locking mechanism and supports
     both get and insert operations.
 
-    Note: We don't use generics here as doing so would require that the interfaces
+    Note: We don't use generics here as doing so would require that callers
     know which k/v types the implementation can work with. Instead, we leave that
-    determination up to the implementation itself and require that the interfaces
+    determination up to the implementation itself and require that callers
     handle any potential errors from invalid k/v types being passed to the
     implementation.
     """
@@ -310,7 +311,7 @@ class _OnDiskCacheImpl(_CacheImpl):
 
         r_fp, w_fp, inserted = None, None, False
         try:
-            w_fp = open(fpath, "xb")
+            w_fp = open(fpath, "xb")  # noqa: SIM115
         except FileExistsError:
             is_stale: bool = False
             with open(fpath, "rb") as r_fp:
@@ -321,7 +322,7 @@ class _OnDiskCacheImpl(_CacheImpl):
                 # match so we choose to remove the old entry so that the new
                 # k/v pair can be cached
                 fpath.unlink()
-                w_fp = open(fpath, "xb")
+                w_fp = open(fpath, "xb")  # noqa: SIM115
             else:
                 w_fp = None
         finally:

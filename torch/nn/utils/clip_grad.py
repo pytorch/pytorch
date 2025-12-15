@@ -5,7 +5,7 @@ import types
 import typing
 import warnings
 from collections.abc import Callable
-from typing import cast, Optional, TypeAlias, TypeVar, Union
+from typing import cast, TypeAlias, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -24,10 +24,7 @@ __all__: list[str] = [
 ]
 
 
-_tensor_or_tensors: TypeAlias = Union[  # noqa: PYI042
-    torch.Tensor,
-    typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
-]
+_tensor_or_tensors: TypeAlias = torch.Tensor | typing.Iterable[torch.Tensor]  # noqa: PYI042
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -54,7 +51,7 @@ def _get_total_norm(
     tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -87,7 +84,7 @@ def _get_total_norm(
     first_device = tensors[0].device
     grouped_tensors: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
-    ] = _group_tensors_by_device_and_dtype(
+    ] = _group_tensors_by_device_and_dtype(  # pyrefly: ignore [bad-assignment]
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 
@@ -125,7 +122,7 @@ def _clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Scale the gradients of an iterable of parameters given a pre-calculated total norm and desired max norm.
 
@@ -191,7 +188,7 @@ def clip_grad_norm_(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -246,7 +243,7 @@ def clip_grad_norm(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -261,7 +258,7 @@ def clip_grad_norm(
 def clip_grad_value_(
     parameters: _tensor_or_tensors,
     clip_value: float,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Clip the gradients of an iterable of parameters at specified value.
 
