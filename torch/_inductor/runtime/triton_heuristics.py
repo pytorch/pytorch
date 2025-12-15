@@ -2992,7 +2992,7 @@ def match_target_block_product(
     tiling_scores,
     target_block_product,
     min_block_size=1,
-    min_red_block: Optional[int] = 4,
+    min_red_block: int | None = 4,
 ):
     """
     Distribute block sizes across dimensions according to tiling scores,
@@ -3015,6 +3015,7 @@ def match_target_block_product(
     for dim, score in tiling_scores.items():
         if score == 0 and "r" not in dim:
             block_sizes[dim] = 1
+            relative_scores[dim] = 0
             continue
 
         size = min_block_size if "r" not in dim else min_red_block

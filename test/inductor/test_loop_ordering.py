@@ -956,7 +956,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             if not downcast_transposed_v:
                 self.assertEqual(cont_reads, t_reads * 3)
             else:
-                self.assertEqual(cont_reads, t_reads * 3 // 2)
+                self.assertEqual(cont_reads, t_reads * 3 / 2)
 
             return nodes
 
@@ -1221,6 +1221,74 @@ class TestTiling(TestCase):
         # Test non-broadcast: linear access pattern
         result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
         self.assertEqual(result, None)
+
+    def test_indirect_access_not_coalesced(self):
+        """Test that memory accesses with indirect indexing are treated as uncoalesced.
+
+        When we have an access pattern like weights[indices[i]], the weight load
+        uses an indirect index and should NOT be counted as coalesced since the
+        access pattern is effectively random.
+
+        For w[idx] where idx is (4096,) and w is (1024, 256):
+        - Read of idx: coalesced (simple linear access)
+        - Read of w: uncoalesced (uses indirect index)
+        - Write to output: coalesced (contiguous)
+        """
+        from torch._inductor import tiling_utils
+        from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            self.assertIsNotNone(coalesce_analysis)
+
+            # Should have exactly 1 uncoalesced access (the indirect weight read)
+            self.assertEqual(
+                len(coalesce_analysis.uncoalesced_addrs),
+                1,
+                f"Expected 1 uncoalesced access, got {len(coalesce_analysis.uncoalesced_addrs)}",
+            )
+
+            # The uncoalesced access should have an INDIRECT symbol
+            for expr in coalesce_analysis.uncoalesced_addrs:
+                has_indirect = any(
+                    symbol_is_type(s, SymT.INDIRECT) for s in expr.free_symbols
+                )
+                self.assertTrue(
+                    has_indirect,
+                    f"Expected uncoalesced expr {expr} to have INDIRECT symbol",
+                )
+
+            # Should have coalesced accesses (idx read + output write)
+            self.assertGreater(
+                len(coalesce_analysis.coalesced_by_var),
+                0,
+                "Expected at least one coalesced variable",
+            )
+
+            # Verify no INDIRECT symbols ended up as coalesced vars
+            for var in coalesce_analysis.coalesced_by_var:
+                self.assertFalse(
+                    symbol_is_type(var, SymT.INDIRECT),
+                    f"INDIRECT symbol {var} should not be in coalesced_by_var",
+                )
+
+            return nodes
+
+        V, D = 1024, 256
+        indices = torch.randint(0, V, (4096,), device=GPU_TYPE)
+        weights = torch.randn(V, D, device=GPU_TYPE)
+
+        def embedding_1d(idx, w):
+            return w[idx]
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn):
+            out = torch.compile(embedding_1d)(indices, weights)
+
+        # Verify correctness
+        expected = embedding_1d(indices, weights)
+        self.assertEqual(out, expected)
 
 
 class TestIndexInversion(TestCase):

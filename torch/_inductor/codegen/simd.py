@@ -3121,3 +3121,6 @@ class CantSplit(Exception):
         super().__init__()
         self.expr = expr
         self.remaining = remaining
+
+    def __str__(self):
+        return f"{self.expr} not divisible by {self.remaining}"
