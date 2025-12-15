@@ -1439,7 +1439,7 @@ if has_triton():
 
                 mat1_block = tl.load(
                     mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     mask=mask_k[None, :],
                     other=0.0,
                 )
@@ -1448,7 +1448,7 @@ if has_triton():
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     mask=mask_k[:, None],
                     other=0.0,
                 )

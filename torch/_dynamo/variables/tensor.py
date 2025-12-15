@@ -1110,7 +1110,7 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             from .. import polyfills
 
             return tx.inline_user_function_return(
@@ -1213,7 +1213,7 @@ class TensorVariable(VariableTracker):
             )
 
     def method_add_(self, other, *, alpha=None):
-        if alpha is not None:
+        if alpha is not None and config.enable_dynamo_decompositions:
             from ..symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
@@ -1226,7 +1226,7 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        if value is not None:
+        if value is not None and config.enable_dynamo_decompositions:
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )

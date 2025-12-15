@@ -256,12 +256,16 @@ class SideEffects:
             )
         assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
-            # TODO plumb HOP information here
             unimplemented(
-                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
-                context="",
-                explanation="This is not supported.",
-                hints=[],
+                gb_type="HOP: Unsafe side effect",
+                context=f"Attempted to mutate {item}",
+                explanation="Mutating a variable from outside the scope of this HOP is not supported.",
+                hints=[
+                    "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a "
+                    "side effect in forward method. Eager activation checkpointing replays that side-effect while "
+                    "recomputing the forward in the backward. If you are ok with side-effect not replayed in the "
+                    "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
+                ],
             )
         return False
 

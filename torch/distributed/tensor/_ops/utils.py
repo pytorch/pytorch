@@ -98,6 +98,11 @@ def is_tensor_shardable(
     """
     Check if the shape is shardable according to the spec.
 
+    This function handles both `Shard` and `_StridedShard` placements:
+    - For `Shard`: checks if the tensor dimension size >= number of shards
+    - For `_StridedShard`: additionally checks if the dimension is shardable after
+      splitting with the placement's `split_factor`
+
     allow_unbacked_sharding: determines the fallback value if unbacked shapes are involved,
     and the queried shape properties are not statically known.
 
@@ -118,19 +123,23 @@ def is_tensor_shardable(
     }[allow_unbacked_sharding]
 
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
-            shards_map[shard_dim] *= spec.mesh.size(i)
-
-    for i, dim_size in enumerate(shape):
-        # TODO: maybe we should determine is_shardable based on
-        #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and guard_fn(dim_size < shards_map[i]):
-            return False
+            num_shards[shard_dim] *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                # make sure tensor dim `shard_dim` is shardable after splitting
+                # with split_factor
+                if guard_fn(
+                    shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
+                ):
+                    return False
+            else:
+                if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
+                    return False
 
     return True
 
@@ -138,16 +147,22 @@ def is_tensor_shardable(
 def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     """Check if the shape is evenly shardable according to the spec."""
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
-            shards_map[shard_dim] *= spec.mesh.size(i)
-
-    for i, dim_size in enumerate(shape):
-        if shards_map[i] > 1 and (dim_size % shards_map[i] != 0):
-            return False
-
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
+            if shard_dim >= len(shape):
+                return False
+            num_shards[shard_dim] *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                if (
+                    shape[shard_dim] % (placement.split_factor * num_shards[shard_dim])
+                    != 0
+                ):
+                    return False
+            else:
+                if shape[shard_dim] % num_shards[shard_dim] != 0:
+                    return False
     return True
 
 

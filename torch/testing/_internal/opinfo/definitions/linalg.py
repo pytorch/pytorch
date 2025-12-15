@@ -25,10 +25,12 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
+    all_types_and,
     all_types_and_complex,
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1153,6 +1155,7 @@ op_db: list[OpInfo] = [
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
         op=torch.linalg.cross,
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+        dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
         error_inputs_func=error_inputs_cross,
@@ -1165,6 +1168,12 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -1173,6 +1182,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.det,
         aliases=("det",),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
@@ -1196,6 +1206,7 @@ op_db: list[OpInfo] = [
         "linalg.cholesky",
         aten_name="linalg_cholesky",
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1208,6 +1219,8 @@ op_db: list[OpInfo] = [
         "linalg.cholesky_ex",
         aten_name="linalg_cholesky_ex",
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1274,6 +1287,8 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1313,6 +1328,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1350,6 +1367,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1386,6 +1405,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1423,6 +1444,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1431,6 +1454,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.householder_product,
         aliases=("orgqr",),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_and_complex_types_and(torch.bfloat16, torch.float16),
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         # TODO: backward uses in-place operations that vmap doesn't like
@@ -1463,6 +1487,10 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.ldl_factor_ex",
@@ -1471,6 +1499,10 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.ldl_solve",
@@ -1483,6 +1515,10 @@ op_db: list[OpInfo] = [
             skipCUDAIfRocm,
             skipCPUIfNoLapack,
         ],
+        skips=(
+            # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     OpInfo(
         "linalg.lstsq",
@@ -1851,6 +1887,7 @@ op_db: list[OpInfo] = [
         op=torch.linalg.inv,
         aliases=("inverse",),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
@@ -1885,6 +1922,7 @@ op_db: list[OpInfo] = [
         aten_name="linalg_inv_ex",
         op=torch.linalg.inv_ex,
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_gradgrad=False,
         supports_forward_ad=True,
@@ -2333,12 +2371,27 @@ python_ref_db: list[OpInfo] = [
     PythonRefInfo(
         "_refs.linalg.cross",
         torch_opinfo_name="linalg.cross",
+        dtypesIfMPS=all_types_and_complex_and(torch.half, torch.bfloat16),
         supports_out=True,
         op_db=op_db,
         skips=(
             # TODO: is this really needed?
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
             ),
         ),
     ),
