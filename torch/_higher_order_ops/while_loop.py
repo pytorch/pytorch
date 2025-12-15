@@ -2,14 +2,13 @@
 import contextlib
 import functools
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    _set_compilation_env,
     autograd_not_implemented,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
@@ -22,7 +21,6 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -52,6 +50,7 @@ class WhileLoopOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
     # pyrefly: ignore [bad-override]
@@ -194,9 +193,6 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_mode,
-    )
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
@@ -243,18 +239,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     def _while_loop_op_wrapper(*args, **kwargs):
         return while_loop_op(*args, **kwargs)
 
-    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_mode(metadata_mode)
-                    )
-                else:
-                    backend = "eager"
-                return torch.compile(
-                    _while_loop_op_wrapper, backend=backend, fullgraph=True
-                )(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
+    from torch._higher_order_ops.utils import setup_compilation_env
+
+    with setup_compilation_env() as backend:
+        return torch.compile(_while_loop_op_wrapper, backend=backend, fullgraph=True)(
+            flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple()
+        )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -637,6 +627,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
@@ -881,7 +872,9 @@ class WhileLoopAutogradOp(torch.autograd.Function):
 
         _, final_grad_carries, final_grad_additional_inputs = split_into_chunks(
             while_loop_op(
+                # pyrefly: ignore [bad-argument-type]
                 cond_gm,
+                # pyrefly: ignore [bad-argument-type]
                 body_gm,
                 # pyrefly: ignore [bad-argument-type]
                 (

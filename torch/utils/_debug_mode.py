@@ -43,6 +43,7 @@ from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._logging import warning_once
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -272,7 +273,6 @@ def _ensure_annotate_decorated():
 
         # Register no-op lowering for inductor backend
         from torch._inductor.lowering import register_lowering
-        from torch._logging import warning_once
 
         @register_lowering(torch.ops.debug_mode_ops.annotate)
         def _annotate_lowering(tag: str) -> None:
@@ -689,7 +689,8 @@ class DebugInterpreter(torch.fx.Interpreter):
         result = super().run(*args)
 
         # reset nn.Module stack to pre-compiled region value
-        assert len(self.mode.current_nn_module_stack) >= len(self.base_nn_module_stack)
+        if len(self.mode.current_nn_module_stack) < len(self.base_nn_module_stack):
+            warning_once(log, "unexpected handling of nn_module_stack in DebugInterpreter")
         while len(self.mode.current_nn_module_stack) > len(self.base_nn_module_stack):
             self.mode._exit_nn_module_call()
 
