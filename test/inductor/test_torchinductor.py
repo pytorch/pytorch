@@ -10206,10 +10206,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif (
-            self.device == GPU_TYPE
-            and not torch._inductor.config.align_random_eager
-        ):
+        elif self.device == GPU_TYPE and not torch._inductor.config.align_random_eager:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -10253,10 +10250,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
-        elif (
-            self.device == GPU_TYPE
-            and not torch._inductor.config.align_random_eager
-        ):
+        elif self.device == GPU_TYPE and not torch._inductor.config.align_random_eager:
             # the load_seed_offset arg can be 1 or non-1; depending on whether
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization

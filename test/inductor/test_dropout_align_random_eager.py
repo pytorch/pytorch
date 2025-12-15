@@ -246,7 +246,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     @pytest.mark.xfail(
-        reason="Exact eager vs compiled dropout parity is not guaranteed for dynamic shapes: align_random_eager is disabled when SymInt is present. If remove the constrain of replace_random.py L204 of all(isinstance(s, int) for s in size), this test will pass but inter-graph will have issue because the global host state does not advance, causing identical random sequences across repeated runs.",
+        reason="Exact eager vs compiled dropout parity is not guaranteed for dynamic shapes: align_random_eager is disabled when SymInt is present. If remove the constrain of replace_random.py, this test will pass but inter-training will have issue.",
         strict=False,
     )
     def test_dropout_parity_dynamic_shapes(self):

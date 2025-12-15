@@ -99,7 +99,7 @@ randint = make_prim(
 )
 
 
-def _reserve_rng_state(device: torch.device, used_offset: SymInt):
+def _reserve_rng_state(device: torch.device, used_offset):
     """
     Reserve `used_offset` 32-bit Philox samples on the given CUDA device and
     return (seed, base), where base is in Philox-4x32 units.
