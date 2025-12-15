@@ -16,10 +16,6 @@ logger = logging.getLogger(__name__)
 
 _VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
 
-# Cache for YAML test library to avoid repeated file reads
-_vllm_test_library_cache: dict[str, Any] | None = None
-
-
 def _load_vllm_test_library_yaml() -> dict[str, Any]:
     """
     Load the VLLM test library configuration from YAML file.
@@ -27,10 +23,6 @@ def _load_vllm_test_library_yaml() -> dict[str, Any]:
     Returns:
         Dictionary containing the test library configuration.
     """
-    global _vllm_test_library_cache
-    if _vllm_test_library_cache is not None:
-        return _vllm_test_library_cache
-
     if not _VLLM_TEST_LIBRARY_PATH.exists():
         raise FileNotFoundError(
             f"VLLM test library YAML file not found: {_VLLM_TEST_LIBRARY_PATH}"
