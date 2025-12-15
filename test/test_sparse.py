@@ -5694,16 +5694,18 @@ class TestSparseAny(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.complex32, torch.complex64, torch.complex128)
     def test_view_as_real(self, device, dtype):
-        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
-        indices = torch.tensor([[0], [0]], device=device)
-        size = torch.Size([3, 3])
-        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
-        res = torch.view_as_real(xs).coalesce()
-
-        self.assertEqual(res.indices(), indices)
-        self.assertEqual(res.values()[0][0], x.real)
-        self.assertEqual(res.values()[0][1], x.imag)
-        self.assertEqual(res.shape, xs.shape + (2,))
+        for xs in self.generate_simple_inputs(torch.sparse_coo, device=device, dtype=dtype):
+            res = torch.view_as_real(xs)
+            self.assertEqual(res.layout, torch.sparse_coo)
+            self.assertEqual(res._indices(), xs._indices())
+            self.assertEqual(res.shape, xs.shape + (2,))
+            if dtype is torch.complex32 and torch.device(device).type == "cpu":
+                # ComplexHalf to_dense() is not supported on CPU.
+                # check res values manually
+                self.assertEqual(res._values()[..., 0], xs._values().real)
+                self.assertEqual(res._values()[..., 1], xs._values().imag)
+                continue
+            self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
