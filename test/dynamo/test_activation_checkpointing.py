@@ -351,7 +351,7 @@ class ActivationCheckpointingViaTagsTests(
         )
         self._validate(fn, backend, x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
