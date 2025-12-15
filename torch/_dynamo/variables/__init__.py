@@ -118,6 +118,7 @@ from .misc import (
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
+    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
