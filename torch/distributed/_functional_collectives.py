@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
-import math
 import sys
 import warnings
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -95,7 +94,7 @@ RANK_TYPES = Union[
     dist.ProcessGroup,
     DeviceMesh,
     tuple["dist.tensor.DeviceMesh", int],
-    str,
+    c10d.GroupName,
 ]
 
 
@@ -183,25 +182,14 @@ def _maybe_view_chunk_cat(
     a result which is concatenated on dim=0, even though actually you may need
     to undo this concatenation and then re-cat on the gather dim.
 
-    When is data-movement not necessary?  Intuitively, we need to understand if
-    the unflatten in this reference implementation of this code triggers a
-    copy or not:
+    This is implemented in a clever way: we can express the chunk and cat purely
+    in terms of view operations.  A copy is not necessary if the resulting view
+    is still contiguous.
 
-        chunks = torch.unflatten(res, 0, [group_size, -1])
-        return torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
-
-    Assume res is contiguous (it will be coming out of the collective).  We
-    essentially need to know if the movedim maintains the contiguity of the
-    tensor.  Moving a dimension typically does NOT preserve contiguity, unless
-    EVERY dimension it is moved across is size 1.
+    This function is only valid for contiguous tensors.
 
     Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
-
-        [4, d1, d2] -> [4, 1, d1, d2] -> [1, 4, d1, d2] (contiguous!)
-
     Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
-
-        [4, 2, d2] -> [4, 1, 2, d2] -> [1, 2, 4, d2] (not contiguous!)
 
     Args:
         res: Tensor with gathered data in dim 0, shape [group_size, ...]
@@ -212,31 +200,10 @@ def _maybe_view_chunk_cat(
         Tensor with data rearranged to gather along gather_dim
     """
 
-    if gather_dim == 0:
-        # When gather_dim is 0, chunk+cat is a no-op
-        return res
-
-    shape = list(res.shape)
-
-    # Optimization: Can use view instead of split+cat when:
-    # 1. res.shape[0] == group_size (invariant after all_gather)
-    # 2. All dims between 0 and gather_dim (exclusive) have size 1
-    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
-
-    if shape[0] == group_size and numel_between == 1:
-        # View optimization: reshape to collapse dim 0 into gather_dim
-        final_shape = (
-            [1]  # Dim 0 becomes 1
-            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
-            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
-            + shape[gather_dim + 1 :]  # Rest unchanged
-        )
-        return res.view(final_shape)
-    else:
-        # General case: fall back to split + cat
-        # This is better than torch.flatten as cat can be vectorized, whereas
-        # the contiguous kernel is always bad.
-        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+    chunks = torch.unflatten(res, 0, [group_size, -1])
+    return torch.flatten(
+        torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1
+    )
 
 
 def all_gather_tensor(
@@ -521,8 +488,8 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    output_split_sizes: Optional[list[int]],
-    input_split_sizes: Optional[list[int]],
+    output_split_sizes: list[int] | None,
+    input_split_sizes: list[int] | None,
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -574,8 +541,8 @@ def all_to_all_single(
 
 def all_to_all_single_autograd(
     self: torch.Tensor,
-    output_split_sizes: Optional[list[int]],
-    input_split_sizes: Optional[list[int]],
+    output_split_sizes: list[int] | None,
+    input_split_sizes: list[int] | None,
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -693,7 +660,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[type] = None
+        self, expected_metadata: Any, expected_type: type | None = None
     ):
         if expected_type is not torch.Tensor:
             return None
@@ -846,7 +813,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
-def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
@@ -855,7 +822,11 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
-        return group
+        # In some cases Dynamo doesn't like tracing through NewType constructors
+        # - so use a cast instead (the actual newtype representation is
+        # literally the underlying type so this is fine). I haven't been able to
+        # reproduce it in isolation (see T247631668).
+        return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(
@@ -1068,6 +1039,14 @@ def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
     return inp.new_empty(shape)
 
 
+def _reduce_scatter_tensor_out_native_meta(
+    inp, reduce_op, group_size, group_name, *, out
+):
+    shape = list(inp.size())
+    shape[0] //= group_size
+    return inp.new_empty(shape)
+
+
 def _reduce_scatter_tensor_coalesced_native_meta(
     inputs, reduce_op, group_size, group_name
 ):
@@ -1094,6 +1073,9 @@ lib_impl.impl(
     "Meta",
 )
 lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+lib_impl.impl(
+    "reduce_scatter_tensor_out", _reduce_scatter_tensor_out_native_meta, "Meta"
+)
 lib_impl.impl(
     "reduce_scatter_tensor_coalesced",
     _reduce_scatter_tensor_coalesced_native_meta,

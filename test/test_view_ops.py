@@ -375,6 +375,13 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
@@ -964,7 +971,7 @@ class TestViewOps(TestCase):
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -975,7 +982,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_split_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.split(t, [1, 1, 1])
@@ -1065,22 +1072,6 @@ class TestViewOps(TestCase):
             expected = torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
             self.assertEqual(result, expected)
             self.assertTrue(result.is_contiguous())
-
-            # Check that whether result is a view matches the movedim reference implementation
-            # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
-            #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
-            chunks = torch.unflatten(x, 0, [group_size, -1])
-            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
-
-            # Check if result is a view of x by comparing data pointers
-            result_is_view = result.data_ptr() == x.data_ptr()
-            # Check if ref is a view of x by comparing data pointers
-            ref_is_view = ref.data_ptr() == x.data_ptr()
-
-            self.assertEqual(result_is_view, ref_is_view,
-                           f"View status mismatch for shape={shape}, group_size={group_size}, "
-                           f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
-                           f"ref_is_view={ref_is_view}")
 
         # Test various configurations - one per line as requested
         test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
@@ -1226,6 +1217,8 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape(1, 9, 1).data_ptr())
         self.assertEqual(torch.reshape(x, (9,)), x.reshape(9))
         self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
+        # ensure reshape() throws an error if extra positional arguments are given.
+        self.assertRaises(TypeError, lambda: x.reshape((9,), torch.float32))
 
         y = torch.randn(4, 4, 4, device=device)[:, 0, :]
         # .data_ptr() on meta tensors is always 0 so they are equal regardless of the reshape
@@ -1769,6 +1762,9 @@ class TestOldViewOps(TestCase):
                     r"must match the existing size \(\d\)",
                 ):
                     torch.broadcast_to(t, s1)
+        # ensure broadcast_to() throws an error when extra positional arguments are given.
+        t = torch.tensor([1, 2, 3])
+        self.assertRaises(TypeError, lambda: t.broadcast_to((3, 3), torch.float32))
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
@@ -1854,6 +1850,11 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(-1, 1), contig_tensor.view(-1, 1))
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
+
+        # ensure view() throws an error if extra positional arguments are given.
+        self.assertRaises(
+            TypeError, lambda: tensor.view((tensor.numel(),), torch.float32)
+        )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_reshape_view_semantics(self, device, dtype):

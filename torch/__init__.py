@@ -27,11 +27,9 @@ from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
-    Optional as _Optional,
     overload as _overload,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
-    Union as _Union,
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
@@ -137,7 +135,8 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ must be kept sorted")
 
 ################################################################################
 # Load the extension module
@@ -306,7 +305,8 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
 def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
-    assert platform.system() == "Linux", "Should only be called on Linux"
+    if platform.system() != "Linux":
+        raise AssertionError(f"Should only be called on Linux, got {platform.system()}")
 
     lib_path = None
     for path in sys.path:
@@ -320,7 +320,7 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
         ctypes.CDLL(lib_path)
 
 
-def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
+def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
@@ -340,7 +340,7 @@ def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
     ]
     # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
-    if err is not None and [
+    if err is not None and not [
         lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
@@ -895,8 +895,10 @@ def sym_max(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))  # type: ignore[call-overload]
     else:
@@ -932,8 +934,10 @@ def sym_min(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))  # type: ignore[call-overload]
     else:
@@ -1007,7 +1011,10 @@ def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
+    if not isinstance(b, (SymBool, builtins.bool)):
+        raise AssertionError(f"expected SymBool or bool, got {type(b)}")
+    if type(t) is not type(f):
+        raise AssertionError(f"type mismatch: {type(t)} vs {type(f)}")
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -1208,11 +1215,10 @@ def get_default_device() -> "torch.device":
         device = device_mode.device
         return _get_device_with_index(device)
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
-        return _get_device_with_index(device)
-    else:
-        return torch.device("cpu")
+    device_context = getattr(_GLOBAL_DEVICE_CONTEXT, "device_context", None)
+    if device_context is not None:
+        return _get_device_with_index(device_context.device)
+    return torch.device("cpu")
 
 
 def set_default_device(device: "Device") -> None:
@@ -1277,7 +1283,7 @@ def set_default_device(device: "Device") -> None:
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
-def set_default_tensor_type(t: _Union[type["torch.Tensor"], str], /) -> None:
+def set_default_tensor_type(t: type["torch.Tensor"] | str, /) -> None:
     r"""
     .. warning::
 
@@ -1525,7 +1531,7 @@ def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     return _C._get_deterministic_algorithms_warn_only()
 
 
-def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
+def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
     r"""Sets the debug mode for deterministic operations.
 
     .. note:: This is an alternative interface for
@@ -1687,7 +1693,7 @@ def is_warn_always_enabled() -> builtins.bool:
 
 def _check_with(
     error_type,
-    cond: _Union[builtins.bool, SymBool],
+    cond: builtins.bool | SymBool,
     message: _Callable[[], str],
 ):  # noqa: F811
     if not isinstance(cond, (builtins.bool, SymBool)):
@@ -1699,7 +1705,10 @@ def _check_with(
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
-    assert issubclass(error_type, Exception) and not issubclass(error_type, Warning)
+    if not issubclass(error_type, Exception) or issubclass(error_type, Warning):
+        raise AssertionError(
+            f"error_type must be a subclass of Exception but not Warning, got {error_type}"
+        )
 
     if message is None:
         message_evaluated = (
@@ -2093,7 +2102,7 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 
-_storage_classes: set[type[_Union[TypedStorage, UntypedStorage]]] = {
+_storage_classes: set[type[TypedStorage | UntypedStorage]] = {
     UntypedStorage,
     DoubleStorage,
     FloatStorage,
@@ -2228,7 +2237,8 @@ def _assert(condition, message):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )
-    assert condition, message
+    if not condition:
+        raise AssertionError(message)
 
 
 ################################################################################
@@ -2399,13 +2409,13 @@ class _TorchCompileInductorWrapper:
             and self.dynamic == other.dynamic
         )
 
-    def apply_mode(self, mode: _Optional[str]):
+    def apply_mode(self, mode: str | None):
         if mode and mode != "default":
             from torch._inductor import list_mode_options
 
             self.apply_options(list_mode_options(mode, self.dynamic))
 
-    def apply_options(self, options: _Optional[dict[str, _Any]]):
+    def apply_options(self, options: dict[str, _Any] | None):
         if not options:
             return
 
@@ -2525,12 +2535,10 @@ def compile(
     model: _Callable[_InputT, _RetT],
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2540,31 +2548,27 @@ def compile(
     model: None = None,
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
-    model: _Optional[_Callable[_InputT, _RetT]] = None,
+    model: _Callable[_InputT, _RetT] | None = None,
     *,
     fullgraph: builtins.bool = False,
-    dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    dynamic: builtins.bool | None = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
+    options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
-) -> _Union[
-    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
-    _Callable[_InputT, _RetT],
-]:
+) -> (
+    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
+    | _Callable[_InputT, _RetT]
+):
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2720,28 +2724,15 @@ def compile(
         use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
-        warnings.warn(
-            "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
-            stacklevel=2,
-        )
-        from torch._higher_order_ops.utils import setup_compilation_env
+        from torch._higher_order_ops.utils import _in_hop_compile
 
-        # Create wrapper that always uses eager backend during export
-        def export_wrapped_fn(*args, **kwargs):
-            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-                # Force eager backend regardless of original backend
-                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
-                return torch._dynamo.optimize(
-                    backend=backend_wrapper,
-                    nopython=fullgraph,
-                    dynamic=dynamic,
-                    disable=disable,
-                    guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore [bad-argument-type]
-                )(model)(*args, **kwargs)
-
-        return export_wrapped_fn
+        if not _in_hop_compile():
+            warnings.warn(
+                "torch.compile is ignored when called inside torch.export region",
+                stacklevel=2,
+            )
+            # torch.compile is a no-op when inside torch.export region
+            return model
 
     if backend == "inductor":
         if use_aoti:
@@ -2872,7 +2863,7 @@ else:
 
 
 @functools.cache
-def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
+def get_device_module(device: torch.device | str | None = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
     If no device is given, return the module for the current accelerator or CPU if none is present.
@@ -2898,8 +2889,8 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
 
 def _constrain_as_size(
     symbol,
-    min: _Optional[builtins.int] = None,
-    max: _Optional[builtins.int] = None,
+    min: builtins.int | None = None,
+    max: builtins.int | None = None,
 ):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.

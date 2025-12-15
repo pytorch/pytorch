@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Optional
 
 from torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler import (
     SubprocessHandler,
@@ -21,7 +20,7 @@ def get_subprocess_handler(
     stdout: str,
     stderr: str,
     local_rank_id: int,
-    numa_options: Optional[NumaOptions] = None,
+    numa_options: NumaOptions | None = None,
 ) -> SubprocessHandler:
     return SubprocessHandler(
         entrypoint=entrypoint,
