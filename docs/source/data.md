@@ -337,7 +337,8 @@ GPUs.
 Since workers rely on Python {py:mod}`multiprocessing`, worker launch behavior is
 different on Windows compared to Unix.
 
-- On Unix, {func}`forkserver` is the default {py:mod}`multiprocessing` start method starting Python 3.14.
+- On Unix, The default {py:mod}`multiprocessing` start method is {func}`forkserver`
+  for Python >= 3.14; {func}`fork` for Python < 3.14.
   Using {func}`fork`, child workers typically can access the {attr}`dataset` and
   Python argument functions directly through the cloned address space. This can have a fast start up,
   but can lead to problems with multi-threaded applications. On Unix platforms that support it, {func}`forkserver`
