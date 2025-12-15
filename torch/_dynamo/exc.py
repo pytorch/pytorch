@@ -403,7 +403,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     assert isinstance(exception_vt, ExceptionVals)
-    tx._attach_traceback_to_exc(exception_vt)
+    tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages
