@@ -4,11 +4,32 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <unistd.h>
+
 using namespace c10::CachingAllocator;
 
 namespace c10::openreg {
 
 constexpr size_t kAggregate = static_cast<size_t>(StatType::AGGREGATE);
+
+namespace {
+
+constexpr size_t kDefaultPageSizeBytes = 4096;
+
+size_t getPageSizeBytes() {
+  static const long page_size_long = sysconf(_SC_PAGESIZE);
+  static const size_t page_size_bytes =
+      page_size_long > 0 ? static_cast<size_t>(page_size_long)
+                         : kDefaultPageSizeBytes;
+  return page_size_bytes;
+}
+
+size_t roundUpToPageSize(size_t nbytes) {
+  const size_t page_size = getPageSizeBytes();
+  return ((nbytes + page_size - 1) / page_size) * page_size;
+}
+
+} // namespace
 
 
 DeviceMemoryAllocator::DeviceMemoryAllocator(c10::DeviceIndex device_index)
@@ -21,29 +42,45 @@ void* DeviceMemoryAllocator::malloc(size_t nbytes) {
 
   std::lock_guard<std::recursive_mutex> lock(mutex_);
 
+  // OpenReg aligns device allocations to page size internally.
+  const size_t aligned_nbytes = roundUpToPageSize(nbytes);
+
+  // Single-level cache: pick the smallest cached block
+  auto cached_it = cached_blocks_.lower_bound(aligned_nbytes);
+  if (cached_it != cached_blocks_.end()) {
+    const size_t cached_nbytes = cached_it->first;
+    void* data = cached_it->second;
+    cached_blocks_.erase(cached_it);
+    cached_pointers_.erase(data);
+
+    allocation_sizes_[data] = cached_nbytes;
+    stats_.allocated_bytes[kAggregate].increase(cached_nbytes);
+    return data;
+  }
+
   void* data = nullptr;
-  auto ret = orMalloc(&data, nbytes);
+  auto ret = orMalloc(&data, aligned_nbytes);
 
   TORCH_CHECK(
       ret == orSuccess && data != nullptr,
       "Failed to allocate ",
-      nbytes,
+      aligned_nbytes,
       " bytes on openreg device ",
       device_index_,
       ". ",
       "Allocated: ",
-      stats_.allocated_bytes[0].current,
+      stats_.allocated_bytes[kAggregate].current,
       " bytes, ",
       "Reserved: ",
-      stats_.reserved_bytes[0].current,
+      stats_.reserved_bytes[kAggregate].current,
       " bytes");
 
   // Track allocation size for proper deallocation statistics
-  allocation_sizes_[data] = nbytes;
+  allocation_sizes_[data] = aligned_nbytes;
 
   // Update statistics
-  stats_.allocated_bytes[kAggregate].increase(nbytes);
-  stats_.reserved_bytes[kAggregate].increase(nbytes);
+  stats_.allocated_bytes[kAggregate].increase(aligned_nbytes);
+  stats_.reserved_bytes[kAggregate].increase(aligned_nbytes);
   stats_.num_device_alloc++;
 
   return data;
@@ -56,52 +93,81 @@ void DeviceMemoryAllocator::free(void* ptr) {
 
   std::lock_guard<std::recursive_mutex> lock(mutex_);
 
-  auto ret = orFree(ptr);
+  auto it = allocation_sizes_.find(ptr);
+  if (it != allocation_sizes_.end()) {
+    const size_t nbytes = it->second;
+    allocation_sizes_.erase(it);
 
+    stats_.allocated_bytes[kAggregate].decrease(nbytes);
+
+    // Cache the block for future reuse.
+    cached_blocks_.emplace(nbytes, ptr);
+    cached_pointers_.insert(ptr);
+    return;
+  }
+
+  if (cached_pointers_.find(ptr) != cached_pointers_.end()) {
+    TORCH_WARN(
+        "Attempted to free an OpenReg memory pointer ",
+        ptr,
+        " on device ",
+        device_index_,
+        " that is already cached. This likely indicates a double-free.");
+    return;
+  }
+
+  // Best-effort orFree for untracked pointers; don't update stats.
+  const auto ret = orFree(ptr);
   if (ret == orSuccess) {
-    auto it = allocation_sizes_.find(ptr);
-    if (it != allocation_sizes_.end()) {
-      size_t nbytes = it->second;
-
-      stats_.allocated_bytes[kAggregate].decrease(nbytes);
-      stats_.reserved_bytes[kAggregate].decrease(nbytes);
-      stats_.num_device_free++;
-
-      allocation_sizes_.erase(it);
-    } else {
-      TORCH_WARN(
-          "Successfully freed OpenReg memory pointer ",
-          ptr,
-          " on device ",
-          device_index_,
-          " that was not tracked by the allocator. "
-          "Statistics may be inaccurate.");
-    }
+    TORCH_WARN(
+        "Successfully freed OpenReg memory pointer ",
+        ptr,
+        " on device ",
+        device_index_,
+        " that was not tracked by the allocator. "
+        "Statistics may be inaccurate.");
   } else {
-    // orFree failed
-    auto it = allocation_sizes_.find(ptr);
-    if (it != allocation_sizes_.end()) {
-      TORCH_WARN(
-          "orFree failed for tracked pointer ",
-          ptr,
-          " with size ",
-          it->second,
-          " bytes on device ",
-          device_index_,
-          ". Return code: ",
-          ret,
-          ". Keeping tracking record - this may indicate a double-free or invalid pointer.");
+    TORCH_WARN(
+        "orFree failed for untracked pointer ",
+        ptr,
+        " on device ",
+        device_index_,
+        ". Return code: ",
+        ret,
+        ". This likely indicates a double-free or invalid pointer.");
+  }
+}
+
+std::vector<void*> DeviceMemoryAllocator::emptyCache() {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+  std::vector<void*> removed;
+  for (auto it = cached_blocks_.begin(); it != cached_blocks_.end();) {
+    const size_t nbytes = it->first;
+    void* ptr = it->second;
+    const auto ret = orFree(ptr);
+
+    if (ret == orSuccess || ret == orErrorUnknown) {
+      stats_.reserved_bytes[kAggregate].decrease(nbytes);
+      if (ret == orSuccess) {
+        stats_.num_device_free++;
+      }
+
+      cached_pointers_.erase(ptr);
+      removed.push_back(ptr);
+      it = cached_blocks_.erase(it);
     } else {
       TORCH_WARN(
-          "orFree failed for untracked pointer ",
+          "orFree failed while emptying OpenReg cache for pointer ",
           ptr,
           " on device ",
           device_index_,
           ". Return code: ",
-          ret,
-          ". This likely indicates a double-free or invalid pointer.");
+          ret);
+      ++it;
     }
   }
+  return removed;
 }
 
 c10::CachingDeviceAllocator::DeviceStats DeviceMemoryAllocator::getStats() {
@@ -219,7 +285,6 @@ void OpenRegDeviceAllocator::freeMemory(void* ptr) {
     auto it = allocated_blocks_.find(ptr);
     if (it != allocated_blocks_.end()) {
       device_index = it->second;
-      allocated_blocks_.erase(it);
       found_in_map = true;
     }
   }
@@ -233,8 +298,6 @@ void OpenRegDeviceAllocator::freeMemory(void* ptr) {
     auto ret = orFree(ptr);
 
     // Only warn if orFree actually failed (not just "not found")
-    // In OpenReg's case, orFree returns orErrorUnknown if pointer not in registry
-    // which is expected for already-freed memory
     if (ret != orSuccess && ret != orErrorUnknown) {
       TORCH_WARN(
           "orFree failed for untracked OpenReg memory pointer ",
@@ -258,8 +321,18 @@ void OpenRegDeviceAllocator::resetPeakStats(c10::DeviceIndex device) {
 }
 
 void OpenRegDeviceAllocator::emptyCache(MempoolId_t mempool_id) {
-  // OpenReg doesn't implement caching yet
-  // TODO: When caching is implemented, release all free blocks here
+  (void)mempool_id;
+  for (auto& allocator : device_allocators_) {
+    auto removed = allocator->emptyCache();
+    if (removed.empty()) {
+      continue;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    for (void* ptr : removed) {
+      allocated_blocks_.erase(ptr);
+    }
+  }
 }
 
 void OpenRegDeviceAllocator::recordStream(
