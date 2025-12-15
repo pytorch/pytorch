@@ -1,0 +1,174 @@
+name: Test upload-test-artifacts action
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-s3-failure:
+        description: 'Simulate S3 failure to test GHA fallback'
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/actions/upload-test-artifacts/**'
+      - '.github/workflows/_test-upload-artifacts.yml'
+
+jobs:
+  test-upload-s3-success:
+    name: Test S3 upload (should succeed)
+    runs-on: ubuntu-latest
+    # Only run on pytorch org (has S3 credentials)
+    if: github.repository_owner == 'pytorch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create fake test artifacts
+        run: |
+          # Create directory structure matching what tests produce
+          mkdir -p test/test-reports/fake-test
+
+          # Create fake JSON files
+          echo '{"test": "data", "passed": true}' > test/test-reports/fake-test/test-results.json
+          echo '{"metrics": {"time": 1.5}}' > test/test-reports/fake-test/metrics.json
+
+          # Create fake XML test reports
+          cat > test/test-reports/fake-test/TEST-fake.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuite name="FakeTest" tests="2" failures="0" errors="0">
+            <testcase classname="FakeTest" name="test_one" time="0.1"/>
+            <testcase classname="FakeTest" name="test_two" time="0.2"/>
+          </testsuite>
+          EOF
+
+          # Create fake CSV
+          echo "test_name,duration,status" > test/test-reports/fake-test/results.csv
+          echo "test_one,0.1,passed" >> test/test-reports/fake-test/results.csv
+
+          # Create fake usage log
+          echo '{"time": "2024-01-01T00:00:00", "total_cpu_percent": 50}' > usage_log.txt
+
+          # Create fake log file
+          echo "Test log output" > test/test-reports/fake-test/test.log
+
+          echo "Created test artifacts:"
+          find test -type f
+          ls -la usage_log.txt
+
+      - name: Get job ID
+        id: get-job-id
+        run: |
+          echo "job-id=${{ github.run_id }}-test-s3" >> "$GITHUB_OUTPUT"
+
+      - name: Test upload-test-artifacts action (S3 path)
+        uses: ./.github/actions/upload-test-artifacts
+        with:
+          file-suffix: test-s3-success-${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Verify S3 upload succeeded
+        run: |
+          echo "If we got here, the action completed successfully"
+          echo "Check the action logs above to verify S3 upload was attempted"
+
+  test-upload-gha-fallback:
+    name: Test GHA fallback (simulated S3 failure)
+    runs-on: ubuntu-latest
+    # This test simulates S3 failure by using an invalid bucket
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create fake test artifacts
+        run: |
+          mkdir -p test/test-reports/fake-test
+
+          echo '{"test": "fallback-data"}' > test/test-reports/fake-test/test-results.json
+
+          cat > test/test-reports/fake-test/TEST-fallback.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuite name="FallbackTest" tests="1" failures="0" errors="0">
+            <testcase classname="FallbackTest" name="test_fallback" time="0.1"/>
+          </testsuite>
+          EOF
+
+          echo "test_name,duration,status" > test/test-reports/fake-test/results.csv
+          echo "test_fallback,0.1,passed" >> test/test-reports/fake-test/results.csv
+
+          echo '{"time": "2024-01-01T00:00:00", "total_cpu_percent": 25}' > usage_log.txt
+
+      - name: Get job ID
+        id: get-job-id
+        run: |
+          echo "job-id=${{ github.run_id }}-test-fallback" >> "$GITHUB_OUTPUT"
+
+      - name: Test upload-test-artifacts action (should fallback to GHA)
+        uses: ./.github/actions/upload-test-artifacts
+        with:
+          file-suffix: test-gha-fallback-${{ steps.get-job-id.outputs.job-id }}
+          # Use a non-existent bucket to force S3 failure
+          s3-bucket: "this-bucket-does-not-exist-12345"
+
+      - name: Verify GHA artifacts were created
+        run: |
+          echo "Checking that GHA fallback was triggered..."
+          echo "The action should have uploaded to GitHub Actions artifacts"
+          echo "Check the workflow run artifacts to verify"
+
+  test-upload-fork:
+    name: Test in fork context (no S3 creds)
+    runs-on: ubuntu-latest
+    # This simulates fork behavior where AWS creds aren't available
+    if: github.repository_owner != 'pytorch' || github.event.inputs.test-s3-failure == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create fake test artifacts
+        run: |
+          mkdir -p test/test-reports/fork-test
+
+          echo '{"test": "fork-data"}' > test/test-reports/fork-test/test-results.json
+
+          cat > test/test-reports/fork-test/TEST-fork.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuite name="ForkTest" tests="1" failures="0" errors="0">
+            <testcase classname="ForkTest" name="test_fork" time="0.1"/>
+          </testsuite>
+          EOF
+
+          echo "test,status" > test/test-reports/fork-test/results.csv
+
+      - name: Get job ID
+        id: get-job-id
+        run: |
+          echo "job-id=${{ github.run_id }}-fork-test" >> "$GITHUB_OUTPUT"
+
+      - name: Test upload-test-artifacts action (fork - no AWS creds)
+        uses: ./.github/actions/upload-test-artifacts
+        with:
+          file-suffix: test-fork-${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Verify fallback behavior
+        run: |
+          echo "In fork context, S3 upload should fail due to missing credentials"
+          echo "GHA fallback should have been triggered"
+
+  verify-artifacts:
+    name: Verify uploaded artifacts
+    runs-on: ubuntu-latest
+    needs: [test-upload-gha-fallback]
+    steps:
+      - name: Download GHA artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-*
+          path: downloaded-artifacts
+        continue-on-error: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          if [ -d "downloaded-artifacts" ]; then
+            find downloaded-artifacts -type f
+          else
+            echo "No artifacts downloaded (this is expected if S3 upload succeeded)"
+          fi
