@@ -2399,6 +2399,13 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d grouped nodes are filtered",
                 len(grouped),
             )
+        mix_order = [x for x in nodes if isinstance(x, FusedMixOrderReductions)]
+        if mix_order:
+            log.debug(
+                "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
+                len(mix_order),
+            )
+
         filtered_nodes = [
             x
             for x in nodes
@@ -2408,6 +2415,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     NopKernelSchedulerNode,
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
+                    FusedMixOrderReductions,
                 ),
             )
         ]
@@ -2439,6 +2447,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = 8
+
+        excluded_buffer_names: OrderedSet[str] = OrderedSet(
+            [
+                buf_name
+                for group in sorted_nodes
+                for node in group
+                if isinstance(node, FusedMixOrderReductions)
+                for buf_name in node.get_buffer_names()
+            ]
+        )
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
             device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
@@ -2447,6 +2465,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for node in nodes:
                 device = node.get_device()
                 if device and (device.type == "mps" or device.type == "cpu"):
+                    continue
+
+                # exclude nodes that read from FusedMixOrderReductions output buffers'
+                if node.used_buffer_names() & excluded_buffer_names:
                     continue
                 device_groups[device].append(node)
 
@@ -2458,7 +2480,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                         for i in range(0, len(device_nodes), max_num_nodes)
                     ]
                 )
-
         return grouped_nodes
 
     group_algorithm_for_combo_kernels: Callable[
@@ -2722,6 +2743,43 @@ _post_grad_graph_counter = itertools.count()
 
 def used_non_deterministic_runtime_estimations() -> bool:
     return config.runtime_estimations_mms_benchmark
+
+
+def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+    """Get free symbols from a node's layout (size, stride, offset)."""
+    free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
+    layout = node.maybe_get_layout()
+    if isinstance(layout, ir.Layout):
+        free_symbol_uses.update(
+            free_symbols(layout.size)
+            | free_symbols(layout.stride)
+            | free_symbols(layout.offset)
+        )
+        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+            # symint may be used as index in layout.target
+            free_symbol_uses.update(get_layout_symints(layout.target))
+    else:
+        assert layout is None, f"Expect layout to be None but found layout={layout}"
+    return free_symbol_uses
+
+
+def get_scheduler_node_symbol_uses(
+    node: BaseSchedulerNode,
+) -> OrderedSet[sympy.Symbol]:
+    """
+    Gets symbols used in a scheduler node, including free symbols from
+    the node's operations and layout symints from outputs.
+    """
+    if isinstance(node, FusedSchedulerNode):
+        return OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+        )
+    assert node.node is not None
+    free_symbol_uses = node.node.get_free_symbol_uses()
+    free_symbol_uses.update(
+        *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+    )
+    return free_symbol_uses
 
 
 class Scheduler:
@@ -5479,7 +5537,12 @@ class Scheduler:
         def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
             return
 
-        log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
+        # Don't log partition reasons for CPU-only graphs since cudagraph
+        # partitioning is not relevant when there are no GPU devices
+        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
+        log_partition_reason = (
+            maybe_log_cudagraph_partition if should_log and has_gpu_device else noop_log
+        )
 
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
@@ -5506,6 +5569,12 @@ class Scheduler:
         if is_cudagraph_unsafe_op(node.node):
             log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
             return True
+
+        # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
+        if config.triton.cudagraph_skip_dynamic_graphs:
+            if get_scheduler_node_symbol_uses(node):
+                log_partition_reason("dynamic shape ops", node=node)
+                return True
 
         return False
 
@@ -5578,41 +5647,6 @@ class Scheduler:
         - free symbols in partition input/node shapes, strides, and offsets. This is needed
           for recording cudagraphs for tensors with dynamic shapes.
         """
-
-        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
-            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
-            layout = node.maybe_get_layout()
-            if isinstance(layout, ir.Layout):
-                free_symbol_uses.update(
-                    free_symbols(layout.size)
-                    | free_symbols(layout.stride)
-                    | free_symbols(layout.offset)
-                )
-                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                    # symint may be used as index in layout.target
-                    free_symbol_uses.update(get_layout_symints(layout.target))
-            else:
-                assert layout is None, (
-                    f"Expect layout to be None but found layout={layout}"
-                )
-            return free_symbol_uses
-
-        def get_scheduler_node_symbol_uses(
-            node: BaseSchedulerNode,
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Gets symbols used in node.
-            """
-            if isinstance(node, FusedSchedulerNode):
-                return OrderedSet().union(
-                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
-                )
-            assert node.node is not None
-            free_symbol_uses = node.node.get_free_symbol_uses()
-            free_symbol_uses.update(
-                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
-            )
-            return free_symbol_uses
 
         def get_input_node_symbols(
             node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
@@ -6141,6 +6175,7 @@ class Scheduler:
         if len(partitions) > 1:
             msg = f"cudagraph partition into {len(partitions)} partitions"
             maybe_log_cudagraph_partition(msg=msg, prefix="")
+            counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):

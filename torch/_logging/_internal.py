@@ -654,7 +654,8 @@ def _validate_settings(settings):
 
 def help_message(verbose=False):
     def pad_to(s, length=30):
-        assert len(s) <= length
+        if len(s) > length:
+            raise AssertionError(f"string length {len(s)} exceeds max {length}")
         return s + " " * (length - len(s))
 
     if verbose:
@@ -805,7 +806,8 @@ def _parse_log_settings(settings):
             name = "torch"
 
         if log_registry.is_log(name):
-            assert level is not None
+            if level is None:
+                raise AssertionError("level must not be None for log name")
             log_qnames = log_registry.log_alias_to_log_qnames[name]
             log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
@@ -961,7 +963,8 @@ class TorchLogsFormatter(logging.Formatter):
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
         if self._is_trace:
-            assert s == ""
+            if s != "":
+                raise AssertionError(f"expected empty string for trace, got {s!r}")
             try:
                 r = f"{prefix} {json.dumps(record.metadata)}"
             except TypeError:
@@ -1339,7 +1342,7 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert name not in [
+    reserved_names = [
         "rank",
         "compiled_autograd_id",
         "frame_id",
@@ -1350,12 +1353,16 @@ def trace_structured(
         "pathname",
         "thread",
     ]
-    assert callable(metadata_fn), (
-        f"metadata_fn should be callable, but got {type(metadata_fn)}"
-    )
-    assert callable(payload_fn), (
-        f"payload_fn should be callable, but got {type(payload_fn)}"
-    )
+    if name in reserved_names:
+        raise AssertionError(f"name {name!r} is reserved and cannot be used")
+    if not callable(metadata_fn):
+        raise AssertionError(
+            f"metadata_fn should be callable, but got {type(metadata_fn)}"
+        )
+    if not callable(payload_fn):
+        raise AssertionError(
+            f"payload_fn should be callable, but got {type(payload_fn)}"
+        )
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:

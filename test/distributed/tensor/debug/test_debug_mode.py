@@ -534,6 +534,11 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+        # check that nn_module doesn't graph break in compiled regions
+        fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            fn(inp)
+
     def test_record_function(self):
         def fn(x, y):
             z = x @ y
@@ -560,7 +565,6 @@ class TestDTensorDebugMode(TestCase):
       aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
       aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
-  [record function] backward._backward_impl (dynamo_timed)
     aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
     aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
     aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
