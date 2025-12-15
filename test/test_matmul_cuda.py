@@ -826,6 +826,7 @@ class TestMatmulCuda(InductorTestCase):
                         out_ten = torch.full_like(out, float("nan"))
                         torch.addmm(c, a, b, out_dtype=output_dtype, out=out_ten)
 
+                    print(f"{c.dtype=}, {a.dtype=}, {b.dtype=}, {output_dtype=}")
                     self.assertEqual(out.dtype, output_dtype)
                     self.assertEqual(out_ten.dtype, output_dtype)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)

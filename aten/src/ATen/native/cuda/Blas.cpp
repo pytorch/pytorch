@@ -450,6 +450,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Copy bias into result and set args.bias args.bias_ld to nullopt
   const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
     // NOTE: self should broadcast over result
+    std::cout << "COPY BIAS!" << std::endl;
+    std::cout << "res sizes: " << args.result->sizes() << std::endl;
+    std::cout << "bias sizes: " << bias.sizes() << std::endl;
     (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
     args.bias = std::nullopt;
     args.bias_ld = std::nullopt;
@@ -468,6 +471,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {
+    std::cout << "Lt! Float/Reduced" << " res.is_same_self: " << args.result->is_same(self) << std::endl;
+    std::cout << "bias: " << args.bias.has_value() << " ld: " << args.bias_ld.has_value() << std::endl;
+    std::cout << std::endl;
     bool lt_success = false;
     if (is_float_output_with_half_input) {
       #ifdef USE_ROCM
@@ -486,6 +492,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       );
       #endif
     } else {
+    std::cout << "Lt! Same dtype" << std::endl;
       // !is_float_output_with_half_input
       AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -506,6 +513,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   } else {
     // No Lt, we use a GEMM instead
     if (is_float_output_with_half_input) {
+      std::cout << "Not Lt! Float/reduced dtype" << std::endl;
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
         scalar_type,
         "addmm_cuda",
@@ -514,6 +522,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         }
       );
     } else {
+      std::cout << "Not Lt! Same dtype" << std::endl;
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -552,6 +561,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   if (!result.is_same(*args.result)) {
     result.copy_(*args.result);
   }
+    std::cout << "END!" << std::endl;
   return result;
 }
 

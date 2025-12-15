@@ -173,6 +173,7 @@ struct cublasCommonArgs {
         // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and
         // mat1.dtype/mat2.dtype if of reduced float type -- we do not have
         // such a kernel specialization yet.
+        std::cout << "COPY BIAS case" << std::endl;
         return;
       }
       const bool can_use_bias_in_epilogue = (
@@ -184,14 +185,17 @@ struct cublasCommonArgs {
           && !result->is_complex() // No Epilogue support for complex types
       );
       if (can_use_bias_in_epilogue) { // Case for bias in epilogue
+        std::cout << "1D BIAS Epilogue case" << std::endl;
         bias = c10::MaybeOwned<Tensor>::borrowed(*self);
       } else { // Case for, potentially, an out-of-place GEMM
         if (self->dim() == 2) { // 2D bias
           // Bias should match the result's layout
           bias = maybe_prepare_matrix_with_layout(*self, transpose_result);
           if (bias.has_value()) {
+          std::cout << "2D BIAS case" << std::endl;
             bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
           }
+          std::cout << "has bias: " << bias.has_value() << std::endl;
         } else { // 1D bias
           if (!transpose_result && self->is_contiguous()) {
             // Bias expanded to a matrix with the leading dimension 0
@@ -199,6 +203,7 @@ struct cublasCommonArgs {
               (self->unsqueeze(-2)).expand(result->sizes())
             );
             bias_ld = static_cast<int64_t>(0);
+          std::cout << "1D BIAS as 2D with ld=0 case" << std::endl;
           }
         }
       }
