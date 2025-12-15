@@ -25,6 +25,7 @@ import traceback
 import types
 from collections.abc import Sequence
 from contextlib import nullcontext
+from itertools import chain
 from typing import TYPE_CHECKING
 
 import sympy
@@ -1015,9 +1016,41 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
+    def _collect_leaf_tensors(self, vars_iter):
+        """
+        Collect unique leaf tensors from an iterable of variables.
+
+        Deduplicates by proxy.node and filters to only leaf tensors (no grad_fn).
+        Returns list of (original_index, var) tuples.
+        """
+        result = []
+        seen_nodes: set = set()
+        for i, var in enumerate(vars_iter):
+            if (
+                isinstance(var, TensorVariable)
+                and var.requires_grad
+                and not var.has_grad_fn
+            ):
+                node = var.proxy.node
+                if node not in seen_nodes:
+                    seen_nodes.add(node)
+                    result.append((i, var))
+        return result
+
     def method_backward(
         self, gradient=None, retain_graph=None, create_graph=None, inputs=None
     ):
+        """
+        Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
+
+        Implementation:
+        1. If inputs=None, auto-detect leaf tensors from leaf_var_creation_order
+           (in-graph params) and input_source_to_var (graph inputs)
+        2. Call autograd.grad(loss, inputs) to compute gradients
+        3. For each unique leaf tensor, call accumulate_grad to update .grad
+        4. Deduplication avoids double accumulation for repeated inputs
+        5. Non-leaf tensors are skipped (no .grad without retain_grad)
+        """
         if not config.trace_autograd_ops:
             unimplemented(
                 gb_type="Unsupported Tensor.backward() call",
@@ -1026,7 +1059,6 @@ class TensorVariable(VariableTracker):
                 hints=[*graph_break_hints.FUNDAMENTAL],
             )
 
-        # Match eager error for tensors that don't require grad
         if not self.requires_grad and not self.has_grad_fn:
             raise TorchRuntimeError(
                 "tensor does not require grad and does not have a grad_fn"
@@ -1035,38 +1067,37 @@ class TensorVariable(VariableTracker):
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
+        inputs_auto_detected = inputs is None
 
-        # If inputs is not provided, find all graph inputs that require grad
-        if inputs is None:
-            # Collect all TensorVariables that are graph inputs with requires_grad=True
-            input_vars = []
-            for var in tx.output.input_source_to_var.values():
-                if isinstance(var, TensorVariable) and var.requires_grad:
-                    input_vars.append(var)
-
-            if not input_vars:
-                # No tensors require grad - backward is a no-op
+        # Auto-detect leaf tensors if inputs not provided
+        if inputs_auto_detected:
+            # Collect from in-graph created leaves first, then graph inputs
+            all_vars = chain(
+                tx.output.leaf_var_creation_order,
+                tx.output.input_source_to_var.values(),
+            )
+            indexed_inputs = self._collect_leaf_tensors(all_vars)
+            if not indexed_inputs:
                 return ConstantVariable.create(None)
-
-            # Create a list variable for the inputs
+            input_vars = [var for _, var in indexed_inputs]
             inputs = VariableTracker.build(tx, input_vars)
+        else:
+            # User-provided inputs - extract and filter
+            if isinstance(inputs, variables.BaseListVariable):
+                input_vars = inputs.items
+            else:
+                input_vars = [inputs]
+            indexed_inputs = self._collect_leaf_tensors(input_vars)
 
-        # Rewrite tensor.backward(inputs=params) as:
-        # grads = torch.autograd.grad(tensor, params, gradient, retain_graph, create_graph)
-        # for param, grad in zip(params, grads):
-        #     torch.ops.inductor.accumulate_grad_(param, grad)
-
-        # Build kwargs for autograd.grad
+        # Build autograd.grad call
         grad_kwargs = {}
         if retain_graph is not None:
             grad_kwargs["retain_graph"] = retain_graph
         if create_graph is not None:
             grad_kwargs["create_graph"] = create_graph
-        # allow_unused=True matches eager backward() behavior where unconnected tensors
-        # simply don't get gradients (no error is raised)
-        grad_kwargs["allow_unused"] = VariableTracker.build(tx, True)
+        if inputs_auto_detected:
+            grad_kwargs["allow_unused"] = VariableTracker.build(tx, True)
 
-        # Call autograd.grad
         grad_args = [self, inputs]
         if gradient is not None:
             grad_args.append(gradient)
@@ -1074,28 +1105,16 @@ class TensorVariable(VariableTracker):
         autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
         grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
 
-        # Get the inputs as a list/tuple
-        if isinstance(inputs, variables.BaseListVariable):
-            input_vars = inputs.items
-        else:
-            # Single tensor case
-            input_vars = [inputs]
-
-        # Accumulate gradients for each input using torch.ops.inductor.accumulate_grad_
-        # This op is handled specially by dynamo to use polyfills.accumulate_grad
+        # Accumulate gradients for unique leaf tensors
         accumulate_grad_fn = VariableTracker.build(
             tx, torch.ops.inductor.accumulate_grad_.default
         )
-
-        for i, input_var in enumerate(input_vars):
-            # Get the i-th gradient
+        for idx, input_var in indexed_inputs:
             grad_i = grads_var.call_method(
-                tx, "__getitem__", [VariableTracker.build(tx, i)], {}
+                tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
             )
-            # Accumulate the gradient
             accumulate_grad_fn.call_function(tx, [input_var, grad_i], {})
 
-        # backward() returns None
         return VariableTracker.build(tx, None)
 
     def method_data_ptr(self, *args, **kwargs):

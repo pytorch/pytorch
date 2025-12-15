@@ -231,27 +231,29 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-def fx_node_reachable(
-    start_node: fx.Node, target_nodes: set[fx.Node], visited: set[fx.Node]
+def grad_fn_reachable(
+    tensor: torch.Tensor, target_grad_fns: set[torch.autograd.graph.Node]
 ) -> bool:
-    """Check if any target node is reachable from start_node by traversing args backwards."""
-    if start_node in visited:
+    """Check if any target grad_fn is reachable from tensor's autograd graph."""
+    if tensor is None or not isinstance(tensor, torch.Tensor):
         return False
-    visited.add(start_node)
-
-    if start_node in target_nodes:
-        return True
-
-    def check_arg(arg: Any) -> bool:
-        if isinstance(arg, fx.Node):
-            return fx_node_reachable(arg, target_nodes, visited)
-        if isinstance(arg, (list, tuple)):
-            return any(check_arg(item) for item in arg)
+    grad_fn = tensor.grad_fn
+    if grad_fn is None:
         return False
 
-    return any(check_arg(arg) for arg in start_node.args) or any(
-        check_arg(v) for v in start_node.kwargs.values()
-    )
+    visited: set[torch.autograd.graph.Node] = set()
+    stack = [grad_fn]
+    while stack:
+        node = stack.pop()
+        if node is None or node in visited:
+            continue
+        visited.add(node)
+        if node in target_grad_fns:
+            return True
+        for next_fn, _ in node.next_functions:
+            if next_fn is not None and next_fn not in visited:
+                stack.append(next_fn)
+    return False
 
 
 @functools.cache
@@ -581,6 +583,10 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # List of TensorVariables that are leaf tensors created in-graph
+        # (e.g., nn.Parameter via tracable_create_parameter). These need to be
+        # tracked separately from input_source_to_var for backward() auto-detection.
+        self.leaf_var_creation_order: list[VariableTracker] = []
         self.export = export
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
@@ -699,17 +705,10 @@ class OutputGraph(OutputGraphCommon):
         # back for backend errors.
         self.has_user_defined_allowed_in_graph = False
 
-        # Tracks which input sources have been checked for external grad_fn
-        # when autograd.grad is used. This avoids re-checking the same sources.
-        self.autograd_grad_checked_sources: set[Source] = set()
-
-        # Tracks the FX nodes created by torch.autograd.grad calls.
-        # Used to check if outputs are connected to autograd.grad computations.
-        self.autograd_grad_nodes: set[torch.fx.Node] = set()
-
-        # Tracks FX nodes passed as the `outputs` arg to torch.autograd.grad.
-        # These tensors have had their grad_fn consumed and shouldn't be returned.
-        self.autograd_grad_output_nodes: set[torch.fx.Node] = set()
+        # Tracks grad_fn objects of tensors passed as the `outputs` arg to torch.autograd.grad.
+        # These tensors have had their grad_fn consumed and shouldn't be returned
+        # with requires_grad=True (would cause "backward through graph a second time" error).
+        self.autograd_grad_output_grad_fns: set[torch.autograd.graph.Node] = set()
 
         # Tracks a list of called ops that were not tagged with "pt2_compliant_tag".
         # This information is useful for logging.
@@ -2119,7 +2118,7 @@ class OutputGraph(OutputGraphCommon):
         This is because aot_autograd will try to trace backward through the outputs,
         which will fail with a confusing error about "backward through graph a second time".
         """
-        if not self.autograd_grad_nodes:
+        if not self.autograd_grad_output_grad_fns:
             return
 
         from . import graph_break_hints
@@ -2129,11 +2128,10 @@ class OutputGraph(OutputGraphCommon):
             if not isinstance(var, TensorVariable) or not var.requires_grad:
                 continue
 
-            output_node = var.proxy.node
-            is_autograd_grad_output = output_node in self.autograd_grad_output_nodes
-            is_derived = fx_node_reachable(output_node, self.autograd_grad_nodes, set())
-
-            if is_derived or is_autograd_grad_output:
+            fake_tensor = var.as_proxy().node.meta.get("example_value")
+            if fake_tensor is not None and grad_fn_reachable(
+                fake_tensor, self.autograd_grad_output_grad_fns
+            ):
                 unimplemented(
                     gb_type="autograd.grad with output that requires grad",
                     context="",
@@ -2805,8 +2803,8 @@ class OutputGraph(OutputGraphCommon):
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
-        self.autograd_grad_checked_sources.clear()
         self.input_source_to_var.clear()
+        self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 
