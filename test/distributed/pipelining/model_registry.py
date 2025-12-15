@@ -186,6 +186,38 @@ class MultiMLP(torch.nn.Module):
         return x
 
 
+class SplitOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, weight):
+        ctx.save_for_backward(input, weight)
+        out1, out2 = torch.chunk(input, 2, dim=-1)
+        return out1, out2
+
+    @staticmethod
+    def backward(ctx, grad_out1, grad_out2):
+        input, weight = ctx.saved_tensors
+
+        if grad_out1 is None:
+            grad_out1 = torch.zeros_like(grad_out2)
+        if grad_out2 is None:
+            grad_out2 = torch.zeros_like(grad_out1)
+
+        grad_input = torch.cat([grad_out1, grad_out2], dim=-1)
+        grad_weight = (grad_out1.sum() + grad_out2.sum()) * weight
+        return grad_input, grad_weight
+
+
+# Model with multi-output intermediates
+class SplitModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(1))
+
+    def forward(self, x):
+        out1, out2 = SplitOp.apply(x, self.weight)
+        return out1 * 2 + out2 * 3
+
+
 # Multi-MLP with kwargs model
 class MultiMLPKwargs(torch.nn.Module):
     def __init__(self, d_hid: int, n_layers: int = 2):

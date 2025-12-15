@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 
-from model_registry import MLPModule
+from model_registry import MLPModule, SplitModel
 
 import torch
 from torch.distributed.pipelining._backward import (
@@ -226,6 +226,30 @@ class StageBackwardTests(TestCase):
                     param_group["grads"] = mock_grads_factory()
 
                 stage_backward_weight(mod.parameters(), param_groups)
+
+    def test_stage_backward_multi_output_intermediate(self, device):
+        mod = SplitModel().to(device)
+        x = torch.randn(10, 10, device=device, requires_grad=True)
+
+        out = mod(x)
+        loss = out.sum()
+
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=[loss],
+            output_grads=None,
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+
+        stage_backward_weight(mod.parameters(), param_groups)
+
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().clone().requires_grad_(True)
+        ref_out = ref_mod(ref_x)
+        ref_loss = ref_out.sum()
+        ref_loss.backward()
+
+        torch.testing.assert_close(mod.weight.grad, ref_mod.weight.grad)
 
 
 devices = ["cpu", "cuda", "hpu", "xpu"]
