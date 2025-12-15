@@ -1826,6 +1826,8 @@ class TestReductions(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
+    @dtypesIfXPU(*set(all_types_and(torch.half)) - {torch.float64})
+    # Acc issue for float64 on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
