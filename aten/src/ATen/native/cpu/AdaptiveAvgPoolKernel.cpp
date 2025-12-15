@@ -261,7 +261,7 @@ void cpu_adaptive_avg_pool2d_backward(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
