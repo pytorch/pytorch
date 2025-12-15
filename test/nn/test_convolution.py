@@ -4229,7 +4229,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
     # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
     # Reference: https://github.com/ROCm/MIOpen/pull/2838
     @xfailIf(
-        torch.version.hip is None and _get_cudnn_version() is not None and (91000 < _get_cudnn_version() < 91500)
+        torch.version.hip is None
+        and _get_cudnn_version() is not None
+        and (91000 < _get_cudnn_version() < 91500)
     )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
@@ -4249,6 +4251,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         yref = c.cpu()(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
+
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestConvolutionNN)
