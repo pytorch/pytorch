@@ -682,7 +682,7 @@ std::optional<c10::ScalarType> out_dtype) {
   bool use_fast_path = false;
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
 #if defined(USE_ROCM_CK_GEMM)
-  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     use_fast_path = true;
   }
 #endif //USE_ROCM_CK_GEMM
