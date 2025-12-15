@@ -3404,15 +3404,6 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("tensor guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
-
             if is_traceable_wrapper_subclass(obj):
                 # inner_data is a list of tuples of:
                 #   (inner attr name, unpickle func, tuple of func inputs)
@@ -3447,6 +3438,15 @@ class GuardsStatePickler(pickle.Pickler):
         elif isinstance(obj, torch.nn.Module):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
+
+            for attr in obj.__dict__.values():
+                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                    continue
+                if id(attr) in self.guard_tree_values:
+                    continue
+                if callable(attr):
+                    continue
+                self.missing_values[id(attr)] = attr
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
