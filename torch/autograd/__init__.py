@@ -94,6 +94,7 @@ def _make_grads(
     new_grads: list[_OptionalTensor] = []
 
     for out, grad in zip(outputs, grads):
+        # pyrefly: ignore [redundant-cast]
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
         out_device = None
