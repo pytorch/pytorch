@@ -69,6 +69,7 @@ Different modes of the event tracker for local debugging:
 "3": In addition to events dump, track all nodes with more than 1 event recursively and dump to DUMP_PREFIX_nodex.txt
 In addition to the above local dumps, tracker is always enabled and dumps via trace_structured.
 """
+# pyrefly: ignore [bad-assignment]
 TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
     ENV_FX_NET_ACC_SPLITTER_TRACKER_MODE, "0"
 )  # type: ignore[assignment]
