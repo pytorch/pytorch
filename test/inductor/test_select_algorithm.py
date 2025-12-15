@@ -529,7 +529,6 @@ class TestExternKernelCaller(TestCase):
         a = torch.randn(64, 64, device=GPU_TYPE)
         b = torch.randn(64, 64, device=GPU_TYPE)
 
-        # Mock TensorMeta.from_irnodes to raise an exception
         with patch.object(
             TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
         ):
@@ -539,7 +538,6 @@ class TestExternKernelCaller(TestCase):
                 compiled_fn = torch.compile(fn)
                 result = compiled_fn(a, b)
 
-        # Verify the warning message was logged
         self.assertTrue(
             any(
                 "Constructing input/output tensor meta failed for Extern Choice"
@@ -549,7 +547,6 @@ class TestExternKernelCaller(TestCase):
             f"Expected warning message not found in logs: {log_context.output}",
         )
 
-        # Verify correctness - the function should still work
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
