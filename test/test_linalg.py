@@ -2511,7 +2511,25 @@ class TestLinalg(TestCase):
                 self.assertFalse(out.is_contiguous())
                 ans = torch.linalg.eigvals(a, out=out)
                 self.assertEqual(ans, out)
-                self.assertEqual(expected.to(complex_dtype), out)
+
+                # sort eigenvalues because the order is not guaranteed
+                # move eigenvalues to CPU to ensure same sorting
+                out = out.cpu()
+                expected = expected.cpu()
+
+                idx = torch.argsort(out.imag, dim=-1)
+                out = torch.gather(out, -1, idx)
+
+                idx = torch.argsort(out.real, dim=-1)
+                out = torch.gather(out, -1, idx)
+
+                idx = torch.argsort(expected.imag, dim=-1)
+                expected = torch.gather(expected, -1, idx)
+
+                idx = torch.argsort(expected.real, dim=-1)
+                expected = torch.gather(expected, -1, idx)
+
+                self.assertEqual(expected, out)
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
