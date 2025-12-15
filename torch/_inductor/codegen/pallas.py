@@ -1770,7 +1770,10 @@ class PallasKernel(SIMDKernel):
             # Check if this is a true partial reduction (pointwise numel > 1)
             # When pointwise_numel == 1, it's effectively a full reduction to scalar
             is_partial_reduction = (
-                has_pointwise and pointwise_numel and pointwise_numel > 1 and reduction_numel
+                has_pointwise
+                and pointwise_numel
+                and pointwise_numel > 1
+                and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
                 # Partial reduction: determine the reduction axis from load index
@@ -1830,9 +1833,7 @@ class PallasKernel(SIMDKernel):
                 # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = (
-                    f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
-                )
+                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
@@ -1912,9 +1913,12 @@ class PallasKernel(SIMDKernel):
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
         # Import math at module level if we'll use it for masked ops
-        imports = """
+        imports = (
+            """
 import functools
-""" + ("import math\n" if self.use_masked_ops else "") + """import torch
+"""
+            + ("import math\n" if self.use_masked_ops else "")
+            + """import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
@@ -1942,14 +1946,17 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
     pw_axes = [i for i in range(len(shape)) if i not in red_axes]
     reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
     return reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
-""" + (
-            "\nfrom jax.experimental.pallas import triton as pltriton"
-            if not interpret_is_cpu
-            else ""
-        ) + (
-            "\nfrom torch._inductor.runtime.runtime_utils import next_power_of_2"
-            if self.use_masked_ops
-            else ""
+"""
+            + (
+                "\nfrom jax.experimental.pallas import triton as pltriton"
+                if not interpret_is_cpu
+                else ""
+            )
+            + (
+                "\nfrom torch._inductor.runtime.runtime_utils import next_power_of_2"
+                if self.use_masked_ops
+                else ""
+            )
         )
         code.splice(imports, strip=True)
 
