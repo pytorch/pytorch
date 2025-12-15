@@ -6,7 +6,6 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/inductor/*
       - ciflow/inductor-pallas/*
   pull_request:
     paths:
