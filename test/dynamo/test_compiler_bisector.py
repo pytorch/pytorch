@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from importlib import import_module
+from unittest import skipIf
 
 import torch
 import torch._prims_common as utils
@@ -167,7 +168,7 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
-    @unittest.skipIf(HAS_XPU_AND_TRITON)
+    @skipIf(HAS_XPU_AND_TRITON)
     def test_rng(self):
         def foo():
             return torch.rand([10], device=device_type) + 1
