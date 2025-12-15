@@ -687,7 +687,6 @@ class TestDynamoTimed(TestCase):
             e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
-            e.xpu_version = None
             e.triton_version = None
             e.python_version = None
             e.pytorch_version = None
@@ -730,7 +729,6 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
- 'xpu_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
@@ -825,7 +823,6 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': True,
  'config_suppress_errors': False,
  'cuda_version': None,
- 'xpu_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
