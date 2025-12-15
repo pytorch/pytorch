@@ -218,7 +218,7 @@ def set_device(device: _device_t) -> None:
         torch._C._xpu_setDevice(device)
 
 
-def get_device_name(device: Optional[_device_t] = None) -> str:
+def get_device_name(device: _device_t | None = None) -> str:
     r"""Get the name of a device.
 
     Args:
@@ -234,7 +234,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
+def get_device_capability(device: _device_t | None = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -259,7 +259,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
 
 
 def get_device_properties(
-    device: Optional[_device_t] = None,
+    device: _device_t | None = None,
 ) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
@@ -281,7 +281,7 @@ def current_device() -> int:
     return torch._C._xpu_getDevice()
 
 
-def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -395,7 +395,7 @@ def set_stream(stream: Stream) -> None:
     )
 
 
-def current_stream(device: Optional[_device_t] = None) -> Stream:
+def current_stream(device: _device_t | None = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -413,9 +413,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
-def get_stream_from_external(
-    data_ptr: int, device: Optional[_device_t] = None
-) -> Stream:
+def get_stream_from_external(data_ptr: int, device: _device_t | None = None) -> Stream:
     r"""Return a :class:`Stream` from an external SYCL queue.
 
     This function is used to wrap SYCL queue created in other libraries in order
@@ -484,7 +482,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: Union[int, str, torch.device] = "xpu"
+    offset: int, device: int | str | torch.device = "xpu"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -502,7 +500,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
+def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:

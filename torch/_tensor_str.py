@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import inf
@@ -15,7 +15,7 @@ class __PrinterOptions:
     threshold: float = 1000
     edgeitems: int = 3
     linewidth: int = 80
-    sci_mode: Optional[bool] = None
+    sci_mode: bool | None = None
 
 
 PRINT_OPTS = __PrinterOptions()

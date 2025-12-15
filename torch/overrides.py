@@ -30,7 +30,7 @@ import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1609,7 +1609,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Optional[Callable[[Any], type]] = None,
+    get_type_fn: Callable[[Any], type] | None = None,
 ) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 

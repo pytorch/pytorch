@@ -274,11 +274,13 @@ class TestUtils(TestCase):
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
 
+def has_supported_gpu():
+    """Check if any GPU platform with Triton support is available."""
+    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
+
+
 class TestAnalysis(TestCase):
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -287,10 +289,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
         """
@@ -341,10 +340,7 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
@@ -399,10 +395,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @skipIfXpu(
         msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
     )
@@ -518,10 +511,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
@@ -572,10 +562,7 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):
         """
