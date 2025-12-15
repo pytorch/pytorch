@@ -6,7 +6,6 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
       - ciflow/inductor-rocm-mi300/*
   workflow_dispatch:
 
@@ -48,8 +47,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1.b" },
         ]}
     secrets: inherit
 

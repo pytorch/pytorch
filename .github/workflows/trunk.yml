@@ -244,7 +244,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
-    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -268,7 +267,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-test:
-    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
     permissions:
       id-token: write
       contents: read
