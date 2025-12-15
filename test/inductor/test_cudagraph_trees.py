@@ -4207,6 +4207,7 @@ if HAS_CUDA_AND_TRITON:
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
         @config.patch("graph_partition", True)
+        @skipIfRocm
         def test_graph_partition_user_defined_triton_kernel_reuse(self):
             from torch.testing._internal.triton_utils import add_kernel
 
