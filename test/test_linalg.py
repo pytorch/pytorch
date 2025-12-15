@@ -2229,7 +2229,25 @@ class TestLinalg(TestCase):
 
             # compare eigenvalues with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
-            self.assertEqual(expected[0], actual[0])
+
+            # sort eigenvalues because the order is not guaranteed
+            # move eigenvalues to CPU to ensure same sorting
+            actual_eigvals = actual[0].cpu()
+            expected_eigvals = expected[0].cpu()
+
+            idx = torch.argsort(actual_eigvals.imag, dim=-1)
+            actual_eigvals = torch.gather(actual_eigvals, -1, idx)
+
+            idx = torch.argsort(actual_eigvals.real, dim=-1)
+            actual_eigvals = torch.gather(actual_eigvals, -1, idx)
+
+            idx = torch.argsort(expected_eigvals.imag, dim=-1)
+            expected_eigvals = torch.gather(expected_eigvals, -1, idx)
+
+            idx = torch.argsort(expected_eigvals.real, dim=-1)
+            expected_eigvals = torch.gather(expected_eigvals, -1, idx)
+
+            self.assertEqual(expected_eigvals, actual_eigvals)
 
 
             # set tolerance for correctness check
