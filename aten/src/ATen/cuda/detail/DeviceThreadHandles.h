@@ -142,10 +142,10 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     // If you want to change this function, be aware that this function will be called
     // by multiple threads and there is no mutex guarding the call of this function, so
     // make sure your implementation is thread-safe.
-    PoolWindow *newPoolWindow() {
+    std::unique_ptr<PoolWindow> newPoolWindow() {
         // The returned pointer will be owned by a thread local variable
         // so that different threads does not share the same PoolWindow.
-        return new PoolWindow(this->weak_from_this());
+        return std::make_unique<PoolWindow>(this->weak_from_this());
     }
 };
 
