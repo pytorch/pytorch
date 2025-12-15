@@ -1061,7 +1061,7 @@ class TestViewOps(TestCase):
     @skipLazy  # Lazy backend has issues with this operation
     def test_maybe_view_chunk_cat(self, device):
         """Test _maybe_view_chunk_cat is equivalent to torch.cat(torch.chunk(...))"""
-        from torch.distributed._functional_collectives import _maybe_view_chunk_cat
+        from torch._utils import _maybe_view_chunk_cat
 
         # Helper to test a configuration
         def test_config(shape, group_size, gather_dim):
