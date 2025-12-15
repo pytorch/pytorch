@@ -176,12 +176,17 @@ struct cublasCommonArgs {
         std::cout << "COPY BIAS case" << std::endl;
         return;
       }
+      const auto self_squeeze = self->squeeze();
       const bool can_use_bias_in_epilogue = (
           transpose_result // required so that bias properly broadcasts in epilogue
           && is_beta_one() // no scaling for bias in epilogue
           && self->is_contiguous()
-          && (self->dim() == 1 || self->squeeze().dim() == 1)
-          && self->sizes().back() == m // should match the rows, hence transpose_result is essential
+          && (
+            // == m -> should match the rows, hence transpose_result is essential
+               (self->dim() == 1 && self->sizes().back() == m) // bias is 1D of shape [m]
+            || (self_squeeze.dim() == 0 && self->sizes().back() == m) // bias is nD of shape [1, ..., 1 (==m)]
+            || (self_squeeze.dim() == 1 && self_squeeze.sizes().back() == m) // bias is nD of shape [1, ..., m]
+          )
           && !result->is_complex() // No Epilogue support for complex types
       );
       if (can_use_bias_in_epilogue) { // Case for bias in epilogue
