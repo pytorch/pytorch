@@ -34,6 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
@@ -207,6 +208,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.compiler.is_compiling: True,
         torch.compiler.is_dynamo_compiling: True,
         torch.compiler.is_exporting: True,
+        torch._dynamo.eval_frame._is_in_optimized_module: True,
         # Look into https://github.com/pytorch/pytorch/pull/164721 why this is
         # turned to True for Dynamo.
         torch.nn.modules.activation._is_make_fx_tracing: True,
@@ -545,6 +547,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
                 torch.compiler.is_exporting,
+                torch._dynamo.eval_frame._is_in_optimized_module,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions()[self.value])
@@ -902,6 +905,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args,
                     kwargs,
                 )
+
+        @register(torch._C._group_tensors_by_device_and_dtype)
+        def handle_group_tensors_by_device_and_dtype(
+            _, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
+                args,
+                kwargs,
+            )
 
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
@@ -1609,14 +1622,52 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        tensor_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                fn_,
-                *proxy_args_kwargs(args, kwargs),
-            ),
-        )
+        # Ops that consume scalar values from tensors (via .item()) for computation only,
+        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
+        # create unbacked symbols that are not in the outputs, causing
+        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
+        # since they only affect tensor values, not shapes.
+        ops_consuming_unbacked_scalars = {
+            # foreach ops with scalar/alpha arguments
+            torch._foreach_add,
+            torch._foreach_add_,
+            torch._foreach_sub,
+            torch._foreach_sub_,
+            torch._foreach_mul,
+            torch._foreach_mul_,
+            torch._foreach_div,
+            torch._foreach_div_,
+            torch._foreach_clamp_max,
+            torch._foreach_clamp_max_,
+            torch._foreach_clamp_min,
+            torch._foreach_clamp_min_,
+            torch._foreach_maximum,
+            torch._foreach_maximum_,
+            torch._foreach_minimum,
+            torch._foreach_minimum_,
+            torch._foreach_pow,
+            torch._foreach_pow_,
+            torch._foreach_lerp,
+            torch._foreach_lerp_,
+            torch._foreach_addcmul,
+            torch._foreach_addcmul_,
+            torch._foreach_addcdiv,
+            torch._foreach_addcdiv_,
+        }
+        ctx = nullcontext
+        if fn_ in ops_consuming_unbacked_scalars:
+            if tx.fake_mode and tx.fake_mode.shape_env:
+                ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        with ctx():
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
