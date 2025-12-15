@@ -388,10 +388,14 @@ class TestFlexFlash(InductorTestCase):
             ).sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_rejects_score_mod_capture(self, device, dtype):
+    def test_flash_attention_backward_rejects_captured_buffer_with_grad(
+        self, device, dtype
+    ):
+        """Test that BACKEND='FLASH' backward raises error when captured buffer requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
-        bias = torch.randn(4, device=device, dtype=dtype)
+        # Captured buffer WITH requires_grad=True should fail
+        bias = torch.randn(4, device=device, dtype=dtype, requires_grad=True)
 
         def score_mod_with_capture(score, b, h, q_idx, kv_idx):
             return score + bias[h]
@@ -400,7 +404,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"NYI: Flex Flash Attention bwd doesn't support captured buffers yet",
+            r"BACKEND='FLASH' but flash attention cannot be used.*require gradients",
         ):
             compiled_fn(
                 q,
@@ -433,6 +437,140 @@ class TestFlexFlash(InductorTestCase):
             return score * score
 
         flash_vs_triton(q, k, v, score_mod=score_mod_squared)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_rel_bias(self, device, dtype):
+        """Test relative position bias backward - uses position indices."""
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
+
+        def rel_bias_mod(score, b, h, q_idx, kv_idx):
+            return score + (q_idx - kv_idx)
+
+        flash_vs_triton(q, k, v, score_mod=rel_bias_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_softcap(self, device, dtype):
+        """Test softcapping backward - uses tanh nonlinearity."""
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
+
+        def softcap_mod(score, b, h, q_idx, kv_idx):
+            cap = 50.0
+            return torch.tanh(score / cap) * cap
+
+        flash_vs_triton(q, k, v, score_mod=softcap_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_head_offset(self, device, dtype):
+        """Test head-based offset backward - uses head index."""
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
+
+        def head_offset_mod(score, b, h, q_idx, kv_idx):
+            return score + h * 0.1
+
+        flash_vs_triton(q, k, v, score_mod=head_offset_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_distance_decay(self, device, dtype):
+        """Test distance-based decay backward - uses position difference."""
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=257, device=device, requires_grad=True
+        )
+
+        def distance_decay_mod(score, b, h, q_idx, kv_idx):
+            # Use squared distance to avoid torch.abs
+            distance_sq = (q_idx - kv_idx) * (q_idx - kv_idx)
+            decay = 1.0 / (1.0 + distance_sq * 0.0001)
+            return score * decay
+
+        flash_vs_triton(q, k, v, score_mod=distance_decay_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_alibi_captured(self, device, dtype):
+        """Test ALiBi backward with captured per-head slopes tensor."""
+        num_heads = 4
+        q, k, v = create_test_tensors(
+            dtype=dtype,
+            num_heads=num_heads,
+            seq_len=257,
+            device=device,
+            requires_grad=True,
+        )
+
+        slopes = torch.exp2(
+            -torch.linspace(1, 8, num_heads, device=device, dtype=dtype)
+        )
+
+        def alibi_mod(score, b, h, q_idx, kv_idx):
+            bias = (kv_idx - q_idx) * slopes[h]
+            return score + bias
+
+        flash_vs_triton(q, k, v, score_mod=alibi_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_head_scale_captured(self, device, dtype):
+        """Test backward with captured per-head scaling factors."""
+        num_heads = 4
+        q, k, v = create_test_tensors(
+            dtype=dtype,
+            num_heads=num_heads,
+            seq_len=257,
+            device=device,
+            requires_grad=True,
+        )
+
+        scales = torch.rand(num_heads, device=device, dtype=dtype) + 0.5
+
+        def head_scale_mod(score, b, h, q_idx, kv_idx):
+            return score * scales[h]
+
+        flash_vs_triton(q, k, v, score_mod=head_scale_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_batch_head_bias_captured(
+        self, device, dtype
+    ):
+        """Test backward with captured 2D batch-head bias matrix."""
+        batch_size, num_heads = 2, 4
+        q, k, v = create_test_tensors(
+            dtype=dtype,
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=257,
+            device=device,
+            requires_grad=True,
+        )
+
+        bias_matrix = (
+            torch.randn(batch_size, num_heads, device=device, dtype=dtype) * 0.5
+        )
+
+        def batch_head_mod(score, b, h, q_idx, kv_idx):
+            return score + bias_matrix[b, h]
+
+        flash_vs_triton(q, k, v, score_mod=batch_head_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_with_pos_bias_table_captured(self, device, dtype):
+        """Test backward with captured relative position bias table."""
+        seq_len = 257
+        q, k, v = create_test_tensors(
+            dtype=dtype, seq_len=seq_len, device=device, requires_grad=True
+        )
+
+        max_len = seq_len
+        table = torch.randn(2 * max_len - 1, device=device, dtype=dtype) * 0.1
+
+        def pos_bias_mod(score, b, h, q_idx, kv_idx):
+            rel_pos = kv_idx - q_idx + max_len - 1
+            return score + table[rel_pos]
+
+        flash_vs_triton(q, k, v, score_mod=pos_bias_mod)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):

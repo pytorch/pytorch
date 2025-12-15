@@ -343,6 +343,7 @@ def _can_use_flex_flash_attention_backward(
     mask_graph: Subgraph,
     joint_outputs: Optional[Any] = None,
     score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
@@ -350,10 +351,12 @@ def _can_use_flex_flash_attention_backward(
     if not is_trivial_mask_graph(mask_graph.graph_module):
         return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
 
-    if score_mod_other_buffers:
+    if input_buffers_require_grads(
+        fw_subgraph.graph_module, num_score_mod_placeholders
+    ):
         return (
             False,
-            "NYI: Flex Flash Attention bwd doesn't support captured buffers yet.",
+            "Input buffers require gradients (not supported by flash attention backward)",
         )
 
     if joint_outputs is not None:
