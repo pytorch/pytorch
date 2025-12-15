@@ -5319,6 +5319,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
         two_d_red = len(self.tiling) == 2
+        # Compute reduction hint earlier using tiling_scores if available
+        # This reuses the same logic that computes tiling_scores to determine the hint
+        reduction_hint_override = None
         if looped_red and two_d_red:
             memory_stats = self.features.memory_stats(self.tiling)
             dim_stats = memory_stats.persistent.memory.dim[0]
@@ -5333,6 +5336,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
                 contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+
+                # Fix reduction hint earlier using tiling_scores and reusing
+                # the same logic of if ratio >= threshold, it's an inner reduction
+                if r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD:
+                    reduction_hint_override = ReductionHint.INNER
             else:
                 contiguous_red = (
                     self.features.get_reduction_hint() == ReductionHint.INNER
@@ -5420,17 +5428,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint()
-            tiling_scores = self.tiling_scores
-            if (
-                reduction_hint == ReductionHint.DEFAULT
-                and tiling_scores is not None
-                and "x" in tiling_scores
-                and "r0_" in tiling_scores
-            ):
-                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                if r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD:
-                    reduction_hint = ReductionHint.INNER
+            # Use reduction hint computed earlier from tiling_scores if available,
+            # otherwise fall back to get_reduction_hint(),
+            # ensures we use the correct hint based on tiling_scores when available
+            reduction_hint = (
+                reduction_hint_override
+                if reduction_hint_override is not None
+                else self.features.get_reduction_hint()
+            )
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
