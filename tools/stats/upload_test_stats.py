@@ -166,7 +166,9 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str,
         return flattened
 
 
-def backfill_test_jsons_while_running(workflow_run_id: int, workflow_run_attempt: int) -> None:
+def backfill_test_jsons_while_running(
+    workflow_run_id: int, workflow_run_attempt: int
+) -> None:
     # The bucket name name is a bit misleading, usually the jsons should be
     # uploaded while the job is running, but that won't happen if the job
     # doesn't have permissions to write to the bucket or if there was an error
@@ -190,12 +192,19 @@ def backfill_test_jsons_while_running(workflow_run_id: int, workflow_run_attempt
         all_existing_jsons = []
         for unzipped_dir in unzipped_json_dirs:
             all_existing_jsons.extend(
-                [str(Path(json_report).relative_to(unzipped_dir)) for json_report in unzipped_dir.glob("**/*.json")]
+                [
+                    str(Path(json_report).relative_to(unzipped_dir))
+                    for json_report in unzipped_dir.glob("**/*.json")
+                ]
             )
 
         for unzipped_dir in unzipped_xml_dirs:
             for xml in unzipped_dir.glob("**/*.xml"):
-                corresponding_json = str(xml.with_suffix(".json").relative_to(unzipped_dir / "test" / "test-reports"))
+                corresponding_json = str(
+                    xml.with_suffix(".json").relative_to(
+                        unzipped_dir / "test" / "test-reports"
+                    )
+                )
                 if corresponding_json in all_existing_jsons:
                     print(f"Skipping upload for existing test json for {xml}")
                     continue
@@ -331,9 +340,7 @@ if __name__ == "__main__":
         remove_nan_inf(failed_tests_cases),
     )
 
-    backfill_test_jsons_while_running(
-        args.workflow_run_id, args.workflow_run_attempt
-    )
+    backfill_test_jsons_while_running(args.workflow_run_id, args.workflow_run_attempt)
 
     # Upload full test_run only for trusted refs (main or trunk/{sha} tags)
     if should_upload_full_test_run(args.head_branch, args.head_repository):
