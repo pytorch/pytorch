@@ -412,7 +412,6 @@ class OptimizedModule(torch.nn.Module):
             isinstance(self._orig_mod.forward, types.MethodType)
             and (
                 trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
             )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
