@@ -18,8 +18,6 @@ class ComplexTensor(Tensor):
     """A class that decomposes all ops on complex Tensors into their real and imaginary parts."""
 
     _data: Tensor
-    _neg_flag: bool
-    _conj_flag: bool
 
     def __new__(
         cls,
@@ -49,7 +47,7 @@ class ComplexTensor(Tensor):
                 data = real
 
         else:
-            data = torch.stack([real, imag], dim=-1)
+            data = torch.stack([real.detach(), imag.detach()], dim=-1)
 
         real = data[..., 0]
         imag = data[..., 1]
@@ -105,8 +103,8 @@ class ComplexTensor(Tensor):
             requires_grad=False,
         )
         res._data = data.detach()
-        res._neg_flag = neg_flag
-        res._conj_flag = conj_flag
+        torch._C._set_conj(res, conj_flag)
+        torch._C._set_neg(res, neg_flag)
 
         return res
 
@@ -153,9 +151,9 @@ class ComplexTensor(Tensor):
 
     def as_interleaved(self) -> Tensor:
         out = torch.view_as_complex(self._data)
-        if self._conj_flag:
+        if self.is_conj():
             out = torch._conj(out)
-        if self._neg_flag:
+        if self.is_neg():
             out = torch._neg_view(out)
         return out
 
@@ -172,7 +170,7 @@ class ComplexTensor(Tensor):
         )
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_data"], {"neg_flag": self._neg_flag, "conj_flag": self._conj_flag}
+        return ["_data"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor({self._data!r}, conj_flag={self._conj_flag!r}, neg_flag={self._neg_flag!r})"
