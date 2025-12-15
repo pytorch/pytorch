@@ -644,7 +644,7 @@ class FakeTensorTest(TestCase):
                 b14,
                 b15,
             ]
-
+            
             if torch.version.cuda:
                 return torch.ops.aten._cudnn_rnn(
                     a0,
@@ -714,7 +714,14 @@ class FakeTensorTest(TestCase):
 
                 for inps in [inps1, inps2]:
                     out = fn(*inps)
-                    self.assertIs(out[4], inps[-3])
+                    # weight_buf is cudnn only <- this is a3 and inps[-3]
+                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4], so the test expects self.assertIs(out[4], inps[-3])
+                    # in miopen_rnn, it does not need the input argument weight_buf, the miopen_rnn generate a new weight_buf instead, and it returns via out[4]
+                    if torch.version.hip:
+                        self.assertIsNotNone(out[4])
+                    else:
+                        self.assertIs(out[4], inps[-3])
+                    
                     for ten in out:
                         if i == 1:
                             self.assertTrue(isinstance(ten, FakeTensor))
