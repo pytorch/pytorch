@@ -7,7 +7,7 @@
 #define HAS_CUDA_GREEN_CONTEXT() 1
 #else
 #define HAS_CUDA_GREEN_CONTEXT() 0
-// Suppress unsued private field warnings as this class is not supposed to be called
+// Suppress unused private field warnings as this class is not supposed to be called
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-private-field")
 #endif
 
@@ -26,7 +26,7 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
         "Attempted to create a green context but"
         " there was no primary context! Creating a primary context...");
 
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
    CUdevice device;

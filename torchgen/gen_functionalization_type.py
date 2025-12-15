@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher, functionalization
 from torchgen.api.translate import translate
@@ -928,7 +928,7 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(
     def map(
         g: NativeFunctionsViewGroup, run: Callable[[ViewMetaSpecialization], list[str]]
     ) -> list[str]:
-        def maybe_run(f: Optional[NativeFunction]) -> list[str]:
+        def maybe_run(f: NativeFunction | None) -> list[str]:
             if f is None:
                 return []
             with native_function_manager(f):

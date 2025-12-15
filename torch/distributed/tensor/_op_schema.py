@@ -26,7 +26,7 @@ These schema definitions enable the DTensor system to:
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -60,11 +60,11 @@ except ImportError:
 ArgsType = tuple[object, ...]
 KwargsType = dict[str, object]
 
-PlacementList = list[Optional[Placement]]
+PlacementList = list[Placement | None]
 
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
-OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+OutputSpecType = DTensorSpec | Sequence[DTensorSpec | None] | None
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
@@ -109,8 +109,8 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
-    input_specs: Optional[Sequence[DTensorSpec]] = None
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...]
+    input_specs: Sequence[DTensorSpec] | None = None
 
     """
     redistribute_cost tells how expensive it is to redistribute a given input into the
@@ -138,7 +138,7 @@ class OpSpec:
             K,    # cost of redistributing tensor_a from 'Shard(0)'
         ],
     """
-    redistribute_cost: Optional[list[list[float]]] = None
+    redistribute_cost: list[list[float]] | None = None
 
     @cached_property
     def output_spec(self) -> DTensorSpec:
@@ -301,7 +301,7 @@ class RuntimeSchemaInfo:
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
-    static_kwargkey: Optional[list[str]] = None
+    static_kwargkey: list[str] | None = None
     # each op can decide if it wants to use pytree flatten/unflatten during operator
     # eager execution, by default we don't need to do flatten/unflatten, only if the
     # op indicate it needs to, this is to accelerate eager performance.
@@ -331,9 +331,9 @@ class OpSchema:
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
-    schema_info: Optional[RuntimeSchemaInfo] = None
+    schema_info: RuntimeSchemaInfo | None = None
 
-    _comparison_key: Optional[tuple[object, ...]] = None
+    _comparison_key: tuple[object, ...] | None = None
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
@@ -360,6 +360,16 @@ class OpSchema:
             else self.args_schema
         )
         return tuple(item for item in args if isinstance(item, OpStrategy))
+
+    @property
+    def kwargs_strategy(self) -> tuple[OpStrategy, ...]:
+        # returns OpStrategy items from kwargs_schema.
+        kwargs_vals = (
+            tree_leaves(self.kwargs_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.kwargs_schema.values()
+        )
+        return tuple(item for item in kwargs_vals if isinstance(item, OpStrategy))
 
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
@@ -560,7 +570,7 @@ class OutputSharding:
     # specifies the output sharding pattern
     output_spec: OutputSpecType
     # schema for redistribution if needed
-    redistribute_schema: Optional[OpSchema] = None
+    redistribute_schema: OpSchema | None = None
     # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
     # flag to use values from `redistribute_schema`
@@ -596,7 +606,7 @@ class OpInfo:
     flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: dict[str, object]
-    args_tree_spec: Optional[TreeSpec] = None
+    args_tree_spec: TreeSpec | None = None
 
     # the output sharding info
-    output_sharding: Optional[OutputSharding] = None
+    output_sharding: OutputSharding | None = None

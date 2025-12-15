@@ -1003,7 +1003,7 @@ def gen_variable_type_func(
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key in fn.info.keys():
+                for key in fn.info:
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(
                             f.func.returns, symint=True
