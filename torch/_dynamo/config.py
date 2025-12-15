@@ -773,6 +773,10 @@ _custom_ops_profile: Optional[Any] = None
 # Deprecated! Please use the config in torch/fx/experimental/_config instead.
 enrich_profiler_metadata: bool = False
 
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

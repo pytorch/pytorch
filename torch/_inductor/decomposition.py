@@ -646,15 +646,17 @@ def empty_like(
         )
 
     shape, permutation = _get_shape_permutation_like(self)
-    return torch.empty_permuted(
+    result = torch.empty(
         shape,
-        permutation,
         dtype=dtype,
         layout=layout,
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
+    if permutation == list(range(len(permutation))):
+        return result
+    return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.full_like)
@@ -1068,6 +1070,7 @@ def index_reduce(
     ):
         return NotImplemented
 
+    # pyrefly: ignore [missing-attribute]
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))

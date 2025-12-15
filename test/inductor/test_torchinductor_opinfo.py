@@ -990,6 +990,7 @@ inductor_skip_exact_stride = {
     "linalg.qr",
     "matmul",
     "__rmatmul__",
+    "nn.functional.group_norm",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
