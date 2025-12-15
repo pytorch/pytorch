@@ -13337,7 +13337,7 @@ fn
 
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
-            with torch._functorch.config.patch(check_custom_op_mode=True):
+            with torch._functorch.config.patch(check_custom_op_aliasing=True):
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "The output of this custom operator \(1\) must not also be an input",
@@ -13354,7 +13354,7 @@ fn
                     _ = compiled_fn(x)
 
     def test_debugmode_warns_outside_ci(self):
-        # Test that DebugMode emits warnings (not errors) when check_custom_op_mode=False
+        # Test that DebugMode emits warnings (not errors) when error_on_custom_op_aliasing=False
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("alias_op2(Tensor x) -> (Tensor, Tensor)")
             lib.impl(
@@ -13370,8 +13370,10 @@ fn
 
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
-            # Use check_custom_op_mode=False (default) to emit warnings instead of errors
-            with torch._functorch.config.patch(check_custom_op_mode=False):
+            # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+            ):
                 with self.assertWarnsRegex(
                     UserWarning,
                     "The output of this custom operator \(1\) must not also be an input",

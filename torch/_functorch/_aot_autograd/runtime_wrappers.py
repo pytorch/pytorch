@@ -271,7 +271,7 @@ def _schema_allows_aliasing(func) -> bool:
 def _check_custom_op_aliasing(name, args, kwargs, result):
     """
     Check if custom op outputs alias inputs or other outputs.
-    If config.check_custom_op_mode is True, raises RuntimeError.
+    If config.error_on_custom_op_aliasing is True, raises RuntimeError.
     Otherwise, emits a warning.
     """
     try:
@@ -282,7 +282,7 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
             result,
         )
     except RuntimeError as e:
-        if config.check_custom_op_mode:
+        if config.error_on_custom_op_aliasing:
             raise
         else:
             warnings.warn(str(e), UserWarning, stacklevel=3)
@@ -291,7 +291,7 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
 class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
     """
     Checks if inp/out of custom ops alias each other.
-    If config.check_custom_op_mode is True, violations raise errors.
+    If config.error_on_custom_op_aliasing is True, violations raise errors.
     Otherwise, violations emit warnings.
     """
 
@@ -349,7 +349,7 @@ class _FirstInvocationContext:
         Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
         Automatically updates state after first use.
         """
-        if self._is_first:
+        if self._is_first and config.check_custom_op_aliasing:
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
         return nullcontext()
