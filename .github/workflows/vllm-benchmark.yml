@@ -88,6 +88,13 @@ jobs:
       image: nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04
       options: --gpus all --ipc=host
     steps:
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y git
+
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
