@@ -11,6 +11,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
 
+#if ROCM_VERSION < 60400
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
 #if (defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
@@ -68,6 +69,9 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
 #endif
 }
 #define ATOMICADD preview_unsafeAtomicAdd
+#else
+#define ATOMICADD unsafeAtomicAdd
+#endif
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
 #else
 #define ATOMICADD atomicAdd
@@ -269,7 +273,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
     scalar_t* dst = self_ptr + index;
 
-    //pack coalseced bf16 and fp16
+    //pack coalesced bf16 and fp16
     if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
     {
         typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
@@ -312,7 +316,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
         }
     }
 
-    // not coalsced, so now let try to capture lane-matches...
+    // not coalesced, so now let try to capture lane-matches...
 
     if (numel > 16 /*<-hueristic threshold*/ * 64 ) {
       // well shucks, unlikely to capture same-dest atomics in a wave.

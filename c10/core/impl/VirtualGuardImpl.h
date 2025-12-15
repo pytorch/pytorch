@@ -57,6 +57,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     return impl_->deviceCount();
   }
 
+  DeviceCapability getDeviceCapability(Device d) const override {
+    return impl_->getDeviceCapability(d);
+  }
+
   // Event functions
   void record(
       void** event,

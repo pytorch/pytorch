@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, cast, IO, Optional, Union
+from typing import Any, cast, IO
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -203,7 +203,7 @@ class PackageExporter:
     def __init__(
         self,
         f: FileLike,
-        importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        importer: Importer | Sequence[Importer] = sys_importer,
         debug: bool = False,
     ) -> None:
         """
@@ -220,7 +220,7 @@ class PackageExporter:
         self.debug = debug
         if isinstance(f, (str, os.PathLike)):
             f = os.fspath(f)
-            self.buffer: Optional[IO[bytes]] = None
+            self.buffer: IO[bytes] | None = None
         else:  # is a byte buffer
             self.buffer = f
 
@@ -433,7 +433,7 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
+    def _get_source_of_module(self, module: types.ModuleType) -> str | None:
         filename = None
         spec = getattr(module, "__spec__", None)
         if spec is not None:
@@ -625,7 +625,7 @@ class PackageExporter:
             is_pickle=True,
         )
 
-        def _check_mocked_error(module: Optional[str], field: Optional[str]):
+        def _check_mocked_error(module: str | None, field: str | None):
             """
             checks if an object (field) comes from a mocked module and then adds
             the pair to mocked_modules which contains mocked modules paired with their
@@ -1105,7 +1105,7 @@ class PackageExporter:
         return self.dependency_graph.to_dot()
 
     def _nodes_with_action_type(
-        self, action: Optional[_ModuleProviderAction]
+        self, action: _ModuleProviderAction | None
     ) -> list[str]:
         result = []
         for name, node_dict in self.dependency_graph.nodes.items():
