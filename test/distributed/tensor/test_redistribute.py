@@ -149,9 +149,7 @@ class RedistributeTest(DTensorTestBase):
             )
         self.assertEqual(partial_tensor.size(), partial_local.size())
         self.assertEqual(partial_tensor, reshard_partial_tensor)
-        self.assertEqual(
-            partial_tensor.to_local(), reshard_partial_tensor.to_local()
-        )
+        self.assertEqual(partial_tensor.to_local(), reshard_partial_tensor.to_local())
         # Verify no communication in forward
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
@@ -159,15 +157,13 @@ class RedistributeTest(DTensorTestBase):
         grad_output = DTensor.from_local(
             torch.ones(12, 3, device=self.device_type, dtype=dtype),
             device_mesh,
-            partial_spec  # ← Use Partial placement!
+            partial_spec,  # ← Use Partial placement!
         )
         with comm_mode:
             reshard_partial_tensor.backward(grad_output)
         grad_input = partial_tensor.grad
         self.assertEqual(grad_input.placements, partial_spec)
-        self.assertEqual(
-            grad_input.to_local(), torch.ones(12, 3, dtype=dtype)
-        )
+        self.assertEqual(grad_input.to_local(), torch.ones(12, 3, dtype=dtype))
         # Verify no communication in backward
         self.assertEqual(comm_mode.get_total_counts(), 0)
 

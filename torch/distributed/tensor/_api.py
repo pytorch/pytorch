@@ -211,10 +211,12 @@ class _FromTorchTensor(torch.autograd.Function):
 
             # for backward shard -> partial, we do shard -> replicate
             # for backward replicate -> partial, we do replicate -> replicate / skip transformation
-            # TODO: for backward partial -> partial, right now we keep it unchanged, 
+            # TODO: for backward partial -> partial, right now we keep it unchanged,
             # but this might need revisit
             normalized_placements: list[Placement] = []
-            for current, target in zip(current_spec.placements, forward_input_placements):
+            for current, target in zip(
+                current_spec.placements, forward_input_placements
+            ):
                 if (
                     current.is_shard() or current.is_replicate()
                 ) and target.is_partial():
