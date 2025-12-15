@@ -119,19 +119,14 @@ jobs:
         uses: pytorch/test-infra/.github/actions/gather-benchmark-metadata@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          venv: ${{ steps.setup-uv.outputs.venv }}
 
       - name: Gather runners info
         id: gather-runners-info
         uses: pytorch/test-infra/.github/actions/gather-runners-info@main
-        with:
-          venv: ${{ steps.setup-uv.outputs.venv }}
 
       - name: Gather dependencies
         id: gather-dependencies
         uses: pytorch/test-infra/.github/actions/gather-dependencies@main
-        with:
-          venv: ${{ steps.setup-uv.outputs.venv }}
 
       - name: DEBUG
         shell: bash
