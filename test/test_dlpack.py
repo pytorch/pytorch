@@ -560,8 +560,8 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
         # Check that the C API capsule exists and get it
-        self.assertTrue(hasattr(torch.Tensor, "__c_dlpack_exchange_api__"))
-        api_capsule = torch.Tensor.__c_dlpack_exchange_api__
+        self.assertTrue(hasattr(torch.Tensor, "__dlpack_c_exchange_api__"))
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
         self.assertEqual(
             type(api_capsule).__name__, "PyCapsule", "API should be a PyCapsule"
         )

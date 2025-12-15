@@ -72,7 +72,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -160,7 +159,6 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
-    TensorVariable,
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
@@ -170,6 +168,7 @@ from .variables.user_defined import UserDefinedDictVariable
 if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch.multiprocessing.reductions import StorageWeakRef
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -1591,7 +1590,7 @@ class OutputGraph(OutputGraphCommon):
                 and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
                 for v in stack_values_flat
             )
-            and all(isinstance(x, TensorVariable) for x in stack_values_flat)
+            and all(x.is_tensor() for x in stack_values_flat)
             and len(set(stack_values_flat)) == len(stack_values_flat)
             and self.side_effects.is_empty()
             and not tx.debug_locals
@@ -1685,15 +1684,33 @@ class OutputGraph(OutputGraphCommon):
                                 "input",
                                 vt.source,
                             )
-                        elif isinstance(vt, torch._dynamo.variables.ConstantVariable):
+                        elif vt.is_python_constant():
                             self.export_metadata.output_return_type[idx] = (
                                 "constant",
                                 vt.as_python_constant(),
                             )
                         else:
-                            assert f"Encountered unrecognized type {vt} at output {idx}"  # noqa: PLW0129
-
-                    self.export_metadata.out_spec = out_spec.as_python_constant()
+                            raise AssertionError(
+                                f"Encountered unrecognized type {vt} at output {idx}"
+                            )
+                    try:
+                        self.export_metadata.out_spec = out_spec.as_python_constant()
+                    except NotImplementedError as e:
+                        if e.args and e.args[0] == "get_function":
+                            unimplemented(
+                                gb_type="nested function with closure in output",
+                                context="as_python_constant for out_spec",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo cannot reconstruct the function."
+                                ),
+                                hints=[
+                                    "Define the function at module scope instead of inside another function"
+                                ],
+                                from_exc=e,
+                            )
+                        else:
+                            raise
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -2270,6 +2287,7 @@ class OutputGraph(OutputGraphCommon):
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
+                        None,  # user_stack
                     )
 
                     log.debug(
@@ -2788,6 +2806,9 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    # output_graph_for_cleanup is set even when there's an error, to allow
+    # cleanup of graph nodes to break reference cycles
+    output_graph_for_cleanup: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
     f_globals: dict[str, Any]
 
@@ -2798,10 +2819,23 @@ class DynamoTracerOutput:
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
         self.f_globals = tracer.f_globals
+        self.output_graph_for_cleanup = tracer.output
         if error:
             self.output_graph = None
         else:
             self.output_graph = tracer.output
+
+    def _cleanup_output_graph(self) -> None:
+        output_graph = self.output_graph_for_cleanup
+        if output_graph:
+            for tracer in output_graph.tracers:
+                tracer.graph._clear_nodes()
+            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+            if (
+                output_graph.tracing_context.fake_mode
+                and output_graph.tracing_context.fake_mode.shape_env
+            ):
+                output_graph.tracing_context.fake_mode.shape_env.tracked_fakes = None
 
 
 err_epilogue = (
@@ -3801,6 +3835,7 @@ class SubgraphTracer(fx.Tracer):
         return MutationInfo(False, "")
 
     def has_aliasing(self) -> AliasingInfo:
+        from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
@@ -3809,12 +3844,12 @@ class SubgraphTracer(fx.Tracer):
             if node.op == "placeholder":
                 example_value = _collect_fake_inputs([node])[0]
                 if isinstance(example_value, torch.Tensor):
-                    storage = StorageWeakRef(example_value._typed_storage())
-                    if storage in input_storages:
-                        # input-input aliasing
-                        msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
-                        return AliasingInfo(True, msg)
-                    input_storages[storage] = node
+                    for storage in get_tensor_storages(example_value):
+                        if storage in input_storages:
+                            # input-input aliasing
+                            msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                            return AliasingInfo(True, msg)
+                        input_storages[storage] = node
             else:
                 break
 
@@ -3825,12 +3860,12 @@ class SubgraphTracer(fx.Tracer):
                 example_value = _collect_fake_inputs([out_node])[0]
                 assert not isinstance(example_value, list)
                 if isinstance(example_value, torch.Tensor):
-                    storage = StorageWeakRef(example_value._typed_storage())
-                    if storage in output_storages:
-                        # output-output aliasing
-                        msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
-                        return AliasingInfo(True, msg)
-                    output_storages[storage] = out_node
+                    for storage in get_tensor_storages(example_value):
+                        if storage in output_storages:
+                            # output-output aliasing
+                            msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                            return AliasingInfo(True, msg)
+                        output_storages[storage] = out_node
 
         intersected_storages = input_storages.keys() & output_storages.keys()
         if len(intersected_storages) > 0:

@@ -1281,6 +1281,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_tensor_call_obj_hasattr_view(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output3 = getattr(x, "view", None)(10)
+            return output3
+
+        x = torch.randn(10)
+        self.assertEqual(x.view(10), fn(x))
+
     def test_mro_type_tensor_no_source(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -5902,6 +5911,61 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_foreach_tensor_scalar(self):
+        # Test that foreach ops with tensor scalar values can be traced fullgraph
+        # when capture_scalar_outputs is enabled. The scalar's .item() creates an
+        # unbacked symbol that should be properly ignored since it only affects
+        # tensor values, not shapes.
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        val = torch.tensor(0.5, dtype=torch.float64)
+
+        # Test _foreach_addcmul with value arg
+        def fn_addcmul(a, b, c, val):
+            return torch._foreach_addcmul([a], [b], [c], value=1 - val)
+
+        expected = fn_addcmul(a, b, c, val)
+        actual = torch.compile(fn_addcmul, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_addcdiv with value arg
+        def fn_addcdiv(a, b, c, val):
+            return torch._foreach_addcdiv([a], [b], [c], value=1 - val)
+
+        expected = fn_addcdiv(a, b, c, val)
+        actual = torch.compile(fn_addcdiv, backend="eager", fullgraph=True)(
+            a, b, c, val
+        )
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_add with scalar arg
+        def fn_add(a, val):
+            return torch._foreach_add([a], 1 - val)
+
+        expected = fn_add(a, val)
+        actual = torch.compile(fn_add, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_mul with scalar arg
+        def fn_mul(a, val):
+            return torch._foreach_mul([a], 1 - val)
+
+        expected = fn_mul(a, val)
+        actual = torch.compile(fn_mul, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+        # Test _foreach_pow with scalar exponent
+        def fn_pow(a, val):
+            return torch._foreach_pow([a.abs()], 1 - val.item())
+
+        expected = fn_pow(a, val)
+        actual = torch.compile(fn_pow, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
     @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
     def test_cross_entropy_loss_fancy_ctor1(self):
         rand_5 = torch.randn(5)
@@ -6424,9 +6488,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = (
-                "map doesn't work unless it is captured completely with torch.compile"
-            )
+            error_message = r"Higher Order Operator: torch\.ops\.higher_order\.map_impl"
         else:
             error_message = "Can't inplace modify module params/buffers"
 
@@ -7674,7 +7736,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected(x):
             return x + 42
@@ -7699,27 +7761,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), [], None
+        )
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), []
+            lambda L: isinstance(L["x"], torch.Tensor), [], None
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [], None)
 
         def injected_str(x: str):
             return x + "1"
@@ -7796,7 +7860,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
         )
 
         def injected_bool(x: bool):
@@ -10115,11 +10179,6 @@ def ___make_guard_fn():
 
         fn(torch.ones(2, 2, device="cpu"))
 
-    # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
-    # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
-    # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
-    # until we have a proper fix.
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
         class SillyCat(torch.autograd.Function):
@@ -14171,6 +14230,72 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(w % 14 == 0)
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_module_to_with_shared_weights_compile(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        container = Container()
+        container_eager = copy.deepcopy(container)
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            compiled = torch.compile(container, backend="eager", fullgraph=True)
+
+            inp1 = torch.randn(4, 4, 4, device="cuda")
+
+            # First call with CUDA input
+            compiled_result1 = compiled(inp1)
+            eager_result1 = container_eager(inp1)
+            same(compiled_result1, eager_result1)
+
+            # Second call - weights are now on CUDA from first call
+            # This tests that .to(cuda) on already-cuda weights doesn't fail
+            compiled_result2 = compiled(inp1)
+            eager_result2 = container_eager(inp1)
+            same(compiled_result2, eager_result2)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_module_to_move_compile(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.fc(x)
+                self.to("cpu")
+                return x
+
+        mod = Model().cuda()
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
+            x = torch.randn(10, 10, device="cuda")
+            ref = fn(x)
+            self.assertEqual(str(mod.fc.weight.device), "cpu")
+            mod.cuda()
+            ref = fn(
+                x
+            )  # second time compile runs, we should also move the module to cpu device
+            self.assertEqual(str(mod.fc.weight.device), "cpu")
 
 
 if __name__ == "__main__":

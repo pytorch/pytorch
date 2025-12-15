@@ -115,12 +115,12 @@ jobs:
     with:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
-      cuda-arch-list: '8.9'
+      cuda-arch-list: '9.0'
       runner: linux.8xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.12xlarge.nvidia.gpu" },
+          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
     secrets: inherit
 
