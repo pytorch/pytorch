@@ -1598,9 +1598,11 @@ class _InProcessFxCompile(FxCompile):
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
+                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
+                        and not config.graph_partition
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -1625,7 +1627,14 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = disable
 
                     # pyrefly: ignore [unbound-name]
-                    if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
+                    if (
+                        cudagraphs
+                        # pyrefly: ignore [unbound-name]
+                        and not config.graph_partition
+                        # pyrefly: ignore [unbound-name]
+                        and not V.graph.disable_cudagraphs_reason
+                    ):
                         maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
                         if maybe_incompat_node:
                             disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
@@ -1863,7 +1872,7 @@ def cudagraphify_impl(
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
         remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
@@ -1963,7 +1972,7 @@ def compile_fx_aot(
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
 
     if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
@@ -2470,6 +2479,7 @@ def compile_fx(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if CompilerBisector.disable_subsystem("inductor", "pre_grad_graph"):
+        # pyrefly: ignore [bad-return]
         return model_
 
     if config_patches:
