@@ -156,7 +156,6 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
       docker-image: ${{ needs.inductor-pallas-tpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-pallas-tpu-build.outputs.test-matrix }}
-      use-gha: "yes"
     secrets: inherit
 
   inductor-triton-cpu-build:
