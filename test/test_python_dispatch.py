@@ -85,7 +85,7 @@ class TestPythonRegistration(TestCase):
             str(torch.rand(2))
 
         finally:
-            v_ref().__exit__()
+            v_ref().__exit__(None, None, None)
 
     def test_fallback(self) -> None:
         test_key = "TESTING_ONLY_GenericMode"
