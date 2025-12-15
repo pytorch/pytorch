@@ -310,7 +310,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"autograd.grad with external grad_fn \(input\)",
+            r"autograd.grad with external grad_fn",
         ):
             fn(external_computation)
 
@@ -550,8 +550,6 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(cnt.frame_count, 1)
 
-    # TODO (tmanlaibaatar) should fix it later
-    @unittest.expectedFailure
     @skipIfCrossRef
     def test_autograd_grad_external_grad_fn_not_reachable(self):
         torch._dynamo.reset()
