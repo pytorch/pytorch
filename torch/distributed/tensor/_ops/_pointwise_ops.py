@@ -568,12 +568,8 @@ def common_pointwise_strategy(
                 else:
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
-                safe_avoid_redistribution = False
-
-                if op not in redistribute_partial_ops or not isinstance(
-                    args_schema[1], _Number
-                ):
-                    safe_avoid_redistribution = True
+                is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
+                keep_partial = op not in redistribute_partial_ops or not is_scalar_arg
 
                 # Check if this partial type should be preserved
                 if preserve_partial is not None and placement.is_partial(
@@ -584,7 +580,7 @@ def common_pointwise_strategy(
                 elif (
                     linearity >= 0
                     and (placement.is_partial("sum") or placement.is_partial("avg"))
-                    and safe_avoid_redistribution
+                    and keep_partial
                 ):
                     # propagate the partial placement
                     out_placements.append(placement)
