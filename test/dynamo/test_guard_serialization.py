@@ -302,6 +302,11 @@ class CustomConstantType:
     def __repr__(self):
         return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
+    def __fx_repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})", {
+            "CustomConstantType": CustomConstantType
+        }
+
 
 torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
@@ -550,6 +555,33 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+        # Check verbose_code_parts from leaf guards (they include hints)
+        def check_leaf_guards(mgr):
+            for guard in mgr.get_leaf_guards():
+                verbose_parts = guard.verbose_code_parts()
+                verbose_str = " ".join(verbose_parts)
+                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                    self.assertIn(
+                        "HINT: type",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include 'HINT: type' "
+                            f"annotation.\nGuard: {verbose_str}"
+                        ),
+                    )
+                    self.assertIn(
+                        "GlobalModule",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include type name "
+                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                        ),
+                    )
+            for child_mgr in mgr.get_child_managers():
+                check_leaf_guards(child_mgr)
+
+        check_leaf_guards(ref.root)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
