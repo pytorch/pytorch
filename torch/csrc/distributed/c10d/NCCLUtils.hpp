@@ -136,7 +136,8 @@ static_assert(
 // Thread-safe: uses NCCLComm wrapper's getAsyncError() which acquires mutex
 // before calling ncclCommGetAsyncError to prevent race conditions between
 // watchdog and main threads.
-#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, commWrapper, failureReason, yield_fn) \
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(                                         \
+    cmd, commWrapper, failureReason, yield_fn)                                \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     auto startTimepoint = std::chrono::steady_clock::now();                   \
@@ -171,7 +172,8 @@ static_assert(
 // Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
 // ncclCommInitRankConfig, ncclCommFinalize, etc.
 #define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, commWrapper, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, commWrapper, failureReason, C10D_SCHED_SLEEP())
+  C10D_NCCL_CHECK_TIMEOUT_BASE(                                        \
+      cmd, commWrapper, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
   do {                                                                       \
