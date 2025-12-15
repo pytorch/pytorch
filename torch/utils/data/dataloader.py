@@ -858,7 +858,11 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         self._data_queue = None
 
     def _initialize_pin_memory(self):
-        """Initialize pin memory thread and related queues."""
+        """Initialize pin memory thread and related queues.
+        Pin memory thread is only used when pin_memory is True and
+        the worker method is multiprocessing. For threading, pinning
+        is done in the worker processes.
+        """
         if self._pin_memory and self._worker_method == "multiprocessing":
             self._pin_memory_thread_done_event = threading.Event()
 
@@ -950,7 +954,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
                 raise RuntimeError(
                     f"DataLoader timed out after {self._timeout} seconds"
                 )
-        elif self._pin_memory and self._worker_method == "multiprocessing":
+        elif hasattr(self, "_pin_memory_thread"):
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()
                 if success:
