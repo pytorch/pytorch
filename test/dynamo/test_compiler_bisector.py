@@ -168,7 +168,7 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
-    @skipIf(HAS_XPU_AND_TRITON)
+    @skipIf(HAS_XPU_AND_TRITON, "String comparison failed: 'eager' != 'inductor' on XPU")
     def test_rng(self):
         def foo():
             return torch.rand([10], device=device_type) + 1
@@ -184,7 +184,6 @@ class TestCompilerBisector(TestCase):
             return torch.allclose(out, out_c)
 
         out = CompilerBisector.do_bisect(test_fn)
-        # String comparison failed: 'eager' != 'inductor' on XPU
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
