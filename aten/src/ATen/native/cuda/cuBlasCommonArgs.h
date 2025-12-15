@@ -165,12 +165,19 @@ struct cublasCommonArgs {
       ldb = ldb * 2;
     }
 
+    this->beta = beta;
     // Prepare bias if it is different from result and beta != 0
-    if (self.has_value() && !c.is_same(*self)
-        && (!beta.has_value() || beta->toComplexDouble() != 0.0)) {
+    if (self.has_value() && !c.is_same(*self) && !is_beta_zero()) {
+      if (self->scalar_type() == c.scalar_type() && self->scalar_type() != mat1.scalar_type()) {
+        // NOTE: self and result are different tensors here
+        // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and
+        // mat1.dtype/mat2.dtype if of reduced float type -- we do not have
+        // such a kernel specialization yet.
+        return;
+      }
       const bool can_use_bias_in_epilogue = (
           transpose_result // required so that bias properly broadcasts in epilogue
-          && (!beta.has_value() || beta->toComplexDouble() == 1.0) // no scaling for bias in epilogue
+          && is_beta_one() // no scaling for bias in epilogue
           && self->is_contiguous()
           && (self->dim() == 1 || self->squeeze().dim() == 1)
           && self->sizes().back() == m // should match the rows, hence transpose_result is essential
@@ -198,12 +205,20 @@ struct cublasCommonArgs {
     }
   }
 
+  bool is_beta_zero() const {
+    return beta.has_value() && beta->toComplexDouble() == 0.0;
+  }
+
+  bool is_beta_one() const {
+    return !beta.has_value() || (beta.has_value() && beta->toComplexDouble() == 1.0);
+  }
+
   bool can_use_bias_epilogue() const {
-    return bias.has_value() && !bias_ld.has_value();
+    return bias.has_value() && !bias_ld.has_value() && is_beta_one();
   }
 
   bool must_copy_bias_into_result() const {
-    return !bias.has_value();
+    return !bias.has_value() && beta.has_value() && !is_beta_zero();
   }
 
   // Matrix members
@@ -215,6 +230,7 @@ struct cublasCommonArgs {
   // Bias
   std::optional<int64_t> bias_ld = std::nullopt;
   std::optional<c10::MaybeOwned<Tensor>> bias = std::nullopt;
+  std::optional<Scalar> beta = std::nullopt;
 
   // Scale members
   void* scale_mata_ptr = nullptr;

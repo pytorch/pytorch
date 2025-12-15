@@ -311,7 +311,7 @@ bool launchGemmAndBiasCublasLt(
     const Scalar& beta,
     Activation activation = Activation::None
 ) {
-  const auto* self_ptr = args.can_use_bias_epilogue()
+  const auto* self_ptr = args.bias.has_value()
     ? (*args.bias)->const_data_ptr<scalar_t>()
       // Fails test
       // pytest -sv test/test_matmul_cuda.py -k test_addmm_baddmm_dtype_overload_float16_M_64_N_64_K_64_batch_size0_broadcast_self_True_high_precision_self_True_backend_cublaslt_cuda
@@ -447,16 +447,24 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     );
   }
 
+  // Copy bias into result and set args.bias args.bias_ld to nullopt
+  const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
+    // NOTE: self should broadcast over result
+    (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
+    args.bias = std::nullopt;
+    args.bias_ld = std::nullopt;
+  };
+
   cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
   if (args.must_copy_bias_into_result()
       /*REMOVE THAT*/ || args.bias_ld.has_value()) {
-      // NOTE: self should broadcast over result
-      at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
+    copy_bias_into_result(args, self);
   }
-  std::cout << "Case bias: " << args.bias.has_value() << " ld: " << args.bias_ld.has_value() << std::endl;
-  std::cout << "alpha: " << alpha << " beta: " << beta << std::endl;
-  std::cout << std::endl;
+  // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results.
+  if (!disable_addmm_cuda_lt && is_float_output_with_half_input && args.can_use_bias_epilogue()) {
+    copy_bias_into_result(args, **args.bias);
+  }
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {
@@ -468,6 +476,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
        TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
       }
+
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
         scalar_type,
         "addmm_cuda_lt",
