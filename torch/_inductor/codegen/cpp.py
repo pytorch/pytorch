@@ -2853,6 +2853,7 @@ class CppVecKernel(CppKernel):
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
+                # pyrefly: ignore [bad-assignment]
                 for indirect_var in replacements:
                     index_c = re.sub(
                         r"\b" + f"{indirect_var}" + r"\b",
