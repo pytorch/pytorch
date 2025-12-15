@@ -128,6 +128,47 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
+    def test_partial_to_partial_forward_backward(self, dtype):
+        device_mesh = self.build_device_mesh()
+        partial_spec = [Partial()]
+
+        # Create a partial tensor - each rank has the same local tensor
+        # When reduced, it would be multiplied by world_size
+        partial_local = torch.ones(
+            12, 3, device=self.device_type, requires_grad=True, dtype=dtype
+        )
+
+        comm_mode = CommDebugMode()
+
+        # 1) test partial -> partial forward: should be no-op
+        partial_tensor = distribute_tensor(partial_local, device_mesh, partial_spec)
+
+        with comm_mode:
+            reshard_partial_tensor = partial_tensor.redistribute(
+                device_mesh, partial_spec
+            )
+        self.assertEqual(partial_tensor.size(), partial_local.size())
+        self.assertEqual(partial_tensor, reshard_partial_tensor)
+        self.assertEqual(partial_tensor.to_local(), reshard_partial_tensor.to_local())
+        # Verify no communication in forward
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # 2) test partial -> partial backward: should be no-op
+        grad_output = DTensor.from_local(
+            torch.ones(12, 3, device=self.device_type, dtype=dtype),
+            device_mesh,
+            partial_spec,  # ← Use Partial placement!
+        )
+        with comm_mode:
+            reshard_partial_tensor.backward(grad_output)
+        grad_input = partial_tensor.grad
+        self.assertEqual(grad_input.placements, partial_spec)
+        self.assertEqual(grad_input.to_local(), torch.ones(12, 3, dtype=dtype))
+        # Verify no communication in backward
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_replicate_to_local_partial_grad(self, dtype):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]

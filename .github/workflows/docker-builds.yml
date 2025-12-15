@@ -108,6 +108,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Build docker image
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
