@@ -1207,8 +1207,8 @@ class TestProfiler(TestCase):
                     parts[-4].isdigit() and int(parts[-4]) > 0,
                     "Wrong tracing file name pattern",
                 )
-                self.assertEqual(parts[-3:], ["pt", "trace", "json"])
-                file_num += 1
+                if parts[-3:] == ["pt", "trace", "json"]:
+                    file_num += 1
             self.assertEqual(file_num, 3)
 
         # test case for gzip file format

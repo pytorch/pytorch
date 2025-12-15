@@ -98,13 +98,13 @@ RegisterHandler pyspyHandler{
       pid_t target = getpid();
       std::string cmd = "py-spy dump";
       cmd += " --pid " + std::to_string(target);
-      if (req.getParam("native") != "") {
+      if (!req.getParam("native").empty()) {
         cmd += " --native";
       }
-      if (req.getParam("subprocesses") != "") {
+      if (!req.getParam("subprocesses").empty()) {
         cmd += " --subprocesses";
       }
-      if (req.getParam("nonblocking") != "") {
+      if (!req.getParam("nonblocking").empty()) {
         cmd += " --nonblocking";
       }
       cmd += " 2>&1";
