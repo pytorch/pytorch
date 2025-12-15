@@ -145,6 +145,8 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
+_in_optimized_module = False
+
 
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
@@ -201,6 +203,27 @@ def get_example_inputs(key: str) -> list[Any]:
         _EXAMPLE_INPUTS[key] = []
 
     return _EXAMPLE_INPUTS[key]
+
+
+@contextlib.contextmanager
+def _set_in_optimized_module():
+    # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
+    # Prevents graph-breaking forward hooks from being registered & traced.
+    # TODO(pianpwk): subsume this flag with better is_compiling() coverage
+    global _in_optimized_module
+    _old_in_optimized_module = (
+        _in_optimized_module  # do we need this? can we just set it to False after
+    )
+    _in_optimized_module = True
+    try:
+        yield
+    finally:
+        _in_optimized_module = _old_in_optimized_module
+
+
+def _is_in_optimized_module() -> bool:
+    global _in_optimized_module
+    return _in_optimized_module
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
@@ -414,10 +437,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (
-                trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
-            )
+            and (trace_rules.check(self._orig_mod.forward))
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -443,7 +463,8 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        with _set_in_optimized_module():
+            return super().__call__(*args, **kwargs)
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """
@@ -893,6 +914,14 @@ class _TorchDynamoContext:
                         and tracing_context.fake_mode.in_kernel_invocation
                     ):
                         return fn(*args, **kwargs)
+                # Skip nested compile during export (but not HOP internal compile)
+                # Only skip if there's an active TracingContext (nested), not for top-level export
+                if torch.compiler.is_exporting():
+                    from torch._higher_order_ops.utils import _in_hop_compile
+
+                    if not _in_hop_compile():
+                        if torch._guards.TracingContext.try_get() is not None:
+                            return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
