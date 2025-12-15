@@ -1073,6 +1073,27 @@ class TestViewOps(TestCase):
             self.assertEqual(result, expected)
             self.assertTrue(result.is_contiguous())
 
+            # Check that whether result is a view matches the movedim reference implementation
+            # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
+            #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+            chunks = torch.unflatten(x, 0, [group_size, -1])
+            ref = torch.flatten(
+                torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1
+            )
+
+            # Check if result is a view of x by comparing data pointers
+            result_is_view = result.data_ptr() == x.data_ptr()
+            # Check if ref is a view of x by comparing data pointers
+            ref_is_view = ref.data_ptr() == x.data_ptr()
+
+            self.assertEqual(
+                result_is_view,
+                ref_is_view,
+                f"View status mismatch for shape={shape}, group_size={group_size}, "
+                f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
+                f"ref_is_view={ref_is_view}",
+            )
+
         # Test various configurations - one per line as requested
         test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
         test_config((4, 8, 16), group_size=4, gather_dim=1)  # docstring example 1
