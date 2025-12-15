@@ -89,7 +89,7 @@ struct TORCH_API Symbol {
   bool is_dimname() const;
 
   // So we can switch on this
-  constexpr operator unique_t() const {
+  constexpr operator unique_t() const noexcept {
     return value;
   }
 
