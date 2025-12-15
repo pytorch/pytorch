@@ -452,6 +452,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.test-matrix }}
+      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
   linux-jammy-xpu-n-py3_10-build:

@@ -334,6 +334,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
   inductor-build:
