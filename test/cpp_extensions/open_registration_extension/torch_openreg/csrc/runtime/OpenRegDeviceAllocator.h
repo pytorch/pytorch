@@ -7,6 +7,7 @@
 
 #include <include/openreg.h>
 
+#include <map>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -25,6 +26,10 @@ class DeviceMemoryAllocator {
 
   void free(void* ptr);
 
+  // Releases all cached blocks back to OpenReg and returns the pointers that
+  // were removed from the cache (successfully freed or already absent).
+  std::vector<void*> emptyCache();
+
   c10::CachingDeviceAllocator::DeviceStats getStats();
 
   void resetAccumulatedStats();
@@ -37,6 +42,9 @@ class DeviceMemoryAllocator {
   c10::CachingDeviceAllocator::DeviceStats stats_;
 
   std::unordered_map<void*, size_t> allocation_sizes_;
+
+  // Single-level cache: best-fit by block size.
+  std::multimap<size_t, void*> cached_blocks_;
 
   std::recursive_mutex mutex_;
 };
@@ -52,7 +60,7 @@ class OpenRegDeviceAllocator final : public c10::DeviceAllocator {
 
 
   bool initialized() override;
-  void emptyCache(MempoolId_t mempool_id = {0, 0}) override;
+  void emptyCache([[maybe_unused]] MempoolId_t mempool_id = {0, 0}) override;
   void recordStream(const DataPtr& ptr, c10::Stream stream) override;
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
