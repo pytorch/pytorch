@@ -46,7 +46,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+      build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
     secrets: inherit

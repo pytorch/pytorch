@@ -426,7 +426,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     from torch.utils._sympy.value_ranges import bound_sympy
 
                     sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
-                    if not math.isinf(sym_range.lower):
+                    if config.aot_inductor.check_lowerbound and not math.isinf(
+                        sym_range.lower
+                    ):
                         self.prefix.splice(
                             f"""
                                 if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
@@ -827,7 +829,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].dtype = static_cast<int32_t>({self.codegen_dtype(tensor.dtype)});"
+                    f"constants_info_[{idx}].dtype = {self.codegen_dtype(tensor.dtype)};"
+                )
+                # Mixed-device constants are only supported when the secondary device is CPU
+                if tensor.device.type != self.device and tensor.device.type != "cpu":
+                    raise AssertionError(
+                        f"Mixed-device constants are only supported when the secondary "
+                        f"device is CPU. Model device is '{self.device}', but constant "
+                        f"'{name}' is on device '{tensor.device}'."
+                    )
+                # device_index is not needed because it can be set at runtime
+                device_type, _ = self.codegen_device(tensor.device).split(", ")
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].device_type = {device_type};"
                 )
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
@@ -2314,7 +2328,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
-        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         """Generate a call to a kernel not contained in the C-shim.  This results in
         different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
@@ -2379,13 +2392,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 kwargs_dict = {}
 
             # Build format kwargs from the dict
-            format_kwargs = {}
+            format_kwargs: dict[str, object] = {}
             for key, value in kwargs_dict.items():
                 if isinstance(value, ir.IRNode):
                     # For tensor nodes, use their buffer name as placeholder
+                    # Using buffer names avoids expensive tensor materialization and device-to-host copies
+                    # that would be required to print actual tensor values. This keeps codegen fast and
+                    # device-agnostic, while still providing useful debugging information about which
+                    # tensors are being referenced.
                     format_kwargs[key] = f"<Tensor:{value.get_name()}>"
                 else:
                     # For scalar values, use them directly
+                    # Scalars are already host-side values, so no performance penalty for printing them
                     format_kwargs[key] = value
 
             # Format the string with kwargs

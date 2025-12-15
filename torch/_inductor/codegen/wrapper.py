@@ -27,6 +27,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
@@ -1193,6 +1194,7 @@ class PythonWrapperCodegen(CodeGen):
             f"""
                 {aot_config_comment}
                 from ctypes import c_void_p, c_long, c_int
+                import builtins
                 import torch
                 import math
                 import random
@@ -1319,7 +1321,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         return self._metas[meta]
 
     @cache_on_self
@@ -1547,7 +1549,37 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        # Special handling for print HOP - use builtin print directly
+        if (
+            isinstance(node.op_overload, torch._ops.HigherOrderOperator)
+            and node.python_kernel_name == "torch.ops.higher_order.print"
+        ):
+            self._generate_print_fallback(node)
+            return
         self.writeline(ExternKernelAllocLine(self, node))
+
+    def _generate_print_fallback(self, node: ir.FallbackKernel) -> None:
+        """Generate a builtin print call for the print HOP fallback."""
+        # Get args and kwargs from the node
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+
+        # First arg is the format string
+        format_str = args[0] if args else ""
+
+        # Build format kwargs - for Python we can directly use the values
+        format_kwargs: dict[str, str] = {}
+        for key, value in kwargs.items():
+            if isinstance(value, ir.IRNode):
+                # For tensor nodes, reference the buffer
+                format_kwargs[key] = value.codegen_reference()
+            else:
+                format_kwargs[key] = repr(value)
+
+        # Generate the print call with formatted string using builtins.print
+        # to avoid any potential shadowing of the print name
+        if format_kwargs:
+            kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
+            self.writeline(f"builtins.print({repr(format_str)}.format({kwargs_str}))")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -3121,6 +3153,11 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
+        elif is_opaque_value_type(type(s)):
+            obj_repr, opaque_types = get_opaque_obj_repr(s)
+            for n, t in opaque_types.items():
+                V.graph.opaque_value_type_classes[n] = t
+            return obj_repr
         else:
             return repr(s)
 
