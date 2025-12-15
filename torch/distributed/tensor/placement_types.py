@@ -21,7 +21,7 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -969,13 +969,13 @@ _Partial = Partial
 
 
 @dataclass(frozen=True)
-class MaskPartial(Partial):
+class _MaskPartial(Partial):
     """
     A partial mask placement devised for rowwise sharded embedding op, where we need
     to mask and adjust the indices to the local embedding shard, embedding masking
     is a special type of the Partial placement
 
-    NOTE: the lifecycle of this MaskPartial placement follows the corresponding DTensor
+    NOTE: the lifecycle of this _MaskPartial placement follows the corresponding DTensor
     lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
     """
 
@@ -1026,14 +1026,14 @@ class MaskPartial(Partial):
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
         assert self.offset_shape is not None, (
-            "offset_shape needs to be set for MaskPartial"
+            "offset_shape needs to be set for _MaskPartial"
         )
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
             my_coordinate[mesh_dim],
         )
-        mask, masked_tensor = MaskPartial._mask_tensor(
+        mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size
         )
         # materialize the mask buffer to be used for reduction
@@ -1078,11 +1078,11 @@ class MaskPartial(Partial):
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, MaskPartial):
+        if not isinstance(other, _MaskPartial):
             return False
 
         # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
+        # the current _MaskPartial placement is still in use and should not be used for cache hit.
         if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
             return False
 
@@ -1103,12 +1103,12 @@ class MaskPartial(Partial):
 
     def __repr__(self) -> str:
         """
-        machine readable representation of the MaskPartial placement
+        machine readable representation of the _MaskPartial placement
         """
-        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"_MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
-        human readable representation of the MaskPartial placement
+        human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
