@@ -1,5 +1,27 @@
 name: job-filter
 
+# Job Filter Rules (for trunk.yml, pull.yml)
+# ==========================================
+# 1. DEFAULT PATTERN - use job's display name (from `name:` field) with space padding:
+#      if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' DISPLAY-NAME ') }}
+#      needs: [job-filter, ...]
+#
+# 2. SHARED BUILD DEPENDENCY - when multiple jobs depend on the same build,
+#    the build job must include all dependent display names:
+#      # build job (used by both linux-jammy-py3.10-gcc11 test AND linux-docs)
+#      if: ${{ needs.job-filter.outputs.jobs == '' || contains(..., ' linux-jammy-py3.10-gcc11 ') || contains(..., ' linux-docs ') }}
+#
+# 3. PRE-EXISTING CONDITION - when a job has a condition that existed before filtering
+#    (e.g., only run on certain events/tags), use OR logic to allow filter override:
+#      if: ${{ PRE_EXISTING_CONDITION || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' DISPLAY-NAME ')) }}
+#    Examples of pre-existing conditions:
+#      - startsWith(github.event.ref, 'refs/tags/ciflow/trunk')
+#      - github.event_name == 'pull_request'
+#
+# 4. SECURITY CONDITIONS - conditions like `github.repository_owner == 'pytorch'`
+#    must ALWAYS be enforced, keep using AND:
+#      if: ${{ github.repository_owner == 'pytorch' && (needs.job-filter.outputs.jobs == '' || contains(...)) }}
+
 on:
   workflow_call:
     inputs:
