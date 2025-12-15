@@ -114,6 +114,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install benchmark dependencies
+        shell: bash
+          set -eux
+          uv pip install pip
+
       - name: Gather benchmark metadata
         id: gather-benchmark-metadata
         uses: pytorch/test-infra/.github/actions/gather-benchmark-metadata@main
