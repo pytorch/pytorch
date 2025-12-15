@@ -238,6 +238,7 @@ def _make_inlined(
 
     def inline_call(*args, **kwargs):
         from torch._dynamo.trace_rules import force_inline
+
         with force_inline():
             return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 

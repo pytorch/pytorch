@@ -2214,7 +2214,6 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-
     def _test_leaf_function_helper(self, mod_class, fn, args_fn):
         """
         Helper function for testing leaf_function decorator.

@@ -499,7 +499,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         **kwargs,
     ) -> None:
         super().__init__(value, **kwargs)
-        from ..trace_rules import is_nonstrict_trace_callable, is_leaf_function
+        from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
         if nonstrict_traceable is None:
             nonstrict_traceable = is_nonstrict_trace_callable(value)
@@ -1957,17 +1957,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
-    ) -> tuple["VariableTracker", "VariableTracker",]:
-        from .higher_order_ops import _make_inlined
-        from torch._higher_order_ops.invoke_leaf_function import leaf_function_module_inputs
+    ) -> tuple[
+        "VariableTracker",
+        "VariableTracker",
+    ]:
         import torch.utils._pytree as pytree
+        from torch._higher_order_ops.invoke_leaf_function import (
+            leaf_function_module_inputs,
+        )
+
+        from .higher_order_ops import _make_inlined
 
         def _is_nn_module_variable(vt):
             from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
             return isinstance(vt, (NNModuleVariable, UnspecializedNNModuleVariable))
 
         def populate_nn_module_states(values, sources):
-            from torch._higher_order_ops.utils import InGraphNNModule
             ret = []
 
             def _populate_one(val, source):
@@ -1975,21 +1981,30 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     return {
                         "source_name": source,
                         "named_parameters": dict(val.named_parameters()),
-                        "named_buffers": dict(val.named_buffers())
+                        "named_buffers": dict(val.named_buffers()),
                     }
                 else:
                     return val
 
             return pytree.tree_map(_populate_one, values, sources)
 
-        flat_args, flat_spec = _make_inlined(tx, pytree.tree_flatten)((args, kwargs)).unpack_var_sequence(tx)
-        flat_sources = VariableTracker.build(tx, [arg.source.name if _is_nn_module_variable(arg) else None for arg in flat_args.unpack_var_sequence(tx)])
+        flat_args, flat_spec = _make_inlined(tx, pytree.tree_flatten)(
+            (args, kwargs)
+        ).unpack_var_sequence(tx)
+        flat_sources = VariableTracker.build(
+            tx,
+            [
+                arg.source.name if _is_nn_module_variable(arg) else None
+                for arg in flat_args.unpack_var_sequence(tx)
+            ],
+        )
         for arg in flat_args.unpack_var_sequence(tx):
             if _is_nn_module_variable(arg):
                 leaf_function_module_inputs[arg.source.name] = arg.value
         sources = _make_inlined(tx, pytree.tree_unflatten)(flat_sources, flat_spec)
-        return _make_inlined(tx, populate_nn_module_states)((args, kwargs), sources).unpack_var_sequence(tx)
-
+        return _make_inlined(tx, populate_nn_module_states)(
+            (args, kwargs), sources
+        ).unpack_var_sequence(tx)
 
     def _call_leaf_function(
         self,
@@ -2005,12 +2020,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         2. For nn.Module inputs, extract the module's source and state_dict
         3. Call the fake_fn for symbolic tracing
         """
+        import torch.utils._pytree as pytree
+        from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
+
         from ..decorators import get_leaf_function_fake_fn, get_leaf_function_real_fn
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
-        import torch.utils._pytree as pytree
-        from torch._higher_order_ops.flat_apply import func_to_graphable
 
         fn = self.value
         fake_fn = get_leaf_function_fake_fn(fn)
@@ -2030,12 +2046,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         new_args, new_kwargs = self._extract_nn_module_states(tx, args, kwargs)
-        flat_args, input_spec = _make_inlined(tx, pytree.tree_flatten)(VariableTracker.build(tx, (new_args, new_kwargs))).unpack_var_sequence(tx)
+        flat_args, input_spec = _make_inlined(tx, pytree.tree_flatten)(
+            VariableTracker.build(tx, (new_args, new_kwargs))
+        ).unpack_var_sequence(tx)
         flat_proxies = [arg.as_proxy() for arg in flat_args.unpack_var_sequence(tx)]
 
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
-            input_spec.as_python_constant(), # pyrefly: ignore [unbound-name]
+            input_spec.as_python_constant(),  # pyrefly: ignore [unbound-name]
         )
         fake_fn_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             f"{fake_fn.__name__}_spec", fake_fn_spec
@@ -2047,13 +2065,18 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         fake_fn_spec_proxy.node.type = type(fake_fn_spec)
         real_fn_spec_proxy.node.type = type(real_fn_spec)
 
-        all_args = (real_fn_spec_proxy, fake_fn_spec_proxy, input_spec_proxy, *flat_proxies)
+        all_args = (
+            real_fn_spec_proxy,
+            fake_fn_spec_proxy,
+            input_spec_proxy,
+            *flat_proxies,
+        )
         # pyrefly: ignore [unbound-name]
-        invoke_leaf_function_proxy = tx.output.create_proxy("call_function", invoke_leaf_function, all_args, {})
+        invoke_leaf_function_proxy = tx.output.create_proxy(
+            "call_function", invoke_leaf_function, all_args, {}
+        )
         out_vt = wrap_fx_proxy(tx, invoke_leaf_function_proxy)
         return out_vt
-
-
 
     def _call_ntuple(self, tx: "InstructionTranslator", args, kwargs):
         """inline behavior of torch.nn.modules.utils._ntuple"""
