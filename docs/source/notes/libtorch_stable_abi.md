@@ -82,7 +82,7 @@ at::Tensor add_scalar(const at::Tensor& input, double scalar) {
 
 // Register the operator
 TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor", &add_scalar);
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
 // Register the implementation
@@ -123,7 +123,7 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
 // (5) Register the operator using STABLE_TORCH_LIBRARY
 //     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor", TORCH_BOX(&add_scalar));
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
 // (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
