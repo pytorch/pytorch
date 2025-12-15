@@ -65,8 +65,12 @@ def aot_eager_regional_inductor(serialize=False):
             context = torch._guards.TracingContext(fake_mode)
             with torch._guards.tracing(context):
                 result = GraphPickler.loads(serialized, fake_mode)
-                assert isinstance(result, torch.fx.GraphModule)
-                result.recompile()
+                if isinstance(result, torch.fx.GraphModule):
+                    result.recompile()
+                elif isinstance(result, RegionalOutputCode):
+                    result._graph_module.recompile()
+                else:
+                    raise RuntimeError(f"Unexpected type: {type(result)}")
                 return result
 
         return aot_autograd(
