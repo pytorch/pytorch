@@ -255,7 +255,14 @@ static bool isInputCompliesAddmmCudaLt(
 }
 
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const Scalar& beta, const scalar_t* bias, int64_t bias_ld, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(
+    cublasCommonArgs &args,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const scalar_t* bias,
+    std::optional<int64_t> bias_ld,
+    cuda::blas::GEMMAndBiasActivationEpilogue activation
+) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -311,7 +318,7 @@ bool launchGemmAndBiasCublasLt(
       // This is because bias is float and not of the reduced type
       // INVESTIGATE
     : static_cast<const scalar_t*>(nullptr);
-  const int64_t self_ld = -1;
+  const std::optional<int64_t> self_ld = args.bias_ld;
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {

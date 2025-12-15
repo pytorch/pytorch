@@ -1577,7 +1577,7 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
       TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
-  const auto use_bias_epilogue = (bias_ptr != nullptr) && (bias_ld < 0);
+  const auto use_bias_epilogue = (bias_ptr != nullptr) && !bias_ld.has_value();
   beta_val = use_bias_epilogue ? 0 : beta_val;
 
   cudaDataType_t abType = CUDA_R_32F;
