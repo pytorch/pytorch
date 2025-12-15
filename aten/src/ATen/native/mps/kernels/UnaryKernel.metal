@@ -523,7 +523,7 @@ struct round_decimals_functor {
 struct pow_scalar_functor {
   template <typename T>
   inline T operator()(const T x, const float y) {
-    return static_cast<T>(::metal::pow(static_cast<float>(x), y));
+    return static_cast<T>(::metal::precise::pow(static_cast<float>(x), y));
   }
 };
 

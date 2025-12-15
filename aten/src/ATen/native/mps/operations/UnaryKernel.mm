@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/UnaryOps.h>
 #include <ATen/native/Pow.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -31,7 +31,6 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   }
   lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::Float);
 }
-
 
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
