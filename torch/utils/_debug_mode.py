@@ -681,7 +681,9 @@ class DebugInterpreter(torch.fx.Interpreter):
 
         # reset nn.Module stack to pre-compiled region value
         if len(self.mode.current_nn_module_stack) < len(self.base_nn_module_stack):
-            warning_once(log, "unexpected handling of nn_module_stack in DebugInterpreter")
+            warning_once(
+                log, "unexpected handling of nn_module_stack in DebugInterpreter"
+            )
         while len(self.mode.current_nn_module_stack) > len(self.base_nn_module_stack):
             self.mode._exit_nn_module_call()
 
