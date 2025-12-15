@@ -7693,8 +7693,8 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args: Sequence[IRNode],
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
-        kwargs: Optional[dict[str, Any]] = None,
         *,
+        kwargs: Optional[dict[str, Any]] = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8172,7 +8172,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                kwargs,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8184,7 +8184,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                kwargs,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
