@@ -6,10 +6,8 @@ import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import uuid4
-
-import psutil
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -34,10 +32,10 @@ class _CheckpointSaveProcessControlOpts(Enum):
 
 @dataclass(init=False, unsafe_hash=True)
 class _CheckpointRequestIdentifier:
-    checkpoint_id: Union[str, os.PathLike, None]
+    checkpoint_id: str | os.PathLike | None
     uuid: str
 
-    def __init__(self, checkpoint_id: Union[str, os.PathLike, None]):
+    def __init__(self, checkpoint_id: str | os.PathLike | None):
         self.checkpoint_id = checkpoint_id
         self.uuid = str(uuid4())
 
@@ -46,8 +44,8 @@ class _CheckpointRequestIdentifier:
 class _AsyncCheckpointRequest:
     staged_state_dict: STATE_DICT_TYPE
     checkpoint_request_id: _CheckpointRequestIdentifier
-    storage_writer: Optional[StorageWriter] = None
-    planner: Optional[SavePlanner] = None
+    storage_writer: StorageWriter | None = None
+    planner: SavePlanner | None = None
     no_dist: bool = False
     use_collectives: bool = True
 
@@ -63,7 +61,7 @@ class _ProcessGroupInitInfo:
     disable_automatic_gc: bool
     disable_manual_gc: bool
 
-    def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
+    def __init__(self, process_group: dist.ProcessGroup | None = None):
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
@@ -153,7 +151,7 @@ class _AsyncCheckpointProcess:
     def _send(self, data: Any) -> None:
         self._process_pipe.send(data)
 
-    def _wait_for_response(self, timeout: Optional[float] = None) -> Any:
+    def _wait_for_response(self, timeout: float | None = None) -> Any:
         if not self._save_process.is_alive():
             logger.info("Checkpoint background process is dead calling join()...")
             self._save_process.join()
@@ -182,9 +180,9 @@ class _AsyncCheckpointProcess:
         self,
         staged_state_dict: STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -210,8 +208,8 @@ class _AsyncCheckpointProcess:
         state_dict: STATE_DICT_TYPE,
         *,
         checkpoint_request_id: _CheckpointRequestIdentifier,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -307,10 +305,6 @@ class _AsyncCheckpointProcess:
                 )
 
                 try:
-                    process = psutil.Process()
-                    mem_bytes = process.memory_info().rss
-                    logger.info(f"Current memory is {mem_bytes / (1024 * 1024):.2f} MB")  # noqa: G004
-
                     response = _AsyncCheckpointProcess._execute_save(
                         obj.staged_state_dict,
                         checkpoint_request_id=obj.checkpoint_request_id,
@@ -330,21 +324,11 @@ class _AsyncCheckpointProcess:
                         and not pg_init_info.disable_manual_gc
                     ):
                         del obj
-                        # Measure memory before garbage collection
-                        process = psutil.Process()
-                        mem_before_bytes = process.memory_info().rss
 
                         collected_objects = gc.collect()
 
-                        # Measure memory after garbage collection and calculate freed memory
-                        mem_after_bytes = process.memory_info().rss
-                        mem_freed_mb = (mem_before_bytes - mem_after_bytes) / (
-                            1024 * 1024
-                        )
-
                         logger.info(
-                            f"Manual garbage collection completed - collected {collected_objects} objects, "  # noqa: G004
-                            f"freed {mem_freed_mb:.2f} MB"  # noqa: G004
+                            f"Manual garbage collection completed - collected {collected_objects} objects."  # noqa: G004
                         )
                         if first_request:
                             # Freeze GC to not check GC for large checkpoint save plans
@@ -367,7 +351,7 @@ class _AsyncCheckpointProcess:
             parent_conn.close()
 
 
-_CHECKPOINT_PROCESS: Optional[_AsyncCheckpointProcess] = None
+_CHECKPOINT_PROCESS: _AsyncCheckpointProcess | None = None
 
 
 class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
@@ -377,12 +361,12 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     @staticmethod
     def _execute_save_impl(
         *,
-        pg_init_info: Optional[_ProcessGroupInitInfo],
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
+        pg_init_info: _ProcessGroupInitInfo | None,
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
+        process_group: dist.ProcessGroup | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -425,12 +409,12 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
+        process_group: dist.ProcessGroup | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Future:
@@ -450,7 +434,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         """
 
         global _CHECKPOINT_PROCESS
-        pg_init_info: Optional[_ProcessGroupInitInfo] = None
+        pg_init_info: _ProcessGroupInitInfo | None = None
         if _CHECKPOINT_PROCESS is None:
             # Find a port on coordinator rank and broadcast
             # to all ranks.

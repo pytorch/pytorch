@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -19,6 +19,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -58,9 +59,9 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def as_list(
-    x: Union[list[object], object],
+    x: list[object] | object,
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
-) -> Union[list[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
+) -> list[object] | torch.fx.immutable_collections.immutable_list:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
@@ -92,10 +93,15 @@ def prod(xs: Iterable[int]) -> int:
 def is_tensor_shardable(
     shape: Sequence[int],
     spec: DTensorSpec,
-    allow_unbacked_sharding: Optional[bool] = None,
+    allow_unbacked_sharding: bool | None = None,
 ) -> bool:
     """
     Check if the shape is shardable according to the spec.
+
+    This function handles both `Shard` and `_StridedShard` placements:
+    - For `Shard`: checks if the tensor dimension size >= number of shards
+    - For `_StridedShard`: additionally checks if the dimension is shardable after
+      splitting with the placement's `split_factor`
 
     allow_unbacked_sharding: determines the fallback value if unbacked shapes are involved,
     and the queried shape properties are not statically known.
@@ -117,19 +123,23 @@ def is_tensor_shardable(
     }[allow_unbacked_sharding]
 
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
             if shard_dim >= len(shape):
                 return False
-            shards_map[shard_dim] *= spec.mesh.size(i)
-
-    for i, dim_size in enumerate(shape):
-        # TODO: maybe we should determine is_shardable based on
-        #       whether it's evenly sharded or not
-        if shards_map[i] > 1 and guard_fn(dim_size < shards_map[i]):
-            return False
+            num_shards[shard_dim] *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                # make sure tensor dim `shard_dim` is shardable after splitting
+                # with split_factor
+                if guard_fn(
+                    shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
+                ):
+                    return False
+            else:
+                if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
+                    return False
 
     return True
 
@@ -137,16 +147,22 @@ def is_tensor_shardable(
 def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     """Check if the shape is evenly shardable according to the spec."""
     # number of shards in each tensor dimension
-    shards_map = [1] * len(shape)
+    num_shards = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
-            shards_map[shard_dim] *= spec.mesh.size(i)
-
-    for i, dim_size in enumerate(shape):
-        if shards_map[i] > 1 and (dim_size % shards_map[i] != 0):
-            return False
-
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
+            if shard_dim >= len(shape):
+                return False
+            num_shards[shard_dim] *= spec.mesh.size(i)
+            if isinstance(placement, _StridedShard):
+                if (
+                    shape[shard_dim] % (placement.split_factor * num_shards[shard_dim])
+                    != 0
+                ):
+                    return False
+            else:
+                if shape[shard_dim] % num_shards[shard_dim] != 0:
+                    return False
     return True
 
 
@@ -211,14 +227,21 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard)
+            assert isinstance(placement, Shard | _StridedShard)
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:
                 # there's a map from the common shape shard dim to
                 # the input shape shard dim before broadcasting,
                 # use that instead
-                new_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, _StridedShard):
+                    new_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
+                else:
+                    new_placements.append(Shard(new_shard_dim))
             else:
                 # there's no map between common shape shard dim and
                 # the input shape shard dim before broadcasting,
@@ -254,9 +277,10 @@ def expand_to_full_mesh_op_strategy(
     *,
     input_index: int = 1,
     inplace_op: bool = False,
-    is_valid_strategy_cb: Optional[
-        Callable[[list[DTensorSpec], tuple[Optional[DTensorSpec], ...]], bool]
-    ] = None,
+    is_valid_strategy_cb: Callable[
+        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+    ]
+    | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -291,7 +315,7 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list: list[Optional[DTensorSpec]] = []
+        spec_list: list[DTensorSpec | None] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
@@ -320,7 +344,7 @@ def expand_to_full_mesh_op_strategy(
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
-        output_specs: tuple[Optional[DTensorSpec], ...]
+        output_specs: tuple[DTensorSpec | None, ...]
         if input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
