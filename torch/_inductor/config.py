@@ -1474,7 +1474,7 @@ class triton:
     # TODO - enable by default
     coalesce_tiling_analysis: bool = (
         os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
+            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "0" if not is_fbcode() else "0"
         )
         == "1"
     )
