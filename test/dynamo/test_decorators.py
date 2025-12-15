@@ -2215,6 +2215,83 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             exported_model = torch.export.export(model, (inp,))
 
 
+    def _test_leaf_function_helper(self, mod_class, fn, args_fn):
+        """
+        Helper function for testing leaf_function decorator.
+
+        Args:
+            mod_class: A callable that returns a fresh nn.Module instance
+            fn: A function that takes (mod, *args) and returns the output to test
+            args_fn: A callable that returns fresh input args for each test run
+        """
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        mod_eager = mod_class()
+        mod_compile_eager = mod_class()
+        mod_compile_eager.load_state_dict(dict(mod_eager.state_dict()))
+        mod_compile_aot = mod_class()
+        mod_compile_aot.load_state_dict(dict(mod_eager.state_dict()))
+
+        args = args_fn()
+
+        out_eager = fn(mod_eager, *args)
+        out_eager.sum().backward()
+
+        out_compile_eager = torch.compile(fn, backend="eager", fullgraph=True)(
+            mod_compile_eager, *args
+        )
+        out_compile_eager.sum().backward()
+
+        backend = AotEagerAndRecordGraphs()
+        out_compile_aot = torch.compile(fn, backend=backend, fullgraph=True)(
+            mod_compile_aot, *args
+        )
+        out_compile_aot.sum().backward()
+
+        self.assertEqual(out_eager, out_compile_eager)
+        self.assertEqual(out_eager, out_compile_aot)
+
+        for (name_eager, param_eager), (_, param_compile_eager), (
+            _,
+            param_compile_aot,
+        ) in zip(
+            mod_eager.named_parameters(),
+            mod_compile_eager.named_parameters(),
+            mod_compile_aot.named_parameters(),
+        ):
+            self.assertEqual(
+                param_eager.grad,
+                param_compile_eager.grad,
+                msg=f"Gradient mismatch for {name_eager} between eager and compile_eager",
+            )
+            self.assertEqual(
+                param_eager.grad,
+                param_compile_aot.grad,
+                msg=f"Gradient mismatch for {name_eager} between eager and compile_aot",
+            )
+
+    def test_leaf_function_simple(self):
+        class NonTracable(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            @torch._dynamo.decorators.leaf_function(lambda self, x: (self.linear(x),))
+            def forward(self, x):
+                if x.sum() > 0:
+                    return (self.linear(x),)
+                else:
+                    return (self.linear(x) + x,)
+
+        def fn(mod, x):
+            return mod(x)[0] + x
+
+        def args_fn():
+            return (torch.randn(3, 3),)
+
+        self._test_leaf_function_helper(NonTracable, fn, args_fn)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

@@ -1403,12 +1403,20 @@ class UserMethodVariable(UserFunctionVariable):
         #
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
-        from ..trace_rules import is_nonstrict_trace_callable
+        from ..trace_rules import is_nonstrict_trace_callable, is_leaf_function
 
         if is_nonstrict_trace_callable(self.fn):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
                 self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
+        # TODO: remove the depulication with nonstrict trace path
+        if is_leaf_function(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, leaf_function=True
             )
             return var.call_function(tx, call_args, kwargs)
 

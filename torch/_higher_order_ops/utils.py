@@ -1283,3 +1283,13 @@ def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
 def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+import dataclasses
+
+@dataclasses.dataclass
+class InGraphNNModule:
+    source_name: str
+    parameters: dict[str, torch.Tensor]
+    buffers: dict[str, torch.Tensor]
+
+# pytree.register_constant(InGraphNNModule)

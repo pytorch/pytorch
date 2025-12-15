@@ -239,6 +239,45 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
+def leaf_function(fake_fn):
+    def wrapped(real_fn):
+        @functools.wraps(real_fn)
+        def inner(*args, **kwargs):
+            return real_fn(*args, **kwargs)
+
+        # Store the fake_fn and real_fn on the wrapped function for later retrieval
+        inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
+        inner._torchdynamo_leaf_real_fn = real_fn  # type: ignore[attr-defined]
+
+        wrapped_id = id(inner)
+        # This line allows us to reuse much of the `allow_in_graph` impl.
+        trace_rules._allowed_callable_ids.add(wrapped_id)
+
+        # This line allows us to diverge the impl from `allow_in_graph`.
+        trace_rules._leaf_function_ids.add(wrapped_id)
+
+        # Avoid id reuse which creates subtle bugs.
+        def deregister() -> None:
+            trace_rules._allowed_callable_ids.remove(wrapped_id)
+            trace_rules._leaf_function_ids.remove(wrapped_id)
+
+        weakref.finalize(inner, deregister)
+
+        return inner
+
+    return wrapped
+
+
+def get_leaf_function_fake_fn(fn: Any) -> Any:
+    """Get the fake_fn associated with a leaf_function decorated callable."""
+    return getattr(fn, "_torchdynamo_leaf_fake_fn", None)
+
+
+def get_leaf_function_real_fn(fn: Any) -> Any:
+    """Get the real_fn associated with a leaf_function decorated callable."""
+    return getattr(fn, "_torchdynamo_leaf_real_fn", None)
+
+
 def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
     def inner(fn: Any) -> Any:
         if isinstance(fn, (list, tuple)):
