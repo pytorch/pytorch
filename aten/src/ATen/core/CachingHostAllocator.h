@@ -40,6 +40,7 @@ struct HostBlock {
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
   bool was_allocated_during_stream_capture_;
+  std::vector<std::tuple<void *, size_t, std::string>> sections_read_under_stream_capture_;
 };
 
 template <typename B>
@@ -841,6 +842,7 @@ struct CachingHostAllocatorImpl {
     return stream_is_capturing(get_current_stream());
   }
 
+ protected:
   B* get_block_from_ptr(void *ptr) {
     std::shared_lock<std::shared_mutex> lk(instance_mutex_);
     {
@@ -887,7 +889,7 @@ struct CachingHostAllocatorImpl {
   }
 
   /* These following functions are runtime-related. */
-
+ private:
   // Allocate page-locked memory on the host.
   virtual void allocate_host_memory(size_t size, void** ptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(
@@ -918,7 +920,7 @@ struct CachingHostAllocatorImpl {
   }
 
   // instance variables
-
+ protected:
   // instance_mutex_ protects graphs_pools_, graph_pools_freeable_,
   // and captures_underway_, as well as the use_count field of
   // PrivatePools in graph_pools_ and graph_pools_freeable_.  We use a
@@ -955,7 +957,7 @@ struct CachingHostAllocatorImpl {
   // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{false};
-protected:
+
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };
 
