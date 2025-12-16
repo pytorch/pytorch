@@ -2,6 +2,7 @@
 
 
 import torch
+import unittest
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -96,6 +97,48 @@ class TestLinearCrossEntropyCPU(TestCase):
             )
 
         self.assertTrue(torch.autograd.gradcheck(func, (input, weight, bias)))
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+class TestLinearCrossEntropyCUDA(TestCase):
+    def test_cuda_matches_cpu(self) -> None:
+        torch.manual_seed(0)
+        device = torch.device("cuda")
+        input = torch.randn(4, 8, device=device)
+        weight = torch.randn(16, 8, device=device)
+        bias = torch.randn(16, device=device)
+        target = torch.randint(0, 16, (4,), device=device)
+
+        def run(strategy: str) -> torch.Tensor:
+            return F.linear_cross_entropy(
+                input,
+                weight,
+                target,
+                linear_bias=bias,
+                reduction="mean",
+                chunking_strategy=strategy,
+                vocab_chunk_size=8,
+                batch_chunk_size=2,
+            )
+
+        cpu_input = input.cpu()
+        cpu_weight = weight.cpu()
+        cpu_bias = bias.cpu()
+        cpu_target = target.cpu()
+
+        for strategy in ("none", "vocab", "batch"):
+            loss_cuda = run(strategy)
+            loss_cpu = F.linear_cross_entropy(
+                cpu_input,
+                cpu_weight,
+                cpu_target,
+                linear_bias=cpu_bias,
+                reduction="mean",
+                chunking_strategy=strategy,
+                vocab_chunk_size=8,
+                batch_chunk_size=2,
+            )
+            self.assertTrue(torch.allclose(loss_cuda.cpu(), loss_cpu, rtol=1e-4, atol=1e-5))
 
 
 if __name__ == "__main__":
