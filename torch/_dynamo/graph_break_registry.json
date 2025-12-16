@@ -3797,14 +3797,6 @@
     {
       "Gb_type": "autograd.grad with output that requires grad",
       "Context": "",
-      "Explanation": "torch.compile with aot_autograd does not currently support double backward. The compiled function uses torch.autograd.grad() and returns a tensor that is connected to the autograd.grad() call, which would require tracing backward through the graph a second time.",
-      "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
-      ]
-    },
-    {
-      "Gb_type": "autograd.grad with output that requires grad",
-      "Context": "",
       "Explanation": "torch.compile with aot_autograd does not currently support double backward. The compiled function uses torch.autograd.grad() and returns tensors that require grad, which would require tracing backward through the autograd.grad() call. Note: This is a conservative check. It may be safe if the returned tensor's grad_fn is not connected to the autograd.grad() computation.",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
@@ -3814,16 +3806,6 @@
   "GB0371": [
     {
       "Gb_type": "autograd.grad with external grad_fn",
-      "Context": "",
-      "Explanation": "torch.autograd.grad() cannot be used when the {arg_name} depend on tensors with grad_fn created outside the compiled region. The autograd graph cannot extend beyond the compiled region boundary.",
-      "Hints": [
-        "Ensure all tensor inputs to the compiled function are leaf tensors.",
-        "Or move the autograd.grad() call outside the compiled region.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    },
-    {
-      "Gb_type": "autograd.grad with external grad_fn (input)",
       "Context": "",
       "Explanation": "torch.autograd.grad() cannot be used when the {arg_name} depend on tensors with grad_fn created outside the compiled region. The autograd graph cannot extend beyond the compiled region boundary.",
       "Hints": [
