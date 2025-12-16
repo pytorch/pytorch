@@ -604,6 +604,23 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
                 node.meta["custom"] = copy.deepcopy(custom)
 
 
+def _get_nested_compile_subgraphs(fx_g: torch.fx.GraphModule) -> set[str]:
+    """Collect all nested compile subgraph names across all modules."""
+    subgraph_names = set()
+    for mod in fx_g.modules():
+        if isinstance(mod, torch.fx.GraphModule):
+            for node in mod.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.higher_order.invoke_subgraph
+                ):
+                    subgraph_node = node.args[0]
+                    assert subgraph_node.op == "get_attr"
+                    subgraph_name = subgraph_node.target
+                    subgraph_names.add(subgraph_name)
+    return subgraph_names
+
+
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
     """
     Input: `fx_g` which contains the joint fwd+bwd FX graph created by
@@ -619,12 +636,21 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
     in any submodule to match forward nodes in any submodule.
     """
 
+    # Collect all nested compile subgraph names
+    # We already copied invoke_subgraph's metadata when creating its joint
+    # graph, so we exclude them here. See NB: invoke_subgraph seq_nr.
+    subgraph_names = _get_nested_compile_subgraphs(fx_g)
+
     # Build a global mapping of seq_nr to forward nodes across all subgraphs
     fwd_seq_nr_to_node: dict[str, torch.fx.Node] = {}
 
+    named_modules = list(fx_g.named_modules())
+
     # First pass: collect all forward nodes from all subgraphs
-    for submod in fx_g.modules():
+    for name, submod in named_modules:
         if isinstance(submod, torch.fx.GraphModule):
+            if name in subgraph_names:
+                continue
             _collect_fwd_nodes_from_subgraph(submod, fwd_seq_nr_to_node)
 
     if annotation_log.isEnabledFor(logging.DEBUG):
@@ -633,8 +659,10 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
 
     # Second pass: copy metadata to backward nodes in all subgraphs
     # using the global forward mapping
-    for submod in fx_g.modules():
+    for name, submod in named_modules:
         if isinstance(submod, torch.fx.GraphModule):
+            if name in subgraph_names:
+                continue
             _copy_metadata_to_bw_nodes_in_subgraph(submod, fwd_seq_nr_to_node)
 
 

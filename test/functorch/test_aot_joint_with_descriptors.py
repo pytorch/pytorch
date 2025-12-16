@@ -1207,6 +1207,145 @@ class inner_f(torch.nn.Module):
 ('call_function', 'div_1', {'mod_name': 'my_mod'})""",
             )
 
+    def test_annotate_invoke_subgraph(self):
+        # TODO: invoke_subgraph nodes should have annotation w.r.t. invoke_subgraph head
+
+        def combine_fn(old, new):
+            return f"{old}.{new}"
+
+        class Bar(nn.Module):
+            @torch.compiler.nested_compile_region
+            def forward(self, x):
+                x = x.sin()
+                with fx_traceback.annotate({"mod_name": "bar"}, combine_fn=combine_fn):
+                    return x * 1
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "foo"}, combine_fn=combine_fn):
+                    y = self.bar(x)
+                    return y + 2
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate(
+                    {"mod_name": "my_mod"}, combine_fn=combine_fn
+                ):
+                    x = x / 2
+                    y = self.foo(x)
+                    z = self.bar(y)
+                return z - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = MyMod()
+
+        # invoke_subgraph doesn't seem to work with with_export=False, no subgraph created
+        graph_module = graph_capture(model, inputs, with_export=True)
+        # The subgraph should only have  {'mod_name': 'bar'}  in annotation
+        # def forward(self, arg0_1: "f32[4, 3]"):
+        #     # no annotation
+        #     sin: "f32[4, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+        #
+        #     # Annotation: {'mod_name': 'bar'}
+        #     mul: "f32[4, 3]" = torch.ops.aten.mul.Tensor(sin, 1);  sin = None
+        #     return (mul,)
+        # But the invoke_subgraph node should have the  'my_mod.foo' annotation
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'div', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod.foo'})
+[('call_function', 'mul', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod.foo'})
+('call_function', 'getitem', {'mod_name': 'my_mod.foo'})
+('call_function', 'add', {'mod_name': 'my_mod.foo'})
+('get_attr', 'repeated_subgraph0_1', {'mod_name': 'my_mod'})
+[('call_function', 'mul', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+        )
+
+        # Now test with require gradients
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        graph_module = graph_capture(model, inputs, with_export=True)
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'div', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod.foo'})
+[('call_function', 'mul', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod.foo'})
+('call_function', 'getitem', {'mod_name': 'my_mod.foo'})
+('call_function', 'add', {'mod_name': 'my_mod.foo'})
+('get_attr', 'repeated_subgraph0_1', {'mod_name': 'my_mod'})
+[('call_function', 'mul', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
+[('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph_2', {'mod_name': 'my_mod'})
+('call_function', 'getitem_2', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph1_1', {'mod_name': 'my_mod.foo'})
+[('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph_3', {'mod_name': 'my_mod.foo'})
+('call_function', 'getitem_4', {'mod_name': 'my_mod.foo'})
+('call_function', 'div_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+        )
+
+    def test_annotate_invoke_subgraph_simple(self):
+        def combine_fn(old, new):
+            return f"{old}.{new}"
+
+        class Bar(nn.Module):
+            @torch.compiler.nested_compile_region
+            def forward(self, x):
+                x = x.sin()
+                with fx_traceback.annotate({"mod_name": "bar"}, combine_fn=combine_fn):
+                    return x * 1
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate(
+                    {"mod_name": "my_mod"}, combine_fn=combine_fn
+                ):
+                    z = self.bar(x)
+                z = z.cos()
+                return z - 1
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = MyMod()
+
+        # invoke_subgraph doesn't seem to work with with_export=False, no subgraph created
+        graph_module = graph_capture(model, inputs, with_export=True)
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod'})
+[('call_function', 'mul', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod'})
+('call_function', 'getitem', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
+[('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'})]
+('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+        )
+
 
 if __name__ == "__main__":
     run_tests()
