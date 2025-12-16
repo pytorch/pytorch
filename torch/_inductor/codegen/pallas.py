@@ -1212,9 +1212,17 @@ class PallasKernel(SIMDKernel):
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
             # Direct indexing for contiguous access
-            # Squeeze trailing 1s for proper broadcasting with other arrays
-            # e.g., (512, 1) -> (512,) to broadcast correctly with (512,) arrays
-            load_expr = f"jnp.squeeze({buf}[{index_str}])"
+            load_expr = f"{buf}[{index_str}]"
+            # Squeeze 2D arrays with trailing 1 (keepdims from reductions)
+            # but NOT higher-dim arrays which use 1s for intentional broadcasting
+            # e.g., (512, 1) -> (512,) but (1, 10, 1) stays as-is
+            try:
+                buf_obj = V.graph.get_buffer(name)
+                buf_size = buf_obj.get_size()
+                if len(buf_size) == 2 and buf_size[-1] == 1:
+                    load_expr = f"jnp.squeeze({load_expr}, axis=-1)"
+            except Exception:
+                pass
 
         return self.cse.generate(
             self.compute,
