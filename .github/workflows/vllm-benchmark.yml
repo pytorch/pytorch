@@ -183,7 +183,7 @@ jobs:
     needs:
       - set-parameters
       - build
-    if: always()
+    # if: always()
     strategy:
       matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
       fail-fast: false
