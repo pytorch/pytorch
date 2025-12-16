@@ -67,20 +67,19 @@ class NCCLSymmetricMemory : public SymmetricMemory {
  public:
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
  NCCLSymmetricMemory(
-      std::shared_ptr<NCCLAllocation> allocation,
+      NCCLAllocation* allocation,
       const std::string& group_name,
       ncclWindow_t buffer_handle,
       ncclWindow_t signal_handle,
       ncclDevComm devComm)
 #else
  NCCLSymmetricMemory(
-      std::shared_ptr<NCCLAllocation> allocation,
+      NCCLAllocation* allocation,
       const std::string& group_name,
       ncclWindow_t buffer_handle,
       ncclWindow_t signal_handle)
 #endif
-      : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
+      : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
         buffer_handle_(buffer_handle),
@@ -224,7 +223,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 #endif
 
  private:
-  std::shared_ptr<NCCLAllocation> allocation_;
   size_t buffer_size_;
   int device_idx_;
   int rank_;
@@ -293,9 +291,8 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto it = allocations_.find(ptr);
     TORCH_CHECK(it != allocations_.end(), "memory needs to be first allocated before calling rendezvous.");
 
-
     auto group = resolve_process_group(group_name.value());
-    auto alloc = it->second;
+    auto& alloc = it->second;
     c10::cuda::CUDAGuard guard(alloc->device_idx);
     ncclWindow_t handle;
     ncclWindow_t signal_handle;
@@ -360,10 +357,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), devComm);
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc.get(), *group_name, std::move(handle), std::move(signal_handle), devComm);
 #else
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc.get(), *group_name, std::move(handle), std::move(signal_handle));
 #endif
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
@@ -384,7 +381,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
-  std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
+  std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
