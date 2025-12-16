@@ -1497,6 +1497,44 @@ def load(
     if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
 
+    # Check if the file is a safetensors file
+    if _is_path(f):
+        fspath = os.fspath(f)
+        if fspath.endswith(".safetensors"):
+            try:
+                import safetensors.torch
+
+                # Convert map_location to a device string for safetensors
+                device = "cpu"
+                if map_location is not None:
+                    if isinstance(map_location, (str, bytes)):
+                        device = str(map_location)
+                    elif isinstance(map_location, torch.device):
+                        device = str(map_location)
+                    elif isinstance(map_location, dict):
+                        # For dict, we can't easily convert, use cpu and let caller remap
+                        warnings.warn(
+                            "Loading safetensors file with dict map_location. "
+                            "Tensors will be loaded to CPU. Use a device string or torch.device instead.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                    elif callable(map_location):
+                        # For callable, we can't determine target device, use cpu
+                        warnings.warn(
+                            "Loading safetensors file with callable map_location. "
+                            "Tensors will be loaded to CPU. Use a device string or torch.device instead.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+
+                return safetensors.torch.load_file(fspath, device=device)
+            except ImportError as e:
+                raise RuntimeError(
+                    "Attempting to load a safetensors file but safetensors is not installed. "
+                    "Please install safetensors with: pip install safetensors"
+                ) from e
+
     with _open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):
             # The zipfile reader is going to advance the current file position.

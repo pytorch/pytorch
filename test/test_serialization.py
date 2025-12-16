@@ -4849,6 +4849,54 @@ class TestSerialization(TestCase, SerializationMixin):
         ref2 = sys.getrefcount(storage)
         self.assertEqual(ref1, ref2)
 
+    def test_load_safetensors(self):
+        # Test loading .safetensors files
+        try:
+            import safetensors.torch
+        except ImportError:
+            self.skipTest("safetensors not installed")
+
+        # Create a simple state dict
+        state_dict = {
+            'tensor1': torch.randn(3, 4),
+            'tensor2': torch.randn(5, 6),
+            'tensor3': torch.tensor([1, 2, 3, 4, 5]),
+        }
+
+        with tempfile.NamedTemporaryFile(suffix='.safetensors', delete=False) as f:
+            try:
+                # Save using safetensors
+                safetensors.torch.save_file(state_dict, f.name)
+
+                # Test loading with torch.load (no map_location)
+                loaded = torch.load(f.name)
+                self.assertEqual(len(loaded), len(state_dict))
+                for key in state_dict:
+                    self.assertTrue(torch.equal(state_dict[key], loaded[key]))
+
+                # Test loading with map_location as string
+                loaded_cpu = torch.load(f.name, map_location='cpu')
+                for key in state_dict:
+                    self.assertTrue(torch.equal(state_dict[key], loaded_cpu[key]))
+                    self.assertEqual(loaded_cpu[key].device.type, 'cpu')
+
+                # Test loading with map_location as torch.device
+                loaded_cpu2 = torch.load(f.name, map_location=torch.device('cpu'))
+                for key in state_dict:
+                    self.assertTrue(torch.equal(state_dict[key], loaded_cpu2[key]))
+
+                # Test with .safetensor extension (without 's')
+                with tempfile.NamedTemporaryFile(suffix='.safetensor', delete=False) as f2:
+                    try:
+                        safetensors.torch.save_file(state_dict, f2.name)
+                        loaded2 = torch.load(f2.name)
+                        for key in state_dict:
+                            self.assertTrue(torch.equal(state_dict[key], loaded2[key]))
+                    finally:
+                        os.unlink(f2.name)
+            finally:
+                os.unlink(f.name)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
