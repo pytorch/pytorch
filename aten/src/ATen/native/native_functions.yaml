@@ -8239,12 +8239,12 @@
 # torch.tensor call; if you FX trace a lift_fresh, you are obligated
 # to convert this into a lift_fresh_copy (because FX will violate the
 # freshness invariant when tracing).
-- func: lift_fresh(Tensor(a) self) -> Tensor(a)
+- func: lift_fresh(Tensor(a) self, Device device) -> Tensor(a)
   dispatch:
     CompositeExplicitAutograd: lift_fresh
 
 # Like lift, but it clones the input.
-- func: lift_fresh_copy(Tensor self) -> Tensor
+- func: lift_fresh_copy(Tensor self, Device device) -> Tensor
   tags: view_copy
   dispatch:
     CompositeExplicitAutogradNonFunctional: lift_fresh_copy

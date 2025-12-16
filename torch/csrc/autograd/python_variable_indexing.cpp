@@ -174,7 +174,7 @@ inline Variable valueToTensor(
   // device
   if (device == at::kCPU && !scalar.isSymbolic()) {
     return at::lift_fresh(
-        at::indexing::scalarToTensor(scalar, options, device));
+        at::indexing::scalarToTensor(scalar, options, device), device);
   } else {
     return at::indexing::scalarToTensor(scalar, options, device);
   }

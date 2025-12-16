@@ -56,6 +56,14 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
+bool CUDAGraph::prev_only_lift_cpu_tensors() const {
+  return prev_only_lift_cpu_tensors_;
+}
+
+void CUDAGraph::set_prev_only_lift_cpu_tensors(bool value) {
+  prev_only_lift_cpu_tensors_ = value;
+}
+
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "

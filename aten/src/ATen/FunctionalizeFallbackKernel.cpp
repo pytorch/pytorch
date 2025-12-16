@@ -208,18 +208,18 @@ static at::Tensor lift_functionalize(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize(const at::Tensor & self, at::Device device) {
   // See Note [Exporting and compiling a graph with lift_fresh_copy]
   if (at::functionalization::impl::isFunctionalTensor(self)) {
     return self.view_as(self);
   }
 
   at::AutoDispatchSkipFunctionalize guard;
-  auto out = at::lift_fresh(self);
+  auto out = at::lift_fresh(self, device);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self, at::Device device) {
   // Note [Exporting and compiling a graph with lift_fresh_copy]
   // If out is already a functional tensor, don't wrap it twice.
   // In theory this could be useful if we want to nest functionalization with itself,
@@ -236,7 +236,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   }
 
   at::AutoDispatchSkipFunctionalize guard;
-  auto out = at::lift_fresh_copy(self);
+  auto out = at::lift_fresh_copy(self, device);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 

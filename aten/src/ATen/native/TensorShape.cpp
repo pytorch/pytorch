@@ -4938,9 +4938,19 @@ at::Tensor lift(const at::Tensor& self) {
   return self;
 }
 
-// See notes in native_functions.yaml
-at::Tensor lift_fresh(const at::Tensor& self) {
+DEFINE_DISPATCH(lift_fresh_stub);
+namespace {
+at::Tensor lift_fresh_cpu(const at::Tensor& self, Device device) {
   return self;
+}
+} // namespace
+
+REGISTER_ALL_CPU_DISPATCH(lift_fresh_stub, &lift_fresh_cpu)
+
+// See notes in native_functions.yaml
+at::Tensor lift_fresh(const at::Tensor& self, Device device) {
+  return (device.type() == kCUDA) ? lift_fresh_stub(device.type(), self, device)
+                                  : lift_fresh_stub(kCPU, self, device);
 }
 
 // Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)

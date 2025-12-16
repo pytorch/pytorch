@@ -5,6 +5,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/TypeCast.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -838,5 +839,25 @@ Tensor& _chunk_cat_out_cuda(
   }
   return out;
 }
+
+
+Tensor lift_fresh_cuda(const Tensor& self, Device device) {
+    if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
+  at::cuda::CaptureStatus::None) {
+    return self;
+  } else {
+    // We create a side stream to avoid capturing into the graph.
+    const auto side_stream = at::cuda::getStreamFromPool();
+    Tensor cuda_tensor;
+    {
+      at::cuda::CUDAStreamGuard guard(side_stream);
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      cuda_tensor = self.to(device);
+    }
+    return cuda_tensor;
+  }
+}
+
+REGISTER_DISPATCH(lift_fresh_stub, &lift_fresh_cuda)
 
 } // namespace at::native

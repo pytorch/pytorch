@@ -277,7 +277,7 @@ at::Tensor tensor_from_numpy(
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
-      at::device(kCPU).dtype(torch_dtype)));
+      at::device(kCPU).dtype(torch_dtype)), kCPU);
 }
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {

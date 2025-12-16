@@ -2092,6 +2092,21 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_torch_tensor(self):
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            a = torch.tensor([[1, 1], [1, 1]], device="cuda")
+            b = torch.tensor([[1, 1], [1, 1]], device="cuda")
+            c = a + b
+
+        g.replay()
+        self.assertEqual(c.sum().item(), 8.0)
+        g.replay()
+        self.assertEqual(c.sum().item(), 8.0)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graphsafe_set_get_rng_state(self):
         # Define a function to create generator states, with optional graph registration
         def create_states(generator):

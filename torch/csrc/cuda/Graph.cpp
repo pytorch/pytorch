@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/tensor_new.h>
 
 #include <ATen/cuda/CUDAGraph.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -36,18 +37,20 @@ void THCPGraph_init(PyObject* module) {
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
                 : c10::cuda::MempoolId_t{0, 0};
-            if (capture_error_mode == "global") {
-              capture_mode = cudaStreamCaptureModeGlobal;
-            } else if (capture_error_mode == "thread_local") {
-              capture_mode = cudaStreamCaptureModeThreadLocal;
-            } else if (capture_error_mode == "relaxed") {
-              capture_mode = cudaStreamCaptureModeRelaxed;
-            } else {
-              TORCH_CHECK(
-                  false,
-                  "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
-                  capture_error_mode);
-            }
+                if (capture_error_mode == "global") {
+                  capture_mode = cudaStreamCaptureModeGlobal;
+                } else if (capture_error_mode == "thread_local") {
+                  capture_mode = cudaStreamCaptureModeThreadLocal;
+                } else if (capture_error_mode == "relaxed") {
+                  capture_mode = cudaStreamCaptureModeRelaxed;
+                } else {
+                  TORCH_CHECK(
+                    false,
+                    "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
+                    capture_error_mode);
+                  }
+            self.set_prev_only_lift_cpu_tensors(torch::utils::only_lift_cpu_tensors());
+            torch::utils::set_only_lift_cpu_tensors(true);
             return self.capture_begin(pool, capture_mode);
           },
           py::arg("pool"),
@@ -55,7 +58,11 @@ void THCPGraph_init(PyObject* module) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
-          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
+          [](::at::cuda::CUDAGraph& self) {
+            self.capture_end();
+            torch::utils::set_only_lift_cpu_tensors(self.prev_only_lift_cpu_tensors());
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "instantiate",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::instantiate))
