@@ -260,6 +260,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
+    // TODO: thread safety
     allocations_.try_emplace(
         ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
     return ptr;
