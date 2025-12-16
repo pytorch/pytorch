@@ -168,7 +168,7 @@ jobs:
           set -eux
 
           python use_existing_torch.py
-          uv pip install -r requirements/build.txt
+          pip install -r requirements/build.txt
 
           sccache --show-stats
           python setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
