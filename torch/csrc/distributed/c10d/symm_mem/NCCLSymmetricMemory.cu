@@ -260,26 +260,23 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
-    auto allocation =
-        std::make_shared<NCCLAllocation>(ptr, size, device_idx);
-    // TODO: thread safety
-    allocations_.emplace(ptr, allocation);
+    allocations_.try_emplace(
+        ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
     return ptr;
   }
 
   void free(void* ptr) override {
     // TODO: thread safety
-    ptr_to_symm_mem_.erase(ptr);
     allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
       TORCH_CHECK(
           false, ptr, " is not allocated with NCCLSymmetricMemoryAllocator");
     }
-    return it->second->get_buffer_size();
+    return it->second->buffer_size;
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
@@ -386,9 +383,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
-  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
-      ptr_to_symm_mem_;
-
   std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
