@@ -689,7 +689,7 @@ class _BaseDataLoaderIter:
         pin_memory_device = (
             acc.type
             if self._pin_memory
-                and (acc := torch.accelerator.current_accelerator()) is not None
+            and (acc := torch.accelerator.current_accelerator()) is not None
             else None
         )
         if pin_memory_device == "mps":
