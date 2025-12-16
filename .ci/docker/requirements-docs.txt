@@ -66,6 +66,6 @@ sphinx-copybutton==0.5.0
 sphinx-design==0.6.1
 sphinxcontrib-mermaid==1.0.0
 myst-parser==4.0.1
-sphinx-hoverxref==1.4.1
+sphinx_tippy==0.4.3
 #Description: This is used to provide hover tooltips in PyTorch docs
-#Pinned versions: 1.4.1
+#Pinned versions: 0.4.3
