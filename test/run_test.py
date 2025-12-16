@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -622,13 +623,14 @@ def run_test(
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
+    failed_tests: list[str] = []
     with ExitStack() as stack:
         output = None
         if options.pipe_logs:
             output = stack.enter_context(open(log_path, "w"))
 
         if should_retry:
-            ret_code, was_rerun = run_test_retries(
+            ret_code, was_rerun, failed_tests = run_test_retries(
                 command,
                 test_directory,
                 env,
@@ -663,7 +665,7 @@ def run_test(
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
-    return ret_code
+    return ret_code, failed_tests
 
 
 def install_cpp_extensions(extensions_dir, env=os.environ):
@@ -830,8 +832,8 @@ def run_test_retries(
         )
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
-        return 1, True
-    return ret_code, any(x > 0 for x in num_failures.values())
+        return 1, True, consistent_failures
+    return ret_code, any(x > 0 for x in num_failures.values()), []
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -1894,6 +1896,7 @@ def do_sharding(
 class TestFailure(NamedTuple):
     test: TestRun
     message: str
+    failed_tests: list[str] = []  # Specific test names that failed
 
 
 def run_test_module(
@@ -1908,11 +1911,19 @@ def run_test_module(
         start = time.perf_counter()
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
-        return_code = handler(test, test_directory, options)
+        result = handler(test, test_directory, options)
         end = time.perf_counter()
         print_to_stderr(
             f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
         )
+
+        # Handle both old-style (int) and new-style (int, list) return values
+        if isinstance(result, tuple):
+            return_code, failed_tests = result
+        else:
+            return_code = result
+            failed_tests = []
+
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
         )
@@ -1925,9 +1936,9 @@ def run_test_module(
             # return code -N, where N is the signal number.
             signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
             message += f" Received signal: {signal_name}"
-        return TestFailure(test.test, message)
+        return TestFailure(test.test, message, failed_tests)
     except Exception as e:
-        return TestFailure(test.test, f"{str(test)} failed! {e}")
+        return TestFailure(test.test, f"{str(test)} failed! {e}", [])
 
 
 def run_tests(
@@ -2065,6 +2076,135 @@ def check_pip_packages() -> None:
         sys.exit(1)
 
 
+def print_test_summary(
+    test_reports_dir: str,
+    failures: list[TestFailure],
+    scheduled_tests: list[ShardedTest],
+) -> None:
+    """Parse JUnit XML test reports and print a summary of test results."""
+    passed = 0
+    failed = 0
+    skipped = 0
+    xfailed = 0
+    failed_tests: list[str] = []
+    xml_found = False
+
+    # Find all XML files in test-reports directory (recursively)
+    xml_pattern = os.path.join(test_reports_dir, "**", "*.xml")
+    xml_files = glob.glob(xml_pattern, recursive=True)
+
+    for xml_file in xml_files:
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            xml_found = True
+
+            # Handle both <testsuites> and <testsuite> as root
+            if root.tag == "testsuites":
+                testsuites = root.findall("testsuite")
+            elif root.tag == "testsuite":
+                testsuites = [root]
+            else:
+                continue
+
+            for testsuite in testsuites:
+                for testcase in testsuite.findall("testcase"):
+                    test_name = testcase.get("name", "unknown")
+                    classname = testcase.get("classname", "")
+                    full_name = f"{classname}.{test_name}" if classname else test_name
+
+                    # Check for failure
+                    failure = testcase.find("failure")
+                    error = testcase.find("error")
+                    skip = testcase.find("skipped")
+
+                    if failure is not None or error is not None:
+                        # Check if it's an expected failure (xfail)
+                        failure_msg = ""
+                        if failure is not None:
+                            failure_msg = (
+                                failure.get("message", "") or failure.text or ""
+                            )
+                        if error is not None:
+                            failure_msg = error.get("message", "") or error.text or ""
+
+                        if (
+                            "xfail" in failure_msg.lower()
+                            or "expected" in failure_msg.lower()
+                        ):
+                            xfailed += 1
+                        else:
+                            failed += 1
+                            failed_tests.append(full_name)
+                    elif skip is not None:
+                        skip_msg = skip.get("message", "") or skip.text or ""
+                        # Check if skipped due to expected failure
+                        if "xfail" in skip_msg.lower():
+                            xfailed += 1
+                        else:
+                            skipped += 1
+                    else:
+                        passed += 1
+
+        except ET.ParseError:
+            # Skip files that can't be parsed
+            continue
+        except Exception:
+            # Skip files that cause other errors
+            continue
+
+    print_to_stderr("\n" + "=" * 70)
+    print_to_stderr("TEST SUMMARY")
+    print_to_stderr("=" * 70)
+
+    if xml_found:
+        # We have XML reports with detailed test-level info
+        total = passed + failed + skipped + xfailed
+        print_to_stderr(f"  Passed:  {passed}")
+        print_to_stderr(f"  Failed:  {failed}")
+        print_to_stderr(f"  Skipped: {skipped}")
+        print_to_stderr(f"  XFailed: {xfailed}")
+        print_to_stderr(f"  Total:   {total}")
+    else:
+        # No XML reports - use file-level info from run_test.py
+        total_files = len(scheduled_tests)
+        failed_files = len(failures)
+        passed_files = total_files - failed_files
+        print_to_stderr(f"  Test files scheduled: {total_files}")
+        print_to_stderr(f"  Test files passed:    {passed_files}")
+        print_to_stderr(f"  Test files failed:    {failed_files}")
+        print_to_stderr("")
+        print_to_stderr(
+            "  (For detailed test-level stats, run in CI or set TEST_SAVE_XML)"
+        )
+
+    print_to_stderr("-" * 70)
+
+    # Print failed tests from XML if available
+    if failed_tests:
+        print_to_stderr("Failed tests:")
+        for test in failed_tests:
+            print_to_stderr(f"  - {test}")
+    elif failures:
+        # Collect specific failed test names from TestFailure objects
+        specific_failed_tests: list[str] = []
+        for failure in failures:
+            if failure.failed_tests:
+                specific_failed_tests.extend(failure.failed_tests)
+
+        if specific_failed_tests:
+            print_to_stderr("Failed tests:")
+            for test in specific_failed_tests:
+                print_to_stderr(f"  - {test}")
+        else:
+            # Fall back to file-level failures if no specific test names
+            print_to_stderr("Failed test files:")
+            for failure in failures:
+                print_to_stderr(f"  - {failure.test}")
+
+    print_to_stderr("=" * 70 + "\n")
+
+
 def main():
     check_pip_packages()
 
@@ -2195,24 +2335,29 @@ def main():
         all_failures = test_batch.failures
 
         if IS_CI:
-            for test, _ in all_failures:
-                test_stats = test_prioritizations.get_test_stats(test)
+            for failure in all_failures:
+                test_stats = test_prioritizations.get_test_stats(failure.test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
                         "selected_tests": selected_tests,
-                        "failure": str(test),
+                        "failure": str(failure.test),
                         **test_stats,
                     },
                 )
             gen_additional_test_failures_file(
-                [test.test_file for test, _ in all_failures]
+                [failure.test.test_file for failure in all_failures]
             )
 
+    # Print test summary when verbose mode is enabled
+    if options.verbose:
+        test_reports_dir = str(REPO_ROOT / "test" / "test-reports")
+        print_test_summary(test_reports_dir, all_failures, test_batch.sharded_tests)
+
     if len(all_failures):
-        for _, err in all_failures:
-            print_to_stderr(err)
+        for failure in all_failures:
+            print_to_stderr(failure.message)
 
         # A disabled test is expected to fail, so there is no need to report a failure here
         if not RERUN_DISABLED_TESTS:
