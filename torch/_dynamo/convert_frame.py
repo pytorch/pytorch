@@ -74,6 +74,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
     is_in_any_mode_without_ignore_compile_internals,
@@ -1921,7 +1922,7 @@ def _compile(
                 and tracer_output.output_graph is not None
                 and not tracer_output.output_graph.export
             ):
-                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = set()
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
 
 
 class ConvertFrame:
