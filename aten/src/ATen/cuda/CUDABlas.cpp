@@ -1577,6 +1577,7 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
       TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
+  const auto use_bias_desc = (bias_ptr != nullptr) && bias_ld.has_value();
   const auto use_bias_epilogue = (bias_ptr != nullptr) && !bias_ld.has_value();
   beta_val = use_bias_epilogue ? 0 : beta_val;
 
@@ -1668,9 +1669,6 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
   }
 #endif
   const auto epilogue = [&]() -> cublasLtEpilogue_t {
-    // The cuBLAS documentation indicates that
-    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
-    // but we keep it verbose here for clarity.
     switch (activation) {
       case GEMMAndBiasActivationEpilogue::RELU:
         return use_bias_epilogue ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
@@ -1688,7 +1686,13 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
+  auto Cdesc = use_bias_desc
+    ? CuBlasLtMatrixLayout(abType, m, n, *bias_ld)
+    : CuBlasLtMatrixLayout(cType, m, n, result_ld);
+  const void* c_ptr = use_bias_desc
+    ? reinterpret_cast<const void*>(bias_ptr)
+    : reinterpret_cast<const void*>(result_ptr);
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1696,7 +1700,7 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(c_ptr));
   uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
@@ -1713,7 +1717,7 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1732,10 +1736,10 @@ bool gemm_and_bias(CUBLASLT_GEMM_ARGS(Dtype, C_Dtype)) {
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      result_ptr,
+      c_ptr,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc.descriptor(),
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,

@@ -181,7 +181,7 @@ struct cublasCommonArgs {
           && is_beta_one() // no scaling for bias in epilogue
           && self->is_contiguous()
           // == m -> should match the rows, hence transpose_result is essential
-          && (self->sizes().back() == m && self->numel() == m) // shapes [1, ..., 1, m] are fine
+          && (self->dim() >= 1 && self->sizes().back() == m && self->numel() == m) // shapes [1, ..., 1, m] are fine
           && !result->is_complex() // no Epilogue support for complex types
       );
       if (can_use_bias_in_epilogue) { // Case for bias in epilogue
