@@ -1269,19 +1269,26 @@ class PallasKernel(SIMDKernel):
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
-        # Special case: single iter var + single indirect var = element-wise gather
-        # In this case, both should be 1D arrays of the same length, no broadcasting needed
+        # Special case: single reduction var + single indirect var = element-wise gather
+        # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
+        # with an indirect var, both are aligned to that dimension (element-wise).
+        # Pointwise vars (x, y, z) form output dimensions and create outer products.
         if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
-            # Simple element-wise gather: just replace iter var with arange
             var = used_iter_vars[0]
             var_name = str(var)
-            if var in self.range_tree_nodes:
-                range_entry = self.range_tree_nodes[var]
-                range_size = range_entry.length
-                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                index_str = index_str.replace(var_name, arange_expr)
-            # Indirect var stays as-is (no reshaping)
-            return index_str
+            # Check if it's a reduction variable (starts with 'r')
+            is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
+                var
+            ].prefix.startswith("r")
+            if is_reduction_var:
+                # Element-wise gather: just replace iter var with arange
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+                    arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                    index_str = index_str.replace(var_name, arange_expr)
+                # Indirect var stays as-is (no reshaping)
+                return index_str
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
