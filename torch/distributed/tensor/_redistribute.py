@@ -8,7 +8,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -22,6 +22,7 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 # When True, forces the graph-based algorithm using Dijkstra's shortest path.
 # When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
 # only when necessary to support strided-shard redistribution
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN: Optional[bool] = None
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 
 
 @contextlib.contextmanager
@@ -557,9 +558,38 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        assert src_spec.shard_order is not None and dst_spec.shard_order is not None
-        src_state = self.DistState(src_spec.placements, src_spec.shard_order)
-        dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
+        # In case _StridedShard exists in placements, we let _StridedShard have
+        # higher priority to express shard_order.
+        if any(
+            isinstance(placement, _StridedShard) for placement in src_spec.placements
+        ):
+            src_placements, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_spec.placements, src_spec.mesh
+                )
+            )
+        else:
+            src_placements = src_spec.placements
+            src_shard_order = src_spec.shard_order
+        if any(
+            isinstance(placement, _StridedShard) for placement in dst_spec.placements
+        ):
+            dst_placements, dst_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    dst_spec.placements, dst_spec.mesh
+                )
+            )
+        else:
+            dst_placements = dst_spec.placements
+            dst_shard_order = dst_spec.shard_order
+        if src_shard_order is None or dst_shard_order is None:
+            raise NotImplementedError(
+                "Redistribution of _StridedShard placement is only supported for "
+                "_StridedShard that can be converted to ordered Shard placements. "
+                "Full _StridedShard redistribution support is not yet implemented."
+            )
+        src_state = self.DistState(src_placements, src_shard_order)
+        dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         for cur_state, nxt_state in itertools.pairwise(state_path):
@@ -762,7 +792,6 @@ def redistribute_local_tensor(
     target_spec: DTensorSpec,
     *,
     async_op: bool = False,
-    is_backward: bool = False,
     use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
@@ -874,27 +903,12 @@ def redistribute_local_tensor(
             elif target.is_partial():
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
-                    # skip the replicate to partial transformation when we are in backward pass
-                    # In this case we keep the grad as replicate, this is because we don't
-                    # want to convert the replicated gradients back to partial, although
-                    # that's logically conform with the same layout, converting the gradients
-                    # back to partial is actually useless as you would have to do reduce later
-                    # which would be more expensive than keeping it replicate! For this reason,
-                    # we keep the replicate grad here.
-                    new_local_tensor = (
-                        partial_spec._partition_value(local_tensor, device_mesh, i)
-                        if not is_backward
-                        else local_tensor
+                    new_local_tensor = partial_spec._partition_value(
+                        local_tensor, device_mesh, i
                     )
                 elif current.is_shard():
-                    if not is_backward:
-                        raise RuntimeError(
-                            f"redistribute from {current} to {target} not supported yet"
-                        )
-                    # for backward shard -> partial, we just need to convert the shard to replicate
-                    current_placement = cast(Shard, current)
-                    new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    raise RuntimeError(
+                        f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
                     # partial -> partial no op, should never hit
@@ -988,26 +1002,37 @@ class Redistribute(torch.autograd.Function):
         else:
             local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
+        # skip the replicate to partial transformation when we are in backward pass
+        # In this case we keep the grad as replicate, this is because we don't
+        # want to convert the replicated gradients back to partial, although
+        # that's logically conform with the same layout, converting the gradients
+        # back to partial is actually useless as you would have to do reduce later
+        # which would be more expensive than keeping it replicate!
+
+        # for backward shard -> partial, we just do shard -> replicate
+        # for backward replicate -> partial, we skip the transformation
+        normalized_placements: list[Placement] = []
+        for current, target in zip(current_spec.placements, previous_spec.placements):
+            if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(target)
+
+        previous_spec = DTensorSpec(
+            previous_spec.device_mesh,
+            placements=tuple(normalized_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
             previous_spec,
             async_op=async_op,
-            is_backward=True,
         )
 
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
-
-        # normalize the target placement to replicate if it is partial
-        normalized_placements: list[Placement] = []
-        for previous_placement in previous_spec.placements:
-            if previous_placement.is_partial():
-                # keep target placement to replicate instead of partial in this case
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(previous_placement)
 
         spec = DTensorSpec(
             previous_spec.device_mesh,
