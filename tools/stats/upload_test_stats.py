@@ -288,4 +288,4 @@ if __name__ == "__main__":
             remove_nan_inf(test_cases),
         )
 
-    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)
+    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt)
