@@ -260,13 +260,6 @@ def find_reachable_grad_fn(
     return None
 
 
-def grad_fn_reachable(
-    tensor: torch.Tensor, target_grad_fns: set[torch.autograd.graph.Node]
-) -> bool:
-    """Check if any target grad_fn is reachable from tensor's autograd graph."""
-    return find_reachable_grad_fn(tensor, target_grad_fns) is not None
-
-
 @functools.cache
 def _step_logger() -> Any:
     return torchdynamo_logging.get_step_logger(log)
@@ -2159,8 +2152,12 @@ class OutputGraph(OutputGraphCommon):
                 continue
 
             fake_tensor = var.as_proxy().node.meta.get("example_value")
-            if fake_tensor is not None and grad_fn_reachable(
-                fake_tensor, self.autograd_grad_output_grad_fns
+            if (
+                fake_tensor is not None
+                and find_reachable_grad_fn(
+                    fake_tensor, self.autograd_grad_output_grad_fns
+                )
+                is not None
             ):
                 # Get source info for better context in error message
                 source_info = var.source.name if var.source else None
