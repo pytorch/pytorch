@@ -112,7 +112,7 @@ class FileBackedGraphModule:
     def __post_init__(self) -> None:
         # Write the code to a file for compatibility with debugging utilities.
         # The file is deleted upon program termination.
-        self.tempfile = tempfile.NamedTemporaryFile(
+        self.tempfile = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w+", suffix=".py", delete=False
         )
         atexit.register(os.remove, self.tempfile.name)
@@ -2657,7 +2657,7 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cutlass.cuda_kernel import CUDATemplateKernel
+        from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()

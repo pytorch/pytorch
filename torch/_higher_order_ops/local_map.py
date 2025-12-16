@@ -178,6 +178,7 @@ class LocalMapHOP(HigherOrderOperator):
         super().__init__("local_map_hop")
 
     def __call__(self, gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(gm, *args, **kwargs)
 
 
@@ -333,6 +334,13 @@ def create_hop_fw_bw(
                 num_fwd_outputs=num_fw_outputs,
                 static_lifetime_input_indices=[],
             )
+
+        # Fix tags because min-cut does not respect fw/bw boundary, breaking
+        # default partitioner's assumptions.
+        for node in new_fw_gm.graph.nodes:
+            node.meta["partitioner_tag"] = "is_forward"
+        for node in new_bw_gm.graph.nodes:
+            node.meta["partitioner_tag"] = "is_backward"
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs

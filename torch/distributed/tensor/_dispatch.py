@@ -3,7 +3,7 @@ import contextlib
 import logging
 import warnings
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -12,6 +12,7 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -153,6 +154,8 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.argmin.default: argmin_argmax_handler,
+            aten.argmax.default: argmin_argmax_handler,
         }
 
     # ********************************************************************************************
@@ -459,14 +462,13 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+                    ExplicitRedistributionContext.observe_redistribution(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                    ):
-                        raise RuntimeError(
-                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
-                        )
+                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema} "
+                        "while ExplicitRedistributionContext was active",
+                    )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
@@ -518,7 +520,7 @@ class OpDispatcher:
         kwargs_schema: dict[str, object] = {}
         local_args: list[object] = []
         local_kwargs: dict[str, object] = {}
-        compute_mesh: Optional[DeviceMesh] = None
+        compute_mesh: DeviceMesh | None = None
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
@@ -567,6 +569,7 @@ class OpDispatcher:
         )
         op_info = OpInfo(
             compute_mesh,
+            # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
                 (
@@ -606,6 +609,7 @@ class OpDispatcher:
             )
             res_list = []
             for e, s in zip(res, spec):
+                # pyrefly: ignore [bad-argument-type]
                 res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list

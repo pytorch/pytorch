@@ -65,6 +65,7 @@ from .variables import (
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -179,7 +180,9 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
+    "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
@@ -380,6 +383,7 @@ manual_torch_name_rule_map: dict[
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
+    "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
 }
 
 
@@ -716,7 +720,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_version_calculator_flag",
         "torch._C._get_warnAlways",
         "torch._C._graph_pool_handle",
-        "torch._C._group_tensors_by_device_and_dtype",
         "torch._C._hack_do_not_use_clone_module_with_class",
         "torch._C._has_distributed",
         "torch._C._has_Standard_Deleter",
@@ -1062,7 +1065,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._conv_depthwise2d",
         "torch._C._nn._pad_circular",
         "torch._C._nn._pad_enum",
-        "torch._C._nn._parse_to",
         "torch._C._nn._test_ambiguous_defaults",
         "torch._C._nn._test_optional_filled_intlist",
         "torch._C._nn._test_optional_floatlist",
@@ -1585,7 +1587,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._fw_primal_copy",
         "torch._grid_sampler_2d_cpu_fallback",
         "torch._grouped_mm",
-        "torch._has_compatible_shallow_copy_type",
         "torch._histogramdd_bin_edges",
         "torch._histogramdd_from_bin_cts",
         "torch._histogramdd_from_bin_tensors",
@@ -3453,6 +3454,7 @@ MOD_INLINELIST = [
     "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
+    "torch.utils._ordered_set",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",

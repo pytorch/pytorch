@@ -382,14 +382,14 @@ def generate_ttir(
                 try:
                     # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
                     specialize_impl = triton.runtime.jit.create_specialize_impl(
-                        specialize_extra=backend.get_arg_specialization
+                        specialize_extra=backend.get_arg_specialization  # pyrefly: ignore [missing-attribute]
                     )
                 except TypeError:  # Unknown arg `specialize_extra`
                     # Older versions of Triton take specialize_extra as an arg to specialize_impl
                     specialize_impl = functools.partial(
                         # pyrefly: ignore  # missing-argument
                         triton.runtime.jit.create_specialize_impl(),
-                        specialize_extra=backend.get_arg_specialization,
+                        specialize_extra=backend.get_arg_specialization,  # pyrefly: ignore [missing-attribute]
                     )
             # create_specialize_impl is removed in https://github.com/triton-lang/triton/pull/7771
             # switch to native_specialize_impl instead
@@ -413,7 +413,7 @@ def generate_ttir(
 
                 specialize_impl = functools.partial(
                     specialize_impl_orig,
-                    specialize_extra=backend.get_arg_specialization,
+                    specialize_extra=backend.get_arg_specialization,  # pyrefly: ignore [missing-attribute]
                 )
 
             from triton._utils import find_paths_if, get_iterable_path
@@ -1016,6 +1016,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
     ) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -1042,6 +1043,7 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
     ) -> dict[str, Any]:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -1053,6 +1055,10 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
+
+
+def get_kernel(kernel_idx: int) -> "TritonKernelType":
+    return kernel_side_table.get_kernel(kernel_idx)
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -1136,7 +1142,7 @@ def triton_kernel_wrapper_mutation_dense(
         else:
             break
 
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
@@ -2105,7 +2111,7 @@ class TraceableTritonKernelWrapper:
             )
         else:
             assert self.kernel is not None
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:

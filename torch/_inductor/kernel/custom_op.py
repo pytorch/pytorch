@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import torch
-from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -19,6 +18,28 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+def _detect_collective_ops(choices: list) -> bool:
+    """
+    Detect if choices contain collective operations.
+    """
+    from torch._inductor.utils import is_collective_op
+
+    for choice in choices:
+        if not hasattr(choice, "gm") or choice.gm is None:
+            continue
+
+        for node in choice.gm.graph.nodes:
+            if node.op == "call_function" and node.target is not None:
+                op_name = str(node.target)
+
+                if is_collective_op(op_name) or is_collective_op(
+                    f"torch.ops.{op_name}"
+                ):
+                    return True
+
+    return False
 
 
 class CustomOpConfig:
@@ -180,14 +201,8 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            raw_shape = ir_buffer.get_size()
-            concrete_shape = V.graph.sizevars.size_hints(
-                raw_shape, fallback=config.unbacked_symint_fallback
-            )
-
-            fake_tensor = torch.empty(
-                concrete_shape, dtype=ir_buffer.get_dtype(), device="meta"
-            )
+            fake_tensor = ir_node_to_tensor(ir_buffer)
+            assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 
         return internal_input_gen_fn
@@ -321,6 +336,8 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
+    is_collective = _detect_collective_ops(choices)
+
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
         name=name,
@@ -329,6 +346,7 @@ def autotune_custom_op(
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
         return_choice=True,
+        is_collective=is_collective,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
@@ -350,9 +368,42 @@ def autotune_custom_op(
     return selected_result
 
 
+def _generate_dynamic_configs(
+    tensor_inputs: list[Buffer],
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]],
+    default_impl: Callable[..., Any],
+    operation_name: str,
+) -> list[CustomOpConfig]:
+    """Generate configs dynamically based on input tensors at lowering time."""
+    import inspect
+
+    sig = inspect.signature(default_impl)
+    param_names = list(sig.parameters.keys())
+
+    with V.fake_mode:
+        fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
+
+    fake_tensors_dict = dict(zip(param_names, fake_tensors))
+
+    configs = config_generator(fake_tensors_dict)
+
+    if not isinstance(configs, (list, tuple)):
+        raise TypeError(
+            f"config_generator must return a list or tuple of CustomOpConfig, "
+            f"got {type(configs)}"
+        )
+    if not configs:
+        raise ValueError(f"config_generator returned empty list for {operation_name}. ")
+
+    return list(configs)
+
+
 def register_custom_op_autotuning(
     custom_op: torch._library.custom_ops.CustomOpDef,
-    configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
+    configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
+    config_generator: Optional[
+        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    ] = None,
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
 ) -> None:
@@ -361,11 +412,15 @@ def register_custom_op_autotuning(
 
     Args:
         custom_op: Custom operation (decorated function from @torch.library.custom_op)
-        configs: List of CustomOpConfig objects
+        configs: List of CustomOpConfig objects for static inputs. Mutually exclusive with config_generator.
+        config_generator: Dynamic config generator function that takes a dict mapping
+                          parameter names to fake tensors, and returns list[CustomOpConfig]
+                          based on input tensor properties. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
 
     Examples:
+        # Static configs
         @torch.library.custom_op("mylib::attention", mutates_args=())
         def my_attention(query, key, value, head_dim=32):
             ...
@@ -383,6 +438,20 @@ def register_custom_op_autotuning(
                 "value": lambda fake: torch.randn_like(fake, device='cuda'),
             },
         )
+
+        # Dynamic config generation based on input tensor properties
+        def generate_k_split_configs(fake_tensors: dict[str, torch.Tensor]) -> list[CustomOpConfig]:
+            # Access tensor shapes, dtypes, devices, etc.
+            m, k = fake_tensors["mat1"].shape
+            _, n = fake_tensors["mat2"].shape
+            k_splits = ... # compute possible k splits based on tensor properties
+            return [CustomOpConfig(k_splits=k) for k in k_splits]
+
+        register_custom_op_autotuning(
+            matmul_decomposeK_op,
+            config_generator=generate_k_split_configs,
+            input_gen_fns={...},
+        )
     """
     from torch._library.custom_ops import CustomOpDef
 
@@ -392,23 +461,36 @@ def register_custom_op_autotuning(
             f"got {type(custom_op)}."
         )
 
+    # Validate configs and config_generator are mutually exclusive
+    if configs is not None and config_generator is not None:
+        raise ValueError(
+            "Cannot specify both 'configs' and 'config_generator'. "
+            "Use 'config_generator' for shape-dependent configs."
+        )
+
+    if configs is None and config_generator is None:
+        raise ValueError("Must specify either 'configs' or 'config_generator'")
+
     op_overload = custom_op._opoverload
     default_impl = custom_op._init_fn
 
-    if not isinstance(configs, (list, tuple)):
-        raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
+    # Process and validate static configs at registration time
+    static_configs = None
+    if configs is not None:
+        if not isinstance(configs, (list, tuple)):
+            raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
-    processed_configs = []
-    for cfg in configs:
-        if isinstance(cfg, CustomOpConfig):
-            processed_configs.append(cfg)
-        else:
-            raise TypeError(
-                f"Each config must be a CustomOpConfig object, got {type(cfg)}"
-            )
+        static_configs = []
+        for cfg in configs:
+            if isinstance(cfg, CustomOpConfig):
+                static_configs.append(cfg)
+            else:
+                raise TypeError(
+                    f"Each config must be a CustomOpConfig object, got {type(cfg)}"
+                )
 
-    if not processed_configs:
-        raise ValueError("At least one config must be provided")
+        if not static_configs:
+            raise ValueError("At least one config must be provided")
 
     if name is None:
         name = f"{op_overload._name}_autotuned"
@@ -419,11 +501,20 @@ def register_custom_op_autotuning(
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
 
-        # Prepare decompositions and kwargs by merging config params with runtime kwargs
+        # Get configs: either generate dynamically or use static configs
+        if config_generator is not None:
+            configs_to_use = _generate_dynamic_configs(
+                tensor_inputs, config_generator, default_impl, name
+            )
+        else:
+            assert static_configs is not None
+            configs_to_use = static_configs
+
+        # Prepare decompositions and kwargs for autotuning
         decompositions = []
         non_tensor_args = []
 
-        for cfg in processed_configs:
+        for cfg in configs_to_use:
             decomp = cfg.get_decomposition(default_impl=default_impl)
             decompositions.append(decomp)
 

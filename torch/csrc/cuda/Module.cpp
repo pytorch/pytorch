@@ -1060,6 +1060,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly(
+          "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
@@ -1091,10 +1093,13 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
+#if USE_ROCM
+      // ROCm: expose shared_memory_per_block for shared memory based pruning
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+#endif
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -1129,7 +1134,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool)>(
+      static_cast<void (*)(
+          bool,
+          bool,
+          int64_t,
+          bool,
+          bool,
+          bool,
+          bool,
+          bool,
+          const std::vector<std::string>&)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1141,7 +1155,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           size_t,
           bool,
           bool,
-          bool)>(torch::cuda::_record_memory_history));
+          bool,
+          const std::vector<std::string>&)>(
+          torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1486,7 +1502,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
-          freed_pointer_set.insert((ptr));
+          freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
         // so even those this will error, so too will the allocator

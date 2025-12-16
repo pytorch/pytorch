@@ -70,7 +70,7 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // this function only handles the case where the real part of x is infinite
   const auto ximag = std::imag(x);
   constexpr auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
-  if (!::isfinite(ximag)) {  // add this to make consitent with std::exp(x+yi)
+  if (!::isfinite(ximag)) {  // add this to make consistent with std::exp(x+yi)
     return {exp_x_abs, std::numeric_limits<scalar_t>::quiet_NaN()};
   }
   const auto sin = std::sin(ximag);

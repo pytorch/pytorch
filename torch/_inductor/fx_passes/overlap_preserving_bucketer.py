@@ -146,6 +146,7 @@ class OverlapPreservingBucketer:
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.node_to_event: dict[fx.Node, PGEvent] = {}
+        self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
         # Compute ancestors including original graph edges and hiding interval dependencies
         self.node_ancestors = self._compute_node_ancestors()
@@ -218,6 +219,9 @@ class OverlapPreservingBucketer:
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
+                # Wait for a different PG but hiding a collective on this PG
+                elif node in hiding_nodes:
+                    node_type = "compute"
             elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
@@ -259,6 +263,8 @@ class OverlapPreservingBucketer:
                 # Enforce: start -> compute -> wait
                 self.aug_graph.add_extra_dep(n=hn, dep=start)
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
+
+            self.all_hiding_nodes |= info.hiding_nodes
 
     def bucket_collectives(self) -> None:
         # Group collectives by PG first
@@ -355,6 +361,12 @@ class OverlapPreservingBucketer:
 
         for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
+                continue
+
+            if (
+                start_node in self.all_hiding_nodes
+                or self.collective_info[start_node].wait_node in self.all_hiding_nodes
+            ):
                 continue
 
             # Initialize bucket with first collective
@@ -739,6 +751,13 @@ class OverlapPreservingBucketer:
         why = WhyNoBucket(existing_coll, candidate)
 
         candidate_info = self.collective_info[candidate]
+
+        if (
+            candidate in self.all_hiding_nodes
+            or candidate_info.wait_node in self.all_hiding_nodes
+        ):
+            why("nyi: bucketing collective used for overlap")
+            return False
 
         # Step 1: Quick check using precomputed ancestors
         # These ancestors are computed prior to adding augmented dependencies and not updated,
