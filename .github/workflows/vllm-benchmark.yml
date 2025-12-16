@@ -43,6 +43,7 @@ jobs:
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       build-docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      torch-cuda-arch-list: '8.0 8.9 9.0'
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
@@ -90,8 +91,10 @@ jobs:
           working-directory: pytorch/pytorch
           docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
 
-  # TODO (huydhn): Move this to a generic GHA, and this only works with CUDA in
-  # the current state
+  # TODO (huydhn): Move this to a generic GHA, also this only works for CUDA in
+  # the current state. I intentionally don't use _linux-build here as we'll need
+  # to refactor it in the new world of open source developer cloud ARC runner.
+  # And this serves as an early example using GHA container directive
   build:
     name: Build PyTorch and vLLM
     needs:
@@ -100,14 +103,74 @@ jobs:
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
+    env:
+      SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+      SCCACHE_REGION: us-east-1
+      TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
     steps:
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          python-version: 3.12
+          activate-environment: true
+
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          set -eux
+          uv pip install pip
+
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          path: pytorch/pytorch
-          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'nightly') }}
+          # TODO: SWITCH BACK TO NIGHTLY DEFAULT
+          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'main') }}
           submodules: recursive
           show-progress: false
+
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
+        run: |
+          VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
+          echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-benchmarks/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Build PyTorch
+        shell: bash
+        env:
+          BUILD_ADDITIONAL_PACKAGES: 'vision audio'
+        run: |
+          set -eux
+          bash .ci/pytorch/build.sh
+
+      # Lumen CLI won't work inside the container
+      - name: Build vLLM
+        working-directory: vllm-project/vllm
+        shell: bash
+        run: |
+          set -eux
+
+          python use_existing_torch.py
+          uv pip install -r requirements/build.txt
+
+          sccache --show-stats
+          python setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
+          sccache --show-stats
+
+      - name: Copy vLLM wheel
+        shell: bash
+        run: |
+          set -eux
+
+          mkdir -p dist/vllm
+          mv vllm-project/vllm/dist dist/vllm
 
   benchmarks:
     name: Run vLLM benchmarks
@@ -138,6 +201,12 @@ jobs:
           python-version: 3.12
           activate-environment: true
 
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          set -eux
+          uv pip install pip
+
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -151,12 +220,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/get-workflow-job-id@36562d6c43fa914f7bdef67ce23e5c31f1387b2e
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install benchmark dependencies
-        shell: bash
-        run: |
-          set -eux
-          uv pip install pip
 
       - name: DEBUG
         working-directory: pytorch/pytorch
