@@ -115,7 +115,10 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
-python setup.py clean
+DO_SETUP_PY_CLEAN_BEFORE_BUILD=${DO_SETUP_PY_CLEAN_BEFORE_BUILD:-1}
+if [[ "$DO_SETUP_PY_CLEAN_BEFORE_BUILD" == "1" ]]; then
+    python setup.py clean
+fi
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
   cp31*)
@@ -444,10 +447,16 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     fi
 fi
 
-# remove stuff before testing
-rm -rf /opt/rh
-if ls /usr/local/cuda* >/dev/null 2>&1; then
-    rm -rf /usr/local/cuda*
+# Optionally remove stuff before testing
+WIPE_RH_CUDA_AFTER_BUILD=${WIPE_RH_CUDA_AFTER_BUILD:-1}
+if [[ "${WIPE_RH_CUDA_AFTER_BUILD}" == "1" ]]; then
+    echo "Removing /opt/rh and /usr/local/cuda*"
+    rm -rf /opt/rh
+    if ls /usr/local/cuda* >/dev/null 2>&1; then
+        rm -rf /usr/local/cuda*
+    fi
+else
+    echo "Not removing /opt/rh and /usr/local/cuda*"
 fi
 
 
