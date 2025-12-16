@@ -12,6 +12,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
+from torch._dynamo.testing import CompileCounter
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
@@ -21,7 +22,6 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
-from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
