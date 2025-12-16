@@ -34,7 +34,6 @@ from ..pattern_matcher import (
     CallFunctionVarArgs,
     filter_nodes,
     fwd_only,
-    gen_register_replacement,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -358,10 +357,11 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and device_type in ["cuda", "xpu"]
+        and getattr(config, f"{device_type}_backend") == "triton"
     )
 
 
@@ -681,66 +681,6 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
-@functools.cache
-def register_addmm_activation_fusions():
-    def is_valid_addmm_activation_fusion(match: Match) -> bool:
-        # Exclude ROCm
-        if torch.version.hip:
-            return False
-
-        if config.max_autotune or config.max_autotune_gemm:
-            return False
-
-        inp = match.kwargs["inp"].meta["val"]
-
-        if not inp.is_cuda:
-            return False
-
-        output = match.output_node()
-        return not all(
-            is_pointwise_use(use, lambda target: torch.Tag.reduction in target.tags)
-            for use in output.users
-        )
-
-    args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
-    beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
-
-    def addmm_relu_pattern(inp, m1, m2, beta, alpha):
-        return aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha))
-
-    def addmm_gelu_pattern(inp, m1, m2, beta, alpha):
-        return aten.gelu(
-            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
-        )
-
-    def addmm_relu_replacement(inp, m1, m2, beta, alpha):
-        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha)
-
-    def addmm_gelu_replacement(inp, m1, m2, beta, alpha):
-        return aten._addmm_activation(
-            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
-        )
-
-    patterns = (addmm_relu_pattern, addmm_gelu_pattern)
-    replacements = (addmm_relu_replacement, addmm_gelu_replacement)
-    for pattern, replacement in zip(patterns, replacements):
-        key = f"{pattern.__name__}"
-        gen_register_replacement(
-            key,
-            # pyrefly: ignore [bad-argument-type]
-            pattern,
-            # pyrefly: ignore [bad-argument-type]
-            replacement,
-            args,
-            # pyrefly: ignore [bad-argument-type]
-            trace_fn=fwd_only,
-            # pyrefly: ignore [bad-argument-type]
-            pass_dicts=pass_patterns[1],
-            extra_check=is_valid_addmm_activation_fusion,
-            scalar_workaround=beta_alpha_workaround,
-        )
-
-
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -765,8 +705,6 @@ def lazy_init():
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
-
-    register_addmm_activation_fusions()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -843,13 +781,22 @@ def is_valid_mm_plus_mm(match: Match):
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    # Check if all required values exist
+    mat1_val = match.kwargs["mat1"].meta.get("val")
+    mat2_val = match.kwargs["mat2"].meta.get("val")
+    mat3_val = match.kwargs["mat3"].meta.get("val")
+    mat4_val = match.kwargs["mat4"].meta.get("val")
+
+    if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
+        return False
+
+    *_b1, m1, k1 = mat1_val.shape
+    *_b2, k2, n1 = mat2_val.shape
     if k1 != k2:
         return False
 
-    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = mat3_val.shape
+    *_b2, k4, n2 = mat4_val.shape
     if k3 != k4:
         return False
 
