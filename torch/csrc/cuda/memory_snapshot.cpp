@@ -209,7 +209,8 @@ void _record_memory_history(
     bool record_cpp_context,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -227,7 +228,12 @@ void _record_memory_history(
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 static void checkOptionIn(
@@ -245,7 +251,8 @@ void _record_memory_history(
     size_t max_entries,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -282,7 +289,12 @@ void _record_memory_history(
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -307,7 +319,6 @@ std::string _memory_snapshot_pickled() {
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
-  IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
@@ -505,17 +516,6 @@ std::string _memory_snapshot_pickled() {
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
     frame_dict.at(i).insert(frames_s, frames.at(i));
-
-    // Add forward frames if available
-    auto* tb = frame_tracebacks.at(i);
-    const auto& forward_tb = tb->forward_traceback();
-    if (forward_tb.has_value() && !forward_tb->empty()) {
-      auto forward_list = new_list();
-      for (const auto& frame_str : *forward_tb) {
-        forward_list.push_back(IValue(frame_str));
-      }
-      frame_dict.at(i).insert(forward_frames_s, forward_list);
-    }
   }
 
   return write_pickle(result);
