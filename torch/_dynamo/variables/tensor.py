@@ -1193,7 +1193,9 @@ class TensorVariable(VariableTracker):
 
         return VariableTracker.build(tx, None)
 
-    def method_data_ptr(self, *args, **kwargs):
+    def method_data_ptr(
+        self, *args: VariableTracker, **kwargs: VariableTracker
+    ) -> "DataPtrVariable":
         return DataPtrVariable(self)
 
     def method_item(self, *args: VariableTracker, **kwargs: VariableTracker) -> None:
