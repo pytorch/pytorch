@@ -368,10 +368,15 @@ class _LSTMLayer(torch.nn.Module):
         split_gates = kwargs.get("split_gates", False)
 
         layer = cls(
+            # pyrefly: ignore [bad-argument-type]
             input_size,
+            # pyrefly: ignore [bad-argument-type]
             hidden_size,
+            # pyrefly: ignore [bad-argument-type]
             bias,
+            # pyrefly: ignore [bad-argument-type]
             batch_first,
+            # pyrefly: ignore [bad-argument-type]
             bidirectional,
             split_gates=split_gates,
         )

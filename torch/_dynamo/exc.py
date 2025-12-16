@@ -167,7 +167,7 @@ class Unsupported(TorchDynamoException):
         msg: str,
         *,
         case_name: Optional[str] = None,
-        real_stack: None | StackSummary = None,
+        real_stack: StackSummary | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -385,7 +385,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     return observed_exception_map[exc_type]
 
 
