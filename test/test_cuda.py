@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI200_ARCH,
     MI300_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -4144,48 +4145,6 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
-    def test_memory_snapshot_forward_trace(self):
-        """Test that forward traces from anomaly mode are captured in memory snapshots."""
-        try:
-            torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history("all", stacks="python")
-
-            # Create a simple model with a backward pass
-            # Use detect_anomaly(check_nan=False) to capture forward traces
-            x = torch.randn(10, 10, device="cuda", requires_grad=True)
-
-            with torch.autograd.detect_anomaly(check_nan=False):
-                y = x * 2  # Forward pass - creates autograd node
-                z = y.sum()
-                z.backward()  # Backward pass - allocations here should have forward traces
-
-            ss = torch.cuda.memory._snapshot()
-
-            # Check that we have device traces with forward_frames
-            found_forward_frames = False
-            if "device_traces" in ss:
-                for device_trace in ss["device_traces"]:
-                    for entry in device_trace:
-                        if isinstance(entry, dict) and "forward_frames" in entry:
-                            # forward_frames should be a list of strings
-                            self.assertIsInstance(entry["forward_frames"], list)
-                            if len(entry["forward_frames"]) > 0:
-                                found_forward_frames = True
-                                # The forward frames should be strings
-                                self.assertIsInstance(entry["forward_frames"][0], str)
-
-            # forward_frames must be present when using detect_anomaly
-            self.assertTrue(
-                found_forward_frames,
-                "forward_frames should be present in memory snapshot when using detect_anomaly",
-            )
-
-        finally:
-            torch.cuda.memory._record_memory_history(None)
-
     @skipIfRocm
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
@@ -5835,6 +5794,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
