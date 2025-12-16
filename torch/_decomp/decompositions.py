@@ -355,7 +355,8 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
 @register_decomposition(aten.ldexp)
 @out_wrapper()
 def ldexp(self: Tensor, other: Tensor) -> Tensor:
-    return self * (2.0**other)
+    two_tensor = torch.tensor(2.0, dtype=self.dtype, device=self.device)
+    return self * torch.pow(two_tensor, other)
 
 
 def apply_loss_reduction(loss: Tensor, reduction: int):
