@@ -1212,7 +1212,9 @@ class PallasKernel(SIMDKernel):
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
             # Direct indexing for contiguous access
-            load_expr = f"{buf}[{index_str}]"
+            # Squeeze trailing 1s for proper broadcasting with other arrays
+            # e.g., (512, 1) -> (512,) to broadcast correctly with (512,) arrays
+            load_expr = f"jnp.squeeze({buf}[{index_str}])"
 
         return self.cse.generate(
             self.compute,
@@ -1230,6 +1232,10 @@ class PallasKernel(SIMDKernel):
         We need to convert this to JAX advanced indexing with proper broadcasting.
         When there are multiple iteration variables, they need different shapes
         to form an outer product (grid) rather than broadcasting together.
+
+        Special case: For gather operations where a single iteration variable
+        and single indirect variable have the same extent, they should be
+        element-wise aligned, not broadcast into an outer product.
         """
         # Get iteration variables
         iter_vars = OrderedSet(self.range_tree_nodes.keys())
@@ -1262,6 +1268,20 @@ class PallasKernel(SIMDKernel):
 
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
+
+        # Special case: single iter var + single indirect var = element-wise gather
+        # In this case, both should be 1D arrays of the same length, no broadcasting needed
+        if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
+            # Simple element-wise gather: just replace iter var with arange
+            var = used_iter_vars[0]
+            var_name = str(var)
+            if var in self.range_tree_nodes:
+                range_entry = self.range_tree_nodes[var]
+                range_size = range_entry.length
+                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                index_str = index_str.replace(var_name, arange_expr)
+            # Indirect var stays as-is (no reshaping)
+            return index_str
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
@@ -1499,6 +1519,7 @@ class PallasKernel(SIMDKernel):
                     # Direct indexed assignment
                     # Check if we need special handling for constant indices on multi-dim outputs
                     # e.g., storing a scalar to a (1,1,1) output with index 0
+                    has_indirect = self._has_indirect_vars(index)
                     try:
                         buf = V.graph.get_buffer(name)
                         buf_size = buf.get_size()
@@ -1511,6 +1532,15 @@ class PallasKernel(SIMDKernel):
                                 f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
                                 f"if jnp.asarray({value}).size != {out}.size "
                                 f"else jnp.asarray({value}).reshape({out}.shape)))"
+                            )
+                        elif has_indirect:
+                            # Indirect indexed store (scatter): arr[indices] = value
+                            # When value is scalar but indices is an array, JAX requires
+                            # the value to match the indexed result shape. Broadcast scalar.
+                            store_expr = (
+                                f"{out}[{index_str}] = ("
+                                f"jnp.full({index_str}.shape, {value}) "
+                                f"if jnp.asarray({value}).ndim == 0 else {value})"
                             )
                         else:
                             store_expr = f"{out}[{index_str}] = {value}"
@@ -1932,9 +1962,9 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel, pw_shape=None):
+def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
     # Helper for partial reductions: reorders axes and reduces
-    # Preserves dimensionality for proper broadcasting (keepdims-style)
+    # Returns result with keepdims-style shape for proper in-kernel broadcasting
     shape = tuple(v.shape)
     # Find contiguous axes whose product = red_numel (search from right)
     red_axes = None
