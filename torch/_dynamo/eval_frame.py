@@ -437,10 +437,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (
-                trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
-            )
+            and (trace_rules.check(self._orig_mod.forward))
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
