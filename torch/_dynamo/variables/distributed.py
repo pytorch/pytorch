@@ -75,6 +75,15 @@ class DistributedVariable(VariableTracker):
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 def is_from_local(value: object) -> bool:
     if not DistributedVariable.is_available():
@@ -318,6 +327,14 @@ class DeviceMeshVariable(DistributedVariable):
             )
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
+        if name == "_flatten":
+            from .builder import SourcelessBuilder
+
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return SourcelessBuilder.create(
+                tx, self.value._flatten(*const_args, **const_kwargs)
+            )
         return super().call_method(tx, name, args, kwargs)
 
 

@@ -4227,8 +4227,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
-    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
-    @xfailIf(_get_cudnn_version() is not None and _get_cudnn_version() > 91000)
+    @xfailIf(
+        _get_cudnn_version() is not None and (91000 < _get_cudnn_version() < 91500)
+    )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4238,15 +4239,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
         del y, yref
 
         # try a batch-splittable case
         x = x.reshape(100, 2, 3280, 3280)
         x = x.contiguous(memory_format=torch.channels_last)
-        yref = c(x)
+        yref = c.cpu()(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

@@ -64,9 +64,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -82,11 +79,13 @@ from torch.fx.experimental.symbolic_shapes import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
+    from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -314,19 +313,21 @@ def _do_bench_using_profiling(
 
         may_ban_benchmarking()
 
+    device_type = get_gpu_type()
+    device_interface = get_interface_for_device(device_type)
     fn()
-    torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    device_interface.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
 
     # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = device_interface.Event(enable_timing=True)
+    end_event = device_interface.Event(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
         fn()
     end_event.record()
-    torch.cuda.synchronize()
+    device_interface.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / 5
 
     # compute number of warmup and repeat
@@ -337,11 +338,10 @@ def _do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
-    torch.cuda.synchronize()
-
+    device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            torch.profiler.ProfilerActivity.CUDA,
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
         ]
     ) as p:
         # Benchmark
@@ -351,7 +351,7 @@ def _do_bench_using_profiling(
             # record time of `fn`
             fn()
         # Record clocks
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
@@ -366,7 +366,8 @@ def _do_bench_using_profiling(
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
             "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
+            "#%s events: %d, #repeats: %s",
+            device_type,
             len(filtered_events),
             n_repeat,
         )
@@ -1953,6 +1954,14 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+def use_triton_scaling_template(
+    scale_option_a: ScalingType,
+    scale_option_b: ScalingType,
+    scaling_types: list[ScalingType],
+) -> bool:
+    return scale_option_a in scaling_types and scale_option_b in scaling_types
+
+
 @functools.lru_cache(maxsize=1)
 def ensure_cute_available() -> bool:
     """Check if CuTeDSL is importable; cache the result for reuse.
@@ -2413,11 +2422,14 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    remove_quote = kwargs.pop("remove_quote", False)
     # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
         kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if remove_quote:
+            kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 
@@ -3051,11 +3063,6 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
-
-
-def is_rocm() -> bool:
-    """Check if we're running on ROCm/HIP platform."""
-    return torch.version.hip is not None
 
 
 def device_need_guard(device: str) -> bool:
@@ -4126,3 +4133,24 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         return target in fallback_hops
 
     return not _needs_inductor_compile(node)
+
+
+# Collective operation names for specialized benchmarking
+COLLECTIVE_OPS = OrderedSet(
+    [
+        "torch.ops._c10d_functional.all_reduce.default",
+        "torch.ops._c10d_functional.all_reduce_.default",
+        "torch.ops._c10d_functional.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional.all_to_all_single.default",
+        "torch.ops._c10d_functional_autograd.all_reduce.default",
+        "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+    ]
+)
+
+
+def is_collective_op(op_name: str) -> bool:
+    """Check if an operation is a collective operation."""
+    return op_name in COLLECTIVE_OPS
