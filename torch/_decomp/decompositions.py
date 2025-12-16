@@ -2291,7 +2291,7 @@ def _to_copy(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.lift_fresh])
+@register_decomposition([aten.detach, aten.lift])
 @out_wrapper()
 def nop_decomposition(x):
     return aten.alias(x)

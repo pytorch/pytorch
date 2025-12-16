@@ -2441,7 +2441,7 @@ class FakeTensorMode(TorchDispatchMode):
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if is_lift_func:
-            assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
+            assert len(kwargs) == 0 and len(args) == 2, f"{args} {kwargs}"
 
             if type(args[0]) is Tensor:
                 return converter.from_real_tensor(self, args[0])
