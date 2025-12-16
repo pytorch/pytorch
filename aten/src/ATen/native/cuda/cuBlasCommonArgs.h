@@ -176,18 +176,13 @@ struct cublasCommonArgs {
         std::cout << "COPY BIAS case" << std::endl;
         return;
       }
-      const auto self_squeeze = self->squeeze();
       const bool can_use_bias_in_epilogue = (
           transpose_result // required so that bias properly broadcasts in epilogue
           && is_beta_one() // no scaling for bias in epilogue
           && self->is_contiguous()
-          && (
-            // == m -> should match the rows, hence transpose_result is essential
-               (self->dim() == 1 && self->sizes().back() == m) // bias is 1D of shape [m]
-            || (self_squeeze.dim() == 0 && self->sizes().back() == m) // bias is nD of shape [1, ..., 1 (==m)]
-            || (self_squeeze.dim() == 1 && self_squeeze.sizes().back() == m) // bias is nD of shape [1, ..., m]
-          )
-          && !result->is_complex() // No Epilogue support for complex types
+          // == m -> should match the rows, hence transpose_result is essential
+          && (self->sizes().back() == m && self->numel() == m) // shapes [1, ..., 1, m] are fine
+          && !result->is_complex() // no Epilogue support for complex types
       );
       if (can_use_bias_in_epilogue) { // Case for bias in epilogue
         std::cout << "1D BIAS Epilogue case" << std::endl;
@@ -195,7 +190,7 @@ struct cublasCommonArgs {
       } else { // Case for, potentially, an out-of-place GEMM
         if (self->dim() == 2) { // 2D bias
           // Bias should match the result's layout
-          bias = maybe_prepare_matrix_with_layout(*self, transpose_result);
+          bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result);
           if (bias.has_value()) {
           std::cout << "2D BIAS case" << std::endl;
             bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
@@ -204,9 +199,7 @@ struct cublasCommonArgs {
         } else { // 1D bias
           if (!transpose_result && self->is_contiguous()) {
             // Bias expanded to a matrix with the leading dimension 0
-            bias = c10::MaybeOwned<Tensor>::owned(
-              (self->unsqueeze(-2)).expand(result->sizes())
-            );
+            bias = c10::MaybeOwned<Tensor>::borrowed(*self);
             bias_ld = static_cast<int64_t>(0);
           std::cout << "1D BIAS as 2D with ld=0 case" << std::endl;
           }
