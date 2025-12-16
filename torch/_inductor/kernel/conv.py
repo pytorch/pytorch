@@ -1180,9 +1180,7 @@ def convolution_backward_lowering(
                 V.graph.sizevars.size_hints(layout_dw.stride)
             )
             input = ir.ExternKernel.require_stride_order(input, req_stride_order)  # type: ignore[assignment]
-            grad_output = ir.ExternKernel.require_stride_order(
-                grad_output, req_stride_order
-            )  # type: ignore[assignment]
+            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)  # type: ignore[assignment]
 
         args_w = [input, grad_output]
 
@@ -1236,9 +1234,7 @@ def convolution_backward_lowering(
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dx.stride)
             )
-            grad_output = ir.ExternKernel.require_stride_order(
-                grad_output, req_stride_order
-            )  # type: ignore[assignment]
+            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)  # type: ignore[assignment]
 
         args_x = [grad_output, weight]
 
