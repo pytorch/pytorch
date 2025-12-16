@@ -223,7 +223,9 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
-        cpu_needs_realized_inputs = [
+        cpu_needs_realized_inputs: list[
+            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+        ] = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
             torch.ops.mkldnn._convolution_transpose_pointwise,

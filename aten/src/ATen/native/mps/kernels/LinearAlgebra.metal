@@ -801,6 +801,27 @@ kernel void orgqr(
   }
 }
 
+template <typename TO, typename TI>
+kernel void unpack_pivots(
+    device TO* perm [[buffer(0)]],
+    constant TI* pivots [[buffer(1)]],
+    constant UnpackPivotsParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto perm_batch_stride = params.perm_batch_stride;
+  auto pivots_batch_stride = params.pivots_batch_stride;
+  auto dim_size = params.dim_size;
+
+  perm += perm_batch_stride * tid;
+  pivots += pivots_batch_stride * tid;
+
+  for (uint32_t i = 0; i < dim_size; i++) {
+    auto j = pivots[i] - 1;
+    auto perm_j = perm[j];
+    perm[j] = perm[i];
+    perm[i] = perm_j;
+  }
+}
+
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
       constant DTYPE * mat1Data [[buffer(0)]],                              \
@@ -860,3 +881,16 @@ REGISTER_ORGQR(half);
 REGISTER_ORGQR(bfloat);
 REGISTER_ORGQR(float2);
 REGISTER_ORGQR(half2);
+
+#define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
+  template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
+  kernel void unpack_pivots<TO, TI>(                      \
+      device TO * perm [[buffer(0)]],                     \
+      constant TI * pivots [[buffer(1)]],                 \
+      constant UnpackPivotsParams & params [[buffer(2)]], \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_UNPACK_PIVOTS(int, int);
+REGISTER_UNPACK_PIVOTS(int, long);
+REGISTER_UNPACK_PIVOTS(long, int);
+REGISTER_UNPACK_PIVOTS(long, long);

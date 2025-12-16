@@ -543,7 +543,7 @@ def dispatch_torch_function(
         res = tx.symbolic_torch_function_state.call_torch_function_mode(
             tx, fn, types, args, kwargs
         )
-        if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
+        if not res.is_constant_match(NotImplemented):
             return res
 
     for arg in overloaded_args:
@@ -555,7 +555,7 @@ def dispatch_torch_function(
             kwargs,
         )
 
-        if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
+        if not res.is_constant_match(NotImplemented):
             return res
 
     unimplemented(
@@ -579,7 +579,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         tx: "InstructionTranslator",
         tensor_var: VariableTracker,
         class_type: type,
-        cls_source: Source,
+        cls_source: Source | None,
     ) -> "TensorWithTFOverrideVariable":
         # [Note: __torch_function__] coerce `tensor_var` into a
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
