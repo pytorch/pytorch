@@ -517,6 +517,101 @@ class RedistributeTest(DTensorTestBase):
                 comm_mode.get_comm_counts()[funcol.reduce_scatter_tensor], 1
             )
 
+    def _test_all_gather_optimization(
+        self,
+        global_shape: tuple[int, ...],
+        placements_src: list,
+        placements_dst: list,
+        should_use_view: bool,
+    ):
+        """
+        Helper method to test all_gather optimization behavior.
+
+        Args:
+            global_shape: Shape of the global tensor
+            placements_src: Source placements for distribution
+            placements_dst: Destination placements for redistribution
+            should_use_view: Whether the optimization should use view (True) or split+cat (False)
+        """
+        device_mesh = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+
+        global_tensor = torch.randn(*global_shape, device=self.device_type)
+        dt = distribute_tensor(global_tensor, device_mesh, placements_src)
+
+        # Capture the operations
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            result = dt.redistribute(device_mesh, placements_dst)
+
+        debug_str = debug_mode.debug_string()
+
+        # Verify optimization behavior
+        if should_use_view:
+            # Should see 'view' but not 'split' or 'cat'
+            self.assertIn("aten::view", debug_str)
+            self.assertNotIn("aten::split", debug_str)
+            self.assertNotIn("aten::cat", debug_str)
+        else:
+            # Should see 'split' and 'cat'
+            self.assertIn("aten::split", debug_str)
+            self.assertIn("aten::cat", debug_str)
+
+        # Verify correctness: result should have the right placements
+        self.assertEqual(result.placements, placements_dst)
+
+        # Verify correctness: local tensor contents should match expected
+        expected_dt = distribute_tensor(global_tensor, device_mesh, placements_dst)
+        self.assertEqual(result.to_local(), expected_dt.to_local())
+
+    @with_comms
+    def test_all_gather_view_optimization_batch1(self):
+        """
+        Test that all_gather with gather_dim=1 and batch=1 uses a pure view
+        instead of split+cat. This optimization avoids unnecessary copies.
+        """
+        # Test case: Shard on dim 1 on both mesh dimensions, then redistribute
+        # to unshard on the last mesh dim. With batch=1 on the first dimension,
+        # the all_gather should use a pure view operation.
+        self._test_all_gather_optimization(
+            global_shape=(1, 8192, 6144),
+            placements_src=[Shard(1), Shard(1)],
+            placements_dst=[Shard(1), Replicate()],
+            should_use_view=True,
+        )
+
+    @with_comms
+    def test_all_gather_no_optimization_gather_dim_not_1(self):
+        """
+        Test that all_gather with batch=1 but gather_dim != 1 still falls back
+        to split+cat, since the view optimization only applies to gather_dim=1.
+        """
+        # Test case: Shard on dim 2, then redistribute to unshard on last mesh dim.
+        # Even though batch=1 on first dimension, gather_dim will be 2 (not 1),
+        # so we can't use the view optimization.
+        self._test_all_gather_optimization(
+            global_shape=(1, 8192, 6144),
+            placements_src=[Shard(2), Shard(2)],
+            placements_dst=[Shard(2), Replicate()],
+            should_use_view=False,
+        )
+
+    @with_comms
+    def test_all_gather_split_cat_fallback_batch_gt_1(self):
+        """
+        Test that all_gather with gather_dim=1 and batch>1 falls back to
+        split+cat (not optimized to view since that would require a copy).
+        """
+        # Test case: Similar to batch=1 test, but with batch=4 on first dimension.
+        # This should fall back to split+cat since the view optimization
+        # doesn't apply when batch > 1.
+        self._test_all_gather_optimization(
+            global_shape=(4, 8192, 6144),
+            placements_src=[Shard(1), Shard(1)],
+            placements_dst=[Shard(1), Replicate()],
+            should_use_view=False,
+        )
+
     @with_comms
     def test_redistribute_negative_shard_dim(self):
         device_mesh = self.build_device_mesh()
