@@ -2,9 +2,7 @@
 # pyre-strict
 from __future__ import annotations
 
-import atexit
 import os
-import pickle
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
 from functools import wraps
@@ -12,20 +10,17 @@ from itertools import combinations
 from random import Random
 from shutil import rmtree
 from threading import Lock
-from time import sleep, time
 from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
 from filelock import FileLock
 
-import torch
 from torch._inductor.runtime.caching import (
     config,
     context,
     exceptions,
     implementations as impls,
-    interfaces as intfs,
     locks,
     utils,
 )
@@ -33,7 +28,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    xfailIfPy314Plus,
 )
 
 
@@ -76,23 +70,6 @@ def patch_on_disk_cache_base_dir(fn):
     return wrapper
 
 
-def patch_deterministic_cache_intf_no_dump_on_exit(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        default_init = intfs._DeterministicCacheIntf.__init__
-
-        def patched_init(
-            intf: intfs._DeterministicCacheIntf, *args: Any, **kwargs: dict[str, Any]
-        ) -> None:
-            default_init(intf, *args, **kwargs)
-            atexit.unregister(intf._dump_imc_to_disk)
-
-        with patch.object(intfs._DeterministicCacheIntf, "__init__", patched_init):
-            return fn(*args, **kwargs)
-
-    return wrapper
-
-
 def patch_remote_cache_with_on_disk_cache(fn):
     impls._OnDiskCacheImpl.has_strong_consistency = True
     return patch.object(impls, "_RemoteCacheImpl", impls._OnDiskCacheImpl)(fn)
@@ -111,6 +88,10 @@ class TestMixin:
     @property
     def random_string(self) -> str:
         return f"s-{Random().randint(0, 2**32)}"
+
+    @property
+    def random_bytes(self) -> bytes:
+        return f"s-{Random().randint(0, 2**32)}".encode()
 
 
 @instantiate_parametrized_tests
@@ -375,7 +356,6 @@ class ContextTest(TestCase):
         """
         self.assertEqual(context._isolation_key(), context._isolation_key())
 
-    @xfailIfPy314Plus
     def test_select_runtime_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected runtime context matches the forms of context.
@@ -389,7 +369,6 @@ class ContextTest(TestCase):
             set(context._RuntimeContext.forms_of_context()),
         )
 
-    @xfailIfPy314Plus
     def test_select_compile_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected compile context matches the forms of context.
@@ -413,15 +392,8 @@ class ExceptionsTest(TestCase):
         "FileLockTimeoutError",
         "UserError",
         "KeyEncodingError",
-        "KeyPicklingError",
         "ValueEncodingError",
-        "ValuePicklingError",
         "ValueDecodingError",
-        "ValueUnPicklingError",
-        "CustomParamsEncoderRequiredError",
-        "CustomResultEncoderRequiredError",
-        "CustomResultDecoderRequiredError",
-        "DeterministicCachingRequiresStrongConsistencyError",
     ]
 
     @parametrize("exception_typename", exception_typenames)
@@ -451,38 +423,8 @@ class ExceptionsTest(TestCase):
         )
         self.assertTrue(issubclass(exceptions.UserError, exceptions.CacheError))
         self.assertTrue(issubclass(exceptions.KeyEncodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.KeyPicklingError, exceptions.KeyEncodingError)
-        )
         self.assertTrue(issubclass(exceptions.ValueEncodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.ValuePicklingError, exceptions.ValueEncodingError)
-        )
         self.assertTrue(issubclass(exceptions.ValueDecodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
-        )
-        self.assertTrue(
-            issubclass(
-                exceptions.CustomParamsEncoderRequiredError, exceptions.UserError
-            )
-        )
-        self.assertTrue(
-            issubclass(
-                exceptions.CustomResultEncoderRequiredError, exceptions.UserError
-            )
-        )
-        self.assertTrue(
-            issubclass(
-                exceptions.CustomResultDecoderRequiredError, exceptions.UserError
-            )
-        )
-        self.assertTrue(
-            issubclass(
-                exceptions.DeterministicCachingRequiresStrongConsistencyError,
-                exceptions.UserError,
-            )
-        )
 
 
 @instantiate_parametrized_tests
@@ -503,24 +445,24 @@ class ImplementationsTest(TestMixin, TestCase):
             impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir, ignore_errors=True
         )
 
-    def assert_key_in(self, key: Any, impl: impls._CacheImpl) -> None:
+    def assert_key_in(self, key: str, impl: impls._CacheImpl) -> None:
         self.assertTrue(impl.get(key) is not None)
 
-    def assert_key_not_in(self, key: Any, impl: impls._CacheImpl) -> None:
+    def assert_key_not_in(self, key: str, impl: impls._CacheImpl) -> None:
         self.assertTrue(impl.get(key) is None)
 
     def assert_key_value_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertTrue(impl.insert(key, value))
 
     def assert_key_value_not_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertFalse(impl.insert(key, value))
 
     def assert_key_has_value_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertTrue(((get := impl.get(key)) is not None) and (get.value == value))
 
@@ -561,7 +503,7 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             key: str = self.random_string
             self.assert_key_not_in(key, impl)
-            value: str = self.random_string
+            value: bytes = self.random_bytes
             self.assert_key_value_inserted_in(key, value, impl)
             self.assert_key_has_value_in(key, value, impl)
 
@@ -586,61 +528,42 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             key: str = self.random_string
             self.assert_key_not_in(key, impl)
-            value: str = self.random_string
+            value: bytes = self.random_bytes
             self.assert_key_value_inserted_in(key, value, impl)
-            self.assert_key_value_not_inserted_in(key, self.random_string, impl)
+            self.assert_key_value_not_inserted_in(key, self.random_bytes, impl)
             self.assert_key_has_value_in(key, value, impl)
 
     @patch_on_disk_cache_base_dir
     @patch_remote_cache_with_on_disk_cache
     @parametrize("impl_typename", TestMixin.impl_typenames)
-    def test_key_encoding(self, impl_typename: str) -> None:
-        """Test that cache implementations properly handle non-serializable keys.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        raise KeyPicklingError when attempting to insert keys that cannot be
-        pickled (such as lambda functions). This ensures proper error handling
-        for invalid key types that would break the caching system.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            with self.assertRaises(exceptions.KeyPicklingError):
-                impl.insert(lambda: None, None)
-
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_encoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle non-serializable values.
+        """Test that in-memory cache can store any value type.
 
-        Verifies that on-disk cache implementations correctly raise ValuePicklingError
-        when attempting to insert values that cannot be pickled (such as lambda functions).
-        This test only applies to on-disk implementations since in-memory caches don't
-        require serialization. Ensures proper error handling for invalid value types.
+        Verifies that in-memory cache implementations can store arbitrary values
+        including non-serializable ones (such as lambda functions) since they don't
+        require serialization. On-disk caches now expect bytes, so they skip this test.
 
         Args:
             impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
         """
         impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
         with impl.lock():
-            if isinstance(impl, impls._OnDiskCacheImpl):
-                with self.assertRaises(exceptions.ValuePicklingError):
-                    impl.insert(None, lambda: None)
+            if isinstance(impl, impls._InMemoryCacheImpl):
+                key: str = self.random_string
+                value = lambda: None  # noqa: E731
+                self.assert_key_value_inserted_in(key, value, impl)
+                self.assert_key_has_value_in(key, value, impl)
 
     @patch_on_disk_cache_base_dir
     @patch_remote_cache_with_on_disk_cache
     @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_decoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle corrupted cached values.
+        """Test that on-disk cache implementations return raw bytes from storage.
 
-        Verifies that on-disk cache implementations correctly raise ValueUnPicklingError
-        when attempting to retrieve values from cache files that contain corrupted or
-        invalid pickled data. This test ensures proper error handling when cached data
-        becomes corrupted on disk. Only applies to on-disk implementations since
-        in-memory caches don't involve serialization/deserialization.
+        Verifies that on-disk cache implementations return raw bytes from disk
+        without attempting to unpickle them, as values are now expected to be
+        stored as bytes. This test writes raw bytes to a cache file and confirms
+        they are returned as-is.
 
         Args:
             impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
@@ -651,11 +574,11 @@ class ImplementationsTest(TestMixin, TestCase):
                 key: str = self.random_string
                 self.assert_key_not_in(key, impl)
                 fpath: Path = impl._fpath_from_key(key)
+                test_bytes: bytes = b"foo"
                 with open(fpath, "xb") as fp:
                     impl._write_version_header(fp)
-                    fp.write(b"foo")
-                with self.assertRaises(exceptions.ValueUnPicklingError):
-                    impl.get(key)
+                    fp.write(test_bytes)
+                self.assert_key_has_value_in(key, test_bytes, impl)
 
     @patch_on_disk_cache_base_dir
     @patch_remote_cache_with_on_disk_cache
@@ -682,7 +605,7 @@ class ImplementationsTest(TestMixin, TestCase):
             if isinstance(impl, impls._OnDiskCacheImpl):
                 key: str = self.random_string
                 self.assert_key_not_in(key, impl)
-                value: str = self.random_string
+                value: bytes = self.random_bytes
                 self.assert_key_value_inserted_in(key, value, impl)
                 self.assert_key_has_value_in(key, value, impl)
                 with patch.object(
@@ -694,428 +617,6 @@ class ImplementationsTest(TestMixin, TestCase):
                 self.assert_key_not_in(key, impl)
                 self.assert_key_value_inserted_in(key, value, impl)
                 self.assert_key_has_value_in(key, value, impl)
-
-
-@instantiate_parametrized_tests
-class InterfacesTest(TestMixin, TestCase):
-    intf_typenames: list[str] = [
-        "_FastCacheIntf",
-        "_DeterministicCacheIntf",
-    ]
-
-    @classmethod
-    def sub_dir(cls) -> str:
-        return f"testing-intfs-instance-{cls.cls_id}"
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
-
-    def intf_from_typename(self, intf_typename: str) -> intfs._CacheIntf:
-        return getattr(intfs, intf_typename)()
-
-    def assert_call_is_cached(self, fn, params, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.get(fn, params, *args, **kwargs) is not None)
-
-    def assert_call_is_not_cached(self, fn, params, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.get(fn, params, *args, **kwargs) is None)
-
-    def assert_call_was_cached(self, fn, params, result, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.insert(fn, params, result, *args, **kwargs))
-
-    def assert_call_was_not_cached(
-        self, fn, params, result, intf, *args, **kwargs
-    ) -> None:
-        self.assertFalse(intf.insert(fn, params, result, *args, **kwargs))
-
-    def assert_cached_call_is(self, fn, params, result, intf, *args, **kwargs) -> None:
-        self.assertTrue(
-            ((get := intf.get(fn, params, *args, **kwargs)) is not None)
-            and (get.value == result)
-        )
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_defaults(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-        sleep_t: int = 5
-
-        @intf.record()
-        def foo(*args, **kwargs) -> None:
-            sleep(sleep_t)
-            return (args, kwargs)
-
-        args, kwargs = (
-            (
-                1,
-                2,
-                3,
-            ),
-            {"bar": "bar"},
-        )
-        params = (args, kwargs)
-        self.assertEqual(foo(*args, **kwargs), params)
-        start_t: float = time()
-        self.assertEqual(foo(*args, **kwargs), params)
-        self.assertTrue((time() - start_t) < sleep_t)
-        self.assert_cached_call_is(
-            foo, params, params, intf, ischema=context._DEFAULT_ISOLATION_SCHEMA
-        )
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_custom_params_encoder(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-        sleep_t: int = 5
-
-        @intf.record(custom_params_encoder=lambda params: "bar")
-        def foo(_lambda) -> None:
-            sleep(sleep_t)
-            return hash(_lambda)
-
-        _lambda = lambda: None  # noqa: E731
-        self.assertEqual(foo(_lambda), hash(_lambda))
-        start_t: float = time()
-        self.assertEqual(foo(_lambda), hash(_lambda))
-        self.assertTrue((time() - start_t) < sleep_t)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_custom_result_encoder_and_decoder(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-        sleep_t: int = 5
-
-        @intf.record(
-            custom_result_encoder=lambda value: "bar",
-            custom_result_decoder=lambda encoded_value: "bar",
-        )
-        def foo() -> None:
-            sleep(sleep_t)
-            return "foo"
-
-        self.assertEqual(foo(), "foo")
-        start_t: float = time()
-        self.assertEqual(foo(), "bar")
-        self.assertTrue((time() - start_t) < sleep_t)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_custom_ischema(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-        sleep_t: int = 5
-
-        @intf.record(
-            ischema=context.IsolationSchema(
-                runtime_context=context.SelectedRuntimeContext(
-                    inductor_configs=True,
-                    torch_determinism_configs=False,
-                    cuda_matmul_precision_configs=False,
-                ),
-                compile_context=False,
-            ),
-        )
-        def foo(*args, **kwargs) -> None:
-            sleep(sleep_t)
-            return (args, kwargs)
-
-        with patch.object(torch._inductor.config, "max_autotune", True):
-            self.assertEqual(
-                foo("foo"),
-                (
-                    ("foo",),
-                    {},
-                ),
-            )
-            start_t: float = time()
-            self.assertEqual(
-                foo("foo"),
-                (
-                    ("foo",),
-                    {},
-                ),
-            )
-            self.assertTrue((time() - start_t) < sleep_t)
-
-        with patch.object(torch._inductor.config, "max_autotune", False):
-            start_t: float = time()
-            self.assertEqual(
-                foo("foo"),
-                (
-                    ("foo",),
-                    {},
-                ),
-            )
-            self.assertTrue((time() - start_t) >= sleep_t)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_params_encoder_required(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-
-        @intf.record()
-        def foo(*args, **kwargs) -> None:
-            return (args, kwargs)
-
-        with self.assertRaises(exceptions.CustomParamsEncoderRequiredError):
-            foo(lambda: None)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_result_encoder_required(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-
-        @intf.record()
-        def foo(*args, **kwargs) -> None:
-            return lambda: None
-
-        with self.assertRaises(exceptions.CustomResultEncoderRequiredError):
-            foo(0)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_remote_cache_with_on_disk_cache
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @parametrize("intf_typename", intf_typenames)
-    def test_result_encoder_and_decoder_required(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-
-        with self.assertRaises(exceptions.CustomResultEncoderRequiredError):
-
-            @intf.record(custom_result_decoder=lambda: None)
-            def foo() -> None:
-                return None
-
-            # otherwise flake8 complains about foo unused
-            _ = foo()
-
-        with self.assertRaises(exceptions.CustomResultDecoderRequiredError):
-
-            @intf.record(custom_result_encoder=lambda: None)
-            def foo() -> None:
-                return None
-
-            # otherwise flake8 complains about foo unused
-            _ = foo()
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @patch_remote_cache_with_on_disk_cache
-    def test_strictly_pre_populated_determinism(self) -> None:
-        intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
-            "_DeterministicCacheIntf"
-        )
-
-        @intf.record()
-        def foo(*args: Any, **kwargs: dict[str, Any]) -> None:
-            return None
-
-        args, kwargs = (
-            (
-                1,
-                2,
-                3,
-            ),
-            {"bar": "bar"},
-        )
-        params, result = (args, kwargs), None
-
-        self.assertEqual(foo(*args, **kwargs), result)
-        self.assertTrue(
-            ((get := intf.get(foo, params)) is not None) and (get.value == result)
-        )
-        self.assertTrue((fpath := intf._dump_imc_to_disk()) is not None)
-
-        with (
-            set_strictly_pre_populated_determinism(True),
-            patch.dict(
-                os.environ,
-                {
-                    "TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE": str(fpath),
-                },
-            ),
-        ):
-            intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
-                "_DeterministicCacheIntf"
-            )
-
-            @intf.record()
-            def foo(*args: Any, **kwargs: dict[str, Any]) -> None:
-                return None
-
-            self.assertEqual(foo(*args, **kwargs), result)
-
-            with self.assertRaises(
-                exceptions.StrictDeterministicCachingKeyNotFoundError
-            ):
-                foo()
-
-            with self.assertRaises(
-                exceptions.StrictDeterministicCachingKeyNotFoundError
-            ):
-                intf.get(foo, ((), {}))
-
-            with self.assertRaises(exceptions.StrictDeterministicCachingInsertionError):
-                intf.insert(foo, ((), {}), None)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(True)
-    @set_strictly_pre_populated_determinism(False)
-    @set_strictly_cached_determinism(False)
-    @patch_on_disk_cache_base_dir
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @patch_remote_cache_with_on_disk_cache
-    def test_strictly_cached_determinism(self) -> None:
-        intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
-            "_DeterministicCacheIntf"
-        )
-
-        @intf.record()
-        def foo(*args: Any, **kwargs: dict[str, Any]) -> None:
-            return None
-
-        args, kwargs = (
-            (
-                1,
-                2,
-                3,
-            ),
-            {"bar": "bar"},
-        )
-        params, result = (args, kwargs), None
-
-        self.assertEqual(foo(*args, **kwargs), result)
-        self.assertTrue(
-            ((get := intf.get(foo, params)) is not None) and (get.value == result)
-        )
-
-        with set_strictly_cached_determinism(True):
-            self.assertEqual(foo(*args, **kwargs), result)
-
-            with self.assertRaises(
-                exceptions.StrictDeterministicCachingKeyNotFoundError
-            ):
-                foo()
-
-            with self.assertRaises(
-                exceptions.StrictDeterministicCachingKeyNotFoundError
-            ):
-                intf.get(foo, ((), {}))
-
-            with self.assertRaises(exceptions.StrictDeterministicCachingInsertionError):
-                intf.insert(foo, ((), {}), None)
-
-    @set_caching_module_enabled(False)
-    @set_deterministic_caching_enabled(True)
-    @patch_on_disk_cache_base_dir
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @patch_remote_cache_with_on_disk_cache
-    @parametrize("intf_typename", intf_typenames)
-    def test_caching_module_disabled(self, intf_typename: str) -> None:
-        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
-        sleep_t: int = 5
-
-        @intf.record()
-        def foo(*args, **kwargs) -> None:
-            sleep(sleep_t)
-            return (args, kwargs)
-
-        args, kwargs = (
-            (
-                1,
-                2,
-                3,
-            ),
-            {"bar": "bar"},
-        )
-        params = (args, kwargs)
-
-        self.assertIsNone(intf.get(foo, params))
-        self.assertFalse(intf.insert(foo, params, params))
-
-        foo(*args, **kwargs)
-        start_t: float = time()
-        foo(*args, **kwargs)
-        self.assertTrue((time() - start_t) >= sleep_t)
-
-    @set_caching_module_enabled(True)
-    @set_deterministic_caching_enabled(False)
-    @patch_on_disk_cache_base_dir
-    @patch_deterministic_cache_intf_no_dump_on_exit
-    @patch_remote_cache_with_on_disk_cache
-    def test_deterministic_caching_disabled(self) -> None:
-        intf: intfs._DeterministicCacheIntf = self.intf_from_typename(
-            "_DeterministicCacheIntf"
-        )
-
-        @intf.record()
-        def foo(*args, **kwargs) -> None:
-            return (args, kwargs)
-
-        args, kwargs = (
-            (
-                1,
-                2,
-                3,
-            ),
-            {"bar": "bar"},
-        )
-        params = (args, kwargs)
-
-        with self.assertRaises(exceptions.DeterministicCachingDisabledError):
-            intf.get(foo, params)
-
-        with self.assertRaises(exceptions.DeterministicCachingDisabledError):
-            intf.insert(foo, params, params)
-
-        with self.assertRaises(exceptions.DeterministicCachingDisabledError):
-            foo(*args, **kwargs)
 
 
 @instantiate_parametrized_tests
@@ -1358,51 +859,6 @@ class UtilsTest(TestMixin, TestCase):
                 {"bar": "bar"},
             ),
         )
-
-    @parametrize("pickle_able", [True, False])
-    def test_try_pickle_key(self, pickle_able: bool) -> None:
-        """Test that cache key pickling works correctly and raises appropriate exceptions.
-
-        Verifies that the _try_pickle_key function successfully pickles serializable
-        cache keys and raises KeyPicklingError for non-serializable keys like lambda
-        functions. Tests both the successful pickling path and error handling.
-        """
-        if pickle_able:
-            key: str = self.random_string
-            self.assertEqual(pickle.loads(utils._try_pickle_key(key)), key)
-        else:
-            with self.assertRaises(exceptions.KeyPicklingError):
-                _ = utils._try_pickle_key(lambda: None)
-
-    @parametrize("pickle_able", [True, False])
-    def test_try_pickle_value(self, pickle_able: bool) -> None:
-        """Test that cache value pickling works correctly and raises appropriate exceptions.
-
-        Verifies that the _try_pickle_value function successfully pickles serializable
-        cache values and raises ValuePicklingError for non-serializable values like
-        lambda functions. Tests both successful pickling and proper error handling.
-        """
-        if pickle_able:
-            value: str = self.random_string
-            self.assertEqual(pickle.loads(utils._try_pickle_value(value)), value)
-        else:
-            with self.assertRaises(exceptions.ValuePicklingError):
-                _ = utils._try_pickle_value(lambda: None)
-
-    @parametrize("unpickle_able", [True, False])
-    def test_try_unpickle_value(self, unpickle_able: bool) -> None:
-        """Test that cache value unpickling works correctly and raises appropriate exceptions.
-
-        Verifies that the _try_unpickle_value function successfully unpickles valid
-        pickled data and raises ValueUnPicklingError for invalid data like None.
-        Tests both successful unpickling and proper error handling for corrupted data.
-        """
-        if unpickle_able:
-            value: str = self.random_string
-            self.assertEqual(utils._try_unpickle_value(pickle.dumps(value)), value)
-        else:
-            with self.assertRaises(exceptions.ValueUnPicklingError):
-                _ = utils._try_unpickle_value(b"foo")
 
 
 if __name__ == "__main__":

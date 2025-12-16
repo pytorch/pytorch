@@ -185,6 +185,7 @@ static Tensor& normal_mps_impl(Tensor& self,
     if (mean_t.defined())
       TORCH_CHECK(mean_t.numel() == std_t.numel(), op_name, ": mean and std must have same number of elements")
   }
+  TORCH_CHECK(!(mean_t.defined() && mean_t.is_complex()), op_name, " expects mean to be non-complex");
 
   RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
