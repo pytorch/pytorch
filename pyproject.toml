@@ -347,7 +347,6 @@ keep-runtime-typing = true
 "torchgen/**" = [
     "S101"
 ]
-"torch/_decomp/decompositions.py" = ["S101"]
 "torch/_dynamo/**" = ["S101"]
 "torch/_export/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
@@ -369,23 +368,16 @@ keep-runtime-typing = true
 "torch/export/**" = ["S101"]
 "torch/fx/**" = ["S101"]
 "torch/jit/**" = ["S101"]
-"torch/nn/modules/**" = ["S101"]
 "torch/onnx/_internal/**" = ["S101"]
 "torch/testing/**" = ["S101"]
 "tools/**" = [
     "S101"
 ]
-"setup.py" = [
-    "S101"
-]
 "functorch/**" = [
     "S101"
 ]
-"docs/source/scripts/exportdb/generate_example_rst.py" = ["S101"]
 "android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
-".github/scripts/gitutils.py" = ["S101"]
 ".github/scripts/test_trymerge.py" = ["S101"]
-".github/scripts/trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
