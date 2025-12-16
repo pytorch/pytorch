@@ -796,7 +796,7 @@ if __name__ == "__main__":
 
                 thealloc()
                 thefree()
-                ss = json.dumps(torch.cuda.memory._snapshot())
+                ss = json.dumps(torch.xpu.memory._snapshot())
                 self.assertEqual(("thefree" in ss), (context == "all"))
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
