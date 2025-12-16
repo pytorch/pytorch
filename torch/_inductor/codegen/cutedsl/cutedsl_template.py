@@ -2,10 +2,9 @@
 import functools
 import itertools
 from collections.abc import Iterable
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from unittest.mock import patch
 
-from torch._inductor.ir import ShapeAsConstantBuffer
 from torch._inductor.utils import Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
@@ -161,7 +160,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         """Benchmark the kernel execution."""
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         """Create the output node for this template choice."""
         return TensorBox.create(
             CuteDSLTemplateBuffer(
