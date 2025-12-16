@@ -1776,8 +1776,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        import torch._higher_order_ops.flat_apply as flat_apply
         from torch._higher_order_ops.flat_apply import (
+            flat_apply,
             func_to_graphable,
             is_graphable_type,
             is_valid_output,
@@ -1923,7 +1923,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         def flat_apply_capture(*args):
             nonlocal captured_spec
-            out = flat_apply.flat_apply(*args, checked_output=False)
+            out = flat_apply(*args, checked_output=False)
             # Output is handled similar to flat_apply input but reverse by
             # tree_flattening the output and trace the unflattening. Note that
             # wrapped functions must return the same pytree structure every time
@@ -1932,9 +1932,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if captured_spec is None:
                 captured_spec = spec
             else:
-                raise RuntimeError(
+                assert captured_spec == spec, (
                     "Error: nonstrict-traced functions must return the same "
-                    "output shape every time. got {spec!r} vs but expected {captured_spec!r}"
+                    f"output shape every time. got {spec!r} vs but expected {captured_spec!r}"
                 )
             assert is_valid_output(flat_out)
             return flat_out
