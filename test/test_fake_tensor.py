@@ -1847,7 +1847,6 @@ class FakeTensorPropTest(TestCase):
                 self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
             else:
                 untyped_storage = t.untyped_storage()
-                # Verify nbytes is correct (not multiplied by element_size again)
                 self.assertEqual(
                     untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
                 )
