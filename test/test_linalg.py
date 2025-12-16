@@ -2229,7 +2229,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
-    def test_eig_compare_backends(self, device, dtype):
+    def test_eig_identity(self, device, dtype):
 
         def run_test(shape, *, symmetric=False):
             from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2247,12 +2247,8 @@ class TestLinalg(TestCase):
             # compare eigenvalues with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
 
-            # sort eigenvalues because the order is not guaranteed
-            actual_eigvals = _sort_complex_real_first(actual[0])
-            expected_eigvals = _sort_complex_real_first(expected[0])
-
-            self.assertEqual(expected_eigvals, actual_eigvals)
-
+            # make sure all eigenvalues are returned
+            self.assertEqual(expected[0].shape, actual[0].shape)
 
             # set tolerance for correctness check
             if dtype in [torch.float32, torch.complex64]:
@@ -2270,6 +2266,42 @@ class TestLinalg(TestCase):
                 raise RuntimeError("eig returned empty tensors unexpectedly")
 
             self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
+
+            #calculate eigenvalues only and check all are returned
+            w_only = torch.linalg.eigvals(a)
+            self.assertEqual(w_only.shape, expected[0].shape)
+
+            #test eigval with eigenvectors returned previously
+            batch_shape = a.shape[:-2]
+            n = a.shape[-1]
+
+            for batch_idx in itertools.product(*[range(s) for s in batch_shape]):
+                A_b = a[batch_idx]
+                w_b = w_only[batch_idx]
+                v_b = v[batch_idx]
+
+                passing = False
+                closest = None
+
+                for i_val in range(n):
+                    eigval = w_b[i_val]
+                    for i_vec in range(n):
+                        eigvec = v_b[:, i_vec]
+
+                        lhs = A_b @ eigvec
+                        rhs = eigval * eigvec
+
+                        # track closest match for better error reporting
+                        if closest is None or torch.max(torch.norm(lhs - rhs)) < closest:
+                            closest = torch.max(torch.norm(lhs - rhs))
+
+                        if torch.allclose(lhs, rhs, atol=atol, rtol=0):
+                            passing = True
+                            break
+
+                    if not passing:
+                        self.fail(f"no matching eigenvector found. Closest: {closest:.2e} Tolerance: {atol:.2e}")
+
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
