@@ -394,6 +394,10 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
+#if not defined(USE_CUDA) and defined(USE_XPU)
+      return c10::DeviceType::XPU;
+#endif
+      [[fallthrough]];
     case libkineto::ActivityType::CUDA_SYNC:
     case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE: {
