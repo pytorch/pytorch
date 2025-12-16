@@ -66,7 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
-    "hoverxref.extension",
+    "sphinx_tippy",
 ]
 
 myst_enable_extensions = [
