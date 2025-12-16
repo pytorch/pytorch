@@ -81,10 +81,14 @@ class FoldedGraphModule(torch.fx.GraphModule):
         setattr(self, self.fx_const_folded_attrs_name, params)
 
 
-def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
+def _inline_module(
+    gm: torch.fx.GraphModule, inline_mod_name: str
+) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     Given `gm` and some graph module which is called with target name `inline_mod_name`,
     this helper will inline all of the nodes from that called graph module into `gm`.
+
+    Returns a mapping from subgraph nodes to the newly created/mapped nodes in gm.
     """
     # Fetch the inner graph module that we want to inline inside `gm`.
     inline_mod = dict(gm.named_modules())[inline_mod_name]
@@ -135,6 +139,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     # this module is unneeded as it's just inlined back to main graph.
     gm.graph.erase_node(call_mod_node_to_replace)
     gm.graph.eliminate_dead_code()
+
+    return replacement_mapping
 
 
 def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:

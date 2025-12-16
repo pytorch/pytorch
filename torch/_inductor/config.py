@@ -2288,6 +2288,9 @@ class test_configs:
     # Assume bucketing reduces latency (mostly for testing)
     assume_bucketing_reduces_latency: bool = True
 
+    # Enable fusion region detection for overlap scheduling cost estimation
+    enable_fusion_regions: bool = False
+
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
         os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"

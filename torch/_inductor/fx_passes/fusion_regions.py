@@ -25,25 +25,18 @@ class FusionRegion:
         self.total_bytes, self.cost_ms = self._compute_cost()
 
     def _compute_cost(self) -> tuple[int, float]:
-        from torch._inductor.utils import get_gpu_dram_gbps
+        from torch.utils._pytree import tree_flatten
+        from torch.utils._runtime_estimation import get_transfer_time
 
-        def get_node_bytes(node: fx.Node) -> int:
-            val = node.meta.get("val")
-            return get_num_bytes(val) if isinstance(val, torch.Tensor) else 0
-
-        total_bytes = 0
         subgraph = self.subgraph_module
+        input_vals = [n.meta.get("val") for n in subgraph.graph.find_nodes(op="placeholder")]
+        output_vals = [n.meta.get("val") for n in torch._inductor.utils.output_node(subgraph).all_input_nodes]
+        flat_inputs, _ = tree_flatten(input_vals)
+        flat_outputs, _ = tree_flatten(output_vals)
 
-        for node in itertools.chain(
-            subgraph.graph.find_nodes(op="placeholder"),
-            torch._inductor.utils.output_node(subgraph).all_input_nodes,
-        ):
-            total_bytes += get_node_bytes(node)
-
-        fusion_bw_gbps = get_gpu_dram_gbps()
-        fusion_bw_bytes_per_s = fusion_bw_gbps * 1e9
-        cost_ms = (total_bytes / fusion_bw_bytes_per_s) * 1000
-        return total_bytes, cost_ms
+        transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
+        total_bytes = sum(get_num_bytes(t) for t in flat_inputs + flat_outputs if isinstance(t, torch.Tensor))
+        return total_bytes, transfer_time_ns / 1e6
 
 
 def is_fusible_node(n: fx.Node) -> bool:
