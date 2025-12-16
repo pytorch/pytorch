@@ -3492,10 +3492,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "guard_nn_modules", True)
     def test_dict_insertion_guard_method_func(self):
-        class SimpleModel(nn.Module):
+        class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = nn.Linear(10, 10)
+                self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x):
                 return self.linear(x)
