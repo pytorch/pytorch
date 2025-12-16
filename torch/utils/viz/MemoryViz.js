@@ -236,7 +236,10 @@ function MemoryView(outer, stack_info, snapshot, device) {
       );
     }
   }
-  sorted_segments.sort((x, y) => x.addr - y.addr);
+  sorted_segments.sort((x, y) => {
+    if (x.addr === y.addr) return 0;
+    return x.addr < y.addr ? -1 : 1;
+  });
 
   function simulate_memory(idx) {
     // create a copy of segments because we edit size properties below
@@ -381,11 +384,21 @@ function MemoryView(outer, stack_info, snapshot, device) {
       segment_d.selectAll('rect').remove();
       block_g.selectAll('rect').remove();
       block_r.selectAll('rect').remove();
-      const segments = [...segments_unsorted].sort((x, y) =>
-        x.size === y.size ? x.addr - y.addr : x.size - y.size,
-      );
+      const segments = [...segments_unsorted].sort((x, y) => {
+        if (x.size > y.size) return 1;
+        if (x.size < y.size) return -1;
+        // if sizes are equal, compare addresses, it's a safe way to sort
+        // numbers and BigInts in js.
+        if (x.addr > y.addr) return 1;
+        if (x.addr < y.addr) return -1;
+        return 0;
+      });
 
-      const segments_by_addr = [...segments].sort((x, y) => x.addr - y.addr);
+      const segments_by_addr = [...segments].sort((x, y) => {
+        if (x.addr > y.addr) return 1;
+        if (x.addr < y.addr) return -1;
+        if (x.addr === y.addr) return 0;
+      });
 
       const max_size = segments.length === 0 ? 0 : segments.at(-1).size;
 
@@ -459,12 +472,14 @@ function MemoryView(outer, stack_info, snapshot, device) {
         let right = segments_by_addr.length - 1;
         while (left <= right) {
           const mid = Math.floor((left + right) / 2);
+          const seg = segments_by_addr[mid];
+          const seg_end =
+            typeof seg.addr === "bigint"
+              ? seg.addr + BigInt(seg.size)
+              : seg.addr + seg.size;
           if (addr < segments_by_addr[mid].addr) {
             right = mid - 1;
-          } else if (
-            addr >=
-            segments_by_addr[mid].addr + segments_by_addr[mid].size
-          ) {
+          } else if (addr >= seg_end) {
             left = mid + 1;
           } else {
             return segments_by_addr[mid];
@@ -484,7 +499,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .data(blocks)
         .enter()
         .append('rect')
-        .attr('x', x => xScale(x.segment.offset + (x.addr - x.segment.addr)))
+        .attr('x', x => xScale(x.segment.offset + Number(x.addr - x.segment.addr)))
         .attr('y', x => yScale(x.segment.row))
         .attr('width', x => xScale(x.requested_size))
         .attr('height', yScale(4 / 5))
@@ -526,7 +541,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .append('rect')
         .attr('x', x =>
           xScale(
-            x.segment.offset + (x.addr - x.segment.addr) + x.requested_size,
+            x.segment.offset + Number(x.addr - x.segment.addr) + x.requested_size,
           ),
         )
         .attr('y', x => yScale(x.segment.row))
