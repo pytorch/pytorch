@@ -2241,7 +2241,10 @@ def _batch_norm_no_update(
 def _fused_dropout_decomposition(input, p, generator=None):
     assert generator is None
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
-    res = mask.type_as(input) * input * (1.0 / p)
+    if p == 0.0:
+        res = torch.zeros_like(input)
+    else:
+        res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
 
 
