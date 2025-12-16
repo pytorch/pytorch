@@ -807,10 +807,8 @@ class OverlapScheduler:
             # Custom estimation provided but returned None - don't fall through to fusible estimation
             return None
 
-        # Estimate fusible nodes (pointwise, reduction, etc.) as memory-bound
-        from torch._inductor.fx_passes.fusion_regions import is_fusible_node
-
-        if is_fusible_node(node):
+        # assume any node without flop counter is mem bound
+        if node.op == "call_function":
             return estimate_mem_bound_runtime_ms(node)
 
         return None

@@ -962,6 +962,12 @@ class TestFusibleNodeOverlap(InductorTestCase):
             len(info.hiding_nodes), 0, "Fusible nodes should hide the collective"
         )
 
+        # Verify graph structure: ag -> pointwise ops -> wait
+        graph_str = str(traced.graph)
+        FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
+            "sub"
+        ).check("wait_tensor").run(graph_str)
+
     def test_fusion_regions_hide_collective(self):
         """Test that fusion regions can hide collectives when enabled."""
 
@@ -1005,6 +1011,12 @@ class TestFusibleNodeOverlap(InductorTestCase):
         self.assertGreater(
             len(info.hiding_nodes), 0, "Fusion region should hide the collective"
         )
+
+        # Verify graph structure: ag -> pointwise ops -> wait
+        graph_str = str(traced.graph)
+        FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
+            "sub"
+        ).check("wait_tensor").run(graph_str)
 
 
 if __name__ == "__main__":
