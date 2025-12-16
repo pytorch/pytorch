@@ -238,6 +238,7 @@ class OpDispatcher:
     ) -> object:
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
+        assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
