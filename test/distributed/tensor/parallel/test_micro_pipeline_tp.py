@@ -236,9 +236,15 @@ class MicroPipelineTPTest(TestCase):
 
         if gather_dim == A_dims - 1:
             # Decomposing the matmul on the K dimension is not supported.
-            # When gather_dim == 1 and A_dims == 2, the view optimization in
-            # _maybe_view_chunk_cat allows the all_gather to be optimized away
-            # entirely, so we only check that fused_all_gather_matmul is NOT used.
+            # The view optimization in _maybe_view_chunk_cat allows the
+            # all_gather to be optimized away entirely, so we only check that
+            # fused_all_gather_matmul is NOT used.
+            self.assertNotIn("fused_all_gather_matmul", code)
+        elif gather_dim == 1:
+            # When gather_dim == 1, the view optimization in _maybe_view_chunk_cat
+            # allows the all_gather to be optimized away entirely (since there are
+            # no dimensions between dim 0 and gather_dim that need to be moved).
+            # This results in no all_gather_into_tensor appearing in the code.
             self.assertNotIn("fused_all_gather_matmul", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
