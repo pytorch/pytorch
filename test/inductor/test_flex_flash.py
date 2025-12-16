@@ -374,6 +374,7 @@ class MaskModCase:
     seq_len: int = 512
     dim: int = 64
     score_mod_factory: Callable[[torch.dtype, str], Callable | None] | None = None
+    requires_grad: bool = False
 
 
 def score_case_name(case: ScoreModCase):
@@ -540,6 +541,33 @@ MASK_MOD_CASES = [
             num_heads=4, dtype=dtype, device=device
         ),
     ),
+    MaskModCase(
+        "backward_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_block_mask_causal_score_times_two",
+        lambda _dtype, _device: _causal_mask,
+        score_mod_factory=lambda _dtype, _device: _times_two,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_block_mask_causal_score_squared",
+        lambda _dtype, _device: _causal_mask,
+        score_mod_factory=lambda _dtype, _device: _score_squared,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_block_mask_causal_rel_bias",
+        lambda _dtype, _device: _causal_mask,
+        score_mod_factory=lambda _dtype, _device: _rel_bias,
+        seq_len=257,
+        requires_grad=True,
+    ),
 ]
 
 
@@ -569,6 +597,13 @@ class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
+        if case.requires_grad:
+            major, _ = torch.cuda.get_device_capability()
+            if major < 9:
+                self.skipTest(
+                    "Block sparsity backward requires SM90+ (Hopper/Blackwell)"
+                )
+
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
@@ -576,6 +611,7 @@ class TestFlexFlash(InductorTestCase):
             dim=case.dim,
             dtype=dtype,
             device=device,
+            requires_grad=case.requires_grad,
         )
         flash_vs_triton(
             q,
@@ -641,7 +677,13 @@ class TestFlexFlash(InductorTestCase):
             )
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_rejects_mask_mod(self, device, dtype):
+    def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 9:
+            self.skipTest("Block sparsity backward is supported on SM90+")
+
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
         def causal_mask(_b, _h, q_idx, kv_idx):
@@ -651,7 +693,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"NYI: Flex Flash Attention doesn't support block_sparsity yet",
+            r"NYI: Block sparsity in backward only supported on SM90/SM100",
         ):
             compiled_fn(
                 q,

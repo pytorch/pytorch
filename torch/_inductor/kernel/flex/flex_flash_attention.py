@@ -348,8 +348,13 @@ def _can_use_flex_flash_attention_backward(
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
 
-    if not is_trivial_mask_graph(mask_graph.graph_module):
-        return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
+    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+    if not mask_trivial:
+        if not _supports_nontrivial_mask_graphs():
+            return (
+                False,
+                "NYI: Block sparsity in backward only supported on SM90/SM100",
+            )
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -424,13 +429,11 @@ def create_flex_flash_attention_backward_kernel(
     fw_subgraph_buffer: Optional[SubgraphResults] = None,
     joint_subgraph_buffer: Optional[Any] = None,
     score_mod_other_buffers: Optional[list[TensorBox]] = None,
-    # TODO: will be needed for block sparsity
-    # mask_graph: SubgraphResults,
-    # mask_mod_other_buffers: list[TensorBox],
-    # kv_num_blocks: TensorBox | None,
-    # kv_indices: TensorBox | None,
-    # full_kv_num_blocks: TensorBox | None,
-    # full_kv_indices: TensorBox | None,
+    mask_graph_buffer: Optional[SubgraphResults] = None,
+    q_num_blocks: Optional[TensorBox] = None,
+    q_indices: Optional[TensorBox] = None,
+    full_q_num_blocks: Optional[TensorBox] = None,
+    full_q_indices: Optional[TensorBox] = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
@@ -481,7 +484,7 @@ def create_flex_flash_attention_backward_kernel(
 
     choices: list[Any] = []
 
-    input_nodes = [
+    input_nodes: list[TensorBox] = [
         query,
         key,
         value,
@@ -492,8 +495,20 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
+    has_block_mask = q_num_blocks is not None
+    if has_block_mask:
+        assert q_indices is not None
+        assert full_q_num_blocks is not None
+        assert full_q_indices is not None
+        input_nodes.extend([q_num_blocks, q_indices, full_q_num_blocks, full_q_indices])
+
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
-    subgraphs = [fw_subgraph_buffer, joint_subgraph_buffer] if has_score_mod else []
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(fw_subgraph_buffer)
+        subgraphs.append(joint_subgraph_buffer)
+    if has_block_mask and mask_graph_buffer is not None:
+        subgraphs.append(mask_graph_buffer)
 
     error = flash_attention_backward_cutedsl_template.maybe_append_choice(
         choices,
@@ -503,6 +518,7 @@ def create_flex_flash_attention_backward_kernel(
         subgraphs=subgraphs if subgraphs else None,
         SM_SCALE=scale,
         HAS_SCORE_MOD=has_score_mod,
+        HAS_BLOCK_MASK=has_block_mask,
     )
 
     for choice in choices:
