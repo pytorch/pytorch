@@ -1,6 +1,8 @@
 #pragma once
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/ExpandUtils.h>
 
 namespace at::native {
 
@@ -57,13 +59,18 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
-std::optional<c10::MaybeOwned<Tensor>> inline maybe_prepare_matrix_with_layout(const Tensor& t, bool make_row_major_like) {
+std::optional<c10::MaybeOwned<Tensor>> inline maybe_prepare_matrix_with_layout(
+    const Tensor& t,
+    bool make_row_major_like,
+    const IntArrayRef& result_sizes) {
   int64_t ld = make_row_major_like ? 0 : 1;
   IntArrayRef strides = t.strides();
   IntArrayRef sizes = t.sizes();
   if (strides[1 - ld] == 1 && strides[ld] >= std::max<int64_t>(1, sizes[1 - ld])) {
     // Means already complies with being row-/col-major-like
-    return c10::MaybeOwned<Tensor>::borrowed(t);
+    return t.sizes() == result_sizes
+      ? c10::MaybeOwned<Tensor>::borrowed(t)
+      : c10::MaybeOwned<Tensor>::owned(*expand_size(t, result_sizes, "maybe_prepare_matrix_with_layout"));
   } else {
     // No compliance, it is best to copy bias into result
     return std::nullopt;
@@ -190,10 +197,12 @@ struct cublasCommonArgs {
       } else { // Case for, potentially, an out-of-place GEMM
         if (self->dim() == 2) { // 2D bias
           // Bias should match the result's layout
-          bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result);
+          bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result, result->sizes());
           if (bias.has_value()) {
-          std::cout << "2D BIAS case" << std::endl;
             bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
+            std::cout << "2D BIAS case" << " trans_res: " << transpose_result << std::endl;
+            std::cout << "bias shape: " << (*bias)->sizes() << " bias strides: " << (*bias)->strides() << std::endl;
+            std::cout << std::endl;
           }
           std::cout << "has bias: " << bias.has_value() << std::endl;
         } else { // 1D bias
