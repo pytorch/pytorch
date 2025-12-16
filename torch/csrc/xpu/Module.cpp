@@ -597,7 +597,7 @@ static void initXpuMethodBindings(PyObject* module) {
         trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
             te.addr_;
         trace_entry[size_s] = te.size_;
-        trace_entry[stream_s] = int64_t(te.queue_);
+        trace_entry[stream_s] = reinterpret_cast<uint64_t>(te.queue_);
         trace_entry[time_us_s] = te.time_.t_;
         trace.append(trace_entry);
       }
