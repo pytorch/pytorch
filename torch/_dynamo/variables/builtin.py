@@ -1780,6 +1780,7 @@ class BuiltinVariable(VariableTracker):
                 for i in [a, b]
             ):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
+                    # type: ignore[arg-type]
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -1797,7 +1798,9 @@ class BuiltinVariable(VariableTracker):
                     if isinstance(x, variables.UnspecializedPythonVariable)
                 )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    result, raw_res, need_unwrap
+                    result,  # type: ignore[arg-type]
+                    raw_res,
+                    need_unwrap,
                 )
             # otherwise return tensor
             else:
