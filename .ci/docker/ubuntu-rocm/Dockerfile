@@ -134,6 +134,7 @@ RUN rm install_openmpi.sh
 WORKDIR /app
 RUN apt-get update && apt-get install -y git python3 python3-pip python3-setuptools
 RUN git clone https://github.com/ROCm/rocm-libraries.git
+RUN cd rocm-libraries
 RUN git checkout users/asunderwood/origami-torch-ext
 RUN pip install nanobind
 WORKDIR /app/rocm-libraries/shared/origami
