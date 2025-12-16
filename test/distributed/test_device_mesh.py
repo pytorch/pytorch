@@ -1458,6 +1458,44 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
 
+    @with_comms
+    def test_device_mesh_w_torchcomms(self) -> None:
+        DeviceMesh._use_torchcomm = True
+        os.environ["TORCH_BACKEND"] = "ncclx"
+        mesh_shape = (2, 2, self.world_size // 2)
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("pp", "dp", "tp"),
+            backend_override="cpu:gloo,cuda:ncclx",  # override for ncclx
+        )
+        dp_rank = mesh_3d.get_local_rank("dp")
+        expected_dp_rank = 0 if self.rank % 4 <= 1 else 1
+        self.assertEqual(dp_rank, expected_dp_rank)
+
+        # test slicing and pg functionality
+        pp_pg = mesh_3d["pp"].get_group()
+        tensor = torch.ones(3, 3, device=self.device_type) * self.rank
+        dist.all_reduce(tensor, group=pp_pg)
+        expected_tensor = torch.ones(3, 3) * 4
+        self.assertEqual(tensor, expected_tensor)
+
+        # test flatten functionality
+        flatten_mesh = mesh_3d.flatten()
+        flatten_pg = flatten_mesh.get_group()
+        tensor = torch.ones(3, 3, device=self.device_type) * self.rank
+        dist.all_reduce(tensor, group=flatten_pg)
+        expected_tensor = torch.ones(3, 3) * 32
+        self.assertEqual(tensor, expected_tensor)
+
+        # finalize the mesh
+        pgs = []
+        pgs.extend(mesh_3d.get_all_groups())
+        pgs.extend(flatten_mesh.get_all_groups())
+
+        for pg in pgs:
+            pg._get_backend(torch.device(f"{self.device_type}:{self.rank}")).getComms().finalize()
+        for sub_comm in comm_per_dim.values():
+            sub_comm.finalize()
+        DeviceMesh._use_torchcomm = False
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):

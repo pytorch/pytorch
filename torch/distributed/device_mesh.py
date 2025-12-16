@@ -329,8 +329,9 @@ else:
             default_initialized = is_initialized()
             # TODO: think about how to allow pg options to be passed to world group
             # or mesh dimension groups
+            backend = os.environ.get("TORCH_BACKEND", None)
             if not default_initialized:
-                init_process_group()
+                init_process_group(backend=backend)
 
             world_size = get_world_size()
             if self._layout.numel() > world_size:
@@ -431,7 +432,7 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                getattr(default_group, "bound_device_id", None) is not None
+                (getattr(default_group, "bound_device_id", None) is not None or _use_torchcomm)
                 and torch.cuda.is_available()
                 and (
                     backend is None

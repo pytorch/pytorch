@@ -141,6 +141,14 @@ _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
+try:
+    # pyrefly: ignore [missing-import]
+    from torchcomms._comms import _BackendWrapper, new_comm
+
+    _TORCHCOMM_AVAILABLE = True
+except ImportError:
+    _TORCHCOMM_AVAILABLE = False
+
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
@@ -2038,8 +2046,11 @@ def _new_process_group_helper(
                     backend_class.size(),
                 )
                 pg._set_default_backend(backend_type)
-        elif _use_torchcomm: 
-            from torchcomms._comms import _BackendWrapper, new_comm
+        elif _use_torchcomm:
+            if not _TORCHCOMM_AVAILABLE:
+                raise RuntimeError(
+                    "torchcomms is not available. Please install torchcomms to use this feature."
+                )
             device = torch.device(os.environ.get("TORCHCOMM_DEVICE", "cuda"))
             # TODO: How do we redirect nccl to ncclx
             comm = new_comm(backend_str, device, name=group_name)
