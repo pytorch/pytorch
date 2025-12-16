@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -1745,7 +1745,7 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> list[Union[str, Weights]] | str:
+    ) -> list[str | Weights] | str:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.

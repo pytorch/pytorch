@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 import operator
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
@@ -22,7 +22,7 @@ def make_prim(
     impl_aten,
     return_type=_prims.RETURN_TYPE.NEW,
     doc: str = "",
-    tags: Optional[Sequence[torch.Tag]] = None,
+    tags: Sequence[torch.Tag] | None = None,
 ):
     if isinstance(return_type, tuple):
 

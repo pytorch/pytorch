@@ -6,7 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -58,7 +58,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
+    hint_override: int | None = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -533,7 +533,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -542,7 +542,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[Optional[int], ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -579,7 +579,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
-        hint_override: Optional[int] = None,
+        hint_override: int | None = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -642,7 +642,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _get_exceeding_shared_memory_checker(
         self,
-    ) -> Optional[Callable[[BaseConfig, int], bool]]:
+    ) -> Callable[[BaseConfig, int], bool] | None:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         If the device does not report available shared memory, returns None.

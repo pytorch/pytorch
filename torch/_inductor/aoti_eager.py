@@ -3,7 +3,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest import mock
 
 import torch
@@ -32,7 +32,7 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
 
 def load_aoti_eager_cache(
     ns: str, op_func_name_with_overload: str, device_type: str
-) -> list[Optional[dict[str, Any]]]:
+) -> list[dict[str, Any] | None]:
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
@@ -174,8 +174,8 @@ def aoti_compile_with_persistent_cache(
     args: tuple[Any],
     kwargs: dict[str, Any],
     *,
-    dynamic_shapes: Optional[dict[str, Any]] = None,
-    options: Optional[dict[str, Any]] = None,
+    dynamic_shapes: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
 ) -> str:
