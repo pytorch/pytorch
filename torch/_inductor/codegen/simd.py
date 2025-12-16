@@ -800,7 +800,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # and assuming A!=0
                     # A must be > B .
                     #
-                    sv.statically_known_g(FloorDiv(size, remaining[current_group]), 1)
+                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
