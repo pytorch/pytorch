@@ -127,7 +127,30 @@ def _inline_module(
         if inline_node.op == "output":
             outputs = inline_node.args[0]
             output_replacements = map_arg(outputs, replacement_fn)
+
+            # If output is a tuple, we need to handle getitem users specially.
+            # Capture users before replace_all_uses_with modifies them.
+            getitem_users: list[torch.fx.Node] = []
+            if isinstance(output_replacements, (list, tuple)):
+                import operator
+
+                getitem_users = [
+                    user
+                    for user in call_mod_node_to_replace.users
+                    if user.op == "call_function"
+                    and user.target is operator.getitem
+                    and isinstance(user.args[1], int)
+                ]
+
             call_mod_node_to_replace.replace_all_uses_with(output_replacements)
+
+            # Inline getitem nodes that now index into the tuple literal
+            for user in getitem_users:
+                idx = user.args[1]
+                assert isinstance(idx, int)
+                user.replace_all_uses_with(output_replacements[idx])
+                gm.graph.erase_node(user)
+
             continue
 
         with gm.graph.inserting_before(call_mod_node_to_replace):
