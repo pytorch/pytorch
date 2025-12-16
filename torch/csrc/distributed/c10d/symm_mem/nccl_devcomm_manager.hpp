@@ -11,6 +11,10 @@
 
 namespace c10d::symmetric_memory {
 
+// Maximum number of barriers for NCCL device communicator.
+// Each CTA will need a separate barrier.
+constexpr int NCCL_DEVCOMM_BARRIER_COUNT = 32;
+
 // Manage all the NCCL device communicator business. Singleton.
 class NCCLDevCommManager {
  public:
@@ -20,23 +24,36 @@ class NCCLDevCommManager {
   // Get single, global manager.
   static NCCLDevCommManager& get(const c10::Device device) {
     static NCCLDevCommManager manager(device);
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         manager.device_ == device,
         "Detected use of NCCLDevCommManager on multiple devices. This is not supported.");
     return manager;
   }
 
   // Get an NCCL device communicator for a group.
-  ncclDevComm get_devcomm(const std::string& group_name) {
+  ncclDevComm& get_devcomm(const std::string& group_name) {
     auto it = group_to_comms_.find(group_name);
     if (it == group_to_comms_.end()) {
       TORCH_CHECK(
           false,
           "NCCL device communicator for group ",
           group_name,
-          " not found");
+          " not found. Have you rendezvoused any tensor with this group?");
     }
     return it->second.second;
+  }
+
+  // Get a host-side communicator for a group.
+  ncclComm_t get_comm(const std::string& group_name) {
+    auto it = group_to_comms_.find(group_name);
+    if (it == group_to_comms_.end()) {
+      TORCH_CHECK(
+          false,
+          "NCCL host communicator for group ",
+          group_name,
+          " not found. Have you rendezvoused any tensor with this group?");
+    }
+    return it->second.first;
   }
 
   // Create device communicator if it doesn't exist. Skip if it already exists.
@@ -51,18 +68,17 @@ class NCCLDevCommManager {
     // See example in
     // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
     memset(&reqs, 0, sizeof(ncclDevCommRequirements));
-    // TODO: we need to figure out how to set the number of CTA and
-    // requirements. See
-    // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/device.html#nccldevcommrequirements
-    int nCTAs = 16;
-    reqs.lsaBarrierCount = nCTAs;
+    // Specifies the number for both the memory and network barriers.
+    reqs.barrierCount = NCCL_DEVCOMM_BARRIER_COUNT;
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
     // Cache the device communicator for future reuse
-    group_to_comms_[group_name] = std::make_pair(comm, devComm);
+    group_to_comms_.emplace(group_name, std::make_pair(comm, devComm));
   }
 
   ~NCCLDevCommManager() noexcept {
+    // Best effort to destroy the device communicators. Skip if CUDA context has
+    // exited.
     try {
       c10::cuda::CUDAGuard guard(device_);
       // Make sure all kernels have completed before destroying the device
