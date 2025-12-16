@@ -473,6 +473,9 @@ def _unlift_graph(
         pytree.treespec_leaf(),
         None,
     )
+    # After unlifting, the buffer mutation information is lost. Pass the information
+    # so that Inductor can do optimizations correctly.
+    unlifted_gm.meta["mutated_named_buffers"] = OrderedSet(buffer_mutations.values())
     return unlifted_gm
 
 
@@ -820,6 +823,13 @@ def _compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     aot_mode: bool = V.aot_compilation
+
+    if config.pipeline_max_autotune_gemm:
+        # Warm up max-autotune process pool asap
+        from torch._inductor.autotune_process import AutotuneProcessPool
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        pool_instance.warm_up()
 
     # Clean up Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
@@ -1860,7 +1870,7 @@ def cudagraphify_impl(
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
         remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
@@ -1960,7 +1970,7 @@ def compile_fx_aot(
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
 
     if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
@@ -2467,6 +2477,7 @@ def compile_fx(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if CompilerBisector.disable_subsystem("inductor", "pre_grad_graph"):
+        # pyrefly: ignore [bad-return]
         return model_
 
     if config_patches:

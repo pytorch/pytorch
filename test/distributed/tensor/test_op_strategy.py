@@ -32,11 +32,7 @@ from torch.distributed.tensor._ops._einsum_strategy import (
 )
 from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
-from torch.distributed.tensor.debug import (
-    _clear_fast_path_sharding_prop_cache,
-    _clear_python_sharding_prop_cache,
-    CommDebugMode,
-)
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -380,6 +376,37 @@ class TestCostModel(DTensorOpTestBase):
             )
             self.assertFalse(output_sharding.needs_redistribute)
 
+    def test_redistribute_cost_with_order(self):
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+
+        # Source: Shard on dim 0 across all three mesh dimensions
+        source_placement = (Shard(0), Shard(0))
+
+        # Target: Replicate on first mesh dimension, shard on others
+        # This requires 2 allgathers, one on dim=0 and one on dim=1
+        replicate_mesh_dim0 = (Replicate(), Shard(0))
+
+        # Target: Replicate on second mesh dimension, shard on others
+        # This requires 1 allgather on dim=1
+        replicate_mesh_dim1 = (Shard(0), Replicate())
+
+        global_tensor = torch.randn(4, 4)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        source_spec = DTensorSpec(mesh_2d, source_placement, global_tensor_meta)
+        target_spec_dim0 = DTensorSpec(mesh_2d, replicate_mesh_dim0, global_tensor_meta)
+        target_spec_dim1 = DTensorSpec(mesh_2d, replicate_mesh_dim1, global_tensor_meta)
+
+        # Calculate costs for allgather on each mesh dimension
+        cost_mesh_dim0 = redistribute_cost(source_spec, target_spec_dim0)
+        cost_mesh_dim1 = redistribute_cost(source_spec, target_spec_dim1)
+
+        # Cost increases with earlier mesh dimensions due to the way
+        # mesh dimensions are ordered (outer to inner in device hierarchy)
+        self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
+
 
 # -------------Test op strategy registration-------------
 # custom op without List[Tensor] as input
@@ -481,8 +508,7 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        _clear_fast_path_sharding_prop_cache()
-        _clear_python_sharding_prop_cache()
+        _clear_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
@@ -534,9 +560,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
 
 class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     @with_comms
-    @patch(
-        "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
-    )
+    @patch("torch.distributed.tensor._sharding_prop._select_min_cost_strategy")
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 

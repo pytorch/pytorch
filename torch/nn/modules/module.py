@@ -115,7 +115,7 @@ calling forward and backward. This is global state used for debugging/profiling
 purposes"""
 _global_backward_pre_hooks: dict[int, Callable] = OrderedDict()
 _global_backward_hooks: dict[int, Callable] = OrderedDict()
-_global_is_full_backward_hook: Optional[bool] = None
+_global_is_full_backward_hook: bool | None = None
 _global_forward_pre_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
@@ -294,7 +294,7 @@ def register_module_forward_hook(
 
 
 def register_module_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -323,7 +323,7 @@ def register_module_backward_hook(
 
 
 def register_module_full_backward_pre_hook(
-    hook: Callable[["Module", _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward pre-hook common to all the modules.
 
@@ -350,7 +350,7 @@ def register_module_full_backward_pre_hook(
 
 
 def register_module_full_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -453,12 +453,12 @@ class Module:
     the change."""
 
     training: bool
-    _parameters: dict[str, Optional[Parameter]]
-    _buffers: dict[str, Optional[Tensor]]
+    _parameters: dict[str, Parameter | None]
+    _buffers: dict[str, Tensor | None]
     _non_persistent_buffers_set: set[str]
     _backward_pre_hooks: dict[int, Callable]
     _backward_hooks: dict[int, Callable]
-    _is_full_backward_hook: Optional[bool]
+    _is_full_backward_hook: bool | None
     _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support set[int], this dict is used as a set, where all
@@ -477,7 +477,7 @@ class Module:
     _load_state_dict_post_hooks: dict[int, Callable]
     _modules: dict[str, Optional["Module"]]
     call_super_init: bool = False
-    _compiled_call_impl: Optional[Callable] = None
+    _compiled_call_impl: Callable | None = None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
@@ -526,7 +526,7 @@ class Module:
     forward: Callable[..., Any] = _forward_unimplemented
 
     def register_buffer(
-        self, name: str, tensor: Optional[Tensor], persistent: bool = True
+        self, name: str, tensor: Tensor | None, persistent: bool = True
     ) -> None:
         r"""Add a buffer to the module.
 
@@ -589,7 +589,7 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+    def register_parameter(self, name: str, param: Parameter | None) -> None:
         r"""Add a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
@@ -1073,7 +1073,7 @@ class Module:
         fn(self)
         return self
 
-    def cuda(self, device: Optional[int | device] = None) -> Self:
+    def cuda(self, device: int | device | None = None) -> Self:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1092,7 +1092,7 @@ class Module:
         """
         return self._apply(lambda t: t.cuda(device))
 
-    def ipu(self, device: Optional[int | device] = None) -> Self:
+    def ipu(self, device: int | device | None = None) -> Self:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1111,7 +1111,7 @@ class Module:
         """
         return self._apply(lambda t: t.ipu(device))
 
-    def xpu(self, device: Optional[int | device] = None) -> Self:
+    def xpu(self, device: int | device | None = None) -> Self:
         r"""Move all model parameters and buffers to the XPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1130,7 +1130,7 @@ class Module:
         """
         return self._apply(lambda t: t.xpu(device))
 
-    def mtia(self, device: Optional[int | device] = None) -> Self:
+    def mtia(self, device: int | device | None = None) -> Self:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
@@ -1218,9 +1218,7 @@ class Module:
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
-    def to_empty(
-        self, *, device: Optional[DeviceLikeType], recurse: bool = True
-    ) -> Self:
+    def to_empty(self, *, device: DeviceLikeType | None, recurse: bool = True) -> Self:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
@@ -1239,8 +1237,8 @@ class Module:
     @overload
     def to(
         self,
-        device: Optional[DeviceLikeType] = ...,
-        dtype: Optional[dtype] = ...,
+        device: DeviceLikeType | None = ...,
+        dtype: dtype | None = ...,
         non_blocking: bool = ...,
     ) -> Self: ...
 
@@ -1384,7 +1382,7 @@ class Module:
 
     def register_full_backward_pre_hook(
         self,
-        hook: Callable[["Module", _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward pre-hook on the module.
@@ -1392,7 +1390,7 @@ class Module:
         The hook will be called every time the gradients for the module are computed.
         The hook should have the following signature::
 
-            hook(module, grad_output) -> tuple[Tensor] or None
+            hook(module, grad_output) -> tuple[Tensor, ...], Tensor or None
 
         The :attr:`grad_output` is a tuple. The hook should
         not modify its arguments, but it can optionally return a new gradient with
@@ -1432,7 +1430,7 @@ class Module:
         return handle
 
     def register_backward_hook(
-        self, hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t]
+        self, hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None]
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
@@ -1459,7 +1457,7 @@ class Module:
 
     def register_full_backward_hook(
         self,
-        hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
@@ -1623,9 +1621,9 @@ class Module:
 
     def register_forward_pre_hook(
         self,
-        hook: Callable[[T, tuple[Any, ...]], Optional[Any]]
+        hook: Callable[[T, tuple[Any, ...]], Any | None]
         | Callable[
-            [T, tuple[Any, ...], dict[str, Any]], Optional[tuple[Any, dict[str, Any]]]
+            [T, tuple[Any, ...], dict[str, Any]], tuple[Any, dict[str, Any]] | None
         ],
         *,
         prepend: bool = False,
@@ -1686,8 +1684,8 @@ class Module:
 
     def register_forward_hook(
         self,
-        hook: Callable[[T, tuple[Any, ...], Any], Optional[Any]]
-        | Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
+        hook: Callable[[T, tuple[Any, ...], Any], Any | None]
+        | Callable[[T, tuple[Any, ...], dict[str, Any], Any], Any | None],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -2830,7 +2828,7 @@ class Module:
 
     def named_modules(
         self,
-        memo: Optional[set["Module"]] = None,
+        memo: set["Module"] | None = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):

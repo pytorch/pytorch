@@ -12,7 +12,7 @@
     v_transposed = V.transpose(1, 2)
 
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=0,
@@ -25,6 +25,7 @@
             out="tSrS_ssa"
         ) | indent_except_first(2) }}
         return tSrS_ssa
+    {{ set_cute_hash("score_mod", "score") }}
 
     # (B,M,H,D) -> (B,H,M,D)
     output = {{get_output()}}
@@ -43,6 +44,7 @@
         n="kv_idx",
         ) | indent_except_first(2) }}
         return mask_mod_output
+    {{ set_cute_hash("mask_mod", "mask") }}
     block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX)
     {% else %}
     block_sparse_tensors = None

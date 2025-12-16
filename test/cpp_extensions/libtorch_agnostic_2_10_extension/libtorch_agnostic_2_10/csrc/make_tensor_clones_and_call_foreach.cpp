@@ -8,7 +8,7 @@ using torch::stable::Tensor;
 
 // Declare my__foreach_mul (defined in my__foreach_mul.cpp)
 extern std::vector<Tensor> my__foreach_mul(
-    torch::headeronly::HeaderOnlyArrayRef<Tensor> self,
+    const torch::headeronly::HeaderOnlyArrayRef<Tensor>& self,
     torch::headeronly::HeaderOnlyArrayRef<Tensor> other);
 
 // Helper function for cloning
