@@ -17,12 +17,6 @@ class LinterTestCase(TestCase):
         else:
             expected_file.write_text(actual)
 
-    def replace(self, s: str):
-        linter = self.LinterClass("dummy")
-        pf = self.LinterClass.make_file(contents=s)
-        replacement, _results = linter._replace(pf)
-        return replacement
-
     @mock.patch("sys.stdout", new_callable=io.StringIO)
     def lint_test(self, path, args, mock_stdout):
         return self._lint_test(path, args, mock_stdout)[:2]

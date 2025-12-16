@@ -210,7 +210,7 @@ class MissingTypeLinter(FileLinter):
         return json.loads(text)
 
     @cached_property
-    def type_results(self) -> dict[Path, list[dict[str, Any]]]:
+    def type_results(self) -> dict[Path, Any]:
         """Map sorted absolute file paths to lists of `pyrefly` function reports"""
         it = ((Path(k), v) for k, v in sorted(self._raw_type_results.items()))
         return {p: v for p, v in it if p.suffix in SUFFIXES}
