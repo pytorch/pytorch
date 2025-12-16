@@ -2482,10 +2482,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
         hint_override: Optional[int] = None,
+        is_combo_kernel: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self.is_combo_kernel: bool = is_combo_kernel
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -3034,8 +3036,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config and not self._has_constant_xmask():
-                mask_vars = OrderedSet(["xmask"])
+            if self.fixed_config or self.is_combo_kernel:
+                mask_vars = OrderedSet(
+                    f"{tree.prefix}mask"
+                    for tree in self.range_trees
+                    if not tree.is_reduction and not self._has_constant_mask(tree)
+                )
             else:
                 mask_vars = OrderedSet()
             if self._load_mask:
@@ -5060,7 +5066,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5666,7 +5672,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config and f"{tree.prefix.upper()}BLOCK" in self.fixed_config:
             if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
                 return True
-        else:
+        elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
                 return True
 
