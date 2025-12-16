@@ -305,6 +305,7 @@ class OverlapScheduler:
         collective_estimator: Literal["analytical", "benchmark"],
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
+        enable_fusion_regions: bool = False,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -321,7 +322,7 @@ class OverlapScheduler:
         # work on the collapsed graph where fused ops are atomic units
         self.region_of: dict[fx.Node, Any] = {}
         self.fusion_replaced: dict[fx.Node, fx.Node] = {}
-        if torch._inductor.config.test_configs.enable_fusion_regions:
+        if enable_fusion_regions:
             from torch._inductor.fx_passes.fusion_regions import (
                 build_fusion_regions,
                 collapse_fusion_regions,
@@ -1345,6 +1346,7 @@ def schedule_overlap_bucketing(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
+    enable_fusion_regions: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1367,6 +1369,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
+        enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
     """
     return OverlapScheduler(
         gm,
@@ -1380,6 +1383,7 @@ def schedule_overlap_bucketing(
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
+        enable_fusion_regions=enable_fusion_regions,
     ).run()
 
 
@@ -1395,7 +1399,9 @@ def schedule_overlap_bucketing_from_inductor_configs(
 
     dist_opts = config.aten_distributed_optimizations
 
-    kwargs: dict[str, object] = {}
+    kwargs: dict[str, object] = {
+        "enable_fusion_regions": True,  # Default to True when called from inductor
+    }
 
     config_keys = (
         "collective_bucketing",
@@ -1408,6 +1414,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "compute_overlap_multipler",
         "max_in_flight_gb",
         "max_coll_distance",
+        "enable_fusion_regions",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

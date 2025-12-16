@@ -988,25 +988,23 @@ class TestFusibleNodeOverlap(InductorTestCase):
             a = torch.ones(1024, 1024, device=self.device)
             traced = make_fx(func)(a)
 
-        import torch._inductor.config as inductor_config
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
-        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
-            from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
-
-            scheduler = OverlapScheduler(
-                traced,
-                max_in_flight_gb=5.0,
-                max_compute_pre_fetch=200,
-                collective_bucketing=False,
-                insert_overlap_deps=False,
-                compute_overlap_multipler=1.0,
-                max_coll_distance=200,
-                custom_runtime_estimation=None,
-                collective_estimator="analytical",
-            )
-            ag_start = next(iter(scheduler.collective_info.keys()))
-            info = scheduler.collective_info[ag_start]
-            scheduler.run()
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=True,
+        )
+        ag_start = next(iter(scheduler.collective_info.keys()))
+        info = scheduler.collective_info[ag_start]
+        scheduler.run()
 
         self.assertGreater(
             len(info.hiding_nodes), 0, "Fusion region should hide the collective"
