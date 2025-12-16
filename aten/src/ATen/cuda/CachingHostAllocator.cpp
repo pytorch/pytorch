@@ -453,6 +453,16 @@ public:
   }
 
   CUDAStream get_current_stream() const override {
+    // get_current_stream() is called in contexts (such as allocation)
+    // where a device may not already be set. Set it before
+    // continuing.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index =
+        c10::cuda::getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
     return at::cuda::getCurrentCUDAStream();
   }
 
