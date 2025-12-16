@@ -499,13 +499,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
     We call this right-to-left sharding which is the opposite of the default
-    left-to-right sharding. See the example below:
+    left-to-right sharding. See the example below::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [Shard(0), Shard(0)]
 
     The default sharding behavior shards the tensor on "dp" mesh dimension first then
-    "tp" dimension. The sharding result will be:
+    "tp" dimension. The sharding result will be::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -515,7 +517,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
     "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
-    result:
+    result::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -529,13 +532,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     this, we use _StridedShard placement to make this right-to-left sharding compatible
     with our left-to-right convention on both tensor distribution and redistribution.
 
-    Now with _StridedShard, the right-to-left sharding above can be represented as:
+    Now with _StridedShard, the right-to-left sharding above can be represented as::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [_StridedShard(0, split_factor=2), Shard(0)]
 
     And a left-to-right processing of `placements` will produce the same result, which is
-    different from using the `Shard` placement:
+    different from using the `Shard` placement::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
