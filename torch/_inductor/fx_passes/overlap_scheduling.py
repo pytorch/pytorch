@@ -771,38 +771,22 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        # Step 3: Bucketing (if enabled), fusion region expansion, and deps
-        if self.collective_bucketing:
-            # Use the full bucketer when bucketing is enabled
-            from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-                OverlapPreservingBucketer,
-            )
+        # Finalize: bucket collectives (if enabled), inline fusions, apply deps
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            finalize_overlap_scheduling,
+        )
 
-            bucketer = OverlapPreservingBucketer(
-                graph=self.gm.graph,
-                collective_info=self.collective_info,
-                scheduled=self.scheduled,
-                max_bucket_memory_gb=2.0,
-                max_coll_distance=self.max_node_distance,
-                insert_overlap_deps=self.insert_overlap_deps,
-                collective_bucketing=self.collective_bucketing,
-                region_of=self.region_of,
-                fusion_replaced=self.fusion_replaced,
-            )
-            bucketer.bucket_collectives()
-        else:
-            # Lightweight path: just apply deps without bucketing overhead
-            from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-                apply_overlap_scheduling_without_bucketing,
-            )
-
-            apply_overlap_scheduling_without_bucketing(
-                gm=self.gm,
-                collective_info=self.collective_info,
-                insert_overlap_deps=self.insert_overlap_deps,
-                region_of=self.region_of,
-                fusion_replaced=self.fusion_replaced,
-            )
+        finalize_overlap_scheduling(
+            gm=self.gm,
+            collective_info=self.collective_info,
+            scheduled=self.scheduled,
+            collective_bucketing=self.collective_bucketing,
+            insert_overlap_deps=self.insert_overlap_deps,
+            max_bucket_memory_gb=2.0,
+            max_coll_distance=self.max_node_distance,
+            region_of=self.region_of,
+            fusion_replaced=self.fusion_replaced,
+        )
 
         return self.gm
 
@@ -1311,21 +1295,6 @@ class OverlapScheduler:
         )
 
         self.reorder_graph()
-
-    def _bucket_collectives(self) -> None:
-        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-            OverlapPreservingBucketer,
-        )
-
-        bucketer = OverlapPreservingBucketer(
-            graph=self.graph,
-            collective_info=self.collective_info,
-            scheduled=self.scheduled,
-            max_bucket_memory_gb=2.0,  # Could make this configurable
-            max_coll_distance=self.max_node_distance,
-            insert_overlap_deps=self.insert_overlap_deps,
-        )
-        bucketer.bucket_collectives()
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node]

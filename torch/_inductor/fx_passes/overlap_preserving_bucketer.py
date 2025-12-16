@@ -104,85 +104,6 @@ def apply_overlap_deps(
             preserve_node_ordering(graph, filtered_deps)
 
 
-def build_hiding_interval_deps(
-    collective_info: dict[fx.Node, "CollectiveInfo"],
-) -> dict[fx.Node, OrderedSet[fx.Node]]:
-    """
-    Build hiding interval dependencies: start -> compute -> wait.
-
-    Returns a dict mapping nodes to their required predecessors based on
-    hiding relationships (compute nodes that hide collectives must execute
-    between collective start and wait).
-    """
-    deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-    for start, info in collective_info.items():
-        if info.is_exposed:
-            continue
-        for hiding_node in info.hiding_nodes:
-            deps[hiding_node].add(start)
-            deps[info.wait_node].add(hiding_node)
-    return dict(deps)
-
-
-def apply_overlap_scheduling_without_bucketing(
-    gm: fx.GraphModule,
-    collective_info: dict[fx.Node, "CollectiveInfo"],
-    insert_overlap_deps: bool,
-    region_of: dict[fx.Node, Any] | None = None,
-    fusion_replaced: dict[fx.Node, fx.Node] | None = None,
-) -> None:
-    """
-    Apply overlap dependencies without collective bucketing.
-
-    This is a lightweight alternative to OverlapPreservingBucketer when
-    bucketing is disabled. It handles:
-    1. Building hiding interval dependencies
-    2. Expanding fusion regions (if any)
-    3. Transferring deps from erased nodes
-    4. Applying topo sort and effect tokens
-
-    Args:
-        gm: The graph module to modify
-        collective_info: Dict mapping collective start nodes to their info
-        insert_overlap_deps: Whether to insert effect tokens for deps
-        region_of: Optional dict mapping module nodes to fusion regions
-        fusion_replaced: Optional dict mapping original nodes to module nodes
-    """
-    region_of = region_of or {}
-    fusion_replaced = fusion_replaced or {}
-
-    # Build hiding interval deps
-    additional_deps = build_hiding_interval_deps(collective_info)
-
-    # Expand fusion regions if any
-    replaced: dict[fx.Node, fx.Node] = {}
-    if region_of:
-        from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
-
-        replaced = expand_fusion_regions(gm, region_of, fusion_replaced)
-
-    # Transfer deps from erased nodes (fusion regions) to their replacements
-    if replaced:
-        # Update deps to point to replacement nodes
-        updated_deps: dict[fx.Node, OrderedSet[fx.Node]] = {}
-        for node, deps in additional_deps.items():
-            # Get the replacement for node if it was erased
-            new_node = replaced.get(node, node)
-            if new_node not in updated_deps:
-                updated_deps[new_node] = OrderedSet()
-
-            # Update each dep to its replacement
-            for dep in deps:
-                new_dep = replaced.get(dep, dep)
-                updated_deps[new_node].add(new_dep)
-
-        additional_deps = updated_deps
-
-    # Apply deps via topo sort and optional effect tokens
-    apply_overlap_deps(gm.graph, additional_deps, insert_overlap_deps)
-    gm.graph.lint()
-
-
 @dataclass
 class PGEvent:
     """
@@ -1012,3 +933,49 @@ class OverlapPreservingBucketer:
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
+
+
+def finalize_overlap_scheduling(
+    gm: fx.GraphModule,
+    collective_info: dict[fx.Node, CollectiveInfo],
+    scheduled: OrderedSet[fx.Node],
+    *,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = False,
+    max_bucket_memory_gb: float = 2.0,
+    max_coll_distance: int = 1000,
+    region_of: dict[fx.Node, Any] | None = None,
+    fusion_replaced: dict[fx.Node, fx.Node] | None = None,
+) -> None:
+    """
+    Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
+
+    This is the main entry point for post-scheduling graph transformations:
+    1. Bucket collectives (if collective_bucketing=True)
+    2. Inline fusion regions back to original nodes
+    3. Transfer deps from erased nodes to replacements
+    4. Apply topological sort and effect tokens
+
+    Args:
+        gm: The graph module to modify
+        collective_info: Dict mapping collective start nodes to their CollectiveInfo
+        scheduled: Ordered set of scheduled nodes
+        collective_bucketing: Whether to bucket collectives
+        insert_overlap_deps: Whether to insert effect tokens for overlap deps
+        max_bucket_memory_gb: Maximum memory for a bucket in GB
+        max_coll_distance: Maximum distance for bucketing candidates
+        region_of: Optional dict mapping module nodes to FusionRegions
+        fusion_replaced: Optional dict mapping original nodes to module nodes
+    """
+    bucketer = OverlapPreservingBucketer(
+        graph=gm.graph,
+        collective_info=collective_info,
+        scheduled=scheduled,
+        max_bucket_memory_gb=max_bucket_memory_gb,
+        max_coll_distance=max_coll_distance,
+        insert_overlap_deps=insert_overlap_deps,
+        collective_bucketing=collective_bucketing,
+        region_of=region_of,
+        fusion_replaced=fusion_replaced,
+    )
+    bucketer.bucket_collectives()

@@ -27,13 +27,22 @@ class FusionRegion:
         from torch.utils._runtime_estimation import get_transfer_time
 
         subgraph = self.subgraph_module
-        input_vals = [n.meta.get("val") for n in subgraph.graph.find_nodes(op="placeholder")]
-        output_vals = [n.meta.get("val") for n in torch._inductor.utils.output_node(subgraph).all_input_nodes]
+        input_vals = [
+            n.meta.get("val") for n in subgraph.graph.find_nodes(op="placeholder")
+        ]
+        output_vals = [
+            n.meta.get("val")
+            for n in torch._inductor.utils.output_node(subgraph).all_input_nodes
+        ]
         flat_inputs, _ = tree_flatten(input_vals)
         flat_outputs, _ = tree_flatten(output_vals)
 
         transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
-        total_bytes = sum(get_num_bytes(t) for t in flat_inputs + flat_outputs if isinstance(t, torch.Tensor))
+        total_bytes = sum(
+            get_num_bytes(t)
+            for t in flat_inputs + flat_outputs
+            if isinstance(t, torch.Tensor)
+        )
         return total_bytes, transfer_time_ns / 1e6
 
 

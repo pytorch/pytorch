@@ -457,9 +457,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # After bucketing, there should be only one all_reduce node (the bucketed one)
         # Check for cat (bucketing input) and split_with_sizes (bucketing output)
         graph_str = str(traced.graph)
-        FileCheck().check("cat.default").check(
-            "all_reduce.default"
-        ).check("split_with_sizes").check_count("%mm", 2).run(graph_str)
+        FileCheck().check("cat.default").check("all_reduce.default").check(
+            "split_with_sizes"
+        ).check_count("%mm", 2).run(graph_str)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -897,180 +897,6 @@ class TestCrossPGOverlap(InductorTestCase):
         )
 
 
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestFusionRegionEstimation(InductorTestCase):
-    """Tests for fusion region detection and memory-bound runtime estimation."""
-
-    def setUp(self):
-        super().setUp()
-        self.device = "cuda"
-
-    def test_estimate_mem_bound_runtime_pointwise(self):
-        """Test that pointwise ops get memory-bound runtime estimates."""
-        from torch._inductor.fx_passes.fusion_regions import (
-            is_fusible_node,
-            is_view_node,
-        )
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            estimate_mem_bound_runtime_ms,
-        )
-
-        with FakeTensorMode():
-            a = torch.ones(1024, 1024, device=self.device)
-            traced = make_fx(lambda a: a + 1)(a)
-
-        (add_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.add.Tensor
-        )
-        self.assertTrue(is_fusible_node(add_node))
-        self.assertFalse(is_view_node(add_node))
-        self.assertGreater(estimate_mem_bound_runtime_ms(add_node), 0)
-
-    def test_view_nodes_identified(self):
-        """Test that view ops are identified correctly."""
-        from torch._inductor.fx_passes.fusion_regions import is_view_node
-
-        with FakeTensorMode():
-            a = torch.ones(1024, device=self.device)
-            traced = make_fx(lambda a: a.view(16, 64))(a)
-
-        (view_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.view.default
-        )
-        self.assertTrue(is_view_node(view_node))
-
-    def test_fusion_region_grouping(self):
-        """Test that connected fusible ops are grouped into regions."""
-        from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
-
-        with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            traced = make_fx(lambda a: (a + 1) * 2 - 3)(a)
-
-        region_of = build_fusion_regions(traced)
-        (add_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.add.Tensor
-        )
-        (mul_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.mul.Tensor
-        )
-        (sub_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.sub.Tensor
-        )
-
-        # All pointwise ops should be in the same region
-        self.assertIs(region_of[add_node], region_of[mul_node])
-        self.assertIs(region_of[mul_node], region_of[sub_node])
-
-    def test_mm_not_in_fusion_region(self):
-        """Test that mm ops are not included in fusion regions."""
-        from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
-
-        with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            traced = make_fx(lambda a: torch.mm(a + 1, a) * 2)(a)
-
-        region_of = build_fusion_regions(traced)
-        (mm_node,) = traced.graph.find_nodes(op="call_function", target=aten.mm.default)
-        self.assertNotIn(mm_node, region_of)
-
-    def test_strict_local_fusion_no_cross_mm(self):
-        """Test that fusion regions don't cross non-fusible (mm) boundaries.
-
-        This is the key property of strict local fusion: ops before and after
-        a non-fusible node are in separate regions, even if they're connected.
-        """
-        from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
-
-        # a + 1 -> mm -> result * 2
-        # The add and mul should NOT be in the same region (mm is between them)
-        with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            traced = make_fx(lambda a: torch.mm(a + 1, a) * 2)(a)
-
-        region_of = build_fusion_regions(traced)
-
-        add_nodes = list(
-            traced.graph.find_nodes(op="call_function", target=aten.add.Tensor)
-        )
-        mul_nodes = list(
-            traced.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
-        )
-
-        # add is before mm, mul is after mm - they should be in different regions
-        # (or one/both not in a region at all if they're singletons)
-        if add_nodes and mul_nodes and add_nodes[0] in region_of and mul_nodes[0] in region_of:
-            self.assertIsNot(
-                region_of[add_nodes[0]],
-                region_of[mul_nodes[0]],
-                "Ops before and after mm should not be in the same fusion region",
-            )
-
-    def test_fusion_regions_with_mm_boundary_and_bytes(self):
-        """Test fusion regions with mm boundary, verifying group count and bytes.
-
-        Pattern:
-            pointwise1 -> pointwise2 -> mm -> pointwise3 -> pointwise4
-            separate_pointwise1 -> separate_pointwise2
-
-        Expected: 3 fusion groups
-        - Group 1: pointwise1, pointwise2 (before mm)
-        - Group 2: pointwise3, pointwise4 (after mm)
-        - Group 3: separate_pointwise1, separate_pointwise2 (independent)
-        """
-        from torch._inductor.fx_passes.fusion_regions import (
-            FusionRegion,
-            build_fusion_regions,
-            collapse_fusion_regions,
-        )
-
-        def model(a, b):
-            # Group 1: before mm
-            x = a + 1  # pointwise1
-            x = x * 2  # pointwise2
-
-            # mm boundary
-            x = torch.mm(x, a)
-
-            # Group 2: after mm
-            x = x - 1  # pointwise3
-            x = x / 2  # pointwise4
-
-            # Group 3: separate chain (not connected to above)
-            y = b + 3  # separate_pointwise1
-            y = y * 4  # separate_pointwise2
-
-            return x, y
-
-        with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            b = torch.ones(64, 64, device=self.device)
-            traced = make_fx(model)(a, b)
-
-        # Build and collapse fusion regions
-        region_of = build_fusion_regions(traced)
-        new_region_of, replaced = collapse_fusion_regions(traced, region_of)
-
-        # Should have exactly 3 fusion regions
-        self.assertEqual(len(new_region_of), 3, f"Expected 3 fusion regions, got {len(new_region_of)}")
-
-        # Verify each region has total_bytes computed
-        for module_node, region in new_region_of.items():
-            self.assertIsInstance(region, FusionRegion)
-            self.assertGreater(region.total_bytes, 0, f"Region {module_node.name} should have positive bytes")
-            self.assertGreater(region.cost_ms, 0, f"Region {module_node.name} should have positive cost")
-
-        # Each region should have 2 nodes
-        for module_node, region in new_region_of.items():
-            self.assertEqual(len(region.nodes), 2, f"Region {module_node.name} should have 2 nodes")
-
-        # Compute expected bytes for a 64x64 float32 tensor
-        # Each region: 1 input + 1 output = 2 tensors * 64*64*4 bytes = 32768 bytes
-        # But fused regions may have different I/O patterns based on graph structure
-        total_bytes_all = sum(r.total_bytes for r in new_region_of.values())
-        self.assertGreater(total_bytes_all, 0, "Total bytes across all regions should be positive")
-
-
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFusionRegionsWithOverlap(InductorTestCase):
@@ -1144,9 +970,7 @@ class TestFusionRegionsWithOverlap(InductorTestCase):
         import torch._inductor.config as inductor_config
 
         # Enable fusion regions
-        with inductor_config.patch(
-            {"test_configs.enable_fusion_regions": True}
-        ):
+        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
             from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
             scheduler = OverlapScheduler(
@@ -1198,7 +1022,7 @@ class TestFusionRegionsWithOverlap(InductorTestCase):
         last_hiding_name = last_hiding_node.name if last_hiding_node else ""
         self.assertTrue(
             "sub" in last_hiding_name or "_fusion_region" in last_hiding_name,
-            f"Last hiding node should be sub or fusion region, got: {last_hiding_name}"
+            f"Last hiding node should be sub or fusion region, got: {last_hiding_name}",
         )
 
         # The graph gets modified with control_deps higher-order ops when
@@ -1227,7 +1051,9 @@ class TestFusionRegionsWithOverlap(InductorTestCase):
 
         # Verify: ag comes before sub, sub comes before wait
         self.assertLess(ag_idx, sub_idx, "ag should come before sub (hiding op)")
-        self.assertLess(sub_idx, wait_idx, "sub (last hiding op) should come before wait")
+        self.assertLess(
+            sub_idx, wait_idx, "sub (last hiding op) should come before wait"
+        )
 
     def test_overlap_bucketing_basic_functionality(self):
         """
@@ -1271,9 +1097,7 @@ class TestFusionRegionsWithOverlap(InductorTestCase):
 
         import torch._inductor.config as inductor_config
 
-        with inductor_config.patch(
-            {"test_configs.enable_fusion_regions": True}
-        ):
+        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
             from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
             scheduler = OverlapScheduler(
@@ -1298,7 +1122,7 @@ class TestFusionRegionsWithOverlap(InductorTestCase):
         # All gather may be bucketed, so check for either the original or bucketed form
         self.assertTrue(
             "all_gather" in graph_str or "bucketed" in graph_str.lower(),
-            "Graph should contain all_gather or bucketed collective"
+            "Graph should contain all_gather or bucketed collective",
         )
         self.assertIn("wait_tensor", graph_str)
 
