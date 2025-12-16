@@ -1,3 +1,4 @@
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
@@ -95,14 +96,20 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
+  auto filter = [this](cudaStream_t stream) {
+    cudaStreamCaptureStatus status{};
+    CaptureId_t stream_capture_id = 0;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  };
+
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
-      cudaStreamCaptureStatus status{};
-      CaptureId_t stream_capture_id = 0;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, filter);
+
+  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+    return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
   });
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
@@ -125,6 +132,7 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -260,6 +268,7 @@ void CUDAGraph::reset() {
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
   if (has_graph_) {
