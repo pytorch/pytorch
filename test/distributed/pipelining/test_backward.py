@@ -192,24 +192,35 @@ class StageBackwardTests(TestCase):
     def test_stage_backward_weight_grad_validation(self, device):
         test_cases = [
             (
-                "size >= 2",
+                "size == 2",
+                lambda: MultiInterMediateModel([d_hid // 2, d_hid // 2]).to(device),
                 lambda: [
                     (
-                        torch.randn(batch_size, d_hid, device=device),
-                        torch.randn(batch_size, d_hid, device=device),
+                        torch.randn(batch_size, d_hid // 2, device=device),
+                        torch.randn(d_hid // 2, d_hid // 2, device=device),
                     )
                 ],
             ),
-            ("size = 1", lambda: [(torch.randn(batch_size, d_hid, device=device),)]),
+            (
+                "size = 1",
+                lambda: MLPModule(d_hid).to(device),
+                lambda: [(torch.randn(batch_size, d_hid, device=device),)]
+            ),
             (
                 "1 grad, 1 None",
-                lambda: [(torch.randn(batch_size, d_hid, device=device), None)],
+                lambda: MultiInterMediateModel([d_hid // 2, d_hid // 2]).to(device),
+                lambda: [(torch.randn(batch_size, d_hid // 2, device=device), None)],
+            ),
+            (
+                "1 None, 1 grad",
+                lambda: MultiInterMediateModel([d_hid // 2, d_hid // 2]).to(device),
+                lambda: [(None, torch.randn(d_hid // 2, d_hid // 2, device=device))],
             ),
         ]
 
-        for description, mock_grads_factory in test_cases:
+        for description, module_factory, mock_grads_factory in test_cases:
             with self.subTest(description=description):
-                mod = MLPModule(d_hid).to(device)
+                mod = module_factory()
                 x = torch.randn(batch_size, d_hid, device=device)
                 x.requires_grad_(True)
                 out = mod(x)
@@ -228,8 +239,8 @@ class StageBackwardTests(TestCase):
                 stage_backward_weight(mod.parameters(), param_groups)
 
     def test_stage_backward_multi_output_intermediate(self, device):
-        mod = MultiInterMediateModel(weight_shape=[32, 96]).to(device)
-        x = torch.randn(16, 128, device=device, requires_grad=True)
+        mod = MultiInterMediateModel([d_hid // 2, d_hid // 2]).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
 
         out = mod(x)
         loss = out.sum()
@@ -243,7 +254,6 @@ class StageBackwardTests(TestCase):
 
         stage_backward_weight(mod.parameters(), param_groups)
 
-        import copy
         ref_mod = copy.deepcopy(mod)
         ref_x = x.detach().clone().requires_grad_(True)
         ref_out = ref_mod(ref_x)
