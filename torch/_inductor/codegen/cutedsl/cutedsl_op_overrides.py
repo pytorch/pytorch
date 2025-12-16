@@ -179,6 +179,10 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} / {b})")
 
     @staticmethod
+    def floordiv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} // {b})")
+
+    @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
