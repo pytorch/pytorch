@@ -18,6 +18,7 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
+from tools.stats.upload_test_stats_running_jobs import get_s3_resource
 
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
@@ -85,6 +86,23 @@ def get_td_exclusions(
             for test_config, test_files in build.items():
                 grouped_tests[build_name][test_config] = sorted(test_files)
         return grouped_tests
+
+
+def get_all_run_attempts(workflow_run_id: int) -> list[int]:
+    # Returns all run attempts for a given workflow run id that have test
+    # artifacts
+    bucket = get_s3_resource().Bucket("gha-artifacts")
+    prefix = f"pytorch/pytorch/{workflow_run_id}/"
+    objs = bucket.objects.filter(Prefix=prefix)
+    run_attempts = set()
+    for obj in objs:
+        no_prefix = obj.key[len(prefix) :]
+        try:
+            run_attempt = int(no_prefix.split("/")[0])
+            run_attempts.add(run_attempt)
+        except ValueError:
+            continue
+    return sorted(run_attempts)
 
 
 def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> None:
