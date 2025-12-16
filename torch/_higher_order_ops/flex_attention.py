@@ -262,8 +262,6 @@ def math_attention(
     # NB: kernel computes in ln2 space, we always convert back at the top level op, so
     # for math impl we divide by log(2) because we will multiply by log(2)
 
-    # This is a test
-
     return (
         post_mod_scores.to(query.dtype) @ value.to(query.dtype),
         logsumexp / math.log(2),
