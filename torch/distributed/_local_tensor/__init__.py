@@ -840,8 +840,6 @@ def _compute_local_tensor_meta(
     """
     Computes the meta information for a LocalTensor from its local tensors.
     """
-    if len(local_tensors) == 0:
-        raise ValueError("LocalTensor cannot be empty!")
     it = iter(local_tensors.values())
     first_local_tensor = next(it)
 
@@ -925,6 +923,9 @@ class LocalTensor(torch.Tensor):
                 "Internal local_tensors require grad, but we will ignore those autograd graph. "
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
+
+        if len(local_tensors) == 0:
+            raise ValueError("LocalTensor cannot be empty!")
 
         (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
             _compute_local_tensor_meta(local_tensors)
