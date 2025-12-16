@@ -210,6 +210,7 @@ def add_needs_realized_inputs(
     ],
 ) -> Optional[list[Any]]:
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
+        # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
     if isinstance(fn, torch._ops.OpOverload):
         needs_realized_inputs.add(fn)
@@ -4140,6 +4141,7 @@ def scatter_fallback(
         reduce,
         self.get_dtype(),
         cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
+        # pyrefly: ignore [missing-attribute]
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -6388,7 +6390,7 @@ fallback_pow_tensor_scalar = fallback_handler(
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(b, float) and b == int(b):
+    if isinstance(b, float) and math.isfinite(b) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)

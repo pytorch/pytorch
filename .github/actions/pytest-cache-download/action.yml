@@ -17,6 +17,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup uv
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
+
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
@@ -26,7 +31,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install boto3==1.35.42
+          # Pre-fetch dependencies to cache them for later uv run calls
+          uv run --no-project --with boto3==1.35.42 python -c "import boto3; print('Dependencies ready')"
 
     - name: Download the cache
       shell: bash
@@ -36,11 +42,11 @@ runs:
         REPO: ${{ github.repository }}
         BUCKET: ${{ inputs.s3_bucket }}
       run: |
-        python3 .github/scripts/pytest_cache.py \
+        uv run --no-project --with boto3==1.35.42 python .github/scripts/pytest_cache.py \
           --download \
           --cache_dir "$GITHUB_WORKSPACE/$CACHE_DIR" \
           --pr_identifier "$GITHUB_REF" \
           --job_identifier "$JOB_IDENTIFIER" \
           --temp_dir "$RUNNER_TEMP" \
           --repo "$REPO" \
-          --bucket "$BUCKET" \
+          --bucket "$BUCKET"
