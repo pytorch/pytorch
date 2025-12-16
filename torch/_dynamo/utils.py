@@ -3756,9 +3756,16 @@ def run_node(
         except Unsupported:
             raise
         except Exception as e:
-            raise RuntimeError(make_error_message(e)).with_traceback(
+            exc = RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
-            ) from e
+            )
+            if getattr(node, "stack_trace", False):
+                # Augment exception msg with FX node's stack trace if there's one.
+                stack_trace = "\nFX node stack trace:\n" + node.stack_trace
+                old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
+                new_msg = old_msg + stack_trace
+                exc.args = (new_msg,) + exc.args[1:]
+            raise exc
 
     raise AssertionError(op)
 
