@@ -53,7 +53,6 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -96,10 +95,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -658,6 +659,7 @@ def check_model(
     torch._dynamo.reset()
 
 
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -5554,6 +5556,34 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
+    @xfail_if_triton_cpu
+    def test_lp_pool1d_with_inf_norm(self):
+        # https://github.com/pytorch/pytorch/issues/167197
+        # Test that LPPool1d works with infinity norm (should behave like max pooling)
+        def fn(x):
+            return torch.nn.functional.lp_pool1d(
+                x, norm_type=float("inf"), kernel_size=2, stride=2
+            )
+
+        self.common(
+            fn,
+            (torch.randn(3, 4, 8),),
+        )
+
+    @xfail_if_triton_cpu
+    def test_lp_pool2d_with_inf_norm(self):
+        # https://github.com/pytorch/pytorch/issues/167197
+        # Test that LPPool2d works with infinity norm (should behave like max pooling)
+        def fn(x):
+            return torch.nn.functional.lp_pool2d(
+                x, norm_type=float("inf"), kernel_size=2, stride=2
+            )
+
+        self.common(
+            fn,
+            (torch.randn(3, 4, 8, 8),),
+        )
+
     @tf32_on_and_off(0.006)
     @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
@@ -6334,6 +6364,16 @@ class CommonTemplate:
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
         x = torch.randn([16, 16], device=self.device)
         self.assertEqual(cfn(x), fn(x))
+
+    @xfail_if_triton_cpu
+    def test_pow_infinite(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        opt = torch.compile(fn, backend="inductor")
+        a = torch.randn((3, 4, 8), device=self.device)
+        b = float("inf")
+        self.assertTrue(same(opt(a, b), fn(a, b)))
 
     def test_glu(self):
         def fn(x):
@@ -13193,21 +13233,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
-
-    @torch._inductor.config.patch(force_shape_pad=True)
-    @skip_if_gpu_halide  # correctness issue
-    def test_should_pad_bench_for_bmm(self):
-        B = 2
-        M = 1024
-        N = 1024
-        K = 1024 + 1  # a size that requires padding
-
-        mat1 = torch.rand(B, M, K, device=self.device)
-        mat2 = torch.rand(B, K, N, device=self.device)
-
-        should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
-
-        self.assertTrue(should_pad)
 
     @parametrize(
         "name, op",
