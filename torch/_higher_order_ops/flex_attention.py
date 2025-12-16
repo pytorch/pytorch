@@ -366,7 +366,6 @@ def trace_flex_attention(
         example_out,
         out_proxy,
         constant=None,
-
         tracer=proxy_mode.tracer,
     )
 
@@ -1092,7 +1091,6 @@ def trace_flex_attention_backward(
         example_out,
         out_proxy,
         constant=None,
-
         tracer=proxy_mode.tracer,
     )
 

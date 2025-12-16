@@ -162,7 +162,6 @@ def group_foreach_args(
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
-
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -691,7 +690,6 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -3133,10 +3131,8 @@ def copy(self, src, non_blocking=False):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
-
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():

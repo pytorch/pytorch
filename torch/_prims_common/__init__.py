@@ -1302,7 +1302,6 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1669,9 +1668,7 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-
             return one_plus_dim_tensor_dtype
-
 
         return zero_dim_tensor_dtype
 

@@ -692,7 +692,6 @@ def package_pt2(
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
-
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
             archive_writer, exported_programs, pickle_protocol=pickle_protocol

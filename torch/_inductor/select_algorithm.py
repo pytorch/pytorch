@@ -1310,7 +1310,6 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -2763,7 +2762,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-
             return externs[0]
         else:
             return choices[0]
@@ -4295,7 +4293,6 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             V.graph.sizevars.atomically_apply_size_hint(
-
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -4306,7 +4303,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                     hint_override=hint_override,
                 )
-
                 for size in V.graph.get_allocation_size(node)
             ),
         )

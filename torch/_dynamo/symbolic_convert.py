@@ -3796,7 +3796,6 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-
             args = args + contents[2 : -len(kw_names)]
 
             kwargs_list = contents[-len(kw_names) :]
@@ -4777,7 +4776,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4852,14 +4850,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracing_ctx.previously_inlined_functions[code] = result
 
         try:
-
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
-
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
                     args=[arg.python_type() for arg in args],
                     kwargs=kwargs,

@@ -323,7 +323,6 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
-
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -337,7 +336,6 @@ def _single_tensor_radam(
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-
 
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 

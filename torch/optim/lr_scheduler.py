@@ -413,7 +413,6 @@ class LambdaLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
-
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -533,7 +532,6 @@ class MultiplicativeLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
-
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict

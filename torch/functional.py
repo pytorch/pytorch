@@ -1787,9 +1787,7 @@ def norm(  # noqa: F811
 
         if isinstance(p, str):
             if p == "fro" and (
-                dim is None
-                or isinstance(dim, (int, torch.SymInt))
-                or len(dim) <= 2
+                dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2
             ):
                 if out is None:
                     return torch.linalg.vector_norm(

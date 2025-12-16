@@ -1721,9 +1721,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
 
             if isinstance(subobj, types.MethodType):
-
                 if dynamic_subobj.__self__ is not self.value:
-
                     if not isinstance(dynamic_subobj.__func__, types.FunctionType):
                         unimplemented(
                             gb_type="User-defined object method with non-function __func__",
@@ -1746,7 +1744,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
 
                     return variables.UserMethodVariable(
-
                         dynamic_subobj.__func__,
                         object_vt,
                     )
@@ -1873,7 +1870,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
             try:
-
                 from optree.registry import _NODETYPE_REGISTRY
 
                 # Check if registered globally

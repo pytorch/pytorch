@@ -439,7 +439,6 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-
                     subobj.__get__(base),
                     source=source,
                 )
@@ -572,7 +571,6 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,

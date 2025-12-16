@@ -104,7 +104,6 @@ class TypeExemplars:
 
     @staticmethod
     def contains(t: type[T]) -> bool:
-
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 

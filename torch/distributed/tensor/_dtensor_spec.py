@@ -92,8 +92,6 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         if self.shard_order is None:
-
-
             _, self.shard_order = self._normalize_placements_into_shard_order(
                 self.placements, self.mesh
             )

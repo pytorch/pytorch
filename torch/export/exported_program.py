@@ -1500,7 +1500,6 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
-
         if transformed_gm is self.graph_module and not res.modified:
             return self
 

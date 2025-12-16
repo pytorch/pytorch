@@ -298,7 +298,6 @@ def update_in(d, keys, func, default=None, factory=dict):
     rv = inner = factory()
     rv.update(d)
 
-
     for key in ks:
         if k in d:
             d = d[k]

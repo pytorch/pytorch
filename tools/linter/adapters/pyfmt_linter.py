@@ -12,7 +12,6 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
-
 import isort
 import usort
 

@@ -30,7 +30,6 @@ def split_result_tensors(
     else:
         splits = [x.shape[0] for x in inputs]
 
-
     return torch.split(result, splits)
 
 

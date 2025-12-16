@@ -1569,7 +1569,6 @@ class NamedTupleVariable(TupleVariable):
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
-
                 return UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
                 return UserMethodVariable(method, self)

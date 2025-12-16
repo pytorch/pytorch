@@ -472,7 +472,6 @@ class MultiheadAttention(nn.MultiheadAttention):
             assert static_v.size(2) == head_dim
             v = static_v
 
-
         src_len = k.size(1)
 
         if key_padding_mask is not None:
@@ -487,11 +486,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
                     k_zeros,
-
                     k.q_scale(),
-
                     k.q_zero_point(),
-
                     k.dtype,
                 )
 
@@ -502,11 +498,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
                     v_zeros,
-
                     v.q_scale(),
-
                     v.q_zero_point(),
-
                     v.dtype,
                 )
 

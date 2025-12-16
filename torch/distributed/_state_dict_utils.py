@@ -201,7 +201,6 @@ def _iterate_state_dict(
                             ret.local_shards()[idx].tensor, non_blocking=non_blocking
                         )
                 else:
-
                     companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:

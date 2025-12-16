@@ -459,7 +459,6 @@ class LSTM(torch.nn.Module):
 
         if (
             not isinstance(dropout, numbers.Number)
-
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):

@@ -1339,28 +1339,17 @@ def bsr_dense_addmm(
         # pyrefly: ignore [unsupported-operation]
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
-
             beta,
             alpha,
-
             beta_is_one=beta == 1,
-
             beta_is_nonzero=beta != 0,
-
             alpha_is_one=alpha == 1,
-
             left_alpha_is_one=left_alpha_is_one,
-
             right_alpha_is_one=right_alpha_is_one,
-
             BLOCKSIZE_ROW=BM,
-
             BLOCKSIZE_INNER=BK,
-
             BLOCKSIZE_COL=BN,
-
             allow_tf32=dot_out_dtype == tl.float32,
-
             acc_dtype=dot_out_dtype,
             **meta,
         )
@@ -1681,17 +1670,12 @@ if has_triton():
                 beta,
                 is_beta_zero,
                 *blocksize,
-
                 k,
                 tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
-
                 acc_dtype=acc_dtype,
-
                 allow_tf32=allow_tf32,
-
                 num_stages=1,
-
                 num_warps=4,
             )
 
@@ -1976,7 +1960,6 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
-
                 row_block,
                 col_block,
                 max_row_nnz,
@@ -2151,11 +2134,8 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
-
             M,
-
             K,
-
             N,
             blocks,
             blocks.stride(0),
@@ -2174,9 +2154,7 @@ if has_triton():
             pq_indices,
             pq_indices.stride(0),
             pq_indices.stride(1),
-
             dot_out_dtype=dot_out_dtype,
-
             **meta,
         )
 
@@ -2373,7 +2351,6 @@ if has_triton():
         _scatter_mm6_kernel[grid](
             B,
             Ms,
-
             Ks,
             N,
             blocks,
@@ -2392,7 +2369,6 @@ if has_triton():
             r_offsets,
             p_offsets,
             q_offsets,
-
             dot_out_dtype=dot_out_dtype,
             **meta,
         )

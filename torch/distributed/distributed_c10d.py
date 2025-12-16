@@ -1879,7 +1879,6 @@ def _get_split_source(pg: ProcessGroup):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
-
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend

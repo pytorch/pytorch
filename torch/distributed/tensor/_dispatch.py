@@ -555,7 +555,6 @@ class OpDispatcher:
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call,
                     v,
-
                     compute_mesh,
                 )
                 local_kwargs[k] = v

@@ -1535,7 +1535,6 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,

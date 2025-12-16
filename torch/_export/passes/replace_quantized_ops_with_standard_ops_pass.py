@@ -638,7 +638,6 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                         ]:
                             buffer_name_to_clean.add(b_name)
                     for b_name in buffer_name_to_clean:
-
                         v.pop(b_name, None)
             for attr_name in attr_names_to_clean:
                 delattr(submod, attr_name)

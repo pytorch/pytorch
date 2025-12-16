@@ -195,7 +195,6 @@ def all_gather(
         if not sync_obj.success:
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
-
             ) from sync_obj.exception
         return [sync_obj.payload]  # type: ignore[list-item]
 

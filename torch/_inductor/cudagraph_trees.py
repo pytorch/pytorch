@@ -930,7 +930,6 @@ class CUDAGraphNode:
             return None
 
         self.static_input_data_ptrs: InputList[Optional[int]] = [
-
             maybe_get_static_data_ptr(i, inputs, self.static_input_idxs)
             for i in range(len(inputs))
         ]

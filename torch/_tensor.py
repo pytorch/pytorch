@@ -1066,7 +1066,6 @@ class Tensor(torch._C.TensorBase):
         else:
             return torch._VF.split_with_sizes(
                 self,
-
                 split_size,
                 dim,
             )
