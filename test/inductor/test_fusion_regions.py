@@ -3,11 +3,10 @@
 import unittest
 
 import torch
-from torch.ops import aten
-
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.ops import aten
 
 
 HAS_GPU = torch.cuda.is_available()
@@ -20,33 +19,6 @@ class TestFusionRegionDetection(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = "cuda"
-
-    def test_view_nodes_identified(self):
-        """Test that view ops are identified correctly."""
-        from torch._inductor.fx_passes.fusion_regions import is_view_node
-
-        with FakeTensorMode():
-            a = torch.ones(1024, device=self.device)
-            traced = make_fx(lambda a: a.view(16, 64))(a)
-
-        (view_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.view.default
-        )
-        self.assertTrue(is_view_node(view_node))
-
-    def test_fusible_nodes_identified(self):
-        """Test that fusible nodes (pointwise, reduction) are identified."""
-        from torch._inductor.fx_passes.fusion_regions import is_fusible_node, is_view_node
-
-        with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            traced = make_fx(lambda a: a + 1)(a)
-
-        (add_node,) = traced.graph.find_nodes(
-            op="call_function", target=aten.add.Tensor
-        )
-        self.assertTrue(is_fusible_node(add_node))
-        self.assertFalse(is_view_node(add_node))
 
     def test_fusion_region_grouping(self):
         """Test that connected fusible ops are grouped into regions."""
@@ -108,7 +80,12 @@ class TestFusionRegionDetection(InductorTestCase):
 
         # add is before mm, mul is after mm - they should be in different regions
         # (or one/both not in a region at all if they're singletons)
-        if add_nodes and mul_nodes and add_nodes[0] in region_of and mul_nodes[0] in region_of:
+        if (
+            add_nodes
+            and mul_nodes
+            and add_nodes[0] in region_of
+            and mul_nodes[0] in region_of
+        ):
             self.assertIsNot(
                 region_of[add_nodes[0]],
                 region_of[mul_nodes[0]],
@@ -128,10 +105,10 @@ class TestFusionRegionDetection(InductorTestCase):
         - Group 3: separate_pointwise1, separate_pointwise2 (independent)
         """
         from torch._inductor.fx_passes.fusion_regions import (
-            FusionRegion,
             build_fusion_regions,
             collapse_fusion_regions,
             expand_fusion_regions,
+            FusionRegion,
         )
 
         def model(a, b):
@@ -166,17 +143,25 @@ class TestFusionRegionDetection(InductorTestCase):
         region_of = build_fusion_regions(traced)
 
         # Should have 6 pointwise nodes in regions (2+2+2)
-        self.assertEqual(len(region_of), 6, f"Expected 6 nodes in regions, got {len(region_of)}")
+        self.assertEqual(
+            len(region_of), 6, f"Expected 6 nodes in regions, got {len(region_of)}"
+        )
 
         # Collapse fusion regions
         new_region_of, replaced = collapse_fusion_regions(traced, region_of)
 
         # Should have exactly 3 fusion regions (call_module nodes)
-        self.assertEqual(len(new_region_of), 3, f"Expected 3 fusion regions, got {len(new_region_of)}")
+        self.assertEqual(
+            len(new_region_of),
+            3,
+            f"Expected 3 fusion regions, got {len(new_region_of)}",
+        )
 
         # After collapse: should have call_module nodes instead of pointwise
         call_modules = list(traced.graph.find_nodes(op="call_module"))
-        self.assertEqual(len(call_modules), 3, "Should have 3 call_module nodes after collapse")
+        self.assertEqual(
+            len(call_modules), 3, "Should have 3 call_module nodes after collapse"
+        )
 
         # Verify each region has correct exact bytes and cost
         # 64x64 float32 tensor = 64*64*4 = 16384 bytes
@@ -188,39 +173,59 @@ class TestFusionRegionDetection(InductorTestCase):
 
         for module_node, region in new_region_of.items():
             self.assertIsInstance(region, FusionRegion)
-            self.assertEqual(len(region.nodes), 2, f"Region {module_node.name} should have 2 nodes")
+            # Count call_function nodes in subgraph (excludes placeholder/output)
+            subgraph_ops = [
+                n for n in region.subgraph_module.graph.nodes if n.op == "call_function"
+            ]
+            self.assertEqual(
+                len(subgraph_ops), 2, f"Region {module_node.name} should have 2 ops"
+            )
 
         # Verify metas are preserved on call_module nodes (including multi-output)
         single_output_count = 0
         multi_output_count = 0
         for module_node in call_modules:
-            self.assertIn("val", module_node.meta, f"call_module {module_node.name} should have 'val' meta")
+            self.assertIn(
+                "val",
+                module_node.meta,
+                f"call_module {module_node.name} should have 'val' meta",
+            )
             val = module_node.meta["val"]
 
             if isinstance(val, (list, tuple)):
                 # Multi-output region (Group 3 with y, z)
                 multi_output_count += 1
-                self.assertEqual(len(val), 2, f"Multi-output region should have 2 outputs")
+                self.assertEqual(
+                    len(val), 2, "Multi-output region should have 2 outputs"
+                )
                 for i, v in enumerate(val):
-                    self.assertEqual(v.shape, (64, 64), f"Output {i} should have shape (64, 64)")
+                    self.assertEqual(
+                        v.shape, (64, 64), f"Output {i} should have shape (64, 64)"
+                    )
                 # 1 input + 2 outputs = 3 tensors
                 expected_bytes = 3 * tensor_bytes
             else:
                 # Single output region (Groups 1 and 2)
                 single_output_count += 1
-                self.assertEqual(val.shape, (64, 64), f"call_module {module_node.name} should have shape (64, 64)")
+                self.assertEqual(
+                    val.shape,
+                    (64, 64),
+                    f"call_module {module_node.name} should have shape (64, 64)",
+                )
                 # 1 input + 1 output = 2 tensors
                 expected_bytes = 2 * tensor_bytes
 
             region = new_region_of[module_node]
             expected_cost_ms = (expected_bytes / fusion_bw_bytes_per_s) * 1000
             self.assertEqual(
-                region.total_bytes, expected_bytes,
-                f"Region {module_node.name} should have {expected_bytes} bytes, got {region.total_bytes}"
+                region.total_bytes,
+                expected_bytes,
+                f"Region {module_node.name} should have {expected_bytes} bytes, got {region.total_bytes}",
             )
             self.assertEqual(
-                region.cost_ms, expected_cost_ms,
-                f"Region {module_node.name} should have {expected_cost_ms} ms, got {region.cost_ms}"
+                region.cost_ms,
+                expected_cost_ms,
+                f"Region {module_node.name} should have {expected_cost_ms} ms, got {region.cost_ms}",
             )
 
         # Verify we have both single and multi-output regions
@@ -232,20 +237,114 @@ class TestFusionRegionDetection(InductorTestCase):
 
         # After expand: should have no call_module nodes
         call_modules_after = list(traced.graph.find_nodes(op="call_module"))
-        self.assertEqual(len(call_modules_after), 0, "Should have no call_module nodes after expand")
+        self.assertEqual(
+            len(call_modules_after), 0, "Should have no call_module nodes after expand"
+        )
 
         # Verify metas are preserved on expanded nodes
-        for erased_node, replacement_node in expand_replaced.items():
-            self.assertIn("val", replacement_node.meta, f"Expanded node {replacement_node.name} should have 'val' meta")
+        for replacement_node in expand_replaced.values():
+            self.assertIn(
+                "val",
+                replacement_node.meta,
+                f"Expanded node {replacement_node.name} should have 'val' meta",
+            )
 
         # Count non-getitem nodes after expand
         # Multi-output regions add getitem nodes when expanded, so exclude those
         nodes_after = [
-            n for n in traced.graph.nodes
+            n
+            for n in traced.graph.nodes
             if n.op == "call_function" and "getitem" not in str(n.target)
         ]
         num_nodes_after = len(nodes_after)
-        self.assertEqual(num_nodes_after, num_nodes_before, "Non-getitem node count should be same after expand")
+        self.assertEqual(
+            num_nodes_after,
+            num_nodes_before,
+            "Non-getitem node count should be same after expand",
+        )
+
+    def test_collapse_expand_preserves_correctness(self):
+        """Test that collapse and expand preserve numerical correctness.
+
+        Run the module before collapse, after collapse, and after expand,
+        verifying all produce the same results. Also verify the graph string
+        is identical before and after the round-trip.
+        """
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            collapse_fusion_regions,
+            expand_fusion_regions,
+        )
+
+        def model(a, b):
+            # Group 1: before mm
+            x = a + 1
+            x = x * 2
+
+            # mm boundary
+            x = torch.mm(x, a)
+
+            # Group 2: after mm
+            x = x - 1
+            x = x / 2
+
+            # Group 3: separate chain with multi-output
+            y = b + 3
+            z = y * 4
+
+            return x, y, z
+
+        # Use real tensors for numerical correctness check
+        torch.manual_seed(42)
+        a = torch.randn(64, 64, device=self.device)
+        b = torch.randn(64, 64, device=self.device)
+
+        # Get expected results from eager execution
+        expected = model(a, b)
+
+        # Trace with FakeTensorMode, then run with real tensors
+        with FakeTensorMode():
+            a_fake = torch.ones(64, 64, device=self.device)
+            b_fake = torch.ones(64, 64, device=self.device)
+            traced = make_fx(model)(a_fake, b_fake)
+
+        # Capture graph string before any transformation
+        graph_str_before = traced.print_readable(print_output=False)
+
+        # Run traced module before any transformation
+        result_before = traced(a, b)
+        for i, (exp, res) in enumerate(zip(expected, result_before)):
+            self.assertEqual(exp, res, f"Output {i} mismatch before collapse")
+
+        # Build and collapse fusion regions
+        region_of = build_fusion_regions(traced)
+        new_region_of, replaced = collapse_fusion_regions(traced, region_of)
+
+        # Run traced module after collapse (with call_module nodes)
+        traced.recompile()
+        result_after_collapse = traced(a, b)
+        for i, (exp, res) in enumerate(zip(expected, result_after_collapse)):
+            self.assertEqual(exp, res, f"Output {i} mismatch after collapse")
+
+        # Expand (inline) the fusion regions back
+        expand_fusion_regions(traced, new_region_of, replaced)
+
+        # Run traced module after expand
+        traced.recompile()
+        result_after_expand = traced(a, b)
+        for i, (exp, res) in enumerate(zip(expected, result_after_expand)):
+            self.assertEqual(exp, res, f"Output {i} mismatch after expand")
+
+        # Verify graph string is identical after round-trip
+        # Note: Multi-output regions may add getitem nodes, so we run DCE first
+        traced.graph.eliminate_dead_code()
+        traced.recompile()
+        graph_str_after = traced.print_readable(print_output=False)
+        self.assertEqual(
+            graph_str_before,
+            graph_str_after,
+            "Graph string should be identical after collapse/expand round-trip",
+        )
 
 
 if __name__ == "__main__":
