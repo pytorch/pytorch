@@ -45,8 +45,7 @@ jobs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       build-docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       torch-cuda-arch-list: '8.0 8.9 9.0'
-      # TODO: UPGRADE TO 12.9
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+      build-environment: linux-jammy-cuda12.9-py3.12-gcc11
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
@@ -91,7 +90,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           working-directory: pytorch/pytorch
-          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm
 
   # TODO (huydhn): Move this to a generic GHA, also this only works for CUDA in
   # the current state. I intentionally don't use _linux-build here as we'll need
