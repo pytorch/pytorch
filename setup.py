@@ -1753,6 +1753,8 @@ def main() -> None:
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
         "_inductor/kernel/templates/*.jinja",
+        # NOTE: for CuTeDSL grouped_gemm.py to be included.
+        "_inductor/kernel/vendored_templates/*.py",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
