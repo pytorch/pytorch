@@ -570,18 +570,20 @@ def common_pointwise_strategy(
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
-                keep_partial = False
-                keep_norm_partial = False
+                propagate_partial = False
 
+                # ordering matters here since NormPartial is a subclass of Partial
                 if isinstance(placement, _NormPartial):
-                    keep_norm_partial = (
+                    # explanation for args_schema[1] >= 0 can be found in summary
+                    # https://github.com/pytorch/pytorch/pull/170035
+                    propagate_partial = (
                         op in norm_partial_avoidable_redistribute_ops
                         and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
                     )
 
                 elif isinstance(placement, Partial):
-                    keep_partial = (
-                        op not in redistribute_partial_ops or not is_scalar_arg
+                    propagate_partial = not (
+                        op in p_sum_scalar_redistribute_ops and is_scalar_arg
                     )
 
                 # Check if this partial type should be preserved
@@ -593,7 +595,7 @@ def common_pointwise_strategy(
                 elif (
                     linearity >= 0
                     and (placement.is_partial("sum") or placement.is_partial("avg"))
-                    and (keep_partial or keep_norm_partial)
+                    and propagate_partial
                 ):
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -693,7 +695,7 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-redistribute_partial_ops = {aten.add.Tensor, aten.add_.Tensor}
+p_sum_scalar_redistribute_ops = {aten.add.Tensor, aten.add_.Tensor}
 
 norm_partial_avoidable_redistribute_ops = {
     aten.div.Scalar,
