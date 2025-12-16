@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfRocm,
@@ -72,9 +71,7 @@ def skipIfTorchVersionLessThan(major, minor):
     return decorator
 
 
-# TODO: Fix this error in Windows:
-# LINK : error LNK2001: unresolved external symbol PyInit__C
-if not IS_WINDOWS:
+if True:
 
     class TestLibtorchAgnostic(TestCase):
         """
