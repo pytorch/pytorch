@@ -115,6 +115,13 @@ jobs:
         BUILD_ENVIRONMENT: ${{ needs.set-parameters.outputs.build-environment }}
         RUNNER: linux.24xlarge.memory
     steps:
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y git zip unzip
+
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -200,7 +207,7 @@ jobs:
         run: |
           set -eux
           apt-get update
-          apt-get install -y git unzip
+          apt-get install -y git zip unzip
 
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
