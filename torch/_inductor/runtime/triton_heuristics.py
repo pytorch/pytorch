@@ -2803,27 +2803,31 @@ def _reduction_configs(
     result_configs = []
 
     # For 3d tiling, default to more autotuning initially
-    if not (max_autotune_enabled or "y" in size_hints):
-        if reduction_hint == ReductionHint.INNER:
-            result_configs = configs + [contiguous_config]
-        elif reduction_hint == ReductionHint.OUTER:
-            result_configs = configs + [outer_config]
-        elif reduction_hint == ReductionHint.OUTER_TINY:
-            result_configs = configs + [tiny_config]
-        else:
-            result_configs = configs + [make_config(32, 128)]
-    else:
-        result_configs = configs + [
-            contiguous_config,
-            outer_config,
-            tiny_config,
-            make_config(64, 64),
-            make_config(8, 512),
-            # halve the XBLOCK/Rn_BLOCK compared to outer_config
-            # TODO: this may only be beneficial when each iteration of the reduction
-            # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-            make_config(64, 4, num_warps=8),
-        ]
+    if "y" in size_hints:
+        pass
+    elif max_autotune_enabled:
+        pass  # skip all these cases
+    if reduction_hint == ReductionHint.INNER:
+        return configs + [contiguous_config]
+    elif reduction_hint == ReductionHint.OUTER:
+        return configs + [outer_config]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        result_configs = configs + [tiny_config]
+
+    # We continue here under the following conditions:
+    # - max_autotune_enabled is True
+    # - max_autotune_enabled is False and reduction_hint is NOT one of the above cases
+    result_configs = configs + [
+        contiguous_config,
+        outer_config,
+        tiny_config,
+        make_config(64, 64),
+        make_config(8, 512),
+        # halve the XBLOCK/Rn_BLOCK compared to outer_config
+        # TODO: this may only be beneficial when each iteration of the reduction
+        # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+        make_config(64, 4, num_warps=8),
+    ]
 
         if torch.version.hip:
             result_configs.extend(
