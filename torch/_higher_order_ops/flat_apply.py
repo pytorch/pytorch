@@ -7,6 +7,7 @@ from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
 
@@ -17,12 +18,12 @@ _Ts = TypeVarTuple("_Ts")
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that that is an acceptable input/output type to a FX node."""
-    return isinstance(val, torch.fx.node.base_types)
+    return isinstance(val, torch.fx.node.base_types) or is_opaque_type(type(val))
 
 
 def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable"""
-    return issubclass(typ, torch.fx.node.base_types)
+    return issubclass(typ, torch.fx.node.base_types) or is_opaque_type(typ)
 
 
 def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
@@ -90,9 +91,9 @@ class FlatApply(HigherOrderOperator):
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
         *flat_args: Unpack[_Ts],
-        # If True then the output is flattened. If False (the default) then the
-        # output is returned verbatim (and must be valid graphable output).
-        flatten_output: bool = False,
+        # If True then the output is checked to be valid. If False then it is up
+        # to the caller to ensure the output is appropriate.
+        checked_output: bool = True,
         **_unused: object,
     ) -> object:
         """
@@ -106,8 +107,7 @@ class FlatApply(HigherOrderOperator):
         >>> def flat_apply_impl(func, in_spec, *flat_args):
         >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         >>>     output = func(*args, **kwargs)
-        >>>     flat_output, _ = pytree.tree_flatten(output)
-        >>>     return flat_output
+        >>>     return output
 
         flat_apply supports the following two cases:
         - an input type is a container type (e.g. of tensors) registered as a pytree.
@@ -115,40 +115,33 @@ class FlatApply(HigherOrderOperator):
         - an input type is a constant type (i.e. torch.compile will specialize on it)
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
-
-        Output is handled in a similar, but reverse, fashion by tree_flattening
-        the output and trace the unflattening. Note that wrapped functions must
-        return the same pytree structure every time they're called.
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-
         # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
-        out, _ = impl(func, in_spec, flatten_output, flat_args)
-        return out
+        return impl(func, in_spec, flat_args, checked_output)
 
 
 @overload
-def _is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
+def is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
 
 
 @overload
-def _is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
+def is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
 
 
-def _is_valid_output(x: object) -> bool:
+def is_valid_output(x: object) -> bool:
     if isinstance(x, (tuple, list)):
-        return all(map(_is_valid_output, x))
+        return all(map(is_valid_output, x))
     return is_graphable(x)
 
 
-# Common functionality for FlatApply and FlatApplyCaptureSpec
 def impl(
     func: _OpTypes | pytree.TreeSpec,
     in_spec: pytree.TreeSpec,
-    flatten_output: bool,
     flat_args: tuple[Unpack[_Ts]],
-) -> tuple[object, pytree.TreeSpec | None]:
+    checked_output: bool,
+) -> _FXOutput:
     if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
@@ -158,39 +151,11 @@ def impl(
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
 
-    # All outputs must either be graphable or lists/tuples of graphables. If
-    # flatten_output is specified then we also allow PyTree flattenable outputs
-    # as well (and the leaves must be graphable).
-    #
-    out_spec = None
-    if flatten_output:
-        out, out_spec = to_graphable(out)
-
-    assert _is_valid_output(out)
-    return out, out_spec
+    if checked_output:
+        # For "normal" usage all outputs must either be graphable or
+        # lists/tuples of graphables.
+        assert is_valid_output(out)
+    return out
 
 
 flat_apply = FlatApply()
-
-
-# FlatApplyCaptureSpec is used with FlatApply to capture the TreeSpec when
-# running the wrapped function. The TreeSpec is captured in self.out_spec. Other
-# than that it behaves the same as FlatApply.
-class FlatApplyCaptureSpec(HigherOrderOperator):
-    def __init__(self) -> None:
-        super().__init__("flat_apply")
-        self.out_spec: pytree.TreeSpec | None = None
-
-    def __call__(
-        self,
-        func: _OpTypes | pytree.TreeSpec,
-        in_spec: pytree.TreeSpec,
-        *flat_args: tuple[Unpack[_Ts]],
-        flatten_output: bool = False,
-        **_unused: object,
-    ) -> object:
-        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
-        assert len(_unused) == 0
-
-        out, self.out_spec = impl(func, in_spec, flatten_output, flat_args)
-        return out

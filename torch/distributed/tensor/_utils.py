@@ -1,7 +1,7 @@
 import logging
 import threading
-from collections.abc import Sequence
-from typing import Any, cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -54,8 +54,9 @@ class ExplicitRedistributionContext:
 
     @classmethod
     def observe_redistribution(
-        cls, src_spec: DTensorSpec, dst_spec: DTensorSpec, message: str
+        cls, src_spec: DTensorSpec, dst_spec: DTensorSpec, message_fn: Callable[[], str]
     ):
+        assert callable(message_fn)
         if instance := getattr(cls._local, "_active", None):
             allowed = True
             if instance._enable:
@@ -65,9 +66,11 @@ class ExplicitRedistributionContext:
                     allowed = redistribute_cost(src_spec, dst_spec) <= 0
             if not allowed:
                 if instance._raise_on_redistribution:
-                    raise RuntimeError(message)
+                    raise RuntimeError(message_fn())
                 else:
-                    logger.warning(message)
+                    # TODO: this is still suboptimal when redistribution is on
+                    # but warnings are being suppressed
+                    logger.warning(message_fn())
 
     def __enter__(self):
         self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
@@ -140,7 +143,7 @@ def _get_shard_size_and_offsets(
     previous_offsets,
     zero_global_offset: int,
     skip_offset: bool,
-) -> tuple[int, Optional[torch.Tensor]]:
+) -> tuple[int, torch.Tensor | None]:
     kwargs: dict[str, Any] = {
         "curr_local_size": curr_local_size,
         "num_chunks": mesh_dim_size,
