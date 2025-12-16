@@ -82,9 +82,8 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert device_module is not None, (
-        f"{device.type.upper()} device module is not loaded"
-    )
+    if device_module is None:
+        raise AssertionError(f"{device.type.upper()} device module is not loaded")
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -96,9 +95,10 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert not self.is_sparse, (
-                f"sparse storage is not supported for {device.type.upper()} tensors"
-            )
+            if self.is_sparse:
+                raise AssertionError(
+                    f"sparse storage is not supported for {device.type.upper()} tensors"
+                )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -137,7 +137,10 @@ def _get_restore_location(device):
         elif isinstance(map_location, (str, torch.device)):
             return map_location
         else:
-            assert callable(map_location)
+            if not callable(map_location):
+                raise AssertionError(
+                    f"expected callable map_location, got {type(map_location).__name__}"
+                )
             raise RuntimeError(
                 "Callable map_location not supported with _rebuild_wrapper_subclass "
                 "or _rebuild_device_tensor_from_numpy"
@@ -193,14 +196,17 @@ def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
     # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
 def set_tensor_metadata(tensor, metadata):
     # See `get_tensor_metadata` above
-    assert isinstance(metadata, dict)
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(metadata, dict):
+        raise AssertionError(f"expected dict, got {type(metadata).__name__}")
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
@@ -1066,7 +1072,8 @@ def try_import(module_name: str) -> ModuleType | None:
 
         # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
         # "The finder should always set this attribute"
-        assert spec.loader is not None, "The loader attribute should always be set"
+        if spec.loader is None:
+            raise AssertionError("The loader attribute should always be set")
         spec.loader.exec_module(module)
         return module
 

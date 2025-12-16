@@ -476,12 +476,13 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         )
         prof = cProfile.Profile()
         try:
-            prof.enable()
             start_ts = time.time()
+            # runcall calls prof.enable() and prof.disable(), so do NOT call
+            # enable outside. This leads to issues like
+            # ValueError: Another profiling tool is already active
             # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
-            prof.disable()
         except ValueError:
             log.exception("failed to enable cProfile")
             profile_latency = 0
@@ -666,6 +667,7 @@ class ConvertFrameAssert:
         # skip tracing non-recursive disabled functions
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
+        # pyrefly: ignore [bad-assignment]
         while (
             prev_frame
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
@@ -847,7 +849,6 @@ def trace_frame(
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
-
     return tracer_output
 
 
@@ -1078,10 +1079,12 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
-            backend_id, compiled_fn, extra_globals=extra_globals
+            backend_id,
+            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            extra_globals=extra_globals,
         )
 
 
@@ -1253,6 +1256,7 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
+            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -1352,6 +1356,10 @@ def compile_frame(  # type: ignore[return]
                 "Restarting analysis due to %s",
                 LazyString(format_traceback_short, e.__traceback__),
             )
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1368,6 +1376,10 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
@@ -1919,6 +1931,7 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )
