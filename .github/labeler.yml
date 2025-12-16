@@ -131,6 +131,7 @@
 - torch/_inductor/codegen/pallas.py
 - test/inductor/test_pallas.py
 - test/inductor/pallas_expected_failures/**
+- .github/workflows/inductor-pallas.yml
 
 "ciflow/b200":
 - test/test_matmul_cuda.py
