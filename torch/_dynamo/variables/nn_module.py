@@ -1254,7 +1254,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(dict.items(hooks_dict))
             )
 
             return variables.NNModuleHooksDictVariable(
