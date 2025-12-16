@@ -672,7 +672,7 @@ std::optional<c10::ScalarType> out_dtype) {
   bool use_fast_path = false;
   // On non CK system(w/ ROCm), make sure use_fast_path is false
 #if defined(USE_ROCM_CK_GEMM)
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
+  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     use_fast_path = true;
   }
 #endif //USE_ROCM_CK_GEMM
