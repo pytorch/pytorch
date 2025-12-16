@@ -28,7 +28,7 @@ namespace at::cuda { namespace {
 
 template <typename Handle_t, void Create(Handle_t *), void Destroy(Handle_t)>
 struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThreadHandlePool<Handle_t, Create, Destroy>> {
-
+private:
     struct Handle {
     Handle_t handle;
     Handle(bool create = false) : handle(nullptr)
@@ -79,6 +79,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     std::unordered_map<c10::DeviceIndex, std::vector<Handle>> created_handles;
     std::unordered_map<c10::DeviceIndex, std::vector<Handle_t>> available_handles;
 
+public:
     // PoolWindow lazily creates and caches the handles that a particular thread is using,
     // so in the common case handle access doesn't incur either handle creation or a mutex lock.
     class PoolWindow
@@ -90,29 +91,17 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     Handle_t reserve(c10::DeviceIndex device)
     {
         // If this thread already has a handle for this device, return it
-        if(my_handles.find(device) != my_handles.end())
-        return my_handles[device];
+        auto [handle_it, inserted] = my_handles.try_emplace(device, Handle_t{nullptr});
 
-        // otherwise, either grab a handle from the pool if one is available,
-        // or if not, create a new one.
-        auto parent = weak_parent.lock();
-        TORCH_CHECK(parent, "Cannot create handle during program termination");
-        std::lock_guard<std::mutex> guard(parent->mutex);
-
-        if(parent->available_handles[device].size() > 0)
-        {
-        my_handles[device] = parent->available_handles[device].back();
-        parent->available_handles[device].pop_back();
-        }
-        else
-        {
-        // In local testing, I do observe that emplace_back sometimes routes through temporaries
-        // that incur move-constructor and destructor calls.  See comments in Handle above.
-        parent->created_handles[device].emplace_back(true /*create*/);
-        my_handles[device] = parent->created_handles[device].back().handle;
+        // if this thread does not have a handle, get one from the pool.
+        // The pool might allocate a new handle if no handles are available.
+        if (inserted) {
+            auto pool = weak_parent.lock();
+            TORCH_CHECK(pool, "Cannot create handle during program termination");
+            handle_it->second = pool->getHandle(device);
         }
 
-        return my_handles[device];
+        return handle_it->second;
     }
 
     private:
@@ -131,12 +120,34 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
                 return;
             }
 
-            std::lock_guard<std::mutex> guard(parent->mutex);
-            for(auto d_h : my_handles)
-                parent->available_handles[d_h.first].push_back(d_h.second);
+            parent->releaseHandles(my_handles);
         }
     }
     };
+
+    void releaseHandles(std::unordered_map<c10::DeviceIndex, Handle_t>& handles)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (auto [device, handle] : handles)
+            available_handles[device].push_back(handle);
+        handles.clear();
+    }
+
+    Handle_t getHandle(c10::DeviceIndex device)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+
+        std::vector<Handle_t>& handles = available_handles[device];
+        if (!handles.empty()) {
+            Handle_t handle = handles.back();
+            handles.pop_back();
+            return handle;
+        }
+
+        // In local testing, I do observe that emplace_back sometimes routes through temporaries
+        // that incur move-constructor and destructor calls.  See comments in Handle above.
+        return created_handles[device].emplace_back(true /*create*/).handle;
+    }
 
     // Warning:
     // If you want to change this function, be aware that this function will be called
