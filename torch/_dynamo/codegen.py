@@ -46,6 +46,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.dicts import ConstDictVariable
 from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -287,8 +288,15 @@ class PyCodegen:
         if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
             self.uses[value] += 1
             self.call_reconstruct(value)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
+        # Check if we can emit a constant load. Skip dicts because:
+        # 1. Dict is not in is_safe_constant() so would always fail anyway
+        # 2. Calling is_python_constant() on a dict triggers as_python_constant()
+        #    which realizes all lazy values, installing guards on unused keys
+        #    during mutation codegen
+        elif (
+            not isinstance(value, ConstDictVariable)
+            and value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):

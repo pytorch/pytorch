@@ -1230,5 +1230,102 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(counter2.frame_count, frame_count_after_second)
 
 
+    def test_dict_mutation_no_recompile_on_unused_key_change(self):
+        """Test that mutating a dict doesn't guard on unused keys.
+
+        When a dict is mutated with a constant key (e.g., d['new_key'] = value),
+        no guard is needed since __setitem__ works the same whether the key
+        exists or not. This ensures that changing any keys (used or unused)
+        doesn't cause unnecessary recompilation.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d):
+            d["new_key"] = 123  # Mutate dict - no guard needed for constant key
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with dict {'a': 1, 'b': 2}
+        d1 = {"a": 1, "b": 2}
+        eager1 = fn(tensor_input, d1.copy())
+        d1_copy = {"a": 1, "b": 2}
+        compiled1 = opt_fn(tensor_input, d1_copy)
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(d1_copy["new_key"], 123)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with completely different keys - should NOT recompile
+        d2 = {"x": 100, "y": 200}
+        eager2 = fn(tensor_input, d2.copy())
+        d2_copy = {"x": 100, "y": 200}
+        compiled2 = opt_fn(tensor_input, d2_copy)
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(d2_copy, {"x": 100, "y": 200, "new_key": 123})
+        self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+        # Third call with 'new_key' already present - should also NOT recompile
+        # since __setitem__ works the same whether key exists or not
+        d3 = {"a": 1, "new_key": 999}
+        eager3 = fn(tensor_input, d3.copy())
+        d3_copy = {"a": 1, "new_key": 999}
+        compiled3 = opt_fn(tensor_input, d3_copy)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(d3_copy["new_key"], 123)  # Overwritten
+        self.assertEqual(counter.frame_count, 1)  # Still no recompile!
+
+    def test_dict_read_then_write_same_key(self):
+        """Test reading and writing the same dict key (e.g., increment).
+
+        When we read a dict key with a constant key, the value is treated as
+        a LazyConstantVariable. When we add to it (d["x"] + 1), it creates a
+        ComputedLazyConstantVariable which doesn't guard on the value.
+        This allows changing the value without recompilation.
+
+        Note: This requires specialize_int=True for the value to stay lazy.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d):
+            d["counter"] = d["counter"] + 1  # Read then write same key
+            return t + 1
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call
+            d1 = {"counter": 10, "other": "unchanged"}
+            eager1 = fn(tensor_input, d1.copy())
+            d1_copy = {"counter": 10, "other": "unchanged"}
+            compiled1 = opt_fn(tensor_input, d1_copy)
+            self.assertTrue(same(eager1, compiled1))
+            self.assertEqual(d1_copy["counter"], 11)
+            self.assertEqual(d1_copy["other"], "unchanged")  # Other key preserved
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call with different counter value - should NOT recompile
+            # because the value is lazy and d["counter"] + 1 creates a
+            # ComputedLazyConstantVariable that recomputes at runtime
+            d2 = {"counter": 100, "different": "keys"}
+            eager2 = fn(tensor_input, d2.copy())
+            d2_copy = {"counter": 100, "different": "keys"}
+            compiled2 = opt_fn(tensor_input, d2_copy)
+            self.assertTrue(same(eager2, compiled2))
+            self.assertEqual(d2_copy["counter"], 101)  # 100 + 1 = 101
+            self.assertEqual(d2_copy["different"], "keys")  # Other key preserved
+            self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+            # Third call with yet another counter value - still no recompile
+            d3 = {"counter": 500}
+            eager3 = fn(tensor_input, d3.copy())
+            d3_copy = {"counter": 500}
+            compiled3 = opt_fn(tensor_input, d3_copy)
+            self.assertTrue(same(eager3, compiled3))
+            self.assertEqual(d3_copy["counter"], 501)  # 500 + 1 = 501
+            self.assertEqual(counter.frame_count, 1)  # Still no recompile!
+
+
 if __name__ == "__main__":
     run_tests()
