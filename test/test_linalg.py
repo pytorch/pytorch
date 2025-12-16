@@ -111,22 +111,6 @@ def get_tunableop_untuned_filename():
     untuned_filename = f"{untuned_filename_base}{ordinal}.csv"
     return untuned_filename
 
-def _sort_complex_real_first(x):
-    """Sort complex values lexicographically by (real, imag) along the last dimension.
-    Intended for test comparisons only. Returns sorted x on CPU.
-    """
-
-    # move eigenvalues to CPU to ensure same sorting
-    x = x.cpu()
-
-    idx = torch.argsort(x.imag, dim=-1)
-    x = torch.gather(x, -1, idx)
-
-    idx = torch.argsort(x.real, dim=-1)
-    x = torch.gather(x, -1, idx)
-
-    return x
-
 
 class TestLinalg(TestCase):
     def setUp(self):
