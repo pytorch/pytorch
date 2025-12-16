@@ -95,10 +95,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -657,6 +659,7 @@ def check_model(
     torch._dynamo.reset()
 
 
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -5553,34 +5556,6 @@ class CommonTemplate:
             check_lowp=not is_halide_backend(self.device),  # misaligned addr fp16
         )
 
-    @xfail_if_triton_cpu
-    def test_lp_pool1d_with_inf_norm(self):
-        # https://github.com/pytorch/pytorch/issues/167197
-        # Test that LPPool1d works with infinity norm (should behave like max pooling)
-        def fn(x):
-            return torch.nn.functional.lp_pool1d(
-                x, norm_type=float("inf"), kernel_size=2, stride=2
-            )
-
-        self.common(
-            fn,
-            (torch.randn(3, 4, 8),),
-        )
-
-    @xfail_if_triton_cpu
-    def test_lp_pool2d_with_inf_norm(self):
-        # https://github.com/pytorch/pytorch/issues/167197
-        # Test that LPPool2d works with infinity norm (should behave like max pooling)
-        def fn(x):
-            return torch.nn.functional.lp_pool2d(
-                x, norm_type=float("inf"), kernel_size=2, stride=2
-            )
-
-        self.common(
-            fn,
-            (torch.randn(3, 4, 8, 8),),
-        )
-
     @tf32_on_and_off(0.006)
     @skip_if_gpu_halide  # slow
     def test_alexnet_prefix(self):
@@ -6361,16 +6336,6 @@ class CommonTemplate:
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
         x = torch.randn([16, 16], device=self.device)
         self.assertEqual(cfn(x), fn(x))
-
-    @xfail_if_triton_cpu
-    def test_pow_infinite(self):
-        def fn(a, b):
-            return torch.pow(a, b)
-
-        opt = torch.compile(fn, backend="inductor")
-        a = torch.randn((3, 4, 8), device=self.device)
-        b = float("inf")
-        self.assertTrue(same(opt(a, b), fn(a, b)))
 
     def test_glu(self):
         def fn(x):

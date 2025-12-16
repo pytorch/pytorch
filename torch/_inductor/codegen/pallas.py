@@ -10,7 +10,6 @@ import sympy  # noqa: TC002
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pallas import has_tpu_pallas
-from torch.utils._sympy.functions import FloorDiv
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -1133,21 +1132,9 @@ class PallasKernel(SIMDKernel):
                 for s in buf_size:
                     buf_numel *= int(s) if hasattr(s, "__int__") else s
 
-                # Check if the index expression has non-unit strides
-                # If so, it's a genuine strided access pattern (like pooling)
-                # vs just a transposed tensor (which will be made contiguous)
+                # Get iteration variables used in the index expression
                 iter_vars = OrderedSet(self.range_tree_nodes.keys())
                 used_vars = index.free_symbols & iter_vars
-
-                has_non_unit_stride = False
-                for var in used_vars:
-                    var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
-                        index, var
-                    )
-                    stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
-                    if stride is not None and stride != 1:
-                        has_non_unit_stride = True
-                        break
 
                 # Compute the expected output size from iteration variables USED in the index
                 # Only multiply ranges of variables that appear in the index expression
@@ -1171,16 +1158,16 @@ class PallasKernel(SIMDKernel):
                 for l in used_range_lengths:
                     output_numel *= l
 
-                # Check for non-affine patterns (like FloorDiv) which indicate gather-style indexing
-                has_non_affine = index.has(sympy.floor) or index.has(FloorDiv)
-
                 # Use strided indexing if:
                 # 1. Buffer size differs from expected output size AND
-                # 2. Either has non-unit strides OR has non-affine patterns (like FloorDiv)
+                # 2. There are iteration variables in the index (meaning we're accessing a subset)
+                # Note: inputs are made contiguous before passing to JAX, so we don't need
+                # to worry about transposed tensors here - the index expression directly
+                # corresponds to which elements to load from the contiguous buffer.
                 if (
                     output_numel > 0
                     and buf_numel != output_numel
-                    and (has_non_unit_stride or has_non_affine)
+                    and len(used_vars) > 0
                 ):
                     index_str = self._generate_strided_index(index)
                     needs_flatten = True
@@ -1776,19 +1763,23 @@ class PallasKernel(SIMDKernel):
             else:
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in ("argmax", "argmin"):
-            # For argmax/argmin, we need to preserve the axis information
-            # because the result is indices, not values.
+            # For argmax/argmin, the result is indices into the reduction dimension.
+            # Unlike sum/max/min, we can't just reshape because the indices depend
+            # on which axis we reduce over. We need to determine the correct axis.
             reduction_op = reduction_ops[reduction_type]
             # Check if this is a true partial reduction (pointwise numel > 1)
             # When pointwise_numel == 1, it's effectively a full reduction to scalar
             is_partial_reduction = (
-                has_pointwise and pointwise_numel and pointwise_numel > 1
+                has_pointwise
+                and pointwise_numel
+                and pointwise_numel > 1
+                and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
                 # Partial reduction: determine the reduction axis from load index
                 # The reduction variable's coefficient in the index expression tells us its stride
                 # Higher stride = outer axis (lower axis number in row-major order)
-                reduction_axis = 0  # Default to axis 0
+                reduction_axis = -1  # Default to last axis
                 if self.load_index_exprs:
                     # Get the first load index expression
                     load_index = next(iter(self.load_index_exprs.values()))
@@ -1821,48 +1812,28 @@ class PallasKernel(SIMDKernel):
                                 pw_stride = 1
                             # Higher stride = earlier (outer) axis
                             # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
-                            reduction_axis = 0 if r_stride > pw_stride else 1
-                if n_reduction_dims == 1:
-                    reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
-                else:
-                    # Multiple reduction dims - reduce over all of them
-                    axes = tuple(range(n_reduction_dims))
-                    reduction_expr = f"{reduction_op}({value}, axis={axes})"
+                            reduction_axis = 0 if r_stride > pw_stride else -1
+                reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_op}({value})"
         elif reduction_type in reduction_ops:
-            if (
+            # Check for true partial reduction (pointwise_numel > 1 means we have
+            # actual pointwise dimensions, not just a scalar placeholder)
+            is_partial_reduction = (
                 has_pointwise
-                and pointwise_numel
+                and pointwise_numel is not None
+                and pointwise_numel > 1
                 and reduction_numel
-                and pointwise_sizes
-            ):
+            )
+            if is_partial_reduction:
                 # For partial reductions, we need to:
-                # 1. Move pointwise axes to the front and reduction axes to the back
-                # 2. Reshape to (pointwise_numel, reduction_numel)
-                # 3. Reduce over the last axis
-                #
-                # We use moveaxis to reorder: first move axes matching pointwise sizes
-                # to the front, then the remaining (reduction) axes go to the back.
-                # Finally reshape and reduce.
-                #
-                # Generate code to dynamically determine and reorder axes:
-                pw_sizes_str = str(pointwise_sizes)
+                # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
+                # 2. Move pointwise axes to front, reduction axes to back
+                # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
                 reduction_op = reduction_ops[reduction_type]
-                reduction_expr = (
-                    f"(lambda v: (lambda pw_sizes: "
-                    f"{reduction_op}(v.reshape(-1, {reduction_numel}), axis=-1) "
-                    f"if v.ndim == 2 else "
-                    f"(lambda input_shape, pw_axes: "
-                    f"{reduction_op}("
-                    f"jnp.moveaxis(v, pw_axes, list(range(len(pw_axes)))).reshape({pointwise_numel}, -1), axis=-1)"
-                    f")("
-                    f"v.shape, "
-                    f"[i for i, s in enumerate(v.shape) if s in pw_sizes][:len(pw_sizes)]"
-                    f")"
-                    f")({pw_sizes_str}))({value})"
-                )
+                # Use a helper to find reduction axes by product matching
+                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
@@ -1944,22 +1915,45 @@ class PallasKernel(SIMDKernel):
         # Import math at module level if we'll use it for masked ops
         imports = (
             """
-            import functools
-            """
-            + ("import math\n            " if self.use_masked_ops else "")
+import functools
+"""
+            + ("import math\n" if self.use_masked_ops else "")
             + """import torch
-            import jax
-            import jax.numpy as jnp
-            from jax.experimental import pallas as pl
-            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-            """
+import jax
+import jax.numpy as jnp
+from jax.experimental import pallas as pl
+from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
+def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
+    # Helper for partial reductions: reorders axes and reduces
+    if v.ndim <= 2:
+        return reduce_fn(v.reshape(pw_numel, red_numel), axis=-1)
+    # Find contiguous axes whose product = red_numel
+    # Search from right to left to prefer reducing over trailing axes
+    shape = tuple(v.shape)
+    red_axes = None
+    for i in range(len(shape) - 1, -1, -1):
+        prod = 1
+        for j in range(i, -1, -1):
+            prod *= shape[j]
+            if prod == red_numel:
+                red_axes = list(range(j, i + 1))
+                break
+        if red_axes is not None:
+            break
+    if red_axes is None:
+        red_axes = [len(shape) - 1]
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    return reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+"""
             + (
-                "\n            from jax.experimental.pallas import triton as pltriton"
+                "\nfrom jax.experimental.pallas import triton as pltriton"
                 if not interpret_is_cpu
                 else ""
             )
             + (
-                "\n            from torch._inductor.runtime.runtime_utils import next_power_of_2"
+                "\nfrom torch._inductor.runtime.runtime_utils import next_power_of_2"
                 if self.use_masked_ops
                 else ""
             )
