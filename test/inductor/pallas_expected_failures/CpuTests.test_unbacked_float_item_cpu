@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpfdrt4hgl/d6/cd6fb5zfjpjw4alhkhkcxzfvaz2r7fewnx46aiudwfqp43g7qmd6.py", line 14, in pallas_fused_clamp_f6761cb0_kernel
-    tmp3 = zuf0
-           ^^^^
-NameError: name 'zuf0' is not defined
