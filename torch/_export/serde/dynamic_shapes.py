@@ -46,6 +46,7 @@ def _postprocess_serialized_shapes(
     """
     from torch.utils._sympy.numbers import int_oo
 
+    # pyrefly: ignore [bad-assignment]
     dims = {
         k: RootDim(
             min=v["min"],  # type: ignore[arg-type]

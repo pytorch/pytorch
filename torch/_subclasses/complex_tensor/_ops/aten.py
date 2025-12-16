@@ -737,6 +737,7 @@ def allclose_impl(
     atol: float = 1e-08,
     equal_nan: bool = False,
 ) -> bool:
+    # pyrefly: ignore [bad-return]
     return torch.all(
         torch.isclose(input, other, rtol=rtol, atol=atol, equal_nan=equal_nan)
     ).item()  # type: ignore[bad-return]
