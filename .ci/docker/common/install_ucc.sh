@@ -8,7 +8,9 @@ else
   with_cuda=no
 fi
 
-source /etc/rocm_env.sh
+if [[ -f /etc/rocm_env.sh ]]; then
+  source /etc/rocm_env.sh
+fi
 
 if [[ -d "${ROCM_PATH}" ]]; then
   with_rocm="${ROCM_PATH}"
