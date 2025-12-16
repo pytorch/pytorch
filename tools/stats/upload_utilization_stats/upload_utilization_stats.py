@@ -59,7 +59,7 @@ class SegmentGenerator:
         df[time_col_name] = pd.to_datetime(df[time_col_name], unit="s", utc=True)
 
         # get unique cmd names
-
+        # pyrefly: ignore [bad-argument-type]
         unique_cmds_df = pd.DataFrame(df[cmd_col_name].unique(), columns=[cmd_col_name])
 
         # get all detected python cmds
@@ -67,7 +67,7 @@ class SegmentGenerator:
             unique_cmds_df[cmd_col_name].str.startswith("python")
         ][cmd_col_name].tolist()
 
-        # find segments by screening continuoues time series data
+        # find segments by screening continuous time series data
         segments: list[OssCiSegmentV1] = []
         for value in cmd_list:
             subset = df[df[cmd_col_name] == value].copy()
