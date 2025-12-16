@@ -316,7 +316,18 @@ def common_reduction_strategy(
         for p in op_spec.output_spec.placements:
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
-            if isinstance(p, Partial) and p.reduce_op != reduction_op:
+            propagate_partial = True
+
+            # ordering matters here since NormPartial is a subclass of Partial
+            if isinstance(p, _NormPartial):
+                if p.reduce_op == "sum":
+                    propagate_partial = False
+
+            elif isinstance(p, Partial):
+                if p.reduce_op != reduction_op:
+                    propagate_partial = False
+
+            if propagate_partial:
                 reduction_linear = False
                 break
 
