@@ -351,12 +351,9 @@ def _safe_ort_session_run(serialized_model: bytes, ort_inputs: Mapping[str, Any]
     Raises:
         OrtAbortedError if the process did not execute successfully.
     """
-    # Use explicit context to avoid relying on default start method
-    # This ensures compatibility with Python 3.14 where default changes from 'fork' to 'forkserver'
-    mp_ctx = multiprocessing.get_context('spawn')
-    manager = mp_ctx.Manager()
+    manager = multiprocessing.Manager()
     return_dict = manager.dict()
-    process = mp_ctx.Process(
+    process = multiprocessing.Process(
         target=_ort_session_run_return_dict,
         args=(serialized_model, ort_inputs, return_dict),
     )
