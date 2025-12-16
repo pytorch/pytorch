@@ -304,6 +304,7 @@ def get_promoted_dtype(
     *args: Any,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
     return_compute_dtype: bool = False,
+) -> torch.dtype:
     def construct_input(inp: Any) -> Any:
         if isinstance(inp, (Number, sympy.Basic)):
             return inp
