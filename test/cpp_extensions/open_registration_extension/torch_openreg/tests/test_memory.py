@@ -409,6 +409,37 @@ class TestPinMemory(TestCase):
         pinned_untyped_storage = untyped_storage.pin_memory("openreg")
         self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
 
+    def test_pin_memory_openreg_storage_various_sizes(self):
+        sizes = [1, 7, 63, 4095, 4096, 4097, 8191, 8192, 16384]
+
+        for size in sizes:
+            tensor = torch.empty(size, dtype=torch.uint8)
+            storage = tensor.storage()
+            self.assertFalse(storage.is_pinned("openreg"))
+
+            pinned_storage = storage.pin_memory("openreg")
+            self.assertTrue(pinned_storage.is_pinned("openreg"))
+            self.assertEqual(pinned_storage.size(), storage.size())
+
+            untyped_storage = tensor.untyped_storage()
+            self.assertFalse(untyped_storage.is_pinned("openreg"))
+
+            pinned_untyped_storage = untyped_storage.pin_memory("openreg")
+            self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
+
+    def test_pin_memory_openreg_repeated_alloc_free(self):
+        sizes = [1, 1024, 4096, 8192, 16384]
+
+        for _ in range(10):
+            pinned_storages = []
+            for size in sizes:
+                tensor = torch.empty(size, dtype=torch.uint8)
+                pinned_storages.append(tensor.storage().pin_memory("openreg"))
+                pinned_storages.append(tensor.untyped_storage().pin_memory("openreg"))
+
+            pinned_storages.clear()
+            gc.collect()
+
 
 class TestMultiDeviceAllocation(TestCase):
     """Test basic multi-device allocation functionality."""
