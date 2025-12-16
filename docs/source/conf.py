@@ -70,6 +70,7 @@ extensions = [
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
     "sphinx_reredirects",
+    "sphinx_tippy",
 ]
 
 myst_enable_extensions = [
