@@ -44,6 +44,8 @@ jobs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       build-docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       torch-cuda-arch-list: '8.0 8.9 9.0'
+      # TODO: UPGRADE TO 12.9
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
@@ -107,6 +109,7 @@ jobs:
       SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
       SCCACHE_REGION: us-east-1
       TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
+      BUILD_ENVIRONMENT: ${{ needs.set-parameters.outputs.build-environment }}
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
