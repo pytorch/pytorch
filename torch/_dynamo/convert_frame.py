@@ -1261,7 +1261,7 @@ def _fullgraph_capture_frame(
             restart_reasons=set(),
         )
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
-    except Unsupported as e:
+    except (Unsupported, UncapturedHigherOrderOpError) as e:
         augment_exc_message(e)
         if config.verbose:
             raise
@@ -1370,7 +1370,7 @@ def compile_frame(  # type: ignore[return]
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
             log.debug(  # noqa: G200
-                "Skipping frame %s %s \
+                "Backend signaled to skip frame: %s %s \
                 %s %s",
                 e,
                 code.co_name,
@@ -1976,40 +1976,6 @@ class ConvertFrame:
 
             soft_fail = isinstance(e, Unsupported)
             code = frame.f_code
-            # This is a soft failure. In the sense, the code path reaches here
-            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
-            # BUILD_SET etc. In such case, we can fallback to eager without
-            # scaring users.
-            if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
-                # Log this message in the graph break. Also use the string
-                # "skip: " to tell that the whole frame is falling back to
-                # eager.
-                if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
-                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
-                        user_stack = e.real_stack
-                        user_stack_formatted = "".join(
-                            traceback.format_list(user_stack)
-                        )
-                        frame_info = exc.format_frame_info(code)
-                        user_stack_trace = (
-                            "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
-                            f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
-                            "The graph break occurred in the following user code:\n"
-                            f"{user_stack_formatted}"
-                        )
-                        torch._logging.trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "dynamo_graph_break_reason",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
-                        )
-                        graph_break_log.debug(
-                            user_stack_trace,
-                            exc_info=True,
-                            stack_info=config.verbose,
-                        )
 
             if not config.suppress_errors and not soft_fail:
                 raise

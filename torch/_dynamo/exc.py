@@ -104,6 +104,8 @@ class TensorifyScalarRestartAnalysis(RestartAnalysis):
     pass
 
 
+# Used for backends only to skip tracing the current frame
+# and all future invocations of it.
 class SkipFrame(TorchDynamoException):
     pass
 
@@ -161,12 +163,18 @@ class BackendCompilerFailed(ShortenTraceback):
         super().__init__(msg, first_useful_frame=first_useful_frame)
 
 
+# NOTE: important invariant! Almost any exception handler that handles Unsupported
+# should NOT suppress the exception if skip_frame is set!
+# skip_frame is used by symbolic_convert.py to bubble up Unsupported exceptions to convert_frame to cause
+# a frame skip. Once the Unsupported exn is in convert_frame, we will always skip, so skip_frame
+# won't be checked
 class Unsupported(TorchDynamoException):
     def __init__(
         self,
         msg: str,
+        gb_type: str,
+        skip_frame: bool = False,
         *,
-        case_name: Optional[str] = None,
         real_stack: None | StackSummary = None,
     ) -> None:
         super().__init__(msg)
@@ -174,9 +182,10 @@ class Unsupported(TorchDynamoException):
             real_stack = torch._guards.TracingContext.extract_stack()
         self.real_stack = real_stack
         self.msg = msg
+        self.skip_frame = skip_frame
         self.category: Optional[str] = None
         self.add_to_stats()
-        self.case_name: Optional[str] = case_name
+        self.gb_type: Optional[str] = gb_type
 
     def remove_from_stats(self) -> None:
         assert self.category is not None
@@ -265,10 +274,12 @@ class RecompileLimitExceeded(Unsupported):
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
 class StepUnsupported(TorchDynamoException):
-    def __init__(self, msg: str) -> None:
+    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
         super().__init__(msg)
         self.msg = msg
-        self.real_stack = torch._guards.TracingContext.extract_stack()
+        if not real_stack:
+            real_stack = torch._guards.TracingContext.extract_stack()
+        self.real_stack = real_stack
 
 
 class UnsafeScriptObjectError(TorchDynamoException):
@@ -276,7 +287,7 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
         super().__init__(msg)
         self.msg = msg
         self.real_stack = (
@@ -566,6 +577,7 @@ def unimplemented(
     hints: list[str],
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
+    skip_frame=False,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -585,8 +597,13 @@ def unimplemented(
         past_real_stack = None
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
-        raise Unsupported(msg, real_stack=past_real_stack) from from_exc
-    raise Unsupported(msg)
+        if isinstance(from_exc, Unsupported):
+            msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
+            raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+        raise Unsupported(
+            msg, gb_type, skip_frame, real_stack=past_real_stack
+        ) from from_exc
+    raise Unsupported(msg, gb_type, skip_frame)
 
 
 # KeyError has special handling for its args
@@ -818,16 +835,6 @@ def format_skip_frame_message(code: Optional[types.CodeType], reason: str) -> st
             f"torch.compile intentionally decided to skip the frame and fall back to eager.\n"
             f"Reason: {reason}"
         )
-
-
-def format_loop_skip_frame_message(code: types.CodeType, frame_summary: str) -> str:
-    frame_info = format_frame_info(code)
-    return (
-        "Skipping frame because there is a graph break in a for/while loop\n"
-        f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
-        f"Reason: Skipping frame because there is a graph break in a for/while loop.\n"
-        f"{frame_summary}"
-    )
 
 
 def format_error_msg(
