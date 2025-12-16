@@ -4,11 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-<<<<<<< HEAD
-from typing import cast
-=======
 from typing import cast, Optional, TypeAlias, TypeVar, Union
->>>>>>> parent of cb3754f39fc ([DTensor] Refactor strategy/rule registration into dedicated module (#168221))
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
