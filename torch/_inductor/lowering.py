@@ -6388,7 +6388,7 @@ def use_two_step_variance(x, axis, keepdim):
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     return (
         isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) < config.unroll_reductions_threshold
+        and int(reduction_numel) < config.chunk_size
         and sympy_product(ranges) != 1
     )
 
