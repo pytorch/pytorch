@@ -263,7 +263,7 @@ def math_attention(
     # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
-        post_mod_scores.to(query.dtype) @ value,
+        post_mod_scores.to(query.dtype) @ value.to(query.dtype),
         logsumexp / math.log(2),
         max_scores / math.log(2),
     )
