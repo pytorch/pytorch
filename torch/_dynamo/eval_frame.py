@@ -475,7 +475,7 @@ class OptimizedModule(torch.nn.Module):
         assert hooks is not None
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         if not self.dynamo_ctx.fullgraph:
             raise RuntimeError(
@@ -495,7 +495,7 @@ class OptimizedModule(torch.nn.Module):
     def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -509,7 +509,7 @@ class OptimizedModule(torch.nn.Module):
     def _load_aot_compiled_module(self, data: bytes) -> None:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
