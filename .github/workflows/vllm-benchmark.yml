@@ -10,7 +10,7 @@ on:
           PyTorch branch (main, nightly, or refs/pull/PR_NUMBER/head for pull request)
         required: true
         type: string
-        default: nightly
+        default: main
       pytorch_commit:
         description: |
           PyTorch commit (optional, default to use the latest commit from the branch)
@@ -39,6 +39,7 @@ concurrency:
 
 jobs:
   set-parameters:
+    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
@@ -59,7 +60,6 @@ jobs:
           repository: pytorch/pytorch-integration-testing
           path: pytorch/pytorch-integration-testing
           ref: main
-          fetch-depth: 0
 
       - name: Set parameters
         working-directory: pytorch/pytorch-integration-testing
@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: pytorch/pytorch
-          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'nightly') }}
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
           show-progress: false
           fetch-depth: 0
 
@@ -102,11 +102,12 @@ jobs:
     name: Build PyTorch and vLLM
     needs:
       - set-parameters
-    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
+    # TODO: TURN IT OFF BY DEFAULT WHEN BRANCH IS NOT SET
+    # if: ${{ inputs.pytorch_commit != '' || inputs.pytorch_branch != '' }}
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
-      options: --ipc=host -tty
+      options: --ipc=host --tty
       # The env inside and outside the container are different
       env:
         SKIP_SCCACHE_INITIALIZATION: 1
@@ -131,8 +132,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # TODO: SWITCH BACK TO NIGHTLY DEFAULT
-          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'main') }}
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
           submodules: recursive
           show-progress: false
 
@@ -142,15 +142,6 @@ jobs:
           VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
           echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
 
-      - name: Checkout vLLM
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: vllm-project/vllm
-          path: vllm-benchmarks/vllm
-          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
-          submodules: recursive
-          show-progress: false
-
       - name: Build PyTorch
         shell: bash
         env:
@@ -158,6 +149,15 @@ jobs:
         run: |
           set -eux
           bash .ci/pytorch/build.sh
+
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-project/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
 
       # Lumen CLI won't work inside the container
       - name: Build vLLM
@@ -174,19 +174,29 @@ jobs:
           sccache --show-stats
 
       - name: Copy vLLM wheel
-        shell: bash
         run: |
-          set -eux
-
           mkdir -p dist/vllm
           mv vllm-project/vllm/dist dist/vllm
+
+      - name: Archive artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip dist/
+
+      - name: Store the build artifacts on S3
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: ${{ needs.set-parameters.outputs.build-environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+          s3-bucket: gha-artifacts
 
   benchmarks:
     name: Run vLLM benchmarks
     needs:
       - set-parameters
       - build
-    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
+    if: always()
     strategy:
       matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
       fail-fast: false
@@ -196,7 +206,7 @@ jobs:
       contents: read
     container:
       image: nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04
-      options: --gpus all --ipc=host -tty
+      options: --gpus all --ipc=host --tty
     steps:
       - name: Install system dependencies
         shell: bash
@@ -220,30 +230,57 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          path: pytorch/pytorch
-          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'nightly') }}
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
           submodules: recursive
           show-progress: false
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: pytorch/test-infra/.github/actions/get-workflow-job-id@36562d6c43fa914f7bdef67ce23e5c31f1387b2e
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
+        run: |
+          VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
+          echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
 
-      - name: DEBUG
-        working-directory: pytorch/pytorch
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-project/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
+      #- name: Install nightly
+      #  if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
+      #  shell: bash
+      #  run: |
+      #    uv pip install vllm --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu129
+
+      - name: Download build artifacts
+        # if: inputs.pytorch_commit != '' || inputs.pytorch_branch != ''
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ needs.set-parameters.outputs.build-environment }}
+          s3-bucket: gha-artifacts
+
+      - name: Install build artifacts
+        # if: inputs.pytorch_commit != '' || inputs.pytorch_branch != ''
         shell: bash
         run: |
           set -eux
 
-          which python
-          python --version
+          # DEBUG
+          ls -laR dist
 
-          git log
+          uv pip install \
+            dist/torch-*.whl \
+            dist/vision/torchvision-*.whl \
+            dist/audio/torchaudio-*.whl \
+            dist/vllm/vllm-*.whl \
+            --extra-index-url https://download.pytorch.org/whl/cu129
 
-      # CHECKOUT VLLM AT THE PINNED COMMIT
-      # INSTALL NIGHTLY
+      - name: DEBUG
+        run: |
+          uv pip list
 
       - name: Gather benchmark metadata
         id: gather-benchmark-metadata
