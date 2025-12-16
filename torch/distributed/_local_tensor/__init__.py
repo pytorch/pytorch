@@ -841,7 +841,7 @@ def _compute_local_tensor_meta(
     Computes the meta information for a LocalTensor from its local tensors.
     """
     if len(local_tensors) == 0:
-        raise ValueError(f'LocalTensor cannot be emtpy!')
+        raise ValueError("LocalTensor cannot be empty!")
     it = iter(local_tensors.values())
     first_local_tensor = next(it)
 
