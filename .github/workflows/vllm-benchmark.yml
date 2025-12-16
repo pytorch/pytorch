@@ -106,12 +106,13 @@ jobs:
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
       options: --ipc=host --tty
-    env:
-      SKIP_SCCACHE_INITIALIZATION: 1
-      SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-      SCCACHE_REGION: us-east-1
-      TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
-      BUILD_ENVIRONMENT: ${{ needs.set-parameters.outputs.build-environment }}
+      # The env inside and outside the container are different
+      env:
+        SKIP_SCCACHE_INITIALIZATION: 1
+        SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
+        TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
+        BUILD_ENVIRONMENT: ${{ needs.set-parameters.outputs.build-environment }}
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
