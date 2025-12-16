@@ -32,6 +32,7 @@ from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    CDNA2OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -6065,6 +6066,10 @@ class AOTInductorTestsTemplate:
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
 
+        if TEST_WITH_ROCM:
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+
         class Model(torch.nn.Module):
             def __init__(self, weight, scale_and_zeros) -> None:
                 super().__init__()
@@ -6097,6 +6102,10 @@ class AOTInductorTestsTemplate:
     def test__weight_int4pack_mm_with_scales_and_zeros(self, m, n, q_group, num_groups):
         if "xpu" not in self.device:
             raise unittest.SkipTest("requires Intel GPU")
+
+        if TEST_WITH_ROCM:
+            if not CDNA2OrLater():
+                self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale, zeros) -> None:
