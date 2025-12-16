@@ -7555,6 +7555,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
 
+    def test_nllloss_1d_input_compile(self):
+        input = torch.log_softmax(torch.randn(32, 1), dim=1).squeeze(1)  # shape: [32]
+        target = torch.zeros(32, dtype=torch.long)  # shape: [32]
+        loss_fn = nn.NLLLoss()
+
+        # Eager mode
+        eager_out = loss_fn(input, target)
+
+        # Compiled mode
+        compiled_fn = torch.compile(lambda x, y: loss_fn(x, y), backend="eager")
+        compiled_out = compiled_fn(input, target)
+
+        torch.testing.assert_close(eager_out, compiled_out, rtol=1e-5, atol=1e-5)
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
