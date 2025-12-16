@@ -104,8 +104,10 @@ class TensorifyScalarRestartAnalysis(RestartAnalysis):
     pass
 
 
-# Used for backends only to skip tracing the current frame
+# Used (primarily for backends) to skip tracing the current frame
 # and all future invocations of it.
+# NOTE: this does NOT cause a graph break, and thus no graph break messages
+# will be issued!
 class SkipFrame(TorchDynamoException):
     pass
 

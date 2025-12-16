@@ -492,7 +492,13 @@
   ],
   "GB9741": [
     {
-      "Gb_type": "skip frame due to being in functor mode",
+      "Gb_type": "skip frame due to being in functorh mode",
+      "Context": "",
+      "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "skip frame due to being in functorch mode",
       "Context": "",
       "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
       "Hints": []
@@ -1744,6 +1750,15 @@
     }
   ],
   "GB0170": [
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.",
+      "Hints": [
+        "Use `torch.cond` to express dynamic control flow.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",

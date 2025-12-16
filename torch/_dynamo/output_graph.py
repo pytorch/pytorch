@@ -2430,6 +2430,8 @@ class OutputGraph(OutputGraphCommon):
                 ],
             )
         except SkipFrame:
+            # The backend compiler has requested that we skip the frame, instead of
+            # aborting execution.
             raise
         except Exception as e:
             raise BackendCompilerFailed(

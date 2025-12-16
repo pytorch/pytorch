@@ -1370,7 +1370,7 @@ def compile_frame(  # type: ignore[return]
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
             log.debug(  # noqa: G200
-                "Backend signaled to skip frame: %s %s \
+                "Received signal to skip frame (without graph break): %s %s \
                 %s %s",
                 e,
                 code.co_name,

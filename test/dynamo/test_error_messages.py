@@ -1118,6 +1118,92 @@ from user code:
         )
 
     @make_logging_test(graph_breaks=True)
+    def test_graph_break_in_loop(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            for i in range(2):
+                torch._dynamo.graph_break()
+            return x + 1
+
+        fn(torch.ones(3))
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+*** While handling this graph break, another graph break occurred: ***
+
+graph break in loop
+  Explanation: torch.compile detected a graph break in a for/while loop. Skipping the frame and falling back to eager, as graph breaks in loops are not supported.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+
+  Developer debug context: frame skipped: fn (test_error_messages.py line N)
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb7000.html
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_graph_break_in_loop
+    fn(torch.ones(3))
+  File "test_error_messages.py", line N, in fn
+    torch._dynamo.graph_break()
+""",
+        )
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            for i in range(2):
+                if x.sum() > 0:
+                    x = x + 1
+                else:
+                    x = x + 2
+            return x + 4
+
+        gn(torch.ones(3))
+        self.assertEqual(len(records), 2)
+        self.assertExpectedInline(
+            munge_exc(records[1].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+*** While handling this graph break, another graph break occurred: ***
+
+graph break in loop
+  Explanation: torch.compile detected a graph break in a for/while loop. Skipping the frame and falling back to eager, as graph breaks in loops are not supported.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+
+  Developer debug context: frame skipped: gn (test_error_messages.py line N)
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb7000.html
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_graph_break_in_loop
+    gn(torch.ones(3))
+  File "test_error_messages.py", line N, in gn
+    if x.sum() > 0:
+""",
+        )
+
+    @make_logging_test(graph_breaks=True)
     def test_skip_frame_in_loop_message(self, records):
         def fn(x):
             for i in range(2):
@@ -1167,7 +1253,7 @@ User code traceback:
         self.assertExpectedInline(
             msg,
             """\
-Backend signaled to skip frame: No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
+Received signal to skip frame (without graph break): No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.
 Frame info: empty_fn (test_error_messages.py line N) empty_fn                 test_error_messages.py N""",
         )
 
