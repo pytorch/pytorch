@@ -121,7 +121,7 @@ function formatEvent(event) {
     event.stream === null ? '' : `\n              (stream ${event.stream})`;
   switch (event.action) {
     case 'oom':
-      return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(
+      return `OOM (requested ${formatSize(event.size)}, Device has ${formatSize(
         event.device_free,
       )} memory free)${stream}`;
     case 'snapshot':
@@ -702,7 +702,9 @@ function annotate_snapshot(snapshot) {
         }
       }
       b.version = snapshot.block_version(b.addr, false);
-      addr += b.size;
+      // Device pointer addresses may be Number or BigInt; ensure safe
+      // arithmetic without JS type errors
+      addr += typeof addr === "bigint" ? BigInt(b.size) : b.size;
     }
   }
 
@@ -1345,7 +1347,7 @@ function create_settings_view(dst, snapshot, device) {
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
   const settings_div = dst.append('div');
-  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+  settings_div.append('p').text('Caching Allocator Settings:');
 
   // Check if allocator_settings exists in snapshot
   if ('allocator_settings' in snapshot) {
