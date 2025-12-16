@@ -1662,6 +1662,7 @@ def _std_var(
             # pyrefly: ignore [no-matching-overload]
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
+            # pyrefly: ignore [no-matching-overload]
             total = sum(
                 x * x.conj(),
                 dim,
