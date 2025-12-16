@@ -79,8 +79,8 @@ jobs:
     name: Build PyTorch and vLLM
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     runs-on: linux.24xlarge.memory
-    containers:
-      images: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+    container:
+      image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
