@@ -14,7 +14,6 @@ from torch.utils._runtime_estimation import get_num_bytes
 class FusionRegion:
     """Represents a connected set of fusible operations that will fuse together."""
 
-    nodes: OrderedSet[fx.Node]  # All nodes in topo order
     subgraph_node: fx.Node  # The call_module node for this fusion
     subgraph_module: fx.GraphModule  # The subgraph module
     total_bytes: int = field(default=0, init=False)  # Total input + output bytes
@@ -27,10 +26,6 @@ class FusionRegion:
     def _compute_cost(self) -> tuple[int, float]:
         from torch._inductor.utils import get_gpu_dram_gbps
 
-        def get_node_bytes(node: fx.Node) -> int:
-            val = node.meta.get("val")
-            return get_num_bytes(val) if isinstance(val, torch.Tensor) else 0
-
         total_bytes = 0
         subgraph = self.subgraph_module
 
@@ -38,12 +33,22 @@ class FusionRegion:
             subgraph.graph.find_nodes(op="placeholder"),
             torch._inductor.utils.output_node(subgraph).all_input_nodes,
         ):
-            total_bytes += get_node_bytes(node)
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor):
+                total_bytes += get_num_bytes(val)
 
         fusion_bw_gbps = get_gpu_dram_gbps()
         fusion_bw_bytes_per_s = fusion_bw_gbps * 1e9
         cost_ms = (total_bytes / fusion_bw_bytes_per_s) * 1000
         return total_bytes, cost_ms
+
+
+def is_view_node(n: fx.Node) -> bool:
+    """Check if a node is a view operation (zero cost, no memory allocation)."""
+
+    return isinstance(n.target, torch._ops.OpOverload) and (
+        n.target.is_view and n.target.namespace in ("aten", "prims")
+    )
 
 
 def is_fusible_node(n: fx.Node) -> bool:
@@ -59,11 +64,7 @@ def is_fusible_node(n: fx.Node) -> bool:
     if torch.Tag.pointwise in tags or torch.Tag.reduction in tags:
         return True
 
-    is_view_attr = getattr(n.target, "is_view", False)
-    if callable(is_view_attr):
-        if is_view_attr(n):
-            return True
-    elif is_view_attr:
+    if is_view_node(n):
         return True
 
     aten = torch.ops.aten
@@ -77,26 +78,13 @@ def is_fusible_node(n: fx.Node) -> bool:
             if len(inputs) <= inductor_config.max_pointwise_cat_inputs:
                 return True
 
-    # Include constant_pad_nd (can be pointwise)
     if n.target == aten.constant_pad_nd.default:
         return True
 
-    # Include specific indexing ops
     if n.target in (aten.slice.Tensor, aten.gather.default, aten.embedding.default):
         return True
 
     return False
-
-
-def is_view_node(n: fx.Node) -> bool:
-    """Check if a node is a view operation (zero cost, no memory allocation)."""
-    if n.op != "call_function":
-        return False
-
-    is_view_attr = getattr(n.target, "is_view", False)
-    if callable(is_view_attr):
-        return is_view_attr(n)
-    return bool(is_view_attr)
 
 
 def _get_contiguous_fusible_spans(gm: fx.GraphModule) -> list[list[fx.Node]]:
@@ -133,7 +121,7 @@ def _find_connected_components(span: list[fx.Node]) -> list[list[fx.Node]]:
 
     from torch.fx.experimental.optimization import UnionFind
 
-    span_set = set(span)
+    span_set = OrderedSet(span)
     node_to_idx = {n: i for i, n in enumerate(span)}
 
     uf = UnionFind(len(span))
@@ -221,7 +209,7 @@ def collapse_fusion_regions(
 
     # Get unique node sets (regions with <2 nodes already filtered in build_fusion_regions)
     unique_regions: list[tuple[OrderedSet[fx.Node], int]] = []
-    seen_region_ids: set[int] = set()
+    seen_region_ids: OrderedSet[int] = OrderedSet()
     for node_set in region_of.values():
         region_id = id(node_set)
         if region_id not in seen_region_ids:
@@ -242,7 +230,7 @@ def collapse_fusion_regions(
     )
 
     # Build partitions list for fuse_by_partitions
-    partitions = [{node: None for node in nodes} for nodes, _ in unique_regions]
+    partitions = [dict.fromkeys(nodes) for nodes, _ in unique_regions]
 
     # Fuse all partitions at once
     fuse_by_partitions(gm, partitions, prefix="_fusion_region_")
@@ -265,14 +253,15 @@ def collapse_fusion_regions(
 
         # Find the call_module node
         module_nodes = list(gm.graph.find_nodes(op="call_module", target=subgraph_name))
-        assert len(module_nodes) == 1, f"Expected 1 call_module for {subgraph_name}, got {len(module_nodes)}"
+        assert len(module_nodes) == 1, (
+            f"Expected 1 call_module for {subgraph_name}, got {len(module_nodes)}"
+        )
         module_node = module_nodes[0]
 
         subgraph_module = getattr(gm, subgraph_name)
 
         # Create FusionRegion with all required info
         region = FusionRegion(
-            nodes=nodes,
             subgraph_node=module_node,
             subgraph_module=subgraph_module,
         )
@@ -311,24 +300,26 @@ def expand_fusion_regions(
             continue
 
         subgraph_name = module_node.target
-        if not hasattr(gm, subgraph_name):
-            continue
+        assert isinstance(subgraph_name, str)
+        assert hasattr(gm, subgraph_name), (
+            f"Expected submodule {subgraph_name} to exist"
+        )
 
-        # _inline_module returns subgraph_node -> new_node mapping
+        # Get the output arg from the subgraph to determine what will replace module_node
+        output_arg = torch._inductor.utils.output_node(region.subgraph_module).args[0]
+
+        # Inline the module and get the mapping from subgraph nodes to new nodes
         subgraph_to_new = _inline_module(gm, subgraph_name)
 
-        # Find the last inlined call_function node (the output)
-        last_new_call = None
-        for new_node in subgraph_to_new.values():
-            if new_node.op == "call_function":
-                last_new_call = new_node
+        # Map module_node to the replacement for the output arg
+        # For multi-output (tuple), use the last element (latest in topo order)
+        # so dependencies are only satisfied after all outputs are computed
+        if isinstance(output_arg, (list, tuple)):
+            if output_arg:
+                result[module_node] = subgraph_to_new[output_arg[-1]]
+        elif isinstance(output_arg, fx.Node) and output_arg in subgraph_to_new:
+            result[module_node] = subgraph_to_new[output_arg]
 
-        # Map module_node to the last inlined call_function node (the output)
-        if last_new_call:
-            result[module_node] = last_new_call
-
-        # Remove the submodule attribute (if _inline_module didn't remove it)
-        if hasattr(gm, subgraph_name):
-            delattr(gm, subgraph_name)
+        delattr(gm, subgraph_name)
 
     return result
