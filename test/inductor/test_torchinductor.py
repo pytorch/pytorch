@@ -889,22 +889,6 @@ def xfail_if_mps(fn):
 xfail_if_mps_unimplemented = xfail_if_mps
 
 
-def xfail_if_mps_on_macos14(fn):
-    """xfail on MPS with macOS < 15 (scatter_add broken), run normally on macOS 15+."""
-
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if not is_mps_backend(self.device):
-            return fn(self, *args, **kwargs)
-        if MACOS_VERSION < 15.0:
-            with self.assertRaises(Exception):
-                return fn(self, *args, **kwargs)
-        else:
-            return fn(self, *args, **kwargs)
-
-    return wrapper
-
-
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -9899,7 +9883,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randn_like(result),
                 x,
                 indices,
-            ],  # Note: FP16/BF16 use FP32 accumulation internally for numerical stability
+            ],
         )
 
     # From https://github.com/pytorch/torchdynamo/issues/1200
@@ -9959,9 +9943,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     @expectedFailureXPU
-    # MPS scatter_add broken on macOS 14, fixed in macOS 15.
-    # Tracking: github.com/pytorch/pytorch/issues/163327
-    @xfail_if_mps_on_macos14
     def test_max_pool2d_with_indices_backward5(self):
         # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):
@@ -9992,9 +9973,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
-    # MPS scatter_add broken on macOS 14, fixed in macOS 15.
-    # Tracking: github.com/pytorch/pytorch/issues/163327
-    @xfail_if_mps_on_macos14
     def test_max_pool2d_with_indices_backward6(self):
         # dilation != 1 - decomposition handles all dilation cases
         def fn(a, b, c):
