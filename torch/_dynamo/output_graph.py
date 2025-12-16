@@ -231,15 +231,19 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-def grad_fn_reachable(
+def find_reachable_grad_fn(
     tensor: torch.Tensor, target_grad_fns: set[torch.autograd.graph.Node]
-) -> bool:
-    """Check if any target grad_fn is reachable from tensor's autograd graph."""
+) -> torch.autograd.graph.Node | None:
+    """Find and return the first target grad_fn reachable from tensor's autograd graph.
+
+    Returns the reachable grad_fn if found, None otherwise. This is useful for
+    providing specific context in error messages about which input has the external grad_fn.
+    """
     if tensor is None or not isinstance(tensor, torch.Tensor):
-        return False
+        return None
     grad_fn = tensor.grad_fn
     if grad_fn is None:
-        return False
+        return None
 
     visited: set[torch.autograd.graph.Node] = set()
     stack = [grad_fn]
@@ -249,11 +253,18 @@ def grad_fn_reachable(
             continue
         visited.add(node)
         if node in target_grad_fns:
-            return True
+            return node
         for next_fn, _ in node.next_functions:
             if next_fn is not None and next_fn not in visited:
                 stack.append(next_fn)
-    return False
+    return None
+
+
+def grad_fn_reachable(
+    tensor: torch.Tensor, target_grad_fns: set[torch.autograd.graph.Node]
+) -> bool:
+    """Check if any target grad_fn is reachable from tensor's autograd graph."""
+    return find_reachable_grad_fn(tensor, target_grad_fns) is not None
 
 
 @functools.cache
@@ -2132,16 +2143,27 @@ class OutputGraph(OutputGraphCommon):
             if fake_tensor is not None and grad_fn_reachable(
                 fake_tensor, self.autograd_grad_output_grad_fns
             ):
+                # Get source info for better context in error message
+                source_info = var.source.name if var.source else None
+                context = "output tensor requires grad"
+                if source_info:
+                    context = f"output tensor {source_info} requires grad"
+
                 unimplemented(
                     gb_type="autograd.grad with output that requires grad",
-                    context="",
+                    context=context,
                     explanation=(
-                        "torch.compile with aot_autograd does not currently support double backward. "
-                        "The compiled function uses torch.autograd.grad() and returns a tensor that "
-                        "is connected to the autograd.grad() call, which would require tracing "
-                        "backward through the graph a second time."
+                        "The compiled function uses torch.autograd.grad() and returns a tensor "
+                        "that still requires gradients and is connected to the autograd.grad() computation. "
+                        "This would cause aot_autograd to attempt 'backward through graph a second time', "
+                        "which is not supported."
                     ),
-                    hints=[*graph_break_hints.USER_ERROR],
+                    hints=[
+                        "Call .detach() on the output tensor before returning it from the compiled function.",
+                        "For example: `return loss.detach(), grads` instead of `return loss, grads`.",
+                        "Or set create_graph=False in autograd.grad() if you don't need higher-order gradients.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
 
     def compile_and_call_fx_graph(
