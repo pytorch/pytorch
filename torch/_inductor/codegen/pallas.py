@@ -1217,23 +1217,36 @@ class PallasKernel(SIMDKernel):
             mask_var = self._get_or_create_mask(name)
             load_expr = f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
         elif needs_flatten:
-            # Flatten then index for non-contiguous access
+            # Flatten then index for non-contiguous access (gather operation)
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
-            # Squeeze 2D intermediate buffers with trailing 1 (keepdims from reductions)
-            # but NOT original graph inputs which may use trailing 1s for intentional broadcasting
-            # Original inputs have names like "arg0_1", intermediate buffers have names like "buf0"
-            # e.g., reduction output (512, 1) -> (512,) but input (10, 1) stays as-is
-            try:
-                buf_obj = V.graph.get_buffer(name)
-                buf_size = buf_obj.get_size()
-                is_graph_input = name.startswith("arg")
-                if not is_graph_input and len(buf_size) == 2 and buf_size[-1] == 1:
-                    load_expr = f"jnp.squeeze({load_expr}, axis=-1)"
-            except Exception:
-                pass
+            # Squeeze (N,1) intermediate buffers when kernel has 1D graph inputs
+            # to avoid wrong broadcasting: (N,) op (N,1) -> (N,N) instead of (N,)
+            # Check on demand since input_buffers may not be fully populated at __init__ time
+            is_intermediate_buffer = name.startswith("buf")
+            if is_intermediate_buffer:
+                # Check if any input buffer is a 1D graph input
+                has_1d_input = False
+                for buf_name in self.args.input_buffers.keys():
+                    if not buf_name.startswith("buf"):
+                        try:
+                            buf_obj = V.graph.get_buffer(buf_name)
+                            buf_size = buf_obj.get_size()
+                            if len(buf_size) == 1:
+                                has_1d_input = True
+                                break
+                        except Exception:
+                            pass
+                if has_1d_input:
+                    try:
+                        buf_obj = V.graph.get_buffer(name)
+                        buf_size = buf_obj.get_size()
+                        if len(buf_size) == 2 and buf_size[-1] == 1:
+                            load_expr = f"jnp.squeeze({load_expr}, axis=-1)"
+                    except Exception:
+                        pass
 
         return self.cse.generate(
             self.compute,
