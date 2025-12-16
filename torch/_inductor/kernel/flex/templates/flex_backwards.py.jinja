@@ -118,8 +118,8 @@
 
         desc_q = None
         desc_do = None
-        desc_k = None
-        desc_v = None
+        desc_k_dq = None
+        desc_v_dq = None
         {%- if USE_TMA %}
         desc_q = tl.make_tensor_descriptor(
             base=Q2,
@@ -133,13 +133,13 @@
             strides=(stride_dom, stride_dod),
             block_shape=[BLOCK_M2, V_HEAD_DIM_ROUNDED],
         )
-        desc_k = tl.make_tensor_descriptor(
+        desc_k_dq = tl.make_tensor_descriptor(
             base=K,
             shape=(KV_LEN, QK_HEAD_DIM),
             strides=(stride_kn, stride_kd),
             block_shape=[BLOCK_N2, QK_HEAD_DIM_ROUNDED],
         )
-        desc_v = tl.make_tensor_descriptor(
+        desc_v_dq = tl.make_tensor_descriptor(
             base=V,
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vd),
@@ -178,7 +178,7 @@
 
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
-            K, V, desc_k, desc_v, kv_start, start_m2,
+            K, V, desc_k_dq, desc_v_dq, kv_start, start_m2,
             dq, q, do, Di, lse,
             off_zq, off_hq2,
             stride_kn, stride_kd, stride_vn, stride_vd,
@@ -197,7 +197,7 @@
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
                 {{gen_argdefs()}},
-                K, V, desc_k, desc_v, kv_start, start_m2,
+                K, V, desc_k_dq, desc_v_dq, kv_start, start_m2,
                 dq, q, do, Di, lse,
                 off_zq, off_hq2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
@@ -232,24 +232,24 @@
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
         {%- if USE_TMA %}
-        desc_k = tl.make_tensor_descriptor(
+        desc_k_dkdv = tl.make_tensor_descriptor(
             base=K,
             shape=(KV_LEN, QK_HEAD_DIM),
             strides=(stride_kn, stride_kd),
             block_shape=[BLOCK_N1, QK_HEAD_DIM_ROUNDED],
         )
-        desc_v = tl.make_tensor_descriptor(
+        desc_v_dkdv = tl.make_tensor_descriptor(
             base=V,
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vd),
             block_shape=[BLOCK_N1, V_HEAD_DIM_ROUNDED],
         )
         k = tl.load_tensor_descriptor(
-            desc_k,
+            desc_k_dkdv,
             [start_n1.to(tl.int32), 0],
         )
         v = tl.load_tensor_descriptor(
-            desc_v,
+            desc_v_dkdv,
             [start_n1.to(tl.int32), 0],
         )
         {%- else %}
