@@ -595,16 +595,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
-            # Check if gradient is sparse - sparse gradients are not supported
-            if len(args) >= 2:
-                grad_var = args[1]
-                if getattr(grad_var, "is_sparse", False):
-                    unimplemented(
-                        gb_type="sparse_grad_accumulate_grad",
-                        context="accumulate_grad_ with sparse gradient",
-                        explanation="Sparse gradients are not supported in compiled autograd",
-                        hints=[],
-                    )
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.accumulate_grad), args, kwargs
             )
@@ -2286,11 +2276,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
-
-        # Register this parameter as a leaf tensor for backward() auto-detection.
-        # When backward() is called without inputs, we need to find all leaf tensors,
-        # including those created in-graph like nn.Parameter.
-        tx.output.leaf_var_creation_order.append(result)
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
