@@ -587,7 +587,7 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
-        torch.cuda.manual_seed_all(0)
+        torch.get_device_module(device).manual_seed_all(0)
         torch.manual_seed(0)
         random.seed(0)
         optim_cls = optim_info.optim_cls

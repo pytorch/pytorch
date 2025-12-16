@@ -901,16 +901,21 @@ class ProvenanceTracingKernelContextTemplate:
                 code
             )
 
-            if self.device == "cuda":
+            if self.device == "cuda" or self.device == "xpu":
+                device_type = torch.accelerator.current_accelerator().type
                 FileCheck().check(
-                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
-                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
+                    f"""KernelContextGuard _ctx("aoti_torch_{device_type}_mm_out", R"("""
+                ).check(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_{device_type}_mm_out("
+                ).check(
                     """KernelContextGuard _ctx("triton_poi_fused_addmm_relu_sigmoid_0", R"("""
                 ).check("call_triton_poi_fused_addmm_relu_sigmoid_0(").check(
                     """KernelContextGuard _ctx("triton_poi_fused_mul_1", R"("""
                 ).check("call_triton_poi_fused_mul_1(").check(
-                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
-                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
+                    f"""KernelContextGuard _ctx("aoti_torch_{device_type}_mm_out", R"""
+                ).check(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_{device_type}_mm_out("
+                ).check(
                     """ KernelContextGuard _ctx("triton_poi_fused_addmm_gelu_2", R"("""
                 ).check("call_triton_poi_fused_addmm_gelu_2(").run(code)
             else:
@@ -941,15 +946,17 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
+@unittest.skipIf(
+    not torch.cuda.is_available() and not torch.xpu.is_available(), "No CUDA and no XPU"
+)
 class TestProvenanceTracingKernelContextGpu(TestCase):
-    device = "cuda"
+    device = GPU_TYPE
 
 
 copy_tests(
     ProvenanceTracingKernelContextTemplate,
     TestProvenanceTracingKernelContextGpu,
-    "cuda",
+    GPU_TYPE,
 )
 
 

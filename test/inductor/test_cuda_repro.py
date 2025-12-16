@@ -2141,9 +2141,7 @@ def foo(x):
 # somehow gives different results.. still, check that it doesn't error
 foo(torch.rand([256], device=\"{device_type}\"))
 """
-        import pdb
 
-        pdb.set_trace()
         subprocess.run([sys.executable, "-c", script], check=True)
 
     def test_reflection_pad_loop_order(self):
