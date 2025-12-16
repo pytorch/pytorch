@@ -147,6 +147,10 @@ static void scatter_mps_general(const Tensor& self_arg,
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(!self.is_complex(), "scatter(): Yet not supported for complex");
 
+  // Add bounds checking for index values to ensure consistent behavior with CPU
+  TORCH_CHECK(index.min().item().toLong() >= 0, "Class values must be non-negative.");
+  TORCH_CHECK(index.max().item().toLong() < self.size(dim), "Class values must be smaller than num_classes.");
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
