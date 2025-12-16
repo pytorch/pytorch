@@ -506,10 +506,8 @@ class Mod(sympy.Function):
 
         # Evaluate if they are both literals.
         if q.is_Number and p.is_Number:
-            if p < 0:
-                raise AssertionError(p)
-            if q < 1:
-                raise AssertionError(q)
+            if p < 0 or q < 1:
+                return None
             return p % q
 
         # If q == 2, it's a matter of whether p is odd or even.
