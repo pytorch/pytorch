@@ -2516,10 +2516,7 @@ html_css_files = [
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = [
-    "js/runllm-widget.js",
-    "js/glossary-tooltips.js",
-]
+html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
