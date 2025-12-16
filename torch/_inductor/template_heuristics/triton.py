@@ -1879,28 +1879,30 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
+        device = kernel_inputs.device()
 
         # Get the appropriate config generator
         configs = self._get_config_generator()
 
         # Generate and process configs
         if config.origami:
-            origami_configs_serach_space = self.get_exhaustive_origami_mm_configs()
             import origami
-            from helper import MatmulHeuristicResult
-            OrigamiGemmSelector = MatmulHeuristicResult(m, n, k, dtype, dtype, dtype)
+            origami_cfg_gen = self.get_exhaustive_origami_mm_configs()
+            allcfgs = origami_cfg_gen(m, n, k, dtype_size=dtype.itemsize, op_name=op_name)
+            selector = origami.TorchMatmulHeuristic(allcfgs, m, n, k, dtype, dtype, dtype, device)
             origami_config_kwargs = {
-                                    'EVEN_K': True, 'USE_FAST_ACCUM': False,
+                                    'EVEN_K': selector.even_k, 'USE_FAST_ACCUM': False,
                                     'ACC_TYPE': 'tl.float32',
                                     'num_stages': 2,
                                     'num_warps': 8,
-                                    'BLOCK_M':OrigamiGemmSelector.config[0],
-                                    'BLOCK_N':OrigamiGemmSelector.config[1],
-                                    'BLOCK_K':OrigamiGemmSelector.config[2],
-                                    'GROUP_M':OrigamiGemmSelector.config[3],
+                                    'BLOCK_M': selector.block_m,
+                                    'BLOCK_N': selector.block_n,
+                                    'BLOCK_K': selector.block_k,
+                                    'GROUP_M': selector.group_m,
                                     'matrix_instr_nonkdim': 16,
-                                    'waves_per_eu': 8,
+                                    'waves_per_eu': selector.waves_per_eu,
                                     'kpack': 2,
+                                    '_origami_config': True,
                                     }
             yield origami_config_kwargs
         else:
