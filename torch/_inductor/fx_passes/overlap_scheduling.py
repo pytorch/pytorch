@@ -1399,9 +1399,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
 
     dist_opts = config.aten_distributed_optimizations
 
-    kwargs: dict[str, object] = {
-        "enable_fusion_regions": True,  # Default to True when called from inductor
-    }
+    kwargs: dict[str, object] = {}
 
     config_keys = (
         "collective_bucketing",

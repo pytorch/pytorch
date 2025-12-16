@@ -983,6 +983,11 @@ class aten_distributed_optimizations:
     # Maximum prefetch or bucketing candidates. Mainly intended for compile time.
     max_coll_distance: Optional[int] = None
 
+    # Enable fusion region detection for overlap scheduling cost estimation.
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
+    # as atomic units with memory-bound runtime estimates.
+    enable_fusion_regions: Optional[bool] = None
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
