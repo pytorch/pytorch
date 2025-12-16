@@ -469,6 +469,21 @@ struct sqr_functor {
   }
 };
 
+struct reciprocal_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(1.0 / float(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return 1.0 / float(x);
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return c10::metal::div(T(1, 0), x);
+  }
+};
+
 struct rsqrt_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -566,11 +581,14 @@ REGISTER_UNARY_OP(round, uchar, uchar);
 REGISTER_UNARY_OP(round, float, float);
 REGISTER_UNARY_OP(round, half, half);
 
+REGISTER_UNARY_OP(sqr, char, char);
+REGISTER_UNARY_OP(sqr, uchar, uchar);
+REGISTER_UNARY_OP(sqr, short, short);
 REGISTER_UNARY_OP(sqr, int, int);
 REGISTER_UNARY_OP(sqr, long, long);
 REGISTER_UNARY_OP(sqr, float, float);
+REGISTER_UNARY_OP(sqr, bfloat, bfloat);
 REGISTER_UNARY_OP(sqr, half, half);
-REGISTER_UNARY_OP(sqr, short, short);
 REGISTER_UNARY_OP(sqr, float2, float2);
 REGISTER_UNARY_OP(sqr, half2, half2);
 
@@ -604,6 +622,7 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(reciprocal, DTYPE1, DTYPE0);   \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
@@ -628,30 +647,31 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
-  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
-                                                  \
-  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);    \
-  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);    \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)        \
+  REGISTER_UNARY_OP(angle, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(expm1, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(abs, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);      \
+  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(reciprocal, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);      \
+                                                     \
+  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);        \
+  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);       \
+  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);       \
   REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);

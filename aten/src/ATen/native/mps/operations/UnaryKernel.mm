@@ -32,6 +32,9 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   if (c10::isIntegralType(iter.common_dtype())) {
     return lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, kInt);
   }
+  if (!exp_scalar.isComplex() && exp_scalar.to<float>() == -1.0) {
+    return lib.exec_unary_kernel(iter, "reciprocal");
+  }
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == -.5) {
     return lib.exec_unary_kernel(iter, "rsqrt");
   }
@@ -62,6 +65,7 @@ REGISTER_UNARY_TI_DISPATCH(asin);
 REGISTER_UNARY_TI_DISPATCH(acos);
 REGISTER_UNARY_TI_DISPATCH(atan);
 REGISTER_UNARY_TI_DISPATCH(sqrt);
+REGISTER_UNARY_TI_DISPATCH(reciprocal);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
 REGISTER_UNARY_TI_DISPATCH(neg);
 REGISTER_UNARY_TI_DISPATCH(exp2);

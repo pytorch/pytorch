@@ -4998,8 +4998,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: reciprocal_out
-    MPS: reciprocal_out_mps
+    CPU, CUDA, MPS, MTIA: reciprocal_out
   tags: pointwise
 
 - func: neg(Tensor self) -> Tensor
