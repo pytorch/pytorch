@@ -186,7 +186,7 @@ class RedistributeTest(DTensorTestBase):
             )
             out.backward(torch.ones_like(out))
 
-        # redistribute forward is no-op, backward 
+        # redistribute forward is no-op, backward
         self.assertEqual(comm_mode.get_total_counts(), 0)
         self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 0)
 

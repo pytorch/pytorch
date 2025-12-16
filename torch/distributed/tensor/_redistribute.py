@@ -1043,8 +1043,12 @@ class Redistribute(torch.autograd.Function):
                 # for backward shard -> partial, we just do shard -> replicate
                 # for backward replicate -> partial, we skip the transformation
                 normalized_placements: list[Placement] = []
-                for current, target in zip(current_spec.placements, previous_spec.placements):
-                    if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                for current, target in zip(
+                    current_spec.placements, previous_spec.placements
+                ):
+                    if (
+                        current.is_shard() or current.is_replicate()
+                    ) and target.is_partial():
                         normalized_placements.append(Replicate())
                     else:
                         normalized_placements.append(target)
