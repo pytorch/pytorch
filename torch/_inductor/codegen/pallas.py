@@ -1696,6 +1696,10 @@ class PallasKernel(SIMDKernel):
         """
         assert self.inside_reduction
 
+        # Handle welford_reduce using the fallback (computes via sum reductions)
+        if reduction_type == "welford_reduce":
+            return self.welford_reduce_fallback(dtype, value)
+
         if isinstance(value, tuple):
             raise Unsupported(
                 "Tuple reductions (e.g., welford_combine) not supported in Pallas backend"
@@ -1836,6 +1840,7 @@ class PallasKernel(SIMDKernel):
                 # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
                 # 2. Move pointwise axes to front, reduction axes to back
                 # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
+                # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
                 reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
@@ -1927,13 +1932,11 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
+def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel, pw_shape=None):
     # Helper for partial reductions: reorders axes and reduces
-    if v.ndim <= 2:
-        return reduce_fn(v.reshape(pw_numel, red_numel), axis=-1)
-    # Find contiguous axes whose product = red_numel
-    # Search from right to left to prefer reducing over trailing axes
+    # Preserves dimensionality for proper broadcasting (keepdims-style)
     shape = tuple(v.shape)
+    # Find contiguous axes whose product = red_numel (search from right)
     red_axes = None
     for i in range(len(shape) - 1, -1, -1):
         prod = 1
@@ -1946,10 +1949,13 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             break
     if red_axes is None:
         red_axes = [len(shape) - 1]
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
     # Move pointwise axes to front, reduction axes to back
     pw_axes = [i for i in range(len(shape)) if i not in red_axes]
     reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
-    return reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)
 """
             + (
                 "\nfrom jax.experimental.pallas import triton as pltriton"
