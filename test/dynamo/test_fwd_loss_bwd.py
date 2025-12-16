@@ -935,15 +935,11 @@ class GraphModule(torch.nn.Module):
     @unittest.expectedFailure
     @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
     def test_tensor_backward_with_ingraph_nn_parameter(self):
-        """Test backward() works for nn.Parameter created in-graph.
-
+        """
         This is an xfail test documenting a known limitation: backward() on in-graph
         created nn.Parameter fails because the accumulate_grad polyfill tries to
         access w.grad, which dynamo represents as GetAttrVariable (not TensorVariable).
         Dynamo doesn't know how to trace .add_() on GetAttrVariable.
-
-        When this test starts passing, it means we've fixed the accumulate_grad issue
-        for in-graph created parameters.
         """
 
         def fn(x):
@@ -995,6 +991,84 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(eager_weight_grad, mod.weight.grad)
+
+    # TODO: Non-leaf tensor inputs to backward() cause a graph break because
+    # supporting them requires retain_grad() tracing which is not yet implemented.
+    @unittest.expectedFailure
+    @skipIfCrossRef
+    def test_tensor_backward_non_leaf_inputs(self):
+        """Test backward with non-leaf tensor inputs.
+
+        When user explicitly passes non-leaf tensors to backward(inputs=...),
+        eager PyTorch calls retain_grad() on them automatically. We should
+        match this behavior and accumulate gradients to non-leaf tensors.
+        """
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        # We need to capture res outside to check its grad after
+        res_holder = {}
+
+        def fn(x):
+            res = mod(x)  # res is non-leaf (has grad_fn)
+            res_holder["res"] = res
+            loss = res.sum()
+            # Pass both leaf (weight) and non-leaf (res) tensors
+            loss.backward(inputs=[mod.weight, res])
+            return loss.detach()
+
+        # Eager
+        for p in mod.parameters():
+            p.grad = None
+        eager_result = fn(x)
+        eager_weight_grad = mod.weight.grad.clone()
+        eager_res_grad = res_holder["res"].grad.clone()
+
+        # Compiled
+        for p in mod.parameters():
+            p.grad = None
+        res_holder.clear()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(eager_weight_grad, mod.weight.grad)
+        self.assertEqual(eager_res_grad, res_holder["res"].grad)
+
+    # TODO: Non-leaf tensor inputs to backward() cause a graph break because
+    # supporting them requires retain_grad() tracing which is not yet implemented.
+    @unittest.expectedFailure
+    @skipIfCrossRef
+    def test_tensor_backward_only_non_leaf_inputs(self):
+        """Test backward with only non-leaf tensor inputs.
+
+        Verifies that when only non-leaf tensors are passed to backward,
+        we correctly call retain_grad() and accumulate their gradients.
+        """
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        res_holder = {}
+
+        def fn(x):
+            res = mod(x)  # res is non-leaf
+            res_holder["res"] = res
+            loss = res.sum()
+            # Only pass non-leaf tensor
+            loss.backward(inputs=[res])
+            return loss.detach()
+
+        # Eager
+        eager_loss = fn(x)
+        eager_res_grad = res_holder["res"].grad.clone()
+
+        # Compiled
+        res_holder.clear()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_loss = compiled_fn(x)
+
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(eager_res_grad, res_holder["res"].grad)
 
 
 if __name__ == "__main__":
