@@ -1170,10 +1170,7 @@ print(t.is_pinned())
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
-            if TEST_WITH_ROCM:
-                torch.cuda._busy_wait_for_flag()
-            else:
-                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
 
         view.record_stream(stream_record)
 
@@ -1186,8 +1183,6 @@ print(t.is_pinned())
 
         with torch.cuda.stream(stream_alloc):
             try_realloc = torch.cuda.FloatTensor([10, 10])
-        if TEST_WITH_ROCM:
-            torch.cuda._clear_flag()
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
