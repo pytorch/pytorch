@@ -1917,13 +1917,12 @@ class PallasKernel(SIMDKernel):
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
-        # Import math at module level if we'll use it for masked ops
+        # Import math for masked ops and symbolic expressions (e.g., math.floor, math.log2)
         imports = (
             """
 import functools
-"""
-            + ("import math\n" if self.use_masked_ops else "")
-            + """import torch
+import math
+import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
