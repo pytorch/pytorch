@@ -732,6 +732,14 @@ class TestStridedSharding(DTensorTestBase):
         return 4
 
     @with_comms
+    def test_1d_mesh_view(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        orig_shape = (8192, 2048)
+        global_inps = torch.randn(*orig_shape, device=self.device_type)
+        inps = distribute_tensor(global_inps, mesh, (Shard(0), ))
+        inps_viewed = inps.view(2, 4096, 2048)
+
+    @with_comms
     def test_1d_mesh_strided_sharding(self):
         mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
         # Test 1: 1-d tensor over 1-d mesh
