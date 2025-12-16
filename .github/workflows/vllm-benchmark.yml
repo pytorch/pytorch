@@ -105,6 +105,7 @@ jobs:
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
+      options: --ipc=host
     env:
       SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
       SCCACHE_REGION: us-east-1
