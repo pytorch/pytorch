@@ -359,16 +359,16 @@ class LazyConstantVariableTests(TestCase):
             self.assertTrue(lc2.lazy_isinstance(ConstantVariable))
             self.assertFalse(lc2.is_realized())
 
-    def test_isinstance_does_not_recompile_on_value_change(self):
-        """Test that isinstance checks do NOT trigger recompilation on value change.
+    def test_isinstance_recompiles_on_value_change(self):
+        """Test that isinstance checks DO trigger recompilation on value change.
 
-        When isinstance() is called on a LazyConstantVariable, it only installs a
-        TYPE_MATCH guard (not CONSTANT_MATCH), so different values of the same type
-        do not cause recompilation.
+        When isinstance() is called on a LazyConstantVariable, the type argument
+        (e.g., `str`) is not a constant-like type, so the lazy variable gets
+        realized to avoid infinite recursion in handler dispatch. This installs
+        a CONSTANT_MATCH guard and causes recompilation when the value changes.
 
-        Note: We use string values here because with specialize_int=False (the default),
-        int values must be realized during handler dispatch to determine if they become
-        ConstantVariable or SymNodeVariable. Strings always become ConstantVariable.
+        Note: This is expected behavior because isinstance() involves non-constant
+        arguments (the type class) alongside the lazy constant.
         """
         tensor_input = torch.randn(3)
 
@@ -386,18 +386,18 @@ class LazyConstantVariableTests(TestCase):
         self.assertTrue(same(eager1, compiled1))
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with different string - should NOT recompile since
-        # isinstance only installs TYPE_MATCH guard
+        # Second call with different string - WILL recompile because isinstance
+        # causes the lazy variable to be realized (installing CONSTANT_MATCH guard)
         eager2 = fn(tensor_input, "world")
         compiled2 = opt_fn(tensor_input, "world")
         self.assertTrue(same(eager2, compiled2))
-        self.assertEqual(counter.frame_count, 1)  # No recompilation!
+        self.assertEqual(counter.frame_count, 2)  # Recompile due to value change
 
-        # Third call with int - should recompile due to type change
+        # Third call with int - recompiles again due to both type and value change
         eager3 = fn(tensor_input, 42)
         compiled3 = opt_fn(tensor_input, 42)
         self.assertTrue(same(eager3, compiled3))
-        self.assertEqual(counter.frame_count, 2)  # Recompile for type change
+        self.assertEqual(counter.frame_count, 3)  # Recompile for value change
 
     def test_container_with_lazy_constant_no_recompile(self):
         """Test that returning containers with LazyConstantVariables works without realization.
@@ -473,8 +473,11 @@ class LazyConstantVariableTests(TestCase):
         """Test that arithmetic operations on lazy constants produce correct results.
 
         When two lazy constants are added/multiplied/etc, the result is computed at
-        trace time but guards are installed on realization. This ensures correctness
-        when values change (recompilation occurs and the new result is computed).
+        trace time via ComputedLazyConstantVariable. The reconstruct() method generates
+        bytecode that recomputes the result at runtime, so no recompilation is needed
+        when values change.
+
+        Note: This feature requires specialize_int=True.
         """
         tensor_input = torch.randn(3)
 
@@ -483,25 +486,31 @@ class LazyConstantVariableTests(TestCase):
             return t + 1, a + b
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_add, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_add, backend=counter)
 
-        eager1 = fn_add(tensor_input, 10, 20)
-        compiled1 = opt_fn(tensor_input, 10, 20)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # 30
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_add(tensor_input, 10, 20)
+            compiled1 = opt_fn(tensor_input, 10, 20)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 30
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_add(tensor_input, 100, 200)
-        compiled2 = opt_fn(tensor_input, 100, 200)
-        self.assertTrue(
-            same(eager2[0], compiled2[0])
-        )  # tensor computation still correct
-        self.assertEqual(compiled2[1], 300)  # Correct result from recompilation
-        self.assertEqual(counter.frame_count, 2)
+            # Different values should NOT recompile - reconstruct() generates bytecode
+            # that recomputes a + b at runtime
+            eager2 = fn_add(tensor_input, 100, 200)
+            compiled2 = opt_fn(tensor_input, 100, 200)
+            self.assertTrue(
+                same(eager2[0], compiled2[0])
+            )  # tensor computation still correct
+            self.assertEqual(compiled2[1], 300)  # Correct result without recompilation
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_multiple_ops_correct_result(self):
-        """Test that chained operations on lazy constants produce correct results."""
+        """Test that chained operations on lazy constants produce correct results.
+
+        Note: This feature requires specialize_int=True.
+        """
         tensor_input = torch.randn(3)
 
         def fn_chain(t, a, b, c):
@@ -509,43 +518,52 @@ class LazyConstantVariableTests(TestCase):
             return t + 1, (a + b) * c
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_chain, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_chain, backend=counter)
 
-        eager1 = fn_chain(tensor_input, 2, 3, 4)
-        compiled1 = opt_fn(tensor_input, 2, 3, 4)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # (2+3)*4 = 20
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_chain(tensor_input, 2, 3, 4)
+            compiled1 = opt_fn(tensor_input, 2, 3, 4)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # (2+3)*4 = 20
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_chain(tensor_input, 10, 20, 30)
-        compiled2 = opt_fn(tensor_input, 10, 20, 30)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 900)  # (10+20)*30 = 900
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes (a + b) * c at runtime
+            eager2 = fn_chain(tensor_input, 10, 20, 30)
+            compiled2 = opt_fn(tensor_input, 10, 20, 30)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 900)  # (10+20)*30 = 900, no recompilation!
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_division_correct_result(self):
-        """Test division operations on lazy constants produce correct results."""
+        """Test division operations on lazy constants produce correct results.
+
+        Note: This feature requires specialize_float=True.
+        """
         tensor_input = torch.randn(3)
 
         def fn_div(t, a, b):
             return t + 1, a / b
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_div, backend=counter)
+        # specialize_float=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_float=True):
+            opt_fn = torch.compile(fn_div, backend=counter)
 
-        eager1 = fn_div(tensor_input, 10.0, 2.0)
-        compiled1 = opt_fn(tensor_input, 10.0, 2.0)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # 5.0
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_div(tensor_input, 10.0, 2.0)
+            compiled1 = opt_fn(tensor_input, 10.0, 2.0)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 5.0
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_div(tensor_input, 100.0, 4.0)
-        compiled2 = opt_fn(tensor_input, 100.0, 4.0)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 25.0)  # Correct result from recompilation
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes a / b at runtime
+            eager2 = fn_div(tensor_input, 100.0, 4.0)
+            compiled2 = opt_fn(tensor_input, 100.0, 4.0)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 25.0)  # Correct result without recompilation
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_string_concat_correct_result(self):
         """Test string concatenation on lazy constants produces correct results."""
@@ -563,12 +581,13 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager1[1], compiled1[1])  # "helloworld"
         self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
+        # Different values do NOT recompile - reconstruct_fn generates bytecode
+        # that recomputes a + b at runtime
         eager2 = fn_concat(tensor_input, "foo", "bar")
         compiled2 = opt_fn(tensor_input, "foo", "bar")
         self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], "foobar")  # Correct result from recompilation
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(compiled2[1], "foobar")  # Correct result without recompilation
+        self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_string_multiply_correct_result(self):
         """Test string multiplication on lazy constants produces correct results.
@@ -601,9 +620,12 @@ class LazyConstantVariableTests(TestCase):
     def test_computed_lazy_constant_with_regular_constant(self):
         """Test operations between lazy constants and regular constants.
 
-        When a lazy constant is combined with a regular constant, the result
-        produces correct values. When the lazy constant value changes,
-        recompilation occurs and produces the correct result.
+        When a lazy constant is combined with a regular constant (closure variable),
+        the result produces correct values. The reconstruct_fn generates bytecode
+        that recomputes the value at runtime, so no recompilation is needed when
+        the lazy constant value changes.
+
+        Note: This feature requires specialize_int=True.
         """
         tensor_input = torch.randn(3)
 
@@ -614,20 +636,23 @@ class LazyConstantVariableTests(TestCase):
             return t + 1, a + CONSTANT
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_mixed, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_mixed, backend=counter)
 
-        eager1 = fn_mixed(tensor_input, 10)
-        compiled1 = opt_fn(tensor_input, 10)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # 110
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_mixed(tensor_input, 10)
+            compiled1 = opt_fn(tensor_input, 10)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 110
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_mixed(tensor_input, 50)
-        compiled2 = opt_fn(tensor_input, 50)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 150)  # Correct result from recompilation
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes a + CONSTANT at runtime
+            eager2 = fn_mixed(tensor_input, 50)
+            compiled2 = opt_fn(tensor_input, 50)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 150)  # Correct result without recompilation
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_branching_recompiles(self):
         """Test that using computed lazy constant in control flow causes recompilation."""
@@ -655,53 +680,68 @@ class LazyConstantVariableTests(TestCase):
         self.assertGreater(counter.frame_count, 1)
 
     def test_computed_lazy_constant_modulo_correct_result(self):
-        """Test modulo operation on lazy constants produces correct results."""
+        """Test modulo operation on lazy constants produces correct results.
+
+        Note: This feature requires specialize_int=True.
+        """
         tensor_input = torch.randn(3)
 
         def fn_mod(t, a, b):
             return t + 1, a % b
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_mod, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_mod, backend=counter)
 
-        eager1 = fn_mod(tensor_input, 17, 5)
-        compiled1 = opt_fn(tensor_input, 17, 5)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # 2
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_mod(tensor_input, 17, 5)
+            compiled1 = opt_fn(tensor_input, 17, 5)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 2
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_mod(tensor_input, 23, 7)
-        compiled2 = opt_fn(tensor_input, 23, 7)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 2)  # 23 % 7 = 2
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes a % b at runtime
+            eager2 = fn_mod(tensor_input, 23, 7)
+            compiled2 = opt_fn(tensor_input, 23, 7)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 2)  # 23 % 7 = 2
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_subtraction_correct_result(self):
-        """Test subtraction operation on lazy constants produces correct results."""
+        """Test subtraction operation on lazy constants produces correct results.
+
+        Note: This feature requires specialize_int=True.
+        """
         tensor_input = torch.randn(3)
 
         def fn_sub(t, a, b):
             return t + 1, a - b
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_sub, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_sub, backend=counter)
 
-        eager1 = fn_sub(tensor_input, 100, 30)
-        compiled1 = opt_fn(tensor_input, 100, 30)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # 70
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_sub(tensor_input, 100, 30)
+            compiled1 = opt_fn(tensor_input, 100, 30)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 70
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_sub(tensor_input, 50, 10)
-        compiled2 = opt_fn(tensor_input, 50, 10)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 40)  # 50 - 10 = 40
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes a - b at runtime
+            eager2 = fn_sub(tensor_input, 50, 10)
+            compiled2 = opt_fn(tensor_input, 50, 10)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 40)  # 50 - 10 = 40
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_chained_operations(self):
-        """Test multiple operations chained together on lazy constants."""
+        """Test multiple operations chained together on lazy constants.
+
+        Note: This feature requires specialize_int=True.
+        """
         tensor_input = torch.randn(3)
 
         # Test longer chain of operations
@@ -710,20 +750,23 @@ class LazyConstantVariableTests(TestCase):
             return t + 1, ((a + b) * c) - d
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_long_chain, backend=counter)
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_long_chain, backend=counter)
 
-        eager1 = fn_long_chain(tensor_input, 2, 3, 4, 5)
-        compiled1 = opt_fn(tensor_input, 2, 3, 4, 5)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # ((2+3)*4)-5 = 15
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_long_chain(tensor_input, 2, 3, 4, 5)
+            compiled1 = opt_fn(tensor_input, 2, 3, 4, 5)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # ((2+3)*4)-5 = 15
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_long_chain(tensor_input, 10, 20, 3, 10)
-        compiled2 = opt_fn(tensor_input, 10, 20, 3, 10)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], 80)  # ((10+20)*3)-10 = 80
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes the entire chain at runtime
+            eager2 = fn_long_chain(tensor_input, 10, 20, 3, 10)
+            compiled2 = opt_fn(tensor_input, 10, 20, 3, 10)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 80)  # ((10+20)*3)-10 = 80, no recompilation!
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_str_format(self):
         """Test str.format() with lazy constants produces correct results."""
@@ -870,6 +913,321 @@ class LazyConstantVariableTests(TestCase):
         self.assertTrue(same(eager2[0], compiled2[0]))
         self.assertEqual(compiled2[1], "Result: 14 and 25")
         self.assertEqual(counter.frame_count, 2)
+
+    def test_returning_lazy_constant_plus_one_no_recompile(self):
+        """Test that returning LazyConstantVariable + 1 does not recompile.
+
+        This tests the reconstruct() functionality of ComputedLazyConstantVariable.
+        When a binary operation (e.g., a + 1) is performed on a LazyConstantVariable,
+        the result should be a ComputedLazyConstantVariable that can generate bytecode
+        to recompute the value from the source. This allows the function to be called
+        with different input values without recompiling.
+
+        Note: This feature requires specialize_int=True. With specialize_int=False
+        (the default), ints are treated symbolically from the first call, which is
+        tested separately in test_lazy_constant_arithmetic_both_specialize_modes.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            # a is a LazyConstantVariable, a + 10 should create a
+            # ComputedLazyConstantVariable with reconstruct() that generates
+            # bytecode to load a and add 10 to it.
+            return t + 1, a + 10
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call
+            eager1 = fn(tensor_input, 5)
+            compiled1 = opt_fn(tensor_input, 5)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 15
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call with different value - should NOT recompile because
+            # the reconstruct() generates bytecode that recomputes a + 10 at runtime
+            eager2 = fn(tensor_input, 100)
+            compiled2 = opt_fn(tensor_input, 100)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 110)  # Correct result without recompilation
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+            # Third call with yet another different value - still no recompile
+            eager3 = fn(tensor_input, 999)
+            compiled3 = opt_fn(tensor_input, 999)
+            self.assertTrue(same(eager3[0], compiled3[0]))
+            self.assertEqual(compiled3[1], 1009)
+            self.assertEqual(counter.frame_count, 1)  # Still no recompilation!
+
+    def test_returning_chained_lazy_operations_no_recompile(self):
+        """Test that chained lazy constant operations don't recompile.
+
+        When multiple operations are chained (e.g., (a + 1) * 2), each operation
+        creates a ComputedLazyConstantVariable. The final result should generate
+        bytecode that chains all the operations together.
+
+        Note: This feature requires specialize_int=True. With specialize_int=False,
+        the value might become symbolic via automatic_dynamic_shapes, which conflicts
+        with the lazy constant optimization.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            # Chain of operations: (a + 1) * 2 - 5
+            result = a + 1
+            result = result * 2
+            result = result - 5
+            return t + 1, result
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: (10 + 1) * 2 - 5 = 17
+            eager1 = fn(tensor_input, 10)
+            compiled1 = opt_fn(tensor_input, 10)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 17
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: (20 + 1) * 2 - 5 = 37
+            eager2 = fn(tensor_input, 20)
+            compiled2 = opt_fn(tensor_input, 20)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 37)  # Correct result
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+            # Third call: (100 + 1) * 2 - 5 = 197
+            eager3 = fn(tensor_input, 100)
+            compiled3 = opt_fn(tensor_input, 100)
+            self.assertTrue(same(eager3[0], compiled3[0]))
+            self.assertEqual(compiled3[1], 197)
+            self.assertEqual(counter.frame_count, 1)  # Still no recompilation!
+
+    def test_returning_two_lazy_constant_operations_no_recompile(self):
+        """Test that operations between two LazyConstantVariables don't recompile.
+
+        When two input lazy constants are combined (e.g., a + b), the result
+        should generate bytecode that loads both operands and performs the
+        operation at runtime.
+
+        Note: This feature requires specialize_int=True. With specialize_int=False,
+        the value might become symbolic via automatic_dynamic_shapes, which conflicts
+        with the lazy constant optimization.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a, b):
+            return t + 1, a + b
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: 5 + 10 = 15
+            eager1 = fn(tensor_input, 5, 10)
+            compiled1 = opt_fn(tensor_input, 5, 10)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 15
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: 100 + 200 = 300
+            eager2 = fn(tensor_input, 100, 200)
+            compiled2 = opt_fn(tensor_input, 100, 200)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 300)
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+            # Third call: 1 + 2 = 3
+            eager3 = fn(tensor_input, 1, 2)
+            compiled3 = opt_fn(tensor_input, 1, 2)
+            self.assertTrue(same(eager3[0], compiled3[0]))
+            self.assertEqual(compiled3[1], 3)
+            self.assertEqual(counter.frame_count, 1)  # Still no recompilation!
+
+    def test_lazy_constant_subtraction_no_recompile(self):
+        """Test that subtraction on lazy constants doesn't recompile.
+
+        Note: This feature requires specialize_int=True.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            return t + 1, a - 5
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: 100 - 5 = 95
+            eager1 = fn(tensor_input, 100)
+            compiled1 = opt_fn(tensor_input, 100)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 95)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: 50 - 5 = 45
+            eager2 = fn(tensor_input, 50)
+            compiled2 = opt_fn(tensor_input, 50)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 45)
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+    def test_lazy_constant_multiplication_no_recompile(self):
+        """Test that multiplication on lazy constants doesn't recompile.
+
+        Note: This feature requires specialize_int=True.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            return t + 1, a * 3
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: 10 * 3 = 30
+            eager1 = fn(tensor_input, 10)
+            compiled1 = opt_fn(tensor_input, 10)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 30)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: 7 * 3 = 21
+            eager2 = fn(tensor_input, 7)
+            compiled2 = opt_fn(tensor_input, 7)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 21)
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+    def test_lazy_constant_division_no_recompile(self):
+        """Test that division on lazy constants doesn't recompile.
+
+        Note: This feature requires specialize_int=True.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            return t + 1, a / 2
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: 100 / 2 = 50.0
+            eager1 = fn(tensor_input, 100)
+            compiled1 = opt_fn(tensor_input, 100)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 50.0)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: 50 / 2 = 25.0
+            eager2 = fn(tensor_input, 50)
+            compiled2 = opt_fn(tensor_input, 50)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 25.0)
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+    def test_lazy_constant_modulo_no_recompile(self):
+        """Test that modulo on lazy constants doesn't recompile.
+
+        Note: This feature requires specialize_int=True.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a):
+            return t + 1, a % 7
+
+        counter = CompileCounter()
+        # specialize_int=True is required for this optimization to work
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call: 17 % 7 = 3
+            eager1 = fn(tensor_input, 17)
+            compiled1 = opt_fn(tensor_input, 17)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 3)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call: 100 % 7 = 2
+            eager2 = fn(tensor_input, 100)
+            compiled2 = opt_fn(tensor_input, 100)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 2)
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+    def test_lazy_constant_arithmetic_both_specialize_modes(self):
+        """Test lazy constant arithmetic works with both specialize_int=True and False.
+
+        This test explicitly verifies the feature works in both modes:
+        - specialize_int=True: reconstruct_fn generates bytecode to recompute at runtime
+        - specialize_int=False: ComputedLazyCache.realize() handles symbolic values
+          if automatic_dynamic_shapes makes them symbolic
+
+        In both cases, values should be correct and recompilation should be minimal.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, a, b):
+            return t + 1, a + b
+
+        # Test with specialize_int=True
+        counter1 = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn1 = torch.compile(fn, backend=counter1)
+
+            # First call
+            eager1 = fn(tensor_input, 10, 20)
+            compiled1 = opt_fn1(tensor_input, 10, 20)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(compiled1[1], 30)
+            self.assertEqual(counter1.frame_count, 1)
+
+            # Second call - no recompile
+            eager2 = fn(tensor_input, 100, 200)
+            compiled2 = opt_fn1(tensor_input, 100, 200)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], 300)
+            self.assertEqual(counter1.frame_count, 1)
+
+            # Third call - still no recompile
+            compiled3 = opt_fn1(tensor_input, 1, 2)
+            self.assertEqual(compiled3[1], 3)
+            self.assertEqual(counter1.frame_count, 1)
+
+        # Test with specialize_int=False (default)
+        counter2 = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=False):
+            opt_fn2 = torch.compile(fn, backend=counter2)
+
+            # First call
+            eager4 = fn(tensor_input, 10, 20)
+            compiled4 = opt_fn2(tensor_input, 10, 20)
+            self.assertTrue(same(eager4[0], compiled4[0]))
+            self.assertEqual(compiled4[1], 30)
+            self.assertEqual(counter2.frame_count, 1)
+
+            # Second call - may trigger one recompile due to automatic_dynamic_shapes
+            eager5 = fn(tensor_input, 100, 200)
+            compiled5 = opt_fn2(tensor_input, 100, 200)
+            self.assertTrue(same(eager5[0], compiled5[0]))
+            self.assertEqual(compiled5[1], 300)  # Correct value
+            frame_count_after_second = counter2.frame_count
+
+            # Third call - should NOT trigger additional recompile
+            # because automatic_dynamic_shapes should have stabilized
+            compiled6 = opt_fn2(tensor_input, 1, 2)
+            self.assertEqual(compiled6[1], 3)  # Correct value
+            self.assertEqual(counter2.frame_count, frame_count_after_second)
 
 
 if __name__ == "__main__":

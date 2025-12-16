@@ -207,6 +207,83 @@ un_ops = (
     operator.length_hint,
 )
 
+
+def _make_binary_op_reconstruct_fn(
+    op: Callable[..., Any],
+) -> Callable[[Any, list[VariableTracker]], None] | None:
+    """Create a reconstruct_fn for a binary operation.
+
+    Returns a function that generates bytecode to recompute the result
+    by loading the operands and applying the binary operation.
+    Returns None if the operation is not a supported binary operation.
+    """
+    import sys
+
+    from torch._dynamo.bytecode_transformation import create_instruction
+
+    # Map operator functions to BINARY_OP arg values (Python 3.11+)
+    operator_to_binary_op_arg: dict[Callable[..., Any], int] = {
+        operator.add: 0,  # NB_ADD
+        operator.and_: 1,  # NB_AND
+        operator.floordiv: 2,  # NB_FLOOR_DIVIDE
+        operator.lshift: 3,  # NB_LSHIFT
+        operator.matmul: 4,  # NB_MATRIX_MULTIPLY
+        operator.mul: 5,  # NB_MULTIPLY
+        operator.mod: 6,  # NB_REMAINDER
+        operator.or_: 7,  # NB_OR
+        operator.pow: 8,  # NB_POWER
+        operator.rshift: 9,  # NB_RSHIFT
+        operator.sub: 10,  # NB_SUBTRACT
+        operator.truediv: 11,  # NB_TRUE_DIVIDE
+        operator.xor: 12,  # NB_XOR
+    }
+
+    # Map operator functions to pre-3.11 opnames
+    operator_to_binary_opname: dict[Callable[..., Any], str] = {
+        operator.add: "BINARY_ADD",
+        operator.and_: "BINARY_AND",
+        operator.floordiv: "BINARY_FLOOR_DIVIDE",
+        operator.lshift: "BINARY_LSHIFT",
+        operator.matmul: "BINARY_MATRIX_MULTIPLY",
+        operator.mul: "BINARY_MULTIPLY",
+        operator.mod: "BINARY_MODULO",
+        operator.or_: "BINARY_OR",
+        operator.pow: "BINARY_POWER",
+        operator.rshift: "BINARY_RSHIFT",
+        operator.sub: "BINARY_SUBTRACT",
+        operator.truediv: "BINARY_TRUE_DIVIDE",
+        operator.xor: "BINARY_XOR",
+    }
+
+    if op not in operator_to_binary_op_arg:
+        return None
+
+    binary_op_arg = operator_to_binary_op_arg[op]
+    binary_opname = operator_to_binary_opname.get(op)
+
+    def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+        if len(args) != 2:
+            # Fall back to loading the constant for non-binary ops
+            codegen.append_output(
+                codegen.create_load_const(op(*[a.as_python_constant() for a in args]))
+            )
+            return
+
+        # Reconstruct left operand
+        codegen(args[0])
+        # Reconstruct right operand
+        codegen(args[1])
+
+        # Generate the binary operation instruction
+        if sys.version_info >= (3, 11):
+            codegen.append_output(create_instruction("BINARY_OP", arg=binary_op_arg))
+        else:
+            assert binary_opname is not None
+            codegen.append_output(create_instruction(binary_opname))
+
+    return reconstruct_fn
+
+
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
 # These functions represent the r* versions of the above ops
@@ -1039,25 +1116,23 @@ class BuiltinVariable(VariableTracker):
                 and not has_kwargs
                 and not is_comparison_op
             ):
-                # Return a ComputedLazyConstantVariable instead of realizing
+                # Return a ComputedLazyConstantVariable instead of realizing.
+                # This allows operations on lazy constants to remain lazy, deferring
+                # guard installation until the result is actually used.
+                #
+                # If the result is used in a tensor operation and automatic_dynamic_shapes
+                # kicks in (making source vars symbolic), ComputedLazyCache.realize()
+                # will detect this and re-apply the operation symbolically.
                 def handle_lazy_constant(tx, args, kwargs):
-                    # If specialize_int/specialize_float is False, those types may become
-                    # SymNodeVariable on realization, which would give incorrect results
-                    # if we cache the computed value. So we must realize in that case.
-                    def should_realize_lazy(arg: VariableTracker) -> bool:
-                        if not isinstance(arg, LazyConstantVariable):
-                            return False
-                        if arg.is_realized():
-                            arg_type = arg.python_type()
-                        else:
-                            arg_type = arg.peek_type()
-                        if arg_type is int and not config.specialize_int:
-                            return True
-                        if arg_type is float and not config.specialize_float:
-                            return True
-                        return False
+                    from .. import config
 
-                    if any(should_realize_lazy(arg) for arg in args):
+                    # Check if we have a reconstruct_fn for this operation.
+                    # Only use ComputedLazyConstantVariable if we can reconstruct
+                    # the result at runtime (via bytecode generation).
+                    reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
+                    if reconstruct_fn is None:
+                        # No reconstruct_fn (e.g., str.format) - fall back to
+                        # realizing lazy args so guards are properly installed.
                         return obj.call_function(
                             tx,
                             [
@@ -1066,8 +1141,49 @@ class BuiltinVariable(VariableTracker):
                             ],
                             kwargs,
                         )
+
+                    # Check if any lazy constant might become symbolic due to
+                    # specialize_int=False or specialize_float=False. If so, we must
+                    # realize to allow symbolic tracing.
+                    #
+                    # This is important because if we don't realize, the function may
+                    # skip compilation entirely (no tensor ops in graph), but we need
+                    # the symbolic tracing to happen for unbacked int/float support.
+                    for arg in args:
+                        if (
+                            isinstance(arg, LazyConstantVariable)
+                            and not arg.is_realized()
+                        ):
+                            val_type = arg.peek_type()
+                            if val_type is int and not config.specialize_int:
+                                # Int might become SymNodeVariable - must realize
+                                return obj.call_function(
+                                    tx,
+                                    [
+                                        v.realize()
+                                        if isinstance(v, LazyVariableTracker)
+                                        else v
+                                        for v in args
+                                    ],
+                                    kwargs,
+                                )
+                            if val_type is float and not config.specialize_float:
+                                # Float might become SymNodeVariable - must realize
+                                return obj.call_function(
+                                    tx,
+                                    [
+                                        v.realize()
+                                        if isinstance(v, LazyVariableTracker)
+                                        else v
+                                        for v in args
+                                    ],
+                                    kwargs,
+                                )
+
                     try:
-                        return ComputedLazyConstantVariable.create(fn, list(args))
+                        return ComputedLazyConstantVariable.create(
+                            fn, list(args), reconstruct_fn
+                        )
                     except Exception:
                         # Fall back to realizing all args if constant folding fails
                         # (e.g., invalid args like complex(1, 1, 1))
@@ -1082,18 +1198,18 @@ class BuiltinVariable(VariableTracker):
 
                 return handle_lazy_constant
             else:
-                # Fall back to realizing non-constant lazy args.
-                # LazyConstantVariable stays lazy to avoid installing CONSTANT_MATCH guards.
-                def realize_non_constant(v: VariableTracker) -> VariableTracker:
-                    if isinstance(v, LazyVariableTracker) and not isinstance(
-                        v, LazyConstantVariable
-                    ):
+                # Fall back to realizing lazy args.
+                # We must realize all LazyVariableTracker (including LazyConstantVariable)
+                # to avoid infinite recursion in handler dispatch - calling obj.call_function()
+                # with unrealized lazy constants would dispatch back to this same handler.
+                def realize_lazy(v: VariableTracker) -> VariableTracker:
+                    if isinstance(v, LazyVariableTracker):
                         return v.realize()
                     return v
 
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
-                    [realize_non_constant(v) for v in args],
+                    [realize_lazy(v) for v in args],
                     kwargs,
                 )
 
