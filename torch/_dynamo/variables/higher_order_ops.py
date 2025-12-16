@@ -4060,6 +4060,10 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         def create_scalar() -> VariableTracker:
+            # If the query is a DTensor, then make the query to be the local
+            # tensor first. The indices should always be plain tensors.
+            if query.call_obj_hasattr(tx, "_local_tensor").value:
+                query = query.var_getattr(tx, "_local_tensor")
             return query.call_method(
                 tx,
                 "new_empty",

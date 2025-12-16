@@ -4,6 +4,7 @@
 import copy
 import inspect
 import warnings
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
 from typing_extensions import deprecated
@@ -31,6 +32,12 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+)
+from torch.nn.attention.flex_attention import (
+    _DEFAULT_SPARSE_BLOCK_SIZE,
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
 )
 
 
@@ -1400,4 +1407,257 @@ def zeros(  # type: ignore[no-untyped-def]
         requires_grad=requires_grad,
         device_mesh=device_mesh,
         placements=placements,
+    )
+
+
+def shard_mask_mod(
+    mask_mod: _mask_mod_signature,
+    B: int | None,
+    H: int | None,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+) -> _mask_mod_signature:
+    from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
+
+    B = 1 if B is None else B
+    H = 1 if H is None else H
+
+    _, global_offset = _compute_local_shape_and_global_offset(
+        (B, H, Q_LEN, KV_LEN),
+        device_mesh.shape,
+        device_mesh.get_coordinate(),
+        placements,
+    )
+
+    def create_mask_mod(b_offset_int, h_offset_int, q_offset_int, kv_offset_int):
+        def offset_mask_mod(b, h, q, kv):
+            b_offset = torch.full_like(b, b_offset_int)
+            h_offset = torch.full_like(h, h_offset_int)
+            q_offset = torch.full_like(q, q_offset_int)
+            kv_offset = torch.full_like(kv, kv_offset_int)
+            return mask_mod(
+                b + b_offset,
+                h + h_offset,
+                q + q_offset,
+                kv + kv_offset,
+            )
+
+        return offset_mask_mod
+
+    return create_mask_mod(*global_offset)
+
+
+def create_distributed_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int | None,
+    H: int | None,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
+) -> BlockMask:
+    """
+    Create a distributed BlockMask for FlexAttention with proper DTensor sharding.
+
+    This function creates a BlockMask where the mask tensors (kv_num_blocks, kv_indices,
+    q_num_blocks, q_indices) are properly distributed as DTensors according to the
+    specified device_mesh and placements.
+
+    Args:
+        mask_mod (_mask_mod_signature): The mask modification function that defines
+            the attention pattern (e.g., causal mask). The mask_mod operates on
+            **global indices** across the entire unsharded tensor dimensions.
+            As a result, if your mask_mod relies on a local tensor (e.g., input from
+            the dataloader), you will need to convert the indices accordingly.
+        B (int | None): **Global** batch size (across all ranks). Can be None for broadcasting.
+        H (int | None): **Global** number of attention heads (across all ranks). Can be None for broadcasting.
+        Q_LEN (int): **Global** query sequence length (across all ranks).
+        KV_LEN (int): **Global** key/value sequence length (across all ranks).
+        device_mesh (DeviceMesh): The device mesh for distributed computation.
+        placements (Sequence[Placement]): The placements for distributing the mask.
+            Must have the same number of elements as device_mesh.ndim.
+        BLOCK_SIZE (int | tuple[int, int]): The block size for the mask. Default
+            is _DEFAULT_SPARSE_BLOCK_SIZE.
+
+    Returns:
+        BlockMask: A BlockMask object with DTensor mask tensors.
+
+    Raises:
+        ValueError: If sharding on head dimension (dim=1) is requested.
+        ValueError: If sharding on KV sequence dimension (dim=3) is requested.
+        ValueError: If sharding on a dimension that is set to None (broadcasting).
+        ValueError: If sharding on a dimension that is not evenly divisible by
+            the number of ranks.
+
+    Note:
+        - All dimension parameters (B, H, Q_LEN, KV_LEN) represent **global shapes**
+          before sharding. The function automatically computes local shapes based on
+          the placements.
+        - Sharding on the head dimension (dim=1) is not currently supported for
+          block masks. Sharding on the KV sequence dimension (dim=3) is not
+          supported because FlexAttention requires full KV context for attention
+          computation.
+    """
+    # Use cached compiled version of create_block_mask for performance
+    create_block_mask_fn = getattr(
+        create_distributed_block_mask, "create_block_mask", None
+    )
+
+    if create_block_mask_fn is None:
+        create_block_mask_fn = torch.compile(create_block_mask)
+        create_block_mask_fn = create_block_mask
+        create_distributed_block_mask.create_block_mask = create_block_mask_fn  # type: ignore[attr-defined]
+
+    shard_dim_sizes = defaultdict(lambda: 1)
+    for p, dim_size in zip(placements, device_mesh.shape, strict=True):
+        if isinstance(p, Shard):
+            if p.dim == 1:
+                raise ValueError(
+                    "Sharding on head dimension is not supported for block masks"
+                )
+            if p.dim == 3:
+                raise ValueError("Sharding on KV sequence dimension is not supported")
+            shard_dim_sizes[p.dim] *= dim_size
+
+    block_mask_sizes = [B, H, Q_LEN, KV_LEN]
+    for dim, shard_size in shard_dim_sizes.items():
+        specificed_size = block_mask_sizes[dim]
+        if specificed_size is None:
+            raise ValueError(
+                f"Sharding on dimension {dim} is not supported because the "
+                "value is set to None (will be broadcasted)."
+            )
+
+        if specificed_size % shard_size != 0:
+            raise ValueError(
+                f"Sharding on dimension {dim} is not supported because the "
+                f"size of the dimension, {specificed_size}, must be divisible by "
+                f"the number of ranks for that dimension, {shard_size}."
+            )
+
+        block_mask_sizes[dim] = specificed_size // shard_size
+
+    mask_mod = shard_mask_mod(
+        mask_mod,
+        B=B,
+        H=H,
+        Q_LEN=Q_LEN,
+        KV_LEN=KV_LEN,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+    dist_b, dist_h, dist_q_len, dist_kv_len = block_mask_sizes
+    # Q_LEN and KV_LEN are always int (never None) in the function signature
+    assert isinstance(dist_q_len, int)
+    assert isinstance(dist_kv_len, int)
+    block_mask = create_block_mask_fn(
+        mask_mod,
+        B=dist_b,
+        H=dist_h,
+        Q_LEN=dist_q_len,
+        KV_LEN=dist_kv_len,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+
+    # For the below two placements, they are the same as the whole BlockMask
+    # placement. For kv_num_blocks_placements, it has one less dimension,
+    # KV_LEN, but since we don't allow sharding on the KV_LEN
+    # dim, this won't affect the placement.
+    # [B, H, Q_LEN // BLOCK_SIZE]
+    kv_num_blocks_placements = placements
+    # [B, H, Q_LEN // BLOCK_SIZE, KV_LEN // BLOCK_SIZE]
+    kv_indices_placements = placements
+
+    # For the below placements,
+    # [B, H, KV_LEN // BLOCK_SIZE]
+    q_num_blocks_placements = []
+    # [B, H, KV_LEN // BLOCK_SIZE, Q_LEN // BLOCK_SIZE]
+    q_indices_placements = []
+    for p in placements:
+        if isinstance(p, Replicate) or p.dim <= 1:
+            q_num_blocks_placements.append(p)
+            q_indices_placements.append(p)
+            continue
+
+        # p.dim > 2 shouldn't happen as we check above
+        assert isinstance(p, Shard)
+        assert p.dim <= 2, f"Sharding on dim {p.dim} is not supported"
+
+        # There is no second or Q_LEN dimension in q_num_blocks_placements.
+        q_num_blocks_placements.append(Replicate())
+        # The second or Q_LEN dimension is swapped with KV_LEN in q_indices_placements.
+        q_indices_placements.append(Shard(3))
+
+    if block_mask.kv_num_blocks is not None:
+        block_mask.kv_num_blocks = DTensor.from_local(
+            block_mask.kv_num_blocks,
+            device_mesh,
+            kv_num_blocks_placements,
+        )
+
+    if block_mask.kv_indices is not None:
+        block_mask.kv_indices = DTensor.from_local(
+            block_mask.kv_indices,
+            device_mesh,
+            kv_indices_placements,
+        )
+
+    if block_mask.full_kv_num_blocks is not None:
+        block_mask.full_kv_num_blocks = DTensor.from_local(
+            block_mask.full_kv_num_blocks,
+            device_mesh,
+            kv_num_blocks_placements,
+        )
+
+    if block_mask.full_kv_indices is not None:
+        block_mask.full_kv_indices = DTensor.from_local(
+            block_mask.full_kv_indices,
+            device_mesh,
+            kv_indices_placements,
+        )
+
+    if block_mask.q_num_blocks is not None:
+        block_mask.q_num_blocks = DTensor.from_local(
+            block_mask.q_num_blocks,
+            device_mesh,
+            q_num_blocks_placements,
+        )
+
+    if block_mask.q_indices is not None:
+        block_mask.q_indices = DTensor.from_local(
+            block_mask.q_indices,
+            device_mesh,
+            q_indices_placements,
+        )
+
+    if block_mask.full_q_num_blocks is not None:
+        block_mask.full_q_num_blocks = DTensor.from_local(
+            block_mask.full_q_num_blocks,
+            device_mesh,
+            q_num_blocks_placements,
+        )
+
+    if block_mask.full_q_indices is not None:
+        block_mask.full_q_indices = DTensor.from_local(
+            block_mask.full_q_indices,
+            device_mesh,
+            q_indices_placements,
+        )
+
+    return BlockMask(
+        seq_lengths=(Q_LEN, KV_LEN),
+        kv_num_blocks=block_mask.kv_num_blocks,
+        kv_indices=block_mask.kv_indices,
+        full_kv_num_blocks=block_mask.full_kv_num_blocks,
+        full_kv_indices=block_mask.full_kv_indices,
+        q_num_blocks=block_mask.q_num_blocks,
+        q_indices=block_mask.q_indices,
+        full_q_num_blocks=block_mask.full_q_num_blocks,
+        full_q_indices=block_mask.full_q_indices,
+        BLOCK_SIZE=block_mask.BLOCK_SIZE,
+        mask_mod=block_mask.mask_mod,
     )
