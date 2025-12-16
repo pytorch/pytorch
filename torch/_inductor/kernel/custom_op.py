@@ -469,6 +469,18 @@ def autotune_custom_op(
             f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
         )
 
+    # Convert user input generation functions BEFORE creating choices
+    input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] = {}
+    if user_input_gen_fns:
+        import inspect
+
+        arg_names = (
+            list(inspect.signature(decompositions[0]).parameters.keys())
+            if decompositions
+            else []
+        )
+        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
+
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
@@ -477,6 +489,7 @@ def autotune_custom_op(
         # pyrefly: ignore [no-matching-overload]
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
+        input_gen_fns=input_gen_fns if input_gen_fns else None,
     )
 
     # Add default implementation as fallback
@@ -522,18 +535,6 @@ def autotune_custom_op(
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
-
-    # Convert user input generation functions to internal format
-    input_gen_fns = {}
-    if user_input_gen_fns:
-        import inspect
-
-        arg_names = (
-            list(inspect.signature(decompositions[0]).parameters.keys())
-            if decompositions
-            else []
-        )
-        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     is_collective = _detect_collective_ops(choices)
 
