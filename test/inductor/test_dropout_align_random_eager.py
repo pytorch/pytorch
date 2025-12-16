@@ -246,10 +246,11 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     @pytest.mark.xfail(
-        reason="With dynamic shapes align_random_eager is disabled; relaxing replace_random.py passes test but breaks inter-training.",
+        reason="With dynamic shapes align_random_eager is disabled.",
         strict=False,
     )
     def test_dropout_parity_dynamic_shapes(self):
+        # relaxing replace_random.py passes test but breaks inter-training.
         device = torch.device(GPU_TYPE)
 
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
