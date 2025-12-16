@@ -1890,7 +1890,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # Handle `Subclass(existing_tensor, ...)` calls.
@@ -1920,7 +1920,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         else:
             # Let Dynamo trace through custom `__new__`
             var = VariableTracker.build(tx, new_func).call_function(
-                tx, [self] + args, kwargs
+                tx, [self] + list(args), kwargs
             )
         assert var is not None
         # Let Dynamo trace through custom `__init__`
