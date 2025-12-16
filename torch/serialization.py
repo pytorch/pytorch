@@ -2027,21 +2027,19 @@ def _load(
 
         return storage_offset
 
-    def load_tensor(dtype, numel, key, location):
+    def load_tensor(dtype, nbytes, key, location):
         name = f"data/{key}"
         if torch._guards.detect_fake_mode(None) is not None:
-            nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
             if can_calculate_storage_offsets:
-                storage._checkpoint_offset = _get_offset(key, name, numel)
+                storage._checkpoint_offset = _get_offset(key, name, nbytes)
             else:
                 storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif _serialization_tls.skip_data:
-            nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
-                storage_offset = _get_offset(key, name, numel)
+                storage_offset = _get_offset(key, name, nbytes)
                 if run_debug_asserts:
                     if storage_offset != zip_file.get_record_offset(name):
                         raise RuntimeError(
@@ -2051,12 +2049,12 @@ def _load(
                         )
             else:
                 storage_offset = zip_file.get_record_offset(name)
-            storage = overall_storage[storage_offset : storage_offset + numel]
+            storage = overall_storage[storage_offset : storage_offset + nbytes]
         else:
             if can_calculate_storage_offsets and run_debug_asserts:
                 # This is debug code that we use to test the validity of
                 # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
-                storage_offset = _get_offset(key, name, numel)
+                storage_offset = _get_offset(key, name, nbytes)
                 if storage_offset != zip_file.get_record_offset(name):
                     raise RuntimeError(
                         "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
@@ -2064,7 +2062,7 @@ def _load(
                         f"{zip_file.get_record_offset(name)}"
                     )
             storage = (
-                zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
+                zip_file.get_storage_from_record(name, nbytes, torch.UntypedStorage)
                 ._typed_storage()
                 ._untyped_storage
             )

@@ -240,6 +240,40 @@ class HeaderOnlyArrayRef {
   /// @}
 };
 
+// WARNING: Template instantiation will NOT be willing to do an implicit
+// conversions to get you to an c10::HeaderOnlyArrayRef, which is why we need so
+// many overloads.
+
+template <typename T>
+bool operator==(c10::HeaderOnlyArrayRef<T> a1, c10::HeaderOnlyArrayRef<T> a2) {
+  return a1.equals(a2);
+}
+
+template <typename T>
+bool operator!=(c10::HeaderOnlyArrayRef<T> a1, c10::HeaderOnlyArrayRef<T> a2) {
+  return !a1.equals(a2);
+}
+
+template <typename T>
+bool operator==(const std::vector<T>& a1, c10::HeaderOnlyArrayRef<T> a2) {
+  return c10::HeaderOnlyArrayRef<T>(a1).equals(a2);
+}
+
+template <typename T>
+bool operator!=(const std::vector<T>& a1, c10::HeaderOnlyArrayRef<T> a2) {
+  return !c10::HeaderOnlyArrayRef<T>(a1).equals(a2);
+}
+
+template <typename T>
+bool operator==(c10::HeaderOnlyArrayRef<T> a1, const std::vector<T>& a2) {
+  return a1.equals(c10::HeaderOnlyArrayRef<T>(a2));
+}
+
+template <typename T>
+bool operator!=(c10::HeaderOnlyArrayRef<T> a1, const std::vector<T>& a2) {
+  return !a1.equals(c10::HeaderOnlyArrayRef<T>(a2));
+}
+
 } // namespace c10
 
 namespace torch::headeronly {
