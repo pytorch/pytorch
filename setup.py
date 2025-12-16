@@ -647,6 +647,8 @@ def mirror_inductor_external_kernels() -> None:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
+            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
+            (new_path.parent / "__init__.py").touch(exist_ok=True)
 
         # Copy the files from the orig location to the new location
         if orig_path.is_file():
@@ -1753,8 +1755,6 @@ def main() -> None:
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
         "_inductor/kernel/templates/*.jinja",
-        # NOTE: for CuTeDSL grouped_gemm.py to be included.
-        "_inductor/kernel/vendored_templates/*.py",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
