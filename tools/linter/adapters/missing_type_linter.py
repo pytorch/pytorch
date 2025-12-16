@@ -38,7 +38,7 @@ SUFFIXES = ".py", ".pyi"
 PUBLIC_NAMES = "__init__", "__main__"
 
 
-def _add_arguments(add: Callable[[...], None]) -> None:
+def _add_arguments(add: Callable[..., Any]) -> None:
     # Also inherits arguments from ._linter.file_linter.FileLinter
 
     help = "Run, but do not print lint checks or write grandfather file"
@@ -75,7 +75,7 @@ class MissingTypeLinter(FileLinter):
     description = DESCRIPTION
     epilog = EPILOG
     report_column_numbers = True
-    summary: dict[str, int]
+    summary: dict[str, float | int]
 
     def __init__(self, argv: Sequence[str] | None = None) -> None:
         super().__init__(argv)
@@ -94,6 +94,7 @@ class MissingTypeLinter(FileLinter):
         return self.must_write_grandfather or not self.missing_annotations_delta
 
     def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
+        assert pf.path is not None
         lr = [m.lint_result() for m in self.missing_annotations_delta[pf.path]]
         if not self.args.dry_run:
             yield from lr
@@ -128,7 +129,7 @@ class MissingTypeLinter(FileLinter):
             return [m for m in lm if m.name not in grandfather]
 
         items = self.missing_annotations.items()
-        return {k.path: g for k, v in items if (g := grandfathered(v))}
+        return {k: g for k, v in items if (g := grandfathered(v))}
 
     @cached_property
     def missing_annotations(self) -> dict[Path, list[MissingAnnotation]]:
@@ -147,7 +148,7 @@ class MissingTypeLinter(FileLinter):
                 count("return_annotations")
             else:
                 yield MissingAnnotation(f["name"], f["location"])
-            has_annotations = [annotated]
+            has_annotations = [annotated]  # pyrefly: ignore[unbound-name]
 
             for p in f["parameters"]:
                 count("public_functions_all_parameters")
@@ -162,7 +163,7 @@ class MissingTypeLinter(FileLinter):
                     count("parameter_annotations")
                 else:
                     yield MissingAnnotation(f["name"], p["location"], p["name"])
-                has_annotations.append(annotated)
+                has_annotations.append(annotated)  # pyrefly: ignore[unbound-name]
 
             if all(has_annotations):
                 count("full_annotations")
@@ -178,7 +179,7 @@ class MissingTypeLinter(FileLinter):
             functions = self.type_results[pf.path.absolute()]["functions"]
 
             if self.args.verbose:
-                msg = f"{i + 1:03d}:{len(functions):03d}:{pf.filename}"
+                msg = f"{i + 1:03d}:{len(functions):03d}:{pf.path}"
                 _log(msg)
 
             for f in functions:
@@ -186,7 +187,7 @@ class MissingTypeLinter(FileLinter):
 
         all_files = [self.make_file(Path(f)) for f in self.type_results]
         missed = ((pf, missing(i, pf)) for i, pf in enumerate(all_files))
-        return {pf: v for pf, m in missed if (v := [i for i in m if i.is_public])}
+        return {pf.path: v for pf, m in missed if (v := [i for i in m if i.is_public])}
 
     def _write_grandfather(self) -> None:
         """Names of symbols that are grandfathered into not having type annotations"""

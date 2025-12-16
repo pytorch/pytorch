@@ -1132,7 +1132,6 @@ torch.distributed.flight_recorder.components.types.TypeInfo.from_type
 torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel.__init__
 torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel.named_buffers
 torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel.named_parameters
-torch.distributed.fsdp.fully_sharded_data_parallel.FullyShardedDataParallel.register_comm_hook
 torch.distributed.fsdp.fully_sharded_data_parallel.UnshardHandle.__init__
 torch.distributed.fsdp.fully_sharded_data_parallel.UnshardHandle.wait
 torch.distributed.fsdp.sharded_grad_scaler.apply_scale
@@ -1169,7 +1168,6 @@ torch.distributed.optim.post_localSGD_optimizer.PostLocalSGDOptimizer.zero_grad
 torch.distributed.optim.utils.as_functional_optim
 torch.distributed.optim.utils.register_functional_optim
 torch.distributed.optim.zero_redundancy_optimizer.ZeroRedundancyOptimizer.__init__
-torch.distributed.optim.zero_redundancy_optimizer.ZeroRedundancyOptimizer.join_hook
 torch.distributed.pipelining.microbatch.TensorChunkSpec.__init__
 torch.distributed.pipelining.microbatch.TensorChunkSpec.from_dict
 torch.distributed.pipelining.microbatch.TensorChunkSpec.from_tuple
@@ -1553,7 +1551,6 @@ torch.export.unflatten.arg_dump
 torch.export.unflatten.create_module
 torch.export.unflatten.elide_call_indices
 torch.export.unflatten.get_actual_output_node
-torch.export_wrapped_fn
 torch.fn
 torch.functional.align_tensors
 torch.functional.atleast_1d
@@ -2120,6 +2117,8 @@ torch.fx.passes.pass_manager.wrapped_fn
 torch.fx.passes.regional_inductor.InductorMarkedNodes.is_node_supported
 torch.fx.passes.regional_inductor.inner
 torch.fx.passes.regional_inductor.regional_inductor
+torch.fx.passes.regional_inductor_invoke_subgraph.get_compiled_fn
+torch.fx.passes.regional_inductor_invoke_subgraph.regional_inductor_invoke_subgraph
 torch.fx.passes.reinplace.matching_view_metadata
 torch.fx.passes.reinplace.reinplace
 torch.fx.passes.reinplace.replace_arg
@@ -2362,6 +2361,7 @@ torch.masked.maskedtensor.unary.unary_fn
 torch.mps.compile_shader
 torch.mps.set_per_process_memory_fraction
 torch.mtia.StreamContext.__init__
+torch.mtia.cb
 torch.mtia.device.__init__
 torch.mtia.init
 torch.mtia.is_bf16_supported
@@ -2552,7 +2552,6 @@ torch.nn.parallel.distributed.DistributedDataParallel.join_device
 torch.nn.parallel.distributed.DistributedDataParallel.join_hook
 torch.nn.parallel.distributed.DistributedDataParallel.join_process_group
 torch.nn.parallel.distributed.DistributedDataParallel.no_sync
-torch.nn.parallel.distributed.DistributedDataParallel.register_comm_hook
 torch.nn.parallel.distributed.DistributedDataParallel.scatter
 torch.nn.parallel.distributed.DistributedDataParallel.to_kwargs
 torch.nn.parallel.distributed.DistributedDataParallel.train
