@@ -1919,13 +1919,13 @@ namespace at::native {
     };
     if (act.dim() == 3) {
       // Conv1D post op
-      supported_postop.push_back("relu");
+      supported_postop.emplace_back("relu");
     } else if (act.dim() == 4) {
       // Conv2D post op
-      supported_postop.push_back("relu");
-      supported_postop.push_back("hardtanh");
-      supported_postop.push_back("hardswish");
-      supported_postop.push_back("swish");
+      supported_postop.emplace_back("relu");
+      supported_postop.emplace_back("hardtanh");
+      supported_postop.emplace_back("hardswish");
+      supported_postop.emplace_back("swish");
     }
     TORCH_CHECK(
       std::find(supported_postop.begin(), supported_postop.end(), attr) != supported_postop.end(),

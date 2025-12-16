@@ -34,6 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
@@ -41,7 +42,6 @@ import torch._refs
 import torch.fx
 import torch.nn
 from torch._guards import TracingContext
-from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -87,7 +87,6 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
-from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -209,6 +208,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.compiler.is_compiling: True,
         torch.compiler.is_dynamo_compiling: True,
         torch.compiler.is_exporting: True,
+        torch._dynamo.eval_frame._is_in_optimized_module: True,
         # Look into https://github.com/pytorch/pytorch/pull/164721 why this is
         # turned to True for Dynamo.
         torch.nn.modules.activation._is_make_fx_tracing: True,
@@ -547,6 +547,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
                 torch.compiler.is_exporting,
+                torch._dynamo.eval_frame._is_in_optimized_module,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions()[self.value])
@@ -739,6 +740,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 not tx.symbolic_torch_function_state.torch_function_mode_enabled
             )
 
+        @register(torch._C._is_torch_function_mode_enabled)
+        def handle_is_torch_function_mode_enabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            # _is_torch_function_mode_enabled returns True only if:
+            # 1. Torch function modes are not disabled (DisableTorchFunction not entered)
+            # 2. There are actually modes on the stack
+            return VariableTracker.build(
+                tx,
+                tx.symbolic_torch_function_state.torch_function_mode_enabled
+                and tx.symbolic_torch_function_state.in_torch_function_mode(),
+            )
+
         @register(
             torch.overrides.has_torch_function,
             torch.overrides.has_torch_function_variadic,
@@ -869,6 +882,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -878,6 +894,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_pow)
         def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
@@ -886,6 +905,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args,
                     kwargs,
                 )
+
+        @register(torch._C._group_tensors_by_device_and_dtype)
+        def handle_group_tensors_by_device_and_dtype(
+            _, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
+                args,
+                kwargs,
+            )
 
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
@@ -1515,27 +1544,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         )
             return self.call_tensor_method(tx, args, kwargs)
 
-        intermediate_opaques = [
-            type(x.value)
-            for x in args
-            if x.source is None
-            and isinstance(x, UserDefinedObjectVariable)
-            and is_opaque_type(type(x.value))
-        ]
-        if len(intermediate_opaques) > 0:
-            unimplemented(
-                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
-                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
-                explanation=(
-                    "Opaque objects cannot be created inside the torch.compile region. "
-                    "They must be created before entering the compiled function."
-                ),
-                hints=[
-                    "Please create the opaque object before calling torch.compile "
-                    "and pass it in as an argument or as a global variable."
-                ],
-            )
-
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1614,14 +1622,52 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        tensor_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                fn_,
-                *proxy_args_kwargs(args, kwargs),
-            ),
-        )
+        # Ops that consume scalar values from tensors (via .item()) for computation only,
+        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
+        # create unbacked symbols that are not in the outputs, causing
+        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
+        # since they only affect tensor values, not shapes.
+        ops_consuming_unbacked_scalars = {
+            # foreach ops with scalar/alpha arguments
+            torch._foreach_add,
+            torch._foreach_add_,
+            torch._foreach_sub,
+            torch._foreach_sub_,
+            torch._foreach_mul,
+            torch._foreach_mul_,
+            torch._foreach_div,
+            torch._foreach_div_,
+            torch._foreach_clamp_max,
+            torch._foreach_clamp_max_,
+            torch._foreach_clamp_min,
+            torch._foreach_clamp_min_,
+            torch._foreach_maximum,
+            torch._foreach_maximum_,
+            torch._foreach_minimum,
+            torch._foreach_minimum_,
+            torch._foreach_pow,
+            torch._foreach_pow_,
+            torch._foreach_lerp,
+            torch._foreach_lerp_,
+            torch._foreach_addcmul,
+            torch._foreach_addcmul_,
+            torch._foreach_addcdiv,
+            torch._foreach_addcdiv_,
+        }
+        ctx = nullcontext
+        if fn_ in ops_consuming_unbacked_scalars:
+            if tx.fake_mode and tx.fake_mode.shape_env:
+                ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        with ctx():
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (

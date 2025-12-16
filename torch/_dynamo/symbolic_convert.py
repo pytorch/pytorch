@@ -44,7 +44,6 @@ import traceback
 import types
 import weakref
 from collections import deque
-from traceback import StackSummary
 from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import TypeIs
 
@@ -91,6 +90,7 @@ from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import (
     ArgsMismatchError,
+    augment_exc_message_with_hop_name,
     BackendCompilerFailed,
     collapse_resume_frames,
     format_graph_break_message,
@@ -893,7 +893,7 @@ def break_graph_if_unsupported(
                 self.log_graph_break(
                     self.code_options,
                     reason=f"{msg_prefix}:\n\n{str(excp)}",
-                    user_stack=excp.real_stack,
+                    exc=excp,
                 )
 
                 if self.maybe_has_backedge():
@@ -1391,7 +1391,7 @@ class InstructionTranslatorBase(
             self.log_graph_break(
                 self.code_options,
                 reason=reason,
-                user_stack=e.real_stack,
+                exc=e,
             )
 
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
@@ -2110,13 +2110,28 @@ class InstructionTranslatorBase(
         ):
             val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
+        # Capture the python_stack when the exception is first raised.
+        # This preserves the original exception location even if the exception
+        # is later re-raised (e.g., in context manager cleanup).
+        # ExceptionVariable and UserDefinedExceptionObjectVariable both have
+        # a python_stack attribute.
+        if (
+            self._isinstance_exception(val)
+            and getattr(val, "python_stack", None) is None
+        ):
+            val.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
+
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
 
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            raise observed_exception_type(f"raised exception {val}")
+            # Pass the stored python_stack to preserve the original exception location
+            python_stack = getattr(val, "python_stack", None)
+            raise observed_exception_type(
+                f"raised exception {val}", real_stack=python_stack
+            )
         unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),
@@ -2304,6 +2319,7 @@ class InstructionTranslatorBase(
                                 explanation=observed_exn_gb_explanation
                                 + " This graph break is unexpected.",
                                 hints=[*graph_break_hints.DYNAMO_BUG],
+                                from_exc=raised_exception,
                             )
 
                         raise raised_exception
@@ -4192,8 +4208,12 @@ class InstructionTranslatorBase(
         self,
         code_options: dict[str, Any],
         reason: str = "",
-        user_stack: Optional[StackSummary] = None,
+        exc: Optional[Exception] = None,
     ) -> None:
+        user_stack = None
+        if exc is not None:
+            user_stack = getattr(exc, "real_stack", None)
+
         if user_stack is None:
             user_stack = torch._guards.TracingContext.extract_stack()
 
@@ -4228,10 +4248,15 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
+
+        # Add HOP context after the first line of reason if present
+        if exc is not None:
+            reason = augment_exc_message_with_hop_name(exc, reason)
+
         user_stack_trace = (
             f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
             f"Graph Break Reason: {reason}\n"
-            "User code traceback:\n"
+            "\nUser code traceback:\n"
         )
 
         if config.verbose:
