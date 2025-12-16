@@ -63,7 +63,6 @@ jobs:
       - name: Set parameters
         working-directory: pytorch/pytorch-integration-testing
         id: set-parameters
-        shell: bash
         env:
           # DEBUG: TO BE REMOVED BEFORE LANDING
           MODELS: ${{ inputs.models || 'facebook/opt-125m' }}
@@ -116,7 +115,6 @@ jobs:
         RUNNER: linux.24xlarge.memory
     steps:
       - name: Install system dependencies
-        shell: bash
         run: |
           set -eux
           sudo apt-get update
@@ -170,7 +168,7 @@ jobs:
       - name: Copy vLLM wheel
         run: |
           mkdir -p dist/vllm
-          mv vllm-project/vllm/dist dist/vllm
+          mv vllm-project/vllm/dist/*.whl dist/vllm
 
       - name: Archive artifacts into zip
         run: |
@@ -203,7 +201,6 @@ jobs:
       options: --gpus all --ipc=host --tty
     steps:
       - name: Install system dependencies
-        shell: bash
         run: |
           set -eux
           apt-get update
@@ -222,7 +219,6 @@ jobs:
           activate-environment: true
 
       - name: Install benchmark dependencies
-        shell: bash
         run: |
           set -eux
           uv pip install pip
@@ -244,7 +240,6 @@ jobs:
 
       #- name: Install nightly
       #  if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
-      #  shell: bash
       #  run: |
       #    uv pip install vllm --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu129
 
@@ -266,7 +261,6 @@ jobs:
 
       - name: Install build artifacts
         # if: inputs.pytorch_commit != '' || inputs.pytorch_branch != ''
-        shell: bash
         run: |
           set -eux
 
@@ -284,16 +278,96 @@ jobs:
         run: |
           uv pip list
 
-      - name: Gather benchmark metadata
-        id: gather-benchmark-metadata
-        uses: pytorch/test-infra/.github/actions/gather-benchmark-metadata@main
+      - name: Checkout pytorch-integration-testing repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          repository: pytorch/pytorch-integration-testing
+          path: pytorch/pytorch-integration-testing
+          ref: main
+
+      - name: Check if the device is supported
+        run: |
+          set -eux
+
+          if command -v nvidia-smi; then
+            DEVICE_NAME=cuda
+            nvidia-smi
+          elif command -v rocm-smi; then
+            DEVICE_NAME=rocm
+            rocm-smi
+          elif command -v hl-smi; then
+            DEVICE_NAME=hpu
+            hl-smi
+          else
+            arch=$(uname -m)
+
+            case "$arch" in
+              aarch64|arm64)
+                DEVICE_NAME=arm64-cpu
+                ;;
+              *)
+                DEVICE_NAME=cpu
+                ;;
+            esac
+            lscpu
+          fi
+          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
+
+      - name: Setup benchmark tests
+        env:
+          MODELS: ${{ matrix.models }}
+        run: |
+          set -eux
+
+          pushd vllm-project/vllm
+          rm .buildkite/performance-benchmarks/tests/*.json || true
+          popd
+
+          pushd pytorch/pytorch-integration-testing
+          # Set the list of benchmarks we want to cover in this runner
+          python .github/scripts/setup_vllm_benchmark.py \
+            --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
+            --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
+            --models "${MODELS}" \
+            --device "${DEVICE_NAME}"
+          popd
+
+          pushd vllm-project/vllm
+          ls -lah .buildkite/performance-benchmarks/tests
+          find .buildkite/performance-benchmarks/tests -type f -exec cat {} \;
+          popd
+
+      - name: Run vLLM benchmark
+        working-directory: vllm-project/vllm
+        env:
+          HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          # vLLM-related environment variables
+          ENGINE_VERSION: v1
+          SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
+        run: |
+          set -eux
+
+          # Remove this once torchao become a vLLM dependency
+          uv pip install torchao==0.14.1
+          bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
+
+      # Keep a copy of the benchmark results on GitHub for reference
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results--${{ env.SANITIZED_DEVICE_TYPE }}-${{ env.SANITIZED_MODELS }}
+          path: vllm-project/vllm/benchmarks/results
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Upload the benchmark results to OSS benchmark database for the dashboard
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: vllm-project/vllm/benchmarks/results
+          dry-run: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Gather runners info
-        id: gather-runners-info
-        uses: pytorch/test-infra/.github/actions/gather-runners-info@main
-
-      - name: Gather dependencies
-        id: gather-dependencies
-        uses: pytorch/test-infra/.github/actions/gather-dependencies@main
