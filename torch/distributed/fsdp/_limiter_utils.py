@@ -1,5 +1,4 @@
 import collections
-from typing import Optional
 
 import torch
 
@@ -19,13 +18,13 @@ class _FreeEventQueue:
         """Enqueues a free event."""
         self._queue.append(free_event)
 
-    def dequeue_if_needed(self) -> Optional[torch.Event]:
+    def dequeue_if_needed(self) -> torch.Event | None:
         """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
             return self._dequeue()
         return None
 
-    def _dequeue(self) -> Optional[torch.Event]:
+    def _dequeue(self) -> torch.Event | None:
         """Dequeues a free event if possible."""
         if self._queue:
             event = self._queue.popleft()

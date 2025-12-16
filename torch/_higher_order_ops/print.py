@@ -22,6 +22,7 @@ class Print(HigherOrderOperator):
 
     def __call__(self, format_str: str, **kwargs: object) -> None:
         assert isinstance(format_str, str)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(format_str, **kwargs)
 
     # pyrefly: ignore [bad-override]
