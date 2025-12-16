@@ -26,7 +26,7 @@ from torch.distributed.tensor._redistribute import (
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import _StridedShard, _MaskPartial
+from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
