@@ -911,7 +911,22 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
-    return fast_random_decomps()
+    result = fast_random_decomps()
+    if config.emulate_precision_casts:
+        # When emulating precision casts, skip decomposition of addcmul/addcdiv
+        # so that we use the native CUDA kernel which preserves FMA semantics.
+        # The decomposed version uses separate mul+add ops which don't match
+        # eager's FMA rounding behavior.
+        result = {
+            k: v
+            for k, v in result.items()
+            if k
+            not in (
+                aten._foreach_addcmul.Scalar,
+                aten._foreach_addcdiv.Scalar,
+            )
+        }
+    return result
 
 
 @register_decomposition(aten.masked_scatter)

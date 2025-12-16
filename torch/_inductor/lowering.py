@@ -2249,7 +2249,13 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert op not in decompositions or override_decomp, (
+    # When emulate_precision_casts is enabled, we skip decomposing addcmul/addcdiv
+    # to use the native CUDA kernel which preserves FMA semantics
+    skip_decomp_for_precision = config.emulate_precision_casts and op in (
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    )
+    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
