@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch._prims_common as utils
@@ -118,6 +118,7 @@ def _propagate_tensor_meta(
     if isinstance(tensor_meta, TensorMeta):
         return tensor_meta
     elif isinstance(tensor_meta, tuple):
+        # pyrefly: ignore [bad-return]
         return tensor_meta[0]
     else:
         raise RuntimeError(f"Unexpected tensor meta type: {type(tensor_meta)}.")
@@ -201,8 +202,8 @@ def _log_softmax_backward_handler(
 def _nll_loss_forward(
     x: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
-    local_weight: Optional[Tensor],
+    weight: Tensor | None,
+    local_weight: Tensor | None,
     reduction: int,
     ignore_index: int,
     input_shape: torch.Size,
@@ -356,7 +357,7 @@ def _nll_loss_and_log_softmax_backward(
     grad_output: Tensor,
     x: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,

@@ -3002,7 +3002,7 @@ class TestForwardADWithScalars(TestCase):
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
 
-        # skip if operator doesnt support forward AD
+        # skip if operator doesn't support forward AD
         if not op.supports_forward_ad:
             raise unittest.SkipTest("Does not support forward_ad")
 

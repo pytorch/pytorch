@@ -41,6 +41,7 @@ These APIs are experimental and subject to change without notice.
     sympy_is_channels_last_strides_generic
     sympy_is_contiguous
     sympy_is_contiguous_generic
+    to_node
 ```
 
 ## torch.fx.experimental.symbolic_shapes
@@ -119,6 +120,8 @@ These APIs are experimental and subject to change without notice.
     is_nested_int
     is_symbol_binding_fx_node
     is_symbolic
+    expect_true
+    log_lru_cache_stats
 ```
 
 ## torch.fx.experimental.proxy_tensor
@@ -141,6 +144,9 @@ These APIs are experimental and subject to change without notice.
     get_proxy_mode
     maybe_enable_thunkify
     maybe_disable_thunkify
+    thunkify
+    track_tensor
+    track_tensor_tree
     decompose
     disable_autocast_cache
     disable_proxy_modes_tracing
@@ -184,3 +190,29 @@ These APIs are experimental and subject to change without notice.
     update_in
     valfilter
     valmap
+    itemfilter
+    itemmap
+```
+
+## torch.fx.experimental.migrate_gradual_types.transform_to_z3
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.migrate_gradual_types.transform_to_z3
+```
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.migrate_gradual_types.transform_to_z3
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    transform_algebraic_expression
+    transform_all_constraints
+    transform_all_constraints_trace_time
+    transform_dimension
+    transform_to_z3
+    transform_var
+```

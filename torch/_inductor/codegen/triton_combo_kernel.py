@@ -35,8 +35,8 @@ from .common import (
 )
 from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import TritonKernel
-from .triton_utils import config_of, signature_to_meta
+from .triton import gen_common_triton_imports, TritonKernel
+from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
 log = logging.getLogger(__name__)
@@ -355,13 +355,9 @@ class ComboKernel(Kernel):
                 code.splice(f"pid_offset = pid // {num_kernels}")
 
     def __init__(
-        self,
-        triton_kernel_cls: type[TritonKernel],
-        enable_autotune: bool = False,
-        mixed_sizes: bool = False,
+        self, enable_autotune: bool = False, mixed_sizes: bool = False
     ) -> None:
         super().__init__()
-        self.triton_kernel_cls = triton_kernel_cls
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
@@ -395,17 +391,17 @@ class ComboKernel(Kernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
-        triton_kernel_cls: type[TritonKernel],
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return triton_kernel_cls(
+        return TritonKernel(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
+            is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
         )
@@ -455,9 +451,10 @@ class ComboKernel(Kernel):
                         "Dynamic shape on reduction dimension is not supported"
                     )
                 val = next_power_of_2(val)
-                code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("R0_BLOCK")
+                code.writeline(
+                    f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
+                )
+                uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
@@ -550,7 +547,14 @@ class ComboKernel(Kernel):
                 size_hints["x"] = min(128, size_hints["x"])
             return heuristics, size_hints_list[i], self.sub_kernels[i]
         else:
-            return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
+            # find persistent_reduction with maximum rnumel
+            i, _ = max(
+                enumerate(size_hints_list),
+                key=lambda x: max(
+                    (v for k, v in x[1].items() if prefix_is_reduction(k))
+                ),
+            )
+            return heuristics_list[i], size_hints_list[i], self.sub_kernels[i]
 
     def get_mutated_args_sub_kernels(self) -> list[str]:
         mutated_args: OrderedSet[str] = OrderedSet()
@@ -615,18 +619,21 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
+
+        for arg_num in equal_1_arg_indices(signature):
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+
         # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
-
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **self.triton_kernel_cls.inductor_meta_common(),
+            **TritonKernel.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel
@@ -774,7 +781,7 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        code.splice(self.triton_kernel_cls.gen_common_triton_imports())
+        code.splice(gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 

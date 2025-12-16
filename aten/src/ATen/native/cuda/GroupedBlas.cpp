@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -522,13 +521,13 @@ _scaled_grouped_mm_cuda_v2(
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
-    if (contraction_dim.size() > 0) {
+    if (!contraction_dim.empty()) {
       const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
       TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
           "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
           mat_b.size(dim_b));
       // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Curently contraction dims must be (-1, -2) only");
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
     } else {
       TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
     }
@@ -673,7 +672,7 @@ std::optional<c10::ScalarType> out_dtype) {
   bool use_fast_path = false;
   // On non CK system(w/ ROCm), make sure use_fast_path is false
 #if defined(USE_ROCM_CK_GEMM)
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
+  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
     use_fast_path = true;
   }
 #endif //USE_ROCM_CK_GEMM

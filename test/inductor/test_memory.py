@@ -242,9 +242,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
-    def test_mutation_size_propogation(self):
+    def test_mutation_size_propagation(self):
         """
-        This tests correct size propogation in the case of mutations.
+        This tests correct size propagation in the case of mutations.
         In this example, buf1 is a mutation of buf0; we should have:
         * buf0: has size_alloc 2048 and size_free 0;
         * buf1: has size_alloc 0 and size_free 2048.
@@ -444,7 +444,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 "allow_buffer_reuse": False,
                 # make sure the mm is at the end so
                 # the earlier deallocation is not at the last step,
-                # which doesnt distinguish between returned tensors
+                # which doesn't distinguish between returned tensors
                 # and which tensors are deallocated immediately prior
                 "reorder_for_peak_memory": False,
             }
