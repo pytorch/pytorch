@@ -51,6 +51,7 @@ jobs:
         with:
           python-version: 3.12
           activate-environment: true
+          ignore-empty-workdir: true
 
       - name: Checkout pytorch-integration-testing repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -113,11 +114,13 @@ jobs:
         SCCACHE_REGION: us-east-1
         TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
         BUILD_ENVIRONMENT: ${{ needs.set-parameters.outputs.build-environment }}
+        RUNNER: linux.24xlarge.memory
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
         with:
           python-version: 3.12
           activate-environment: true
+          ignore-empty-workdir: true
 
       - name: Install build dependencies
         shell: bash
@@ -206,6 +209,7 @@ jobs:
         with:
           python-version: 3.12
           activate-environment: true
+          ignore-empty-workdir: true
 
       - name: Install benchmark dependencies
         shell: bash
