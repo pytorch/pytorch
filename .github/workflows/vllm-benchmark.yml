@@ -73,9 +73,27 @@ jobs:
             --models "${MODELS}" \
             --runners "${RUNNERS}"
 
+  # TODO (huydhn): Move this to a generic GHA, and this only works with CUDA in
+  # the current state
+  build:
+    name: Build PyTorch and vLLM
+    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
+    runs-on: linux.24xlarge.memory
+    containers:
+      images: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: pytorch/pytorch
+          ref: ${{ inputs.pytorch_commit || (inputs.pytorch_branch || 'nightly') }}
+          submodules: recursive
+          show-progress: false
+
   benchmarks:
     name: Run vLLM benchmarks
-    needs: set-parameters
+    needs:
+      - set-parameters
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     strategy:
       matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
