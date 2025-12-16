@@ -139,6 +139,8 @@ jobs:
         run: |
           set -eux
 
+          sleep 3600
+
           which python
           python --version
 
