@@ -2253,38 +2253,27 @@ class TestLinalg(TestCase):
 
             #calculate eigenvalues only and check all are returned
             w_only = torch.linalg.eigvals(a)
-            self.assertEqual(w_only.shape, expected[0].shape)
+            self.assertEqual(w_only.shape, w.shape)
 
-            #test eigval with eigenvectors returned previously
-            batch_shape = a.shape[:-2]
-            n = a.shape[-1]
+            #check all eigenvalues found by eig are in eigvals output
+            for batch_idx in itertools.product(*[range(s) for s in w.shape[:-1]]):
+                w_b = w[batch_idx]
+                w_only_b = w_only[batch_idx]
+                for wi in w_b:
+                    found = False
+                    closest = None
 
-            for batch_idx in itertools.product(*[range(s) for s in batch_shape]):
-                A_b = a[batch_idx]
-                w_b = w_only[batch_idx]
-                v_b = v[batch_idx]
+                    for wj in w_only_b:
+                        if closest is None or torch.abs(wi - wj) < closest:
+                            closest = torch.abs(wi - wj)
 
-                passing = False
-                closest = None
-
-                for i_val in range(n):
-                    eigval = w_b[i_val]
-                    for i_vec in range(n):
-                        eigvec = v_b[:, i_vec]
-
-                        lhs = A_b @ eigvec
-                        rhs = eigval * eigvec
-
-                        # track closest match for better error reporting
-                        if closest is None or torch.max(torch.norm(lhs - rhs)) < closest:
-                            closest = torch.max(torch.norm(lhs - rhs))
-
-                        if torch.allclose(lhs, rhs, atol=atol, rtol=0):
-                            passing = True
+                        if torch.isclose(wi, wj, atol=atol, rtol=0):
+                            found = True
                             break
 
-                    if not passing:
-                        self.fail(f"no matching eigenvector found. Closest: {closest:.2e} Tolerance: {atol:.2e}")
+                    if not found:
+                        self.fail(f"eigenvalue from eigvals out of tolerance, closest was: {closest.item():.2e}")
+
 
 
         shapes = [(0, 0),  # Empty matrix
