@@ -7193,7 +7193,6 @@ def miopen_rnn(
     batch_sizes,
     dropout_state,
 ):
-
     total_weight_elems = 0
     for w in weight:
         if w.numel() > 0:
