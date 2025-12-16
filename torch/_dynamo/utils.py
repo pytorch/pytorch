@@ -659,6 +659,30 @@ _dynamo_timed_tls = threading.local()
 
 
 @contextmanager
+def compile_time_record_function(name: str) -> Generator[Any, None, None]:
+    """
+    A context manager for compile-time profiling that uses _RecordFunctionFast
+    for lower overhead than torch.profiler.record_function.
+
+    This is intended for use during compilation (dynamo, inductor, etc.) where
+    we want profiling support but with minimal overhead. Moreover, we do not
+    want the record_function call inside torch.compile to be dispatched.
+
+    Args:
+        name: The name of the record function event that will appear in profiles.
+    """
+    if torch.autograd.profiler._is_profiler_enabled:
+        rf = torch._C._profiler._RecordFunctionFast(name)
+        rf.__enter__()
+        try:
+            yield
+        finally:
+            rf.__exit__(None, None, None)
+    else:
+        yield
+
+
+@contextmanager
 def dynamo_timed(
     key: str,
     # TODO(masneral): Deprecate this param.
@@ -737,9 +761,7 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
-    cx_mgrs: list[typing.Any] = [
-        torch.profiler.record_function(f"{key} (dynamo_timed)")
-    ]
+    cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
         wc_name = waitcounter_name_override if waitcounter_name_override else key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
@@ -2657,7 +2679,9 @@ dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+# pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
+# pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
@@ -4639,7 +4663,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
-        # pyrefly: ignore [annotation-mismatch]
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
