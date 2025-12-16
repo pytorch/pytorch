@@ -479,7 +479,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
 
-        expected = expected/4.0
+        expected = expected / 4.0
         self.assertEqual(res, expected)
 
     @with_comms
