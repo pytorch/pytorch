@@ -10,6 +10,7 @@ import sympy  # noqa: TC002
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pallas import has_tpu_pallas
+from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -895,6 +896,13 @@ class PallasKernel(SIMDKernel):
         if not self.range_trees:
             return "..."
 
+        # Check for ModularIndexing - this is NOT contiguous access
+        # ModularIndexing is used for roll/wrap-around operations
+        if index.has(ModularIndexing):
+            # Generate actual index expression - iteration variables are already
+            # defined as jnp.arange arrays, so we just convert to JAX code
+            return self.kexpr(index)
+
         # Simplify the index
         index = V.graph.sizevars.simplify(index)
         free_symbols = index.free_symbols
@@ -1032,9 +1040,10 @@ class PallasKernel(SIMDKernel):
             return self.kexpr(index), False
         else:
             index_str = self._get_index_str(index)
-            # Since inputs are made contiguous before passing to JAX,
-            # we can use direct indexing without flattening
-            return index_str, False
+            # Check if index contains ModularIndexing - this requires flattened access
+            # ModularIndexing is used for roll/wrap-around operations
+            needs_flatten = index.has(ModularIndexing) and index_str != "..."
+            return index_str, needs_flatten
 
     def _determine_masked_ops_for_kernel(self) -> bool:
         """
