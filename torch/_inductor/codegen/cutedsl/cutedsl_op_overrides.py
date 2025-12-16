@@ -326,11 +326,42 @@ class CuteDSLOpOverrides(OpOverrides):
     # Logical operations
     @staticmethod
     def logical_and(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} and {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} & {b})")
 
     @staticmethod
     def logical_or(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} or {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} | {b})")
+
+    # Bitwise operations (override parent class to properly CSE)
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_and(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} & {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_or(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} | {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_xor(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} ^ {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_not(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_unary_op(x, "(~{x})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_left_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} << {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_right_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} >> {b})")
 
     @staticmethod
     def logical_not(a):

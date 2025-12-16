@@ -3980,10 +3980,15 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             mask_callable = mask_fn.as_python_constant()
             if mask_callable is None:
                 mask_callable = torch.nn.attention.flex_attention.noop_mask
-            mask_fn = UserFunctionVariable(
-                mask_callable,
-                source=mask_fn.source,
-            )
+                mask_fn = UserFunctionVariable(
+                    mask_callable,
+                    source=mask_fn.source,
+                )
+            elif isinstance(mask_callable, types.FunctionType):
+                mask_fn = UserFunctionVariable(
+                    mask_callable,
+                    source=mask_fn.source,
+                )
         mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
             tx, query, mask_fn, "mask_fn"
         )
