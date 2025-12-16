@@ -11,9 +11,9 @@ from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
+    fallback_handler,
     lowerings as L,
     register_lowering,
-    fallback_handler,
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -1164,19 +1164,18 @@ def convolution_backward_lowering(
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
-
     has_triton_dw_choices = False
     dw = None
+    choices_dw = []
+    args_w = []
+    layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
     if output_mask[1]:
-        choices_dw = []
-
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
             grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
             layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
         else:
-            layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dw.stride)
             )
@@ -1224,18 +1223,16 @@ def convolution_backward_lowering(
 
     has_triton_dx_choices = False
     dx = None
+    choices_dx = []
+    args_x = []
+    layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
     if output_mask[0]:
-        choices_dx = []
-
-        args_x = [grad_output, weight]
-
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
             layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
         else:
-            layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
             req_stride_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dx.stride)
             )
