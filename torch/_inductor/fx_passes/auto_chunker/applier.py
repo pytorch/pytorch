@@ -1,11 +1,12 @@
 import copy
 import logging
 import operator
-from typing import Optional
+from typing import Any, Optional
 
 import torch
+from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode
-from torch.fx import Graph, Node
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .core import get_chunking_meta, reorder_nodes
@@ -17,28 +18,27 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-def _factory_args(fake_tensor):
+def _factory_args(fake_tensor: Tensor) -> dict[str, Any]:
     return {
         "device": fake_tensor.device,
         "dtype": fake_tensor.dtype,
     }
 
 
-def fake_tensor_prop(gm):
+def fake_tensor_prop(gm: GraphModule) -> None:
     inputs = []
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            fake_tensor = get_fake_tensor_from_node_arg(node)
-            if fake_tensor is not None:
-                inputs.append(fake_tensor)
-            else:
-                inputs.append(node)
+    for node in gm.graph.find_nodes(op="placeholder", sort=False):
+        fake_tensor = get_fake_tensor_from_node_arg(node)
+        if fake_tensor is not None:
+            inputs.append(fake_tensor)
+        else:
+            inputs.append(node)
 
     fake_mode = detect_fake_mode(inputs)
     FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
 
 
-def is_chunking_subgraph_input(node):
+def is_chunking_subgraph_input(node: Node) -> bool:
     meta = get_chunking_meta(node)
     if meta is None or is_tangent_node(node):
         return False
@@ -53,7 +53,7 @@ class ChunkingApplier:
     been attached to the nodes in the chunking subgraph.
     """
 
-    def __init__(self, parent_gm, num_chunk):
+    def __init__(self, parent_gm: GraphModule, num_chunk: int):
         self.gm = parent_gm
         self.parent_graph = reorder_nodes(self.gm.graph)
         # From this point on self.parent_graph is not equal to self.gm.graph
@@ -62,7 +62,7 @@ class ChunkingApplier:
         self.num_chunk = num_chunk
 
         # tangent node to the all-one tensor
-        self.overriden_tangent = {}
+        self.overriden_tangent: dict[Node, Optional[Node]] = {}
 
         self.subgraph_input: list[Node] = []
         self.subgraph_body: list[Node] = []
@@ -73,6 +73,9 @@ class ChunkingApplier:
 
         # First index is node index,
         # Second index is chunk index.
+        # Node index may be different to the index for self.subgraph_input
+        # since not every subgraph_input may be chunked.
+        # check self.chunk_subgraph_input for more details
         self.chunked_subgraph_input: list[list[Node]] = []
 
         self.accumulators: dict[Node, Optional[Node]] = {}
@@ -86,9 +89,9 @@ class ChunkingApplier:
                 # the accumulator nodes is created later
                 self.accumulators[node] = None
 
-        self.chunk_size_to_gm_attr = {}
+        self.chunk_size_to_gm_attr: dict[int, str] = {}
 
-    def _categorize_subgraph_nodes(self):
+    def _categorize_subgraph_nodes(self) -> None:
         """
         For each chunked node, decide if it's a input/body/output node of the
         chunking subgraph.
@@ -102,7 +105,7 @@ class ChunkingApplier:
 
             # skip tangent nodes since they are overridden as 1 and
             # reapplied later in the bwd graph
-            if node.op == "placeholder" and "tangent" in node.target:
+            if is_tangent_node(node):
                 self.overriden_tangent[node] = None  # will update the value later
                 continue
 
@@ -128,32 +131,28 @@ class ChunkingApplier:
                 # None of the node's arguments are chunked. It's a placeholder
                 self.subgraph_input.append(node)
             elif len(user_nodes_no_meta) > 0:
-                # None of the node's users are chunked. It's a output node
                 self.subgraph_output.append(node)
             else:
                 self.subgraph_body.append(node)
 
         assert len(self.subgraph_body) > 0
 
-    def replace_tangent_to_one(self):
-        idx = 0
-        for node in self.overriden_tangent:
-            assert node.op == "placeholder" and "tangent" in node.target
+    def replace_tangent_to_one(self) -> None:
+        for idx, node in enumerate(self.overriden_tangent):
+            assert is_tangent_node(node)
 
             fake_tensor = node.meta["val"]
             one = self.parent_graph.call_function(
                 aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
             )
 
-            name = "tangent_overriden_as_one"
-            if idx > 0:
-                name += "_" + str(idx + 1)
+            name = "tangent_overriden_as_one_{idx}"
             one._rename(name)
             one.meta = copy.copy(node.meta)
             node.replace_all_uses_with(one)
             self.overriden_tangent[node] = one
 
-    def chunk_subgraph_input(self):
+    def chunk_subgraph_input(self) -> None:
         """
         Chunk subgraph inputs if necessary. Note that not every subgraph
         input needs to be chunked.
@@ -161,6 +160,7 @@ class ChunkingApplier:
         """
         for node_idx, subgraph_input in enumerate(self.subgraph_input):
             meta = get_chunking_meta(subgraph_input)
+            assert meta is not None
 
             # not chunked
             if meta.chunk_dim is None:
@@ -182,13 +182,13 @@ class ChunkingApplier:
                 tensors = torch.chunk(input_tensor, self.num_chunk)
                 self.chunk_sizes = [t.size(0) for t in tensors]
 
-    def create_accumulators(self):
+    def create_accumulators(self) -> None:
         for node in self.accumulators:
             # use fp32 for accumulators
             fake_tensor = node.meta["val"]
             if fake_tensor.numel() == 1:
                 # TODO(shunting) revisit
-                # This tensor maybe fused with mm and becomes a addmm
+                # This tensor may be fused with mm and becomes a addmm
                 # if we upcast here, addmm may fail due to incompatible
                 # dtypes for input arguments.
                 override_dtype = torch.float32
@@ -204,16 +204,16 @@ class ChunkingApplier:
             accum.meta = {"val": fake_tensor.to(override_dtype)}
             self.accumulators[node] = accum
 
-    def build_subgraph(self, chunk_size):
+    def build_subgraph(self, chunk_size: int) -> GraphModule:
         """
         Build a subgraph for the given chunk size.
         The last chunk can be smaller and a new subgraph will be created
         to avoid involving dynamic shapes.
         """
         new_graph = Graph()
-        env = {}
+        env: dict[Node, Node] = {}
 
-        def _create_placeholder_node(input_node):
+        def _create_placeholder_node(input_node: Node) -> Node:
             new_node = new_graph.placeholder(input_node.name)
             fake_tensor = input_node.meta["val"]
             chunking_meta = get_chunking_meta(input_node)
@@ -232,6 +232,7 @@ class ChunkingApplier:
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():
+            assert overriden_tangent_node is not None
             env[overriden_tangent_node] = _create_placeholder_node(
                 overriden_tangent_node
             )
@@ -301,7 +302,7 @@ class ChunkingApplier:
         fake_tensor_prop(sub_gm)
         return sub_gm
 
-    def build_subgraphs(self):
+    def build_subgraphs(self) -> None:
         assert self.chunk_sizes is not None
         for chunk_size in self.chunk_sizes:
             if chunk_size in self.chunk_size_to_gm_attr:
@@ -316,7 +317,7 @@ class ChunkingApplier:
             # it.
             sub_gm.meta["produced_by_chunker"] = True
 
-    def call_subgraph_for_each_chunk(self):
+    def call_subgraph_for_each_chunk(self) -> None:
         for chunk_id in range(self.num_chunk):
             assert self.chunk_sizes is not None
             chunk_size = self.chunk_sizes[chunk_id]
@@ -326,13 +327,15 @@ class ChunkingApplier:
             args = []
             chunks_iter = iter(self.chunked_subgraph_input)
             for node in self.subgraph_input:
-                if get_chunking_meta(node).chunk_dim is not None:
+                chunking_meta = get_chunking_meta(node)
+                assert chunking_meta is not None
+                if chunking_meta.chunk_dim is not None:
                     args.append(next(chunks_iter)[chunk_id])
                 else:
                     # not chunked
                     args.append(node)
 
-            args += list(self.overriden_tangent.values())
+            args += list(self.overriden_tangent.values())  # type: ignore[arg-type]
 
             for accum in self.accumulators.values():
                 assert accum is not None
@@ -355,7 +358,7 @@ class ChunkingApplier:
             for orig_node in self.accumulators:
                 self.accumulators[orig_node] = output_node_dict[orig_node]
 
-    def recover_to_unchunked_nodes(self):
+    def recover_to_unchunked_nodes(self) -> None:
         """
         Recover the node from chunks and do the replacement.
         """
@@ -391,7 +394,7 @@ class ChunkingApplier:
             assert recovered is not node
             node.replace_all_uses_with(recovered)
 
-    def erase_original_nodes(self):
+    def erase_original_nodes(self) -> None:
         # Traverse reversely to erase user first
         for node in reversed(tuple(self.subgraph_body + self.subgraph_output)):
             if node.op == "placeholder":
@@ -399,7 +402,7 @@ class ChunkingApplier:
 
             self.parent_graph.erase_node(node)
 
-    def apply(self):
+    def apply(self) -> GraphModule:
         with self.parent_graph.inserting_before(self.subgraph_body[0]):
             self.replace_tangent_to_one()
             self.chunk_subgraph_input()
