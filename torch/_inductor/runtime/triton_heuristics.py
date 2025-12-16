@@ -2849,6 +2849,25 @@ def _reduction_configs(
                     make_config(
                         2, 2048, num_warps=8, num_stages=1, waves_per_eu=1
                     ),  # wrt3: 170 us # triton_red_fused__to_copy__unsafe_view_clone_native_layer_norm_native_layer_norm_backward_permute_tanh_tanh_backward_29
+                    # hrt (medium), performance numbers are over baseline as reported by paas
+                    make_config(
+                        32, 512, num_warps=8, num_stages=1
+                    ),  # 2.1X
+                    make_config(
+                        1, 256, num_warps=1, num_stages=1
+                    ),  # 8.3X
+                    make_config(
+                        64, 128, num_warps=8, num_stages=1
+                    ),  # 2.0X
+                    make_config(
+                        1, 1024, num_warps=8, num_stages=1
+                    ),  # 7.7X
+                    make_config(
+                        64, 64, num_warps=8, num_stages=1
+                    ),  # 1.8X
+                    make_config(
+                        1, 4096, num_warps=8, num_stages=1
+                    ),  # 6.8X
                 ]
             )
 
