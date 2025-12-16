@@ -237,6 +237,10 @@ function MemoryView(outer, stack_info, snapshot, device) {
     }
   }
   sorted_segments.sort((x, y) => {
+    // Note [Sort BigInt and Number Safely]
+    // x.addr and y.addr may be BigInt, so subtracting them directly can cause
+    // errors. Use explicit comparison instead to safely handle both BigInt and
+    // Number.
     if (x.addr === y.addr) return 0;
     return x.addr < y.addr ? -1 : 1;
   });
@@ -385,19 +389,18 @@ function MemoryView(outer, stack_info, snapshot, device) {
       block_g.selectAll('rect').remove();
       block_r.selectAll('rect').remove();
       const segments = [...segments_unsorted].sort((x, y) => {
+        // See Note [Sort BigInt and Number Safely].
         if (x.size > y.size) return 1;
         if (x.size < y.size) return -1;
-        // if sizes are equal, compare addresses, it's a safe way to sort
-        // numbers and BigInts in js.
         if (x.addr > y.addr) return 1;
         if (x.addr < y.addr) return -1;
         return 0;
       });
 
       const segments_by_addr = [...segments].sort((x, y) => {
-        if (x.addr > y.addr) return 1;
-        if (x.addr < y.addr) return -1;
+        // See Note [Sort BigInt and Number Safely]
         if (x.addr === y.addr) return 0;
+        return x.addr < y.addr ? -1 : 1;
       });
 
       const max_size = segments.length === 0 ? 0 : segments.at(-1).size;
@@ -473,6 +476,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
         while (left <= right) {
           const mid = Math.floor((left + right) / 2);
           const seg = segments_by_addr[mid];
+          // Device pointer addresses may be Number or BigInt; ensure safe
+          // arithmetic without JS type errors.
           const seg_end =
             typeof seg.addr === "bigint"
               ? seg.addr + BigInt(seg.size)
