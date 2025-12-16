@@ -37,6 +37,7 @@ from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInf
 import operator
 import string
 
+
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
@@ -493,6 +494,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
+            elif self.device_type == 'xpu':
+                dtypes = op.dtypesIfXPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -1026,7 +1029,7 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 class TestAssertCloseErrorMessage(TestCase):
