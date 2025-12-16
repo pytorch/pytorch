@@ -314,19 +314,21 @@ def _do_bench_using_profiling(
 
         may_ban_benchmarking()
 
+    device_type = get_gpu_type()
+    device_interface = get_interface_for_device(device_type)
     fn()
-    torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    device_interface.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
 
     # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = device_interface.Event(enable_timing=True)
+    end_event = device_interface.Event(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
         fn()
     end_event.record()
-    torch.cuda.synchronize()
+    device_interface.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / 5
 
     # compute number of warmup and repeat
@@ -337,11 +339,10 @@ def _do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
-    torch.cuda.synchronize()
-
+    device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            torch.profiler.ProfilerActivity.CUDA,
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
         ]
     ) as p:
         # Benchmark
@@ -351,7 +352,7 @@ def _do_bench_using_profiling(
             # record time of `fn`
             fn()
         # Record clocks
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
@@ -366,7 +367,8 @@ def _do_bench_using_profiling(
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
             "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
+            "#%s events: %d, #repeats: %s",
+            device_type,
             len(filtered_events),
             n_repeat,
         )
@@ -2413,11 +2415,14 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    remove_quote = kwargs.pop("remove_quote", False)
     # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
         kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if remove_quote:
+            kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 
@@ -2706,6 +2711,17 @@ def get_gpu_shared_memory() -> int:
 
     # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
+
+
+def get_max_numwarps() -> int:
+    if torch.cuda.is_available():
+        warp_size = torch.cuda.get_device_properties().warp_size
+        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+    else:
+        # Defaults
+        warp_size = 32
+        max_threads_per_block = 1024
+    return max_threads_per_block // warp_size
 
 
 def is_welford_reduction(reduction_type: str) -> bool:
@@ -4110,3 +4126,24 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         return target in fallback_hops
 
     return not _needs_inductor_compile(node)
+
+
+# Collective operation names for specialized benchmarking
+COLLECTIVE_OPS = OrderedSet(
+    [
+        "torch.ops._c10d_functional.all_reduce.default",
+        "torch.ops._c10d_functional.all_reduce_.default",
+        "torch.ops._c10d_functional.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional.all_to_all_single.default",
+        "torch.ops._c10d_functional_autograd.all_reduce.default",
+        "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+    ]
+)
+
+
+def is_collective_op(op_name: str) -> bool:
+    """Check if an operation is a collective operation."""
+    return op_name in COLLECTIVE_OPS

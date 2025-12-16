@@ -43,8 +43,8 @@ class SubprocessHandler:
         local_rank_id: int,
         numa_options: NumaOptions | None,
     ):
-        self._stdout = open(stdout, "w") if stdout else None
-        self._stderr = open(stderr, "w") if stderr else None
+        self._stdout = open(stdout, "w") if stdout else None  # noqa: SIM115
+        self._stderr = open(stderr, "w") if stderr else None  # noqa: SIM115
         # inherit parent environment vars
         env_vars = os.environ.copy()
         env_vars.update(env)

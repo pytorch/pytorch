@@ -294,7 +294,7 @@ def register_module_forward_hook(
 
 
 def register_module_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -323,7 +323,7 @@ def register_module_backward_hook(
 
 
 def register_module_full_backward_pre_hook(
-    hook: Callable[["Module", _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward pre-hook common to all the modules.
 
@@ -350,7 +350,7 @@ def register_module_full_backward_pre_hook(
 
 
 def register_module_full_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -1382,7 +1382,7 @@ class Module:
 
     def register_full_backward_pre_hook(
         self,
-        hook: Callable[["Module", _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward pre-hook on the module.
@@ -1390,7 +1390,7 @@ class Module:
         The hook will be called every time the gradients for the module are computed.
         The hook should have the following signature::
 
-            hook(module, grad_output) -> tuple[Tensor] or None
+            hook(module, grad_output) -> tuple[Tensor, ...], Tensor or None
 
         The :attr:`grad_output` is a tuple. The hook should
         not modify its arguments, but it can optionally return a new gradient with
@@ -1430,7 +1430,7 @@ class Module:
         return handle
 
     def register_backward_hook(
-        self, hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t]
+        self, hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None]
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
@@ -1457,7 +1457,7 @@ class Module:
 
     def register_full_backward_hook(
         self,
-        hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.

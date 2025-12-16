@@ -21,6 +21,10 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._redistribute import (
+    _gen_transform_infos,
+    use_min_cost_redistribution_plan,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -120,6 +124,47 @@ class RedistributeTest(DTensorTestBase):
         grad_input = replica_tensor.grad
         self.assertEqual(grad_input.placements, replica_spec)
         self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    @parametrize("dtype", [torch.float32, torch.cfloat])
+    def test_partial_to_partial_forward_backward(self, dtype):
+        device_mesh = self.build_device_mesh()
+        partial_spec = [Partial()]
+
+        # Create a partial tensor - each rank has the same local tensor
+        # When reduced, it would be multiplied by world_size
+        partial_local = torch.ones(
+            12, 3, device=self.device_type, requires_grad=True, dtype=dtype
+        )
+
+        comm_mode = CommDebugMode()
+
+        # 1) test partial -> partial forward: should be no-op
+        partial_tensor = distribute_tensor(partial_local, device_mesh, partial_spec)
+
+        with comm_mode:
+            reshard_partial_tensor = partial_tensor.redistribute(
+                device_mesh, partial_spec
+            )
+        self.assertEqual(partial_tensor.size(), partial_local.size())
+        self.assertEqual(partial_tensor, reshard_partial_tensor)
+        self.assertEqual(partial_tensor.to_local(), reshard_partial_tensor.to_local())
+        # Verify no communication in forward
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # 2) test partial -> partial backward: should be no-op
+        grad_output = DTensor.from_local(
+            torch.ones(12, 3, device=self.device_type, dtype=dtype),
+            device_mesh,
+            partial_spec,  # ← Use Partial placement!
+        )
+        with comm_mode:
+            reshard_partial_tensor.backward(grad_output)
+        grad_input = partial_tensor.grad
+        self.assertEqual(grad_input.placements, partial_spec)
+        self.assertEqual(grad_input.to_local(), torch.ones(12, 3, dtype=dtype))
+        # Verify no communication in backward
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
@@ -879,6 +924,75 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
             )
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+    @with_comms
+    def test_force_min_cost_redistribution_plan(self):
+        """
+        Test that the disable_graph_based_transform context manager correctly controls
+        the redistribution algorithm selection (graph-based vs greedy).
+        """
+        # Set deterministic seed for reproducible tensor generation
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+
+        # the redistribution path differs if we use graph-based or greedy search solution
+        src_placement, src_order = (
+            [Shard(0), Shard(0), Shard(0)],  # All mesh dims shard tensor dim 0
+            (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),
+            ),  # Device order: 0→1→2
+        )
+        dst_placement, dst_order = (
+            [Shard(1), Shard(1), Shard(1)],  # All mesh dims shard tensor dim 1
+            (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1, 2)),
+            ),  # Device order: 0→1→2
+        )
+
+        # Test both graph-based (enable_graph=True) and greedy (enable_graph=False) algorithms
+        for idx, enable_graph in enumerate([True, False]):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(), mesh, src_placement, shard_order=src_order
+            )
+
+            with (
+                use_min_cost_redistribution_plan(enabled=enable_graph),
+                DebugMode(record_torchfunction=False) as debug_mode,
+            ):
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+
+            # Validate graph-based algorithm trace (idx=0, disable_graph=False)
+            # Graph-based uses optimal path search (Dijkstra's algorithm)
+            # Expected path has 6 transformations with strategic intermediate states
+            # Path: S(0)[0,1,2] → S(0)[0,1]S(2) → S(0)S(2)[1,0] →
+            #       S(1)S(2)[1,0] → S(1)[0,1]S(2) → S(1)[0,1,2]
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(2)->S(0)S(2)[1]S(2)[0]->S(1)S(2)[1]S(2)[0]->S(1)[0]S(1)[1]S(2)->S(1)[0]S(1)[1]S(1)[2]""",
+                )
+            # Validate greedy algorithm trace (idx=1, disable_graph=True)
+            # Greedy uses simple heuristic approach (processes mesh dims sequentially)
+            # Expected path has 6 transformations but with different intermediate states
+            # Path: S(0)[0,1,2] → S(0)[0,1]R → S(0)RR →
+            #       S(1)RR → S(1)[0,1]R → S(1)[0,1,2]
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(), mesh, dst_placement, shard_order=dst_order
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+            # Clear the transformation cache between iterations. Without this,
+            # the second iteration would use cached paths from the first
+            _gen_transform_infos.cache_clear()
 
     @with_comms
     def test_generate_shard_orders(self):
