@@ -293,6 +293,26 @@ IF(USE_FBGEMM_GENAI)
     )
   else()
     if(USE_ROCM)
+      # Generate ck/config.h from ck/config.h.in into the build tree
+      function(_fbgemm_rocm_generate_ck_conf)
+        set(CK_ENABLE_INT8 "ON")
+        set(CK_ENABLE_FP16 "ON")
+        set(CK_ENABLE_FP32 "ON")
+        set(CK_ENABLE_FP64 "ON")
+        set(CK_ENABLE_BF16 "ON")
+        set(CK_ENABLE_FP8 "ON")
+        set(CK_ENABLE_BF8 "ON")
+        set(CK_USE_XDL "ON")
+        set(CK_USE_WMMA "ON")
+        # Path to vendored CK
+        set(FBGEMM_CK_DIR "${FBGEMM_THIRD_PARTY}/composable_kernel")
+        configure_file(
+          "${FBGEMM_CK_DIR}/include/ck/config.h.in"
+          "${FBGEMM_CK_DIR}/include/ck/config.h"
+          @ONLY
+        )
+      endfunction()
+      _fbgemm_rocm_generate_ck_conf()
       # Only include the kernels we want to build to avoid increasing binary size.
       file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
         "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
