@@ -1298,10 +1298,13 @@ if "optree" in sys.modules:
             python_pytree.register_dataclass(CustomClass)
 
         python_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
-        c = CustomClass(torch.tensor(0), torch.tensor(1))
-        mapped = python_pytree.tree_map(lambda x: x + 1, c)
-        self.assertEqual(mapped.x, torch.tensor(1))
-        self.assertEqual(mapped.y, torch.tensor(2))
+        try:
+            c = CustomClass(torch.tensor(0), torch.tensor(1))
+            mapped = python_pytree.tree_map(lambda x: x + 1, c)
+            self.assertEqual(mapped.x, torch.tensor(1))
+            self.assertEqual(mapped.y, torch.tensor(2))
+        finally:
+            python_pytree._deregister_pytree_node(CustomClass)
 
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
