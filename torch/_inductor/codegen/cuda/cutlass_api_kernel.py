@@ -1,0 +1,209 @@
+# mypy: allow-untyped-defs
+"""
+Kernel class for cutlass_api code generation.
+
+This module provides the kernel infrastructure for generating Python code
+that calls cutlass_api to execute GEMM operations.
+"""
+
+import logging
+from typing import Any, Optional
+
+from torch._inductor.codegen.common import IndentedBuffer, Kernel
+from torch._inductor.ir import Buffer, ReinterpretView
+from torch._inductor.utils import OrderedSet
+from torch._inductor.virtualized import V
+
+
+log = logging.getLogger(__name__)
+
+
+class CutlassAPIKernelWrapper:
+    """Wrapper to provide .run() interface for cutlass_api kernels."""
+
+    def __init__(self, kernel_fn, kernel_path: Optional[str] = None):
+        self.kernel_fn = kernel_fn
+        self.kernel_path = kernel_path
+
+    def run(self, *args, stream=None, **kwargs):
+        """Execute the cutlass_api kernel."""
+        return self.kernel_fn(*args, stream=stream, **kwargs)
+
+
+class CutlassAPITemplateKernel(Kernel):
+    """
+    Template kernel implementation for cutlass_api.
+
+    Generates Python code that calls cutlass_api to execute GEMM operations.
+    Unlike CuteDSL which uses Jinja templates, this generates simpler direct
+    Python code.
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_nodes: list[Buffer],
+        output_node: Buffer,
+        kernel_metadata: dict[str, Any],
+        accumulator_type: Any,  # torch.dtype
+    ) -> None:
+        super().__init__()
+        self.kernel_name = kernel_name
+        self.input_nodes = input_nodes
+        self.output_node = output_node
+        self.kernel_metadata = kernel_metadata
+        self.accumulator_type = accumulator_type
+
+        # Track input args for call_kernel
+        self._template_input_args: list[tuple[str, Buffer]] = []
+        self._seen_input_args: set[str] = set()
+
+        # Create named input nodes mapping
+        for i, input_node in enumerate(input_nodes):
+            node_name = getattr(input_node, "name", f"input_{i}")
+            param_name = f"in_ptr{i}"
+            self._template_input_args.append((param_name, input_node))
+            self._seen_input_args.add(param_name)
+
+    def gen_imports(self) -> str:
+        """Generate common imports for cutlass_api code."""
+        imports = IndentedBuffer()
+        imports.splice(
+            """
+            import torch
+            import cutlass
+            import cutlass_api
+            """
+        )
+        return imports.getvalue()
+
+    def render(self) -> str:
+        """Render the kernel code."""
+        code = IndentedBuffer()
+
+        # Generate imports
+        code.splice(self.gen_imports())
+        code.writeline("")
+
+        # Generate kernel name lookup
+        kernel_name_str = self.kernel_metadata["kernel_name"]
+        code.writeline(f'_CUTLASS_API_KERNEL_NAME = "{kernel_name_str}"')
+        code.writeline("_cutlass_api_kernel_cache = {}")
+        code.writeline("_cutlass_api_artifact_cache = {}")
+        code.writeline("")
+
+        # Generate dtype mapping
+        acc_dtype_str = str(self.accumulator_type).split(".")[-1]  # e.g., "float32"
+        code.writeline(f"_ACCUMULATOR_DTYPE = torch.{acc_dtype_str}")
+        code.writeline("")
+
+        # Generate helper to get accumulator type
+        code.writeline("def _get_accumulator_type():")
+        with code.indent():
+            code.writeline("dtype_map = {")
+            with code.indent():
+                code.writeline("torch.float32: cutlass.Float32,")
+                code.writeline("torch.float16: cutlass.Float16,")
+                code.writeline("torch.bfloat16: cutlass.BFloat16,")
+            code.writeline("}")
+            code.writeline("return dtype_map.get(_ACCUMULATOR_DTYPE, cutlass.Float32)")
+        code.writeline("")
+
+        # Generate the main kernel function
+        # Collect input parameter names
+        input_params = []
+        for i, _ in enumerate(self.input_nodes):
+            input_params.append(f"in_ptr{i}")
+
+        # Add output
+        input_params.append("out_ptr0")
+        # Add stream parameter
+        input_params.append("stream=None")
+
+        params_str = ", ".join(input_params)
+        code.writeline(f"def {self.kernel_name}_main({params_str}):")
+        with code.indent():
+            # Get or create kernel
+            code.writeline("global _cutlass_api_kernel_cache, _cutlass_api_artifact_cache")
+            code.writeline("")
+            code.writeline("# Get or create kernel")
+            code.writeline("if _CUTLASS_API_KERNEL_NAME not in _cutlass_api_kernel_cache:")
+            with code.indent():
+                code.writeline(
+                    "kernels = cutlass_api.get_kernels("
+                )
+                with code.indent():
+                    code.writeline(
+                        "metadata_filter=lambda m: m.kernel_name == _CUTLASS_API_KERNEL_NAME"
+                    )
+                code.writeline(")")
+                code.writeline("if not kernels:")
+                with code.indent():
+                    code.writeline(
+                        'raise RuntimeError(f"Could not find cutlass_api kernel: {_CUTLASS_API_KERNEL_NAME}")'
+                    )
+                code.writeline("_cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME] = kernels[0]")
+            code.writeline("")
+            code.writeline("kernel = _cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME]")
+            code.writeline("")
+
+            # Create GemmArguments
+            code.writeline("# Create GEMM arguments")
+            code.writeline("args = cutlass_api.arguments.GemmArguments(")
+            with code.indent():
+                code.writeline("in_ptr0,")
+                code.writeline("in_ptr1,")
+                code.writeline("out_ptr0,")
+                code.writeline("accumulator_type=_get_accumulator_type(),")
+            code.writeline(")")
+            code.writeline("")
+
+            # Compile if needed
+            code.writeline("# Compile kernel if not cached")
+            code.writeline("cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)")
+            code.writeline("if cache_key not in _cutlass_api_artifact_cache:")
+            with code.indent():
+                code.writeline("_cutlass_api_artifact_cache[cache_key] = kernel.compile(args)")
+            code.writeline("")
+            code.writeline("artifact = _cutlass_api_artifact_cache[cache_key]")
+            code.writeline("")
+
+            # Run kernel
+            code.writeline("# Run kernel")
+            code.writeline("kernel.run(args, artifact, assume_supported_args=True)")
+
+        return code.getvalue()
+
+    def _get_reinterpret_view(self, node: Buffer) -> Optional[ReinterpretView]:
+        """Check if node is a ReinterpretView and return it."""
+        if isinstance(node, ReinterpretView):
+            return node
+        return None
+
+    def call_kernel(self, name: str, node=None):
+        """
+        Generate the kernel call in the wrapper code.
+
+        Similar to CuteDSLTemplateKernel.call_kernel but simplified for cutlass_api.
+        """
+        wrapper = V.graph.wrapper_code
+
+        # Build call args matching the signature
+        call_args = []
+        arg_types = []
+
+        for _, input_node in self._template_input_args:
+            reinterpret_view = self._get_reinterpret_view(input_node)
+            if reinterpret_view is not None:
+                call_args.append(reinterpret_view.codegen_reference())
+            else:
+                call_args.append(input_node.get_name())
+            arg_types.append(V.graph.get_dtype(input_node.get_name()))
+
+        # Add output
+        output_name = self.output_node.get_name()
+        call_args.append(output_name)
+        arg_types.append(V.graph.get_dtype(output_name))
+
+        # Generate the kernel call using triton=True for Python-based kernels
+        wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)

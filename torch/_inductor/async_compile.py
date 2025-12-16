@@ -637,6 +637,45 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def cutlass_api(self, kernel_name: str, source_code: str):
+        """
+        Compile cutlass_api kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the cutlass_api kernel, as a string
+
+        Note:
+            cutlass_api kernels are Python code that calls the cutlass_api library.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.cuda.cutlass_api_kernel import (
+            CutlassAPIKernelWrapper,
+        )
+        from torch._inductor.codegen.cuda.cutlass_api_scheduling import MAIN_SUFFIX
+
+        kernel_code_log.info("cutlass_api Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find cutlass_api main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return CutlassAPIKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(

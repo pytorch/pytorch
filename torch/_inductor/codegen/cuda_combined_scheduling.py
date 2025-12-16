@@ -11,6 +11,7 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
+from .cuda.cutlass_api_scheduling import CutlassAPIScheduling
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
@@ -46,6 +47,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
+        self._cutlass_api_scheduling = CutlassAPIScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
@@ -57,6 +59,8 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._rocm_cpp_scheduling
         if self._cutedsl_scheduling.is_cutedsl_template(node):
             return self._cutedsl_scheduling
+        if self._cutlass_api_scheduling.is_cutlass_api_template(node):
+            return self._cutlass_api_scheduling
         return self._triton_scheduling
 
     def can_fuse_vertical(
@@ -73,6 +77,11 @@ class CUDACombinedScheduling(BaseScheduling):
             node1
         ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
             return False
+        # cutlass_api doesn't support vertical fusion currently
+        elif self._cutlass_api_scheduling.is_cutlass_api_template(
+            node1
+        ) or self._cutlass_api_scheduling.is_cutlass_api_template(node2):
+            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -85,6 +94,10 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
             if self._cutedsl_scheduling.is_cutedsl_template(node):
                 return self._cutedsl_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )  # always False at the moment
+            if self._cutlass_api_scheduling.is_cutlass_api_template(node):
+                return self._cutlass_api_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
@@ -116,6 +129,13 @@ class CUDACombinedScheduling(BaseScheduling):
             assert not epilogue_nodes
             assert not prologue_nodes
             return self._cutedsl_scheduling.codegen_template(
+                template_node, epilogue_nodes, prologue_nodes
+            )
+        elif self._cutlass_api_scheduling.is_cutlass_api_template(template_node):
+            # cutlass_api doesn't support epilogue/prologue fusion yet
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            return self._cutlass_api_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         else:
