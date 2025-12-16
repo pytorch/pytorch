@@ -54,17 +54,7 @@ def eager(
 ) -> Callable[..., Any]:
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
-
-    def wrapper(*args, **kwargs):
-        from torch.utils._debug_mode import DebugInterpreter, get_active_debug_mode
-
-        if (
-            debug_mode := get_active_debug_mode()
-        ) is not None and debug_mode.run_compile_with_interpreter:
-            return DebugInterpreter(gm, backend="eager").run(*args, **kwargs)
-        return gm.forward(*args, **kwargs)
-
-    return wrapper
+    return gm.forward
 
 
 def make_eager_backend_with_torch_function_mode(
@@ -173,12 +163,6 @@ def boxed_nop(
     forward_fn = fx_g.forward
 
     def run(args: Any) -> Any:
-        from torch.utils._debug_mode import DebugInterpreter, get_active_debug_mode
-
-        if (
-            debug_mode := get_active_debug_mode()
-        ) is not None and debug_mode.run_compile_with_interpreter:
-            return DebugInterpreter(fx_g, backend="aot_eager").run(*args)
         return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
