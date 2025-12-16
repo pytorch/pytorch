@@ -258,6 +258,12 @@ def create_flex_flash_attention_kernel(
     subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Expected query, key, and value to have the same dtype, "
+            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype} instead."
+        )
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
 

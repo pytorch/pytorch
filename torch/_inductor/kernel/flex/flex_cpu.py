@@ -68,6 +68,13 @@ def lower_cpu(
         mask_graph,
     ) = block_mask
 
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Expected query, key, and value to have the same dtype, "
+            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype} instead."
+        )
+
     if kernel_options["OUTPUT_LOGSUMEXP"]:
         raise NotImplementedError(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
