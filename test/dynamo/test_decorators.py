@@ -2214,7 +2214,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(RuntimeError):
             exported_model = torch.export.export(model, (inp,))
 
-    def _test_leaf_function_helper(self, mod_class, fn, args_fn):
+    def _test_leaf_function_helper(self, mod_class, args_fn, loss_fn):
         """
         Helper function for testing leaf_function decorator.
 
@@ -2224,6 +2224,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             args_fn: A callable that returns fresh input args for each test run
         """
         from torch._dynamo.testing import AotEagerAndRecordGraphs
+        import torch.utils._pytree as pytree
 
         mod_eager = mod_class()
         mod_compile_eager = mod_class()
@@ -2232,20 +2233,22 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         mod_compile_aot.load_state_dict(dict(mod_eager.state_dict()))
 
         args = args_fn()
+        args_clone = pytree.tree_map(lambda x: x.clone().detach().requires_grad_(x.requires_grad), args)
+        args_clone2 = pytree.tree_map(lambda x: x.clone().detach().requires_grad_(x.requires_grad), args)
 
-        out_eager = fn(mod_eager, *args)
-        out_eager.sum().backward()
+        out_eager = mod_eager(*args)
+        loss_fn(out_eager).backward()
 
-        out_compile_eager = torch.compile(fn, backend="eager", fullgraph=True)(
-            mod_compile_eager, *args
+        out_compile_eager = torch.compile(mod_compile_eager,  backend="eager", fullgraph=True)(
+            *args_clone
         )
-        out_compile_eager.sum().backward()
+        loss_fn(out_compile_eager).backward()
 
         backend = AotEagerAndRecordGraphs()
-        out_compile_aot = torch.compile(fn, backend=backend, fullgraph=True)(
-            mod_compile_aot, *args
+        out_compile_aot = torch.compile(mod_compile_aot, backend=backend, fullgraph=True)(
+            *args_clone2
         )
-        out_compile_aot.sum().backward()
+        loss_fn(out_compile_aot).backward()
 
         self.assertEqual(out_eager, out_compile_eager)
         self.assertEqual(out_eager, out_compile_aot)
@@ -2269,6 +2272,9 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
                 msg=f"Gradient mismatch for {name_eager} between eager and compile_aot",
             )
 
+        pytree.tree_map(lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad) if isinstance(x, torch.Tensor) and x.requires_grad else None, args, args_clone)
+        pytree.tree_map(lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad) if isinstance(x, torch.Tensor) and x.requires_grad else None, args, args_clone2)
+
     def test_leaf_function_simple(self):
         class NonTracable(torch.nn.Module):
             def __init__(self):
@@ -2282,13 +2288,43 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
                 else:
                     return (self.linear(x) + x,)
 
-        def fn(mod, x):
-            return mod(x)[0] + x
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        self._test_leaf_function_helper(NonTracable, args_fn, loss_fn)
+
+    def test_leaf_function_in_inner_module(self):
+        class Simple(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.non_tracable = NonTracable()
+
+            def forward(self, x):
+                return self.non_tracable(self.linear(x))
+
+        class NonTracable(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            @torch._dynamo.decorators.leaf_function(lambda self, x: (self.linear(x),))
+            def forward(self, x):
+                if x.sum() > 0:
+                    return (self.linear(x),)
+                else:
+                    return (self.linear(x) + x,)
 
         def args_fn():
-            return (torch.randn(3, 3),)
+            return (torch.randn(3, 3, requires_grad=True),)
 
-        self._test_leaf_function_helper(NonTracable, fn, args_fn)
+        def loss_fn(out):
+            return out[0].sum()
+
+        self._test_leaf_function_helper(NonTracable, args_fn, loss_fn)
 
 
 if __name__ == "__main__":
