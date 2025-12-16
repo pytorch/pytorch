@@ -11,7 +11,7 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
 )
