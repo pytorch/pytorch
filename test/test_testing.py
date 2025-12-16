@@ -36,6 +36,10 @@ from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInf
 import operator
 import string
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
@@ -421,6 +425,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
+            elif self.device_type == 'xpu':
+                dtypes = op.dtypesIfXPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -435,6 +441,8 @@ if __name__ == '__main__':
             if len(
                 op.supported_dtypes("cpu").symmetric_difference(
                     op.supported_dtypes("cuda")
+                ).symmetric_difference(
+                    op.supported_dtypes("xpu")
                 )
             )
             > 0
@@ -442,11 +450,11 @@ if __name__ == '__main__':
         dtypes=OpDTypes.none,
     )
     def test_supported_dtypes(self, device, op):
-        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
-        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertNotEqual(op.supported_dtypes(device_type), op.supported_dtypes(device_type))
+        self.assertEqual(op.supported_dtypes(device_type), op.supported_dtypes(f"{device_type}:0"))
         self.assertEqual(
-            op.supported_dtypes(torch.device("cuda")),
-            op.supported_dtypes(torch.device("cuda", index=1)),
+            op.supported_dtypes(torch.device(device_type)),
+            op.supported_dtypes(torch.device(device_type, index=1)),
         )
 
     def test_setup_and_teardown_run_for_device_specific_tests(self, device):
@@ -899,7 +907,7 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 class TestAssertCloseErrorMessage(TestCase):

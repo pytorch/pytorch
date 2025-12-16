@@ -9,7 +9,10 @@ import numpy as np
 import numpy.typing as npt
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import (
+    TEST_XPU,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes,
     all_types,
@@ -49,7 +52,7 @@ EXTENSIBLE_DTYPE_DISPATCH = (
 )
 
 # Better way to acquire devices?
-DEVICES = ["cpu"] + (["cuda"] if TEST_CUDA else [])
+DEVICES = ["cpu"] + (["cuda"] if TEST_CUDA else [])  + (["xpu"] if TEST_XPU else [])
 
 
 class _dynamic_dispatch_dtypes(_dispatch_dtypes):
@@ -66,6 +69,13 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
             "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
+            stacklevel=2,
+        )
+        return _dynamic_dispatch_dtypes(())
+
+    if not TEST_XPU and device_type == "xpu":
+        warnings.warn(
+            "WARNING: XPU is not available, empty_dtypes dispatch will be returned!",
             stacklevel=2,
         )
         return _dynamic_dispatch_dtypes(())
