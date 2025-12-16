@@ -6,6 +6,7 @@ import torch
 
 class EffectType(Enum):
     ORDERED = "Ordered"
+    COLLECTIVE = "Collective"  # For communication ops that mutate tensors in-place
 
 
 from torch._library.utils import RegistrationHandle

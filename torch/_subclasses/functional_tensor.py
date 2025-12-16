@@ -451,6 +451,18 @@ class FunctionalTensorMode(TorchDispatchMode):
             do_auto_functionalize_v2,
         )
 
+        # Check effects - effectful ops use handle_effects for ordering.
+        # handle_effects will internally use auto_functionalize for ops with mutations.
+        from torch._higher_order_ops.effects import handle_effects, has_effects
+
+        if has_effects(func):
+            assert not torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), torch._C.DispatchKey.Functionalize
+            )
+            return handle_effects(
+                self._allow_token_discovery, self._tokens, func, args, kwargs
+            )
+
         if can_auto_functionalize(
             func
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -468,16 +480,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             if inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize_v2(self, func, args, kwargs)
             return do_auto_functionalize(self, func, args, kwargs)
-
-        from torch._higher_order_ops.effects import handle_effects, has_effects
-
-        if has_effects(func):
-            assert not torch._C._dispatch_has_kernel_for_dispatch_key(
-                func.name(), torch._C.DispatchKey.Functionalize
-            )
-            return handle_effects(
-                self._allow_token_discovery, self._tokens, func, args, kwargs
-            )
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)

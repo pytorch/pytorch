@@ -89,7 +89,9 @@ class WithEffects(HigherOrderOperator):
         **kwargs: dict[str, Any],
     ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
-        assert not has_aliasing(op), "Ops with aliasing is not supported"
+        assert _get_effect(op) == _EffectType.COLLECTIVE or not has_aliasing(op), (
+            "non-COLLECTIVE ops with aliasing are not supported"
+        )
         assert isinstance(kwargs, dict)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(token, op, *args, **kwargs)
@@ -113,10 +115,11 @@ def has_aliasing(op: OpType):
 
 
 def has_effects(op) -> bool:
-    return (
-        isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
-        and not has_aliasing(op)
-        and _get_effect(op) is not None
+    if not isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)):
+        return False
+    effect = _get_effect(op)
+    return effect is not None and (
+        effect == _EffectType.COLLECTIVE or not has_aliasing(op)
     )
 
 
@@ -261,11 +264,89 @@ def handle_effects(
 
     token = tokens[key]
 
-    from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
+    from torch._subclasses.functional_tensor import (
+        FunctionalTensor,
+        PythonFunctionalizeAPI,
+    )
+
+    def _sync_functional_tensors(ctx, arg):
+        """Recursively commit and sync an arg's FunctionalTensors."""
+        if arg is None:
+            return
+        if isinstance(arg, FunctionalTensor):
+            ctx.commit_update(arg)
+            ctx.sync(arg)
+        elif isinstance(arg, (list, tuple)):
+            for a in arg:
+                _sync_functional_tensors(ctx, a)
+
+    # Check if op has mutable args - if so, we need to handle them properly
+    mutable_args_names = []
+    if isinstance(op, torch._ops.OpOverload):
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        mutable_args_names, _ = get_mutable_args(op)
 
     ctx = PythonFunctionalizeAPI()
 
     unwrapped_token = ctx.unwrap_tensors([token])[0]
+
+    if mutable_args_names:
+        # Op has mutable args - use auto_functionalize-style mutation handling
+        # but wrap in with_effects for ordering
+
+        # Normalize args to kwargs for tracking, but we'll pass as positional args
+        # to with_effects to avoid naming collisions (e.g., "op" parameter name)
+        normalized_kwargs = {}
+        schema = op._schema
+        for idx, arg in enumerate(schema.arguments):
+            if arg.name in kwargs:
+                normalized_kwargs[arg.name] = kwargs[arg.name]
+            elif idx < len(args):
+                normalized_kwargs[arg.name] = args[idx]
+            else:
+                normalized_kwargs[arg.name] = arg.default_value
+
+        unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)
+        # Convert back to positional args for with_effects to avoid name collisions
+        unwrapped_args = tuple(unwrapped_kwargs[arg.name] for arg in schema.arguments)
+
+        with ctx.redispatch_to_next():
+            # Call with_effects wrapping the op - this gives us ordering
+            (new_token, *unwrapped_outs) = with_effects(
+                unwrapped_token, op, *unwrapped_args
+            )
+
+        # Update token
+        wrapped_token = ctx.wrap_tensors(new_token)
+        assert isinstance(wrapped_token, torch.Tensor)
+        tokens[key] = wrapped_token
+
+        # Handle mutation updates like auto_functionalize does
+        # The op schema defines which outputs correspond to mutated inputs
+        num_returns = len(op._schema.returns)
+        if num_returns == 0:
+            unwrapped_actual_out = None
+        else:
+            # Note: with_effects returns (token, *op_outputs)
+            # For non-aliasing ops, op_outputs is the schema returns
+            # For aliasing ops (Tensor(a!) -> Tensor(a!)), the output aliases input
+            unwrapped_actual_out = (
+                unwrapped_outs[0]
+                if num_returns == 1
+                else tuple(unwrapped_outs[:num_returns])
+            )
+
+        # Update mutable args
+        for name in mutable_args_names:
+            _sync_functional_tensors(ctx, normalized_kwargs[name])
+
+        return (
+            ctx.wrap_tensors(unwrapped_actual_out)
+            if unwrapped_actual_out is not None
+            else None
+        )
+
     unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():

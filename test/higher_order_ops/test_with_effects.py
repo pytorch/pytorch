@@ -1054,6 +1054,145 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_collective_effect_with_inplace_op(self):
+        """Test that in-place ops with COLLECTIVE effect type work correctly.
+
+        This simulates collective communication ops that mutate their input tensors
+        in-place (like all_reduce with in-place semantics).
+        """
+        torch._dynamo.reset()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            # Define an in-place op that simulates a collective (e.g., all_reduce)
+            torch.library.define(
+                "mylib::inplace_collective",
+                "(Tensor(a!) tensor, int op_type) -> ()",
+                lib=lib,
+            )
+
+            def inplace_collective_impl(tensor: torch.Tensor, op_type: int) -> None:
+                # Simulate a collective by scaling the tensor
+                tensor.mul_(2.0)
+
+            lib.impl(
+                "inplace_collective",
+                inplace_collective_impl,
+                "CompositeExplicitAutograd",
+            )
+
+            # Register as COLLECTIVE effect for ordering
+            handle = _register_effectful_op(
+                torch.ops.mylib.inplace_collective.default, _EffectType.COLLECTIVE
+            )
+
+            try:
+                self.assertEqual(
+                    _get_effect(torch.ops.mylib.inplace_collective.default),
+                    _EffectType.COLLECTIVE,
+                )
+
+                def f(x):
+                    y = x.clone()
+                    # Call twice to verify effect ordering is maintained
+                    torch.ops.mylib.inplace_collective(y, 0)  # y *= 2
+                    torch.ops.mylib.inplace_collective(y, 1)  # y *= 2 again
+                    return y + 1  # Should be x * 4 + 1
+
+                inputs = (torch.randn(3, 4),)
+
+                # Test eager
+                ref = f(*inputs)
+                expected = inputs[0] * 4 + 1
+                self.assertTrue(torch.allclose(ref, expected))
+
+                # Test aot_eager - verify correctness
+                compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+                out = compiled_f(*inputs)
+                self.assertTrue(torch.allclose(ref, out))
+
+                fw_graph, _ = get_fw_bw_graph(f, inputs)
+                self.assertExpectedInline(
+                    fw_graph.code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.mylib.inplace_collective.default, clone, 0);  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.mylib.inplace_collective.default, clone, 1);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (getitem_2, add)""",
+                )
+
+            finally:
+                handle.destroy()
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_collective_effect_with_tensor_list_mutation(self):
+        """Test that ops mutating a list of tensors with COLLECTIVE effect work.
+
+        This simulates collective ops like all_gather that populate an output list.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::gather_collective",
+                "(Tensor input, Tensor(a!)[] output_list) -> ()",
+                lib=lib,
+            )
+
+            def gather_impl(input: torch.Tensor, output_list: list) -> None:
+                # Simulate gathering by copying input to each output tensor
+                for out in output_list:
+                    out.copy_(input)
+
+            lib.impl("gather_collective", gather_impl, "CompositeExplicitAutograd")
+
+            handle = _register_effectful_op(
+                torch.ops.mylib.gather_collective.default, _EffectType.COLLECTIVE
+            )
+
+            try:
+
+                def f(x):
+                    out1 = torch.empty_like(x)
+                    out2 = torch.empty_like(x)
+                    # Call twice to verify effect ordering is maintained
+                    torch.ops.mylib.gather_collective(x, [out1, out2])
+                    torch.ops.mylib.gather_collective(x * 2, [out1, out2])  # Overwrite
+                    return out1 + out2  # Should be x * 2 + x * 2 = x * 4
+
+                inputs = (torch.randn(3, 4),)
+
+                ref = f(*inputs)
+                expected = inputs[0] * 4
+                self.assertTrue(torch.allclose(ref, expected))
+
+                compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+                out = compiled_f(*inputs)
+                self.assertTrue(torch.allclose(ref, out))
+
+                fw_graph, _ = get_fw_bw_graph(f, inputs)
+                self.assertExpectedInline(
+                    fw_graph.code.strip(),
+                    """\
+def forward(self, arg0_1, arg1_1):
+    empty_like = torch.ops.aten.empty_like.default(arg1_1, pin_memory = False)
+    empty_like_1 = torch.ops.aten.empty_like.default(arg1_1, pin_memory = False)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.mylib.gather_collective.default, arg1_1, [empty_like, empty_like_1]);  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.mylib.gather_collective.default, mul, [empty_like, empty_like_1]);  getitem = mul = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(empty_like, empty_like_1);  empty_like = empty_like_1 = None
+    return (getitem_2, add)""",
+                )
+
+            finally:
+                handle.destroy()
+
 
 if __name__ == "__main__":
     run_tests()
