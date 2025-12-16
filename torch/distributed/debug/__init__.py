@@ -18,11 +18,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 _WORKER_SERVER: _WorkerServer | None = None
 _DEBUG_SERVER_PROC: multiprocessing.Process | None = None
 
-# Use explicit context to avoid relying on default start method
-# This ensures compatibility with Python 3.14 where default changes from 'fork' to 'forkserver'
-# We use 'spawn' here as it's the most compatible across platforms
-_MP_CONTEXT = multiprocessing.get_context("spawn")
-
 
 def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
     """
@@ -62,7 +57,7 @@ def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
     from torch.distributed.debug._frontend import main
 
     if RANK == 0:
-        _DEBUG_SERVER_PROC = _MP_CONTEXT.Process(target=main, args=(port,), daemon=True)
+        _DEBUG_SERVER_PROC = multiprocessing.Process(target=main, args=(port,), daemon=True)
         _DEBUG_SERVER_PROC.start()
 
 
