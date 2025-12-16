@@ -3672,7 +3672,7 @@ class GridExpr:
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
 
-    def ceildiv(self, numel: str | int, block: None | int | str) -> str | int:
+    def ceildiv(self, numel: str | int, block: int | str | None) -> str | int:
         if block is None or block == 1:
             return numel
         if isinstance(numel, int) and isinstance(block, int):

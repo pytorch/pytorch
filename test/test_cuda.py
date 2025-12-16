@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI200_ARCH,
     MI300_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -5793,6 +5794,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
