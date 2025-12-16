@@ -657,14 +657,14 @@ static inline void split_batch_dim_to_32bit_out(
     bool deterministic,
     bool depthwise,
     int64_t max_worksize,
-    func_t func_32bit) {
+    func_t func_indexing) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = output.numel();
   // Assume the shape of the tensor is (N, C, D1, D2, ...)
   // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
-    func_32bit(
+    func_indexing(
         output,
         input,
         weight,
@@ -693,7 +693,7 @@ static inline void split_batch_dim_to_32bit_out(
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor output_ = output.narrow(0, start, split_size_);
-      func_32bit(
+      func_indexing(
           output_,
           input_,
           weight,
@@ -708,7 +708,7 @@ static inline void split_batch_dim_to_32bit_out(
     return;
   }
   // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API.
-  func_32bit(
+  func_indexing(
       output,
       input,
       weight,
