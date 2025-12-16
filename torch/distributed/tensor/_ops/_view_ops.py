@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -542,7 +542,7 @@ def propagate_shape_and_sharding(
 
     def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim,
-    ) -> tuple[Optional[int], Optional[Shard | _StridedShard]]:
+    ) -> tuple[int | None, Shard | _StridedShard | None]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
             if (
