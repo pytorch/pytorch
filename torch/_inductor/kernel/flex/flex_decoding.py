@@ -12,7 +12,7 @@ from torch._inductor.virtualized import V
 from ... import ir
 from ...ir import FixedLayout, FlexibleLayout
 from ...lowering import empty, empty_strided, lowerings
-from ...runtime.runtime_utils import is_power_of_2, next_power_of_2
+from ...runtime.runtime_utils import ceildiv, is_power_of_2, next_power_of_2
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -43,16 +43,6 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
        use the main flex_attention kernel.
     """
     force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
-    qhead = query.get_size()[1]
-    kvhead = value.get_size()[1]
-    qlen = query.get_size()[-2]
-
-    # This is required in create_flex_decoding_kernel function
-    can_use_single_block_m = True
-    if "BLOCK_M" in kernel_options:
-        can_use_single_block_m = V.graph.sizevars.evaluate_expr(
-            sympy.Le(qlen * (qhead // kvhead), kernel_options["BLOCK_M"])
-        )
 
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
@@ -88,7 +78,6 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         not force_flex
         and not kernel_options.get("OUTPUT_MAX", False)
         and short_query_length
-        and can_use_single_block_m
         and static_batch
         and static_num_heads
         and non_zero_length
@@ -96,11 +85,10 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and pw_of_two
     )
     log.debug(
-        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, can_use_single_block_m=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
         out,
         force_flex,
         short_query_length,
-        can_use_single_block_m,
         static_batch,
         static_num_heads,
     )
@@ -108,7 +96,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
 
 
 @SymbolicGridFn
-def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
+def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, seq_len_q, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
     Each block is responsible for iterating over blocks of keys and values calculating
@@ -116,7 +104,9 @@ def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, me
     groups of SPLIT_KV blocks then combine their output to produce the final result.
     """
 
-    return (batch_size * kv_heads, meta["SPLIT_KV"], 1)
+    BLOCK_M = meta["BLOCK_M"]
+    num_block_m = ceildiv(seq_len_q * gqa_group_size, BLOCK_M)
+    return (num_block_m, batch_size * kv_heads, meta["SPLIT_KV"])
 
 
 flex_decoding_template = TritonTemplate(
@@ -168,7 +158,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
@@ -188,8 +178,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
         for k, v in kernel_options.items()
     }
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(seq_len_q % 128 == 0)
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(seq_len_kv % 128 == 0)
+    seq_q_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(seq_len_q % 128, 0)
+    )
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(seq_len_kv % 128, 0)
+    )
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -308,10 +302,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
-    V.graph.sizevars.check_leq(
-        seq_len_q * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
-    )
-
     kernel_options.setdefault(
         "SAFE_M_BOUNDARY",
         ((seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]) == 0,
@@ -319,6 +309,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
@@ -333,6 +324,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if conf.block_n > SPARSE_KV_BLOCK_SIZE:
             conf.block_n = SPARSE_KV_BLOCK_SIZE
 
+        if SPARSE_Q_BLOCK_SIZE % kernel_options["BLOCK_M"] != 0:
+            continue
+
         if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
             continue
 
@@ -346,6 +340,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 cur_kernel_options.pop(k)
         # Performance tuning
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)

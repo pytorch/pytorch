@@ -806,7 +806,7 @@ def register_kernel(
 
     Args:
         op (str | OpOverload): The operator to register an impl to.
-        device_types (None | str | Sequence[str]): The device_types to register an impl to.
+        device_types (str | None | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
         func (Callable): The function to register as the implementation for
