@@ -7,7 +7,6 @@ from typing import Any, cast, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from torch._utils import _maybe_view_chunk_cat
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -209,8 +208,7 @@ def all_gather_tensor(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res = res.wait()  # type: ignore[attr-defined]
-
-        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
+        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
 
