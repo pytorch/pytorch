@@ -167,7 +167,7 @@ class Unsupported(TorchDynamoException):
         msg: str,
         *,
         case_name: Optional[str] = None,
-        real_stack: None | StackSummary = None,
+        real_stack: StackSummary | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:

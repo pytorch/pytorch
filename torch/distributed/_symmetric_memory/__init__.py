@@ -1934,7 +1934,7 @@ def empty(  # type: ignore[misc]
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: Union[c10d.GroupName, ProcessGroup]
+    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
