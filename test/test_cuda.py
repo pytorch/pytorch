@@ -4008,10 +4008,7 @@ import multiprocessing
 
 def fork_and_check_is_pinned():
     # Create a pipe to communicate between parent and child processes
-    # Use explicit 'fork' context for Python 3.14 compatibility
-    # (Python 3.14 changes default from 'fork' to 'forkserver')
-    mp_ctx = multiprocessing.get_context('fork')
-    parent_conn, child_conn = mp_ctx.Pipe()
+    parent_conn, child_conn = multiprocessing.Pipe()
 
     def worker(conn):
         try:
@@ -4025,7 +4022,7 @@ def fork_and_check_is_pinned():
         finally:
             conn.close()
     # Fork a new process
-    p = mp_ctx.Process(target=worker, args=(child_conn,))
+    p = multiprocessing.Process(target=worker, args=(child_conn,))
     p.start()
     # Receive the result from the child process
     result = parent_conn.recv()
