@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 import sympy
 
@@ -16,14 +15,12 @@ def static_eq(a: _IntLike, b: _IntLike) -> bool:
 @dataclass
 class Term:
     coefficient: _IntLike
-    range: Optional[_IntLike]  # None for unbounded
+    range: _IntLike | None  # None for unbounded
     original_expr: sympy.Expr
     reconstruction_multiplier: _IntLike  # The multiplier needed for reconstruction
 
 
-def generate_inverse_formula(
-    expr: sympy.Expr, var: sympy.Symbol
-) -> Optional[sympy.Expr]:
+def generate_inverse_formula(expr: sympy.Expr, var: sympy.Symbol) -> sympy.Expr | None:
     """
      Analyze an expression to see if it matches a specific invertible pattern that we
      know how to reverse.
@@ -89,7 +86,7 @@ def generate_inverse_formula(
     return generate_reconstruction_expr(terms, var)
 
 
-def parse_terms(expr: sympy.Expr, var: sympy.Symbol) -> Optional[list[Term]]:
+def parse_terms(expr: sympy.Expr, var: sympy.Symbol) -> list[Term] | None:
     """Parse expression into terms."""
     if not isinstance(expr, sympy.Add):
         # Single term
@@ -107,7 +104,7 @@ def parse_terms(expr: sympy.Expr, var: sympy.Symbol) -> Optional[list[Term]]:
     return terms
 
 
-def parse_single_term(term: sympy.Expr, var: sympy.Symbol) -> Optional[Term]:
+def parse_single_term(term: sympy.Expr, var: sympy.Symbol) -> Term | None:
     """Parse a single term and extract coefficient, range, and reconstruction multiplier."""
     # Extract coefficient and expression parts
     coefficient, expr_parts = term.as_coeff_mul()
@@ -141,7 +138,7 @@ def parse_single_term(term: sympy.Expr, var: sympy.Symbol) -> Optional[Term]:
 
 def analyze_expression_properties(
     expr: sympy.Expr, var: sympy.Symbol
-) -> tuple[Optional[_IntLike], Optional[_IntLike]]:
+) -> tuple[_IntLike | None, _IntLike | None]:
     """Analyze an expression to determine its range and reconstruction multiplier."""
     # ModularIndexing(var, divisor, modulo) = (var // divisor) % modulo
     if isinstance(expr, ModularIndexing):

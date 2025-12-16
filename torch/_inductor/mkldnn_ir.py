@@ -39,8 +39,8 @@ def _prepare_convolution_fusion_create(
     dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[Sequence[int]] = None,
-    quantize_args: Optional[list["TensorBox"]] = None,
+    output_padding: Sequence[int] | None = None,
+    quantize_args: list["TensorBox"] | None = None,
     other: Optional["TensorBox"] = None,
 ):
     """
@@ -231,7 +231,7 @@ def _prepare_linear_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    quantize_args: Optional[list["TensorBox"]] = None,
+    quantize_args: list["TensorBox"] | None = None,
     other: Optional["TensorBox"] = None,
     binary_sum: bool = False,
 ):
@@ -334,7 +334,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         attr,
-        scalars: Optional[list[Any]],
+        scalars: list[Any] | None,
         algorithm,
     ):
         (
@@ -396,10 +396,10 @@ class ConvolutionBinary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: Optional[float],
-        unary_attr: Optional[str],
-        unary_scalars: Optional[list[Any]],
-        unary_algorithm: Optional[str],
+        binary_alpha: float | None,
+        unary_attr: str | None,
+        unary_scalars: list[Any] | None,
+        unary_algorithm: str | None,
     ):
         (
             inputs,
@@ -474,10 +474,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: Optional[float],
-        unary_attr: Optional[str],
-        unary_scalars: Optional[list[Any]],
-        unary_algorithm: Optional[str],
+        binary_alpha: float | None,
+        unary_attr: str | None,
+        unary_scalars: list[Any] | None,
+        unary_algorithm: str | None,
     ):
         (
             inputs,
@@ -544,7 +544,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups_: int,
         attr,
-        scalars: Optional[list[Any]],
+        scalars: list[Any] | None,
         algorithm,
     ):
         transposed = True
