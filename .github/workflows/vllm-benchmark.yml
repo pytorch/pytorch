@@ -133,7 +133,7 @@ jobs:
         shell: bash
         run: |
           set -eux
-          uv pip install pip
+          uv pip install pip setuptools
 
       - name: Get vLLM pinned commit
         id: vllm-pinned-commit
@@ -213,7 +213,7 @@ jobs:
         run: |
           set -eux
           apt-get update
-          apt-get install -y git
+          apt-get install -y git unzip
 
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -231,7 +231,7 @@ jobs:
         shell: bash
         run: |
           set -eux
-          uv pip install pip
+          uv pip install pip setuptools
 
       - name: Get vLLM pinned commit
         id: vllm-pinned-commit
