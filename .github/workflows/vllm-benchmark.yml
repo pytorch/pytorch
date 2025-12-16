@@ -105,8 +105,9 @@ jobs:
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
-      options: --ipc=host
+      options: --ipc=host --tty
     env:
+      SKIP_SCCACHE_INITIALIZATION: 1
       SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
       SCCACHE_REGION: us-east-1
       TORCH_CUDA_ARCH_LIST: ${{ needs.set-parameters.outputs.torch-cuda-arch-list }}
@@ -117,7 +118,7 @@ jobs:
           python-version: 3.12
           activate-environment: true
 
-      - name: Install benchmark dependencies
+      - name: Install build dependencies
         shell: bash
         run: |
           set -eux
@@ -191,7 +192,7 @@ jobs:
       contents: read
     container:
       image: nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04
-      options: --gpus all --ipc=host
+      options: --gpus all --ipc=host --tty
     steps:
       - name: Install system dependencies
         shell: bash
