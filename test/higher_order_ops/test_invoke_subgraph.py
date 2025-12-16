@@ -1791,6 +1791,39 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_grad_accumulation(self):
+        mod1 = torch.nn.Linear(8, 8)
+        mod2 = torch.nn.Linear(8, 8)
+        mod3 = torch.nn.Linear(8, 8)
+
+        @nested_compile_region
+        def gn(x):
+            return mod1(x) - mod2(x)
+
+        def fn(c):
+            d = gn(c) - mod3(c)
+            return d * 2
+
+        c = torch.randn((8, 8), requires_grad=True)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(c)
+        res.sum().backward()
+
+        # The gradient addition node for mod3 is not in the subgraph.
+        bw_add_nodes = backend.bw_graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(bw_add_nodes), 1)
+        subgraph_node = backend.bw_graphs[0].graph.find_nodes(op="get_attr")[0]
+        subgraph_name = subgraph_node.target
+        # The gradient addition node between mod1 and mode2 will be in the subgraph
+        bw_add_nodes = getattr(backend.bw_graphs[0], subgraph_name).graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(bw_add_nodes), 1)
+
     def test_complex(self):
         # Observed in Wan2.1
         @nested_compile_region

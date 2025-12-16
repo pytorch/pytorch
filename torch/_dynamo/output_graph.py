@@ -927,9 +927,9 @@ class OutputGraph(OutputGraphCommon):
     def subtracer(
         self,
         source_target: Optional[Target],
-        prior_tracer: "SubgraphTracer",
+        prior_tracer: Optional["SubgraphTracer"],
         description: Optional[str] = None,
-    ) -> Generator[fx.Tracer, None, None]:
+    ) -> Generator["SubgraphTracer", None, None]:
         new_scope_ctx = enter_new_scope()
         try:
             if prior_tracer:
@@ -1854,12 +1854,14 @@ class OutputGraph(OutputGraphCommon):
                         ):
                             for k, v in var.items.items():
                                 specs = {}
+                                # pyrefly: ignore[missing-attribute]
                                 for k_spec, val in v.items.items():
                                     specs[k_spec.vt.as_python_constant()] = (
                                         val.as_python_constant()
                                     )
                                 assert ["in_spec", "out_spec"] == list(specs.keys())
                                 self.export_metadata.module_call_spec[
+                                    # pyrefly: ignore[missing-attribute]
                                     k.vt.as_python_constant()
                                 ] = specs
                         # export uses tracepoint pass to dump submodule inp/out spec
@@ -1945,8 +1947,7 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        if config.replay_side_effects:
-            self.side_effects.codegen_update_mutated(cg)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """
@@ -2287,6 +2288,7 @@ class OutputGraph(OutputGraphCommon):
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
+                        None,  # user_stack
                     )
 
                     log.debug(
