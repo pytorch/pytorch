@@ -1479,7 +1479,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         self.assertEqual(tensor, expected_tensor)
 
         # test flatten functionality
-        flatten_mesh = mesh_3d.flatten()
+        flatten_mesh = mesh_3d._flatten()
         flatten_pg = flatten_mesh.get_group()
         tensor = torch.ones(3, 3, device=self.device_type) * self.rank
         dist.all_reduce(tensor, group=flatten_pg)

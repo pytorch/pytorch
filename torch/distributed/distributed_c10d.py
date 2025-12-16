@@ -2052,7 +2052,7 @@ def _new_process_group_helper(
                     "torchcomms is not available. Please install torchcomms to use this feature."
                 )
             device = torch.device(os.environ.get("TORCHCOMM_DEVICE", "cuda"))
-            # TODO: How do we redirect nccl to ncclx
+            # TODO: We need to add pg option conversion.
             comm = new_comm(backend_str, device, name=group_name)
             group_name = GroupName(group_name)
             backend_class = _BackendWrapper(comm)
