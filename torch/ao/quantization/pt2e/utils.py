@@ -477,9 +477,13 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    assert in_spec.type is tuple
+    if in_spec.type is not tuple:
+        raise AssertionError(f"Expected in_spec.type to be tuple, got {in_spec.type}")
     args_spec = in_spec.child(0)
-    assert args_spec.type is tuple
+    if args_spec.type is not tuple:
+        raise AssertionError(
+            f"Expected args_spec.type to be tuple, got {args_spec.type}"
+        )
     args_spec_children = args_spec.children()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
