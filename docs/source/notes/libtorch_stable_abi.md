@@ -163,21 +163,20 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 | -------- | ------- | ------- | ------- |
 | std::optional\<S> | if there is a value, raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue representing S. if there is no value, nullptr. | std::optional\<T> | Type? |
 | torch::stable::Tensor | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
-| RAIIATH (outdated) | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
 | torch::headeronly::ScalarType | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | torch::headeronly::ScalarType | ScalarType |
-| int32_t | raw bitwise copy into leading bytes of uint64_t | at::Layout | Layout |
-| int32_t | raw bitwise copy into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
+| torch::headeronly::Layout | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | at::Layout | Layout |
+| torch::headeronly::MemoryFormat | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
 | bool | raw bitwise copy into leading bytes of uint64_t | bool | bool |
 | int64_t | raw bitwise copy into leading bytes of uint64_t | int64_t | int |
 | double | raw bitwise copy into leading bytes of uint64_t | double | float |
-| ? | ? | c10::Device | Device |
+| torch::stable::Device | raw bitwise copy of index and type into leading bytes of uint64_t | c10::Device | Device |
 | ? | ? | c10::Stream | Stream |
 | ? | ? | c10::complex<double> | complex |
 | ? | ? | at::Scalar | Scalar |
-| ? | ? | std::string/const char*/ivalue::ConstantString | str |
+| std::string/std::string_view | raw bitwise copy of underlying StringHandle into leading bytes of uint64_t | std::string/const char*/ivalue::ConstantString | str |
 | ? | ? | at::Storage | Storage |
 | ? | ? | at::Generator | Generator |
-| ? | ? | c10::List\<T> | Type[] |
+| std::vector<T>/torch::headeronly::HeaderOnlyArrayRef<T> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue pointing to a list of StableIValues recursively representing the underlying elements. | c10::List\<T> | Type[] |
 | ? | ? | ivalue::Tuple\<T> | (Type, ...) |
 | ? | ? | c10::SymInt | SymInt |
 | ? | ? | c10::SymFloat | SymFloat |
