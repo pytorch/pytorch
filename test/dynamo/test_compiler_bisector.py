@@ -11,11 +11,8 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
+from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
-from torch.testing._internal.inductor_utils import (
-    HAS_XPU_AND_TRITON,
-)
-
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -168,7 +165,9 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
-    @skipIf(HAS_XPU_AND_TRITON, "String comparison failed: 'eager' != 'inductor' on XPU")
+    @skipIf(
+        HAS_XPU_AND_TRITON, "String comparison failed: 'eager' != 'inductor' on XPU"
+    )
     def test_rng(self):
         def foo():
             return torch.rand([10], device=device_type) + 1
