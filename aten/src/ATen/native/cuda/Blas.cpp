@@ -460,8 +460,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
-  if (args.must_copy_bias_into_result()
-      /*REMOVE THAT*/ || args.bias_ld.has_value()) {
+
+  // result.is_complex implies BLAS path, so we need to copy bias (self) into result
+  if (result.is_complex() && args.bias.has_value()) {
+    copy_bias_into_result(args, **args.bias);
+  }
+  if (args.must_copy_bias_into_result()) {
     copy_bias_into_result(args, self);
   }
   // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results.

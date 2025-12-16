@@ -197,7 +197,7 @@ struct cublasCommonArgs {
           }
           std::cout << "has bias: " << bias.has_value() << std::endl;
         } else { // 1D bias
-          if (!transpose_result && self->is_contiguous()) {
+          if (transpose_result && self->is_contiguous()) {
             // Bias expanded to a matrix with the leading dimension 0
             bias = c10::MaybeOwned<Tensor>::borrowed(*self);
             bias_ld = static_cast<int64_t>(0);
