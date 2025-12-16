@@ -197,6 +197,30 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual((4, 8), empty_like_dt.to_local().shape)
 
     @with_comms
+    def test_meta_init_partial(self):
+        device_mesh = self.build_device_mesh()
+        partial_spec = [Partial()]
+
+        class ToyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "scalar_buffer", torch.tensor(0.0, dtype=torch.float32)
+                )
+
+        with torch.device("meta"):
+            module = ToyModule()
+            module._buffers["scalar_buffer"] = DTensor.from_local(
+                module.scalar_buffer,
+                device_mesh=device_mesh,
+                placements=partial_spec,
+            )
+        module.to_empty(device=None)
+
+        # check that to_empty preserves partial
+        self.assertEqual(module.scalar_buffer.placements, (Partial(),))
+
+    @with_comms
     def test_fill_inplace(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -736,11 +760,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
+            _clear_sharding_prop_cache,
             _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_fast_path_sharding_prop_cache()
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
