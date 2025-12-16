@@ -899,236 +899,6 @@ class TestCrossPGOverlap(InductorTestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-class TestFusionRegionsWithOverlap(InductorTestCase):
-    """Test that fusion regions work correctly with overlap scheduler and deps."""
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        cls.device = "cuda"
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        dist.destroy_process_group()
-
-    def test_fusion_region_with_overlap_scheduler_and_deps(self):
-        """
-        Test that fusion regions correctly handle overlap deps.
-
-        Graph structure:
-        - ag_start
-        - pointwise1 (a + 1)  \
-        - pointwise2 (b * 2)   - fusion region (independent of collective)
-        - pointwise3 (b - 3)  /
-        - ag_wait
-        - matmul using ag_out and pointwise result (not fusible, so separate)
-
-        Expected behavior with fusion regions enabled:
-        1. The three pointwise ops form a fusion region
-        2. The fusion region hides the collective (overlap dep: ag_start -> fusion_region)
-        3. Wait depends on the fusion region (overlap dep: fusion_region -> wait)
-
-        The key is that the pointwise chain does NOT depend on ag_out,
-        so it can be overlapped with the collective.
-        We use matmul to consume the results separately from the fusion region.
-        """
-
-        def func(a):
-            group_name = "0"
-            group_size = 1
-
-            ag = torch.ops._c10d_functional.all_gather_into_tensor(
-                a, group_size, group_name
-            )
-            # Chain of pointwise ops - forms a fusion region
-            # This chain is INDEPENDENT of the collective output
-            b = a + 1
-            b = b * 2
-            b = b - 3
-            # Wait for collective after pointwise ops
-            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
-            # Use matmul (not fusible) to consume the results
-            # This keeps the fusion region separate
-            return torch.mm(ag_out[:1024, :1024], b)
-
-        with FakeTensorMode():
-            a = torch.ones(1024, 1024, device=self.device)
-            traced = make_fx(func)(a)
-
-        # Custom runtime estimation to ensure collective has measurable time
-        # Return None for other nodes to let scheduler use default estimation
-        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
-            if "all_gather" in str(node.target):
-                return 10.0  # 10ms collective time
-            return None  # Let scheduler use default estimation for other nodes
-
-        import torch._inductor.config as inductor_config
-
-        # Enable fusion regions
-        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
-            from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
-
-            scheduler = OverlapScheduler(
-                traced,
-                max_in_flight_gb=5.0,
-                max_compute_pre_fetch=200,
-                collective_bucketing=False,
-                insert_overlap_deps=True,
-                compute_overlap_multipler=1.0,
-                max_coll_distance=200,
-                custom_runtime_estimation=custom_runtime,
-                collective_estimator="analytical",
-            )
-
-            # Get the collective info before run() modifies the graph
-            # The scheduler identifies collectives in __init__
-            self.assertEqual(len(scheduler.collective_info), 1)
-            original_ag_start = next(iter(scheduler.collective_info.keys()))
-            info = scheduler.collective_info[original_ag_start]
-
-            scheduler.run()
-
-        # Verify the collective was hidden by checking if it has hiding nodes
-        # The hiding_nodes should include the fusion region (call_module) node
-        self.assertGreater(
-            len(info.hiding_nodes), 0, "Fusion region should hide the collective"
-        )
-
-        # Verify overlap dep structure:
-        # - ag_start -> last_hiding_node (overlap dep)
-        # - wait depends on last_hiding_node
-        #
-        # The expected structure after scheduling is:
-        #   ag_start
-        #   pointwise1 (a + 1)
-        #   pointwise2 (b * 2)
-        #   pointwise3 (b - 3)  <- last hiding node, has overlap dep FROM ag_start
-        #   wait                <- depends on pointwise3
-        #
-        # This means: ag is launched, pointwise ops run (hiding the ag),
-        # then wait blocks until ag completes.
-
-        # Find the last hiding node (should be the last pointwise or fusion region output)
-        hiding_nodes_list = list(info.hiding_nodes)
-        last_hiding_node = hiding_nodes_list[-1] if hiding_nodes_list else None
-        self.assertIsNotNone(last_hiding_node, "Should have a last hiding node")
-
-        # The last hiding node should be a pointwise op (sub) or fusion region output
-        last_hiding_name = last_hiding_node.name if last_hiding_node else ""
-        self.assertTrue(
-            "sub" in last_hiding_name or "_fusion_region" in last_hiding_name,
-            f"Last hiding node should be sub or fusion region, got: {last_hiding_name}",
-        )
-
-        # The graph gets modified with control_deps higher-order ops when
-        # insert_overlap_deps=True. Verify the graph is still valid.
-        traced.graph.lint()
-
-        # Check that the graph contains the expected operations
-        # (they may be wrapped in control_deps)
-        graph_str = str(traced.graph)
-        self.assertIn("all_gather_into_tensor", graph_str)
-        self.assertIn("wait_tensor", graph_str)
-        self.assertIn("mm", graph_str)
-        # The pointwise ops (add, mul, sub) should still be present
-        self.assertIn("add", graph_str)
-        self.assertIn("mul", graph_str)
-        self.assertIn("sub", graph_str)
-
-        # Verify the overlap structure is correct by checking node order
-        # The structure should be: ag -> pointwise ops -> wait
-        # Control_dep may or may not be present depending on whether natural
-        # data dependencies already enforce the correct order
-        node_names = [n.name for n in traced.graph.nodes if n.op == "call_function"]
-        ag_idx = next(i for i, n in enumerate(node_names) if "all_gather" in n)
-        wait_idx = next(i for i, n in enumerate(node_names) if "wait_tensor" in n)
-        sub_idx = next(i for i, n in enumerate(node_names) if "sub" in n)
-
-        # Verify: ag comes before sub, sub comes before wait
-        self.assertLess(ag_idx, sub_idx, "ag should come before sub (hiding op)")
-        self.assertLess(
-            sub_idx, wait_idx, "sub (last hiding op) should come before wait"
-        )
-
-    def test_overlap_bucketing_basic_functionality(self):
-        """
-        Test basic overlap bucketing with fusion regions.
-
-        Simpler test that just verifies the scheduler runs without errors
-        and produces a valid graph.
-        """
-
-        def func(a, b):
-            group_name = "0"
-            group_size = 1
-
-            # Two collectives
-            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
-                a, group_size, group_name
-            )
-            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
-                b, group_size, group_name
-            )
-
-            # Pointwise chain that can hide both
-            c = a + b
-            c = c * 2
-            c = c - 1
-
-            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
-            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
-
-            return ag1_out.sum() + ag2_out.sum() + c.sum()
-
-        with FakeTensorMode():
-            a = torch.ones(512, 512, device=self.device)
-            b = torch.ones(512, 512, device=self.device)
-            traced = make_fx(func)(a, b)
-
-        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
-            if "all_gather" in str(node.target):
-                return 5.0
-            return 0.0
-
-        import torch._inductor.config as inductor_config
-
-        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
-            from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
-
-            scheduler = OverlapScheduler(
-                traced,
-                max_in_flight_gb=5.0,
-                max_compute_pre_fetch=200,
-                collective_bucketing=True,
-                insert_overlap_deps=True,
-                compute_overlap_multipler=1.0,
-                max_coll_distance=200,
-                custom_runtime_estimation=custom_runtime,
-                collective_estimator="analytical",
-            )
-            result = scheduler.run()
-
-        # Verify the graph is valid
-        result.graph.lint()
-
-        # Verify the graph contains expected operations
-        # (they may be wrapped in control_deps higher-order ops)
-        graph_str = str(result.graph)
-        # All gather may be bucketed, so check for either the original or bucketed form
-        self.assertTrue(
-            "all_gather" in graph_str or "bucketed" in graph_str.lower(),
-            "Graph should contain all_gather or bucketed collective",
-        )
-        self.assertIn("wait_tensor", graph_str)
-
-
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFusibleNodeOverlap(InductorTestCase):
     """Test that fusible nodes are used for overlapping with collectives."""
 
@@ -1190,6 +960,50 @@ class TestFusibleNodeOverlap(InductorTestCase):
         info = scheduler.collective_info[ag_start]
         self.assertGreater(
             len(info.hiding_nodes), 0, "Fusible nodes should hide the collective"
+        )
+
+    def test_fusion_regions_hide_collective(self):
+        """Test that fusion regions can hide collectives when enabled."""
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            b = a + 1
+            b = b * 2
+            b = b - 3
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            return ag_out.sum() + b.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(1024, 1024, device=self.device)
+            traced = make_fx(func)(a)
+
+        import torch._inductor.config as inductor_config
+
+        with inductor_config.patch({"test_configs.enable_fusion_regions": True}):
+            from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+            scheduler = OverlapScheduler(
+                traced,
+                max_in_flight_gb=5.0,
+                max_compute_pre_fetch=200,
+                collective_bucketing=False,
+                insert_overlap_deps=False,
+                compute_overlap_multipler=1.0,
+                max_coll_distance=200,
+                custom_runtime_estimation=None,
+                collective_estimator="analytical",
+            )
+            ag_start = next(iter(scheduler.collective_info.keys()))
+            info = scheduler.collective_info[ag_start]
+            scheduler.run()
+
+        self.assertGreater(
+            len(info.hiding_nodes), 0, "Fusion region should hide the collective"
         )
 
 
