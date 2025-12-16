@@ -1183,7 +1183,7 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
 
     output_size_list = (
         size_split(input_strategy.shape[dim], split_size_or_sections)
-        if isinstance(split_size_or_sections, int)
+        if isinstance(split_size_or_sections, IntLike)
         else split_size_or_sections
     )
     if not isinstance(output_size_list, Sized):
