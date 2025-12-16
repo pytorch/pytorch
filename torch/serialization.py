@@ -1739,7 +1739,10 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     deserialized_objects = {}
 
     def persistent_load(saved_id):
-        assert isinstance(saved_id, tuple)
+        if not isinstance(saved_id, tuple):
+            raise AssertionError(
+                f"saved_id must be a tuple, got {type(saved_id).__name__}"
+            )
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
@@ -1836,7 +1839,10 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if torch._guards.active_fake_mode() is None and not _serialization_tls.skip_data:
         offset = f.tell() if f_should_read_directly else None
         for key in deserialized_storage_keys:
-            assert key in deserialized_objects
+            if key not in deserialized_objects:
+                raise AssertionError(
+                    f"storage key {key!r} not found in deserialized_objects"
+                )
             typed_storage = deserialized_objects[key]
             typed_storage._untyped_storage._set_from_file(
                 f,
@@ -1994,7 +2000,8 @@ def _load(
             return storage_offset
 
         if current_offset is None:
-            assert key == "0"
+            if key != "0":
+                raise AssertionError(f"expected key '0', got {key!r}")
             current_offset = zip_file.get_record_offset(name)
             local_header_offset = zip_file.get_record_header_offset(name)
             storage_offset = current_offset
@@ -2087,13 +2094,17 @@ def _load(
         return typed_storage
 
     def persistent_load(saved_id):
-        assert isinstance(saved_id, tuple)
+        if not isinstance(saved_id, tuple):
+            raise AssertionError(
+                f"saved_id must be a tuple, got {type(saved_id).__name__}"
+            )
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
-        assert typename == "storage", (
-            f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
-        )
+        if typename != "storage":
+            raise AssertionError(
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+            )
         storage_type, key, location, numel = data
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8

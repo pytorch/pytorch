@@ -64,7 +64,7 @@
 // algo, under the hood, cudnn will run with the slower kernel since it sees
 // fastest algorithm combination with a sub optimal mathType.
 
-constexpr size_t operator"" _TiB(unsigned long long n) {
+constexpr size_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) * 1024 * 1024 * 1024 * 1024;
 }
 
