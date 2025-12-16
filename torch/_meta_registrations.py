@@ -3,7 +3,7 @@ import math
 from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import wraps
-from typing import TypeVar
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
