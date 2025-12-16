@@ -22,6 +22,7 @@ permissions:
 jobs:
   build:
     name: vllm-x-pytorch-build
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
     with:
       # When building vLLM, uv doesn't like that we rename wheel without changing the wheel metadata
