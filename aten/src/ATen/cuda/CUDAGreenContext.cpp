@@ -26,7 +26,7 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
         "Attempted to create a green context but"
         " there was no primary context! Creating a primary context...");
 
-    cudaFree(0);
+    cudaFree(nullptr);
   }
 
    CUdevice device;
