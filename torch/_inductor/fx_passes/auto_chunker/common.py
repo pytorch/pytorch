@@ -61,5 +61,5 @@ class ChunkingMeta:
         return self.chunk_dim == dim
 
     @staticmethod
-    def is_nop(meta: ChunkingMeta) -> bool:
+    def is_nop(meta: ChunkingMeta | None) -> bool:
         return meta is None or meta == ChunkingMeta()

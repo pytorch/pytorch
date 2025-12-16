@@ -1,4 +1,6 @@
-from typing import Optional
+import logging
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 
 import torch
 from torch._inductor import config
@@ -18,7 +20,9 @@ aten = torch.ops.aten
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 
-def set_chunking_meta(node, meta=None, **kwargs):
+def set_chunking_meta(
+    node: Node, meta: Optional[ChunkingMeta] = None, **kwargs: Any
+) -> bool:
     """
     kwargs can override fields in the passed in `meta`
     """
@@ -35,7 +39,7 @@ def set_chunking_meta(node, meta=None, **kwargs):
     return old_meta is None or old_meta != meta
 
 
-def update_chunking_meta(node, **kwargs):
+def update_chunking_meta(node: Node, **kwargs: Any) -> bool:
     """
     Unlike set_chunking_mete, this function keeps the existing chunking
     metadata if it's not overridden.
@@ -48,13 +52,17 @@ def update_chunking_meta(node, **kwargs):
     for k, v in kwargs.items():
         if getattr(meta, k, None) != v:
             changed = True
-        setattr(meta, k, v)
+            setattr(meta, k, v)
 
     node.meta["chunking"] = meta
     return changed
 
 
-def set_chunking_meta_if_none(nodes, meta, filter_for_nop=None):
+def set_chunking_meta_if_none(
+    nodes: Sequence[Node],
+    meta: ChunkingMeta,
+    filter_for_nop: Optional[Callable[[Node], bool]] = None,
+) -> bool:
     """
     If filter_fop_nop returns true for a node, we set the chunking
     meta to nop instead.
@@ -70,25 +78,27 @@ def set_chunking_meta_if_none(nodes, meta, filter_for_nop=None):
     return changed
 
 
-def copy_chunking_meta(dst_node, src_node):
+def copy_chunking_meta(dst_node: Node, src_node: Node | ChunkingMeta) -> bool:
     if isinstance(src_node, torch.fx.Node):
         src_meta = get_chunking_meta(src_node)
     else:
         assert isinstance(src_node, ChunkingMeta)
         src_meta = src_node
     assert src_meta
-    return set_chunking_meta(dst_node, **src_meta.__dict__)
+    return set_chunking_meta(dst_node, src_meta)
 
 
-def get_chunking_meta(node):
+def get_chunking_meta(node: Node) -> Optional[ChunkingMeta]:
     return node.meta.get("chunking")
 
 
-def has_nop_chunking_meta(node):
+def has_nop_chunking_meta(node: Node) -> bool:
     return ChunkingMeta.is_nop(get_chunking_meta(node))
 
 
-def get_chunking_metas(nodes, skip_none=False):
+def get_chunking_metas(
+    nodes: Sequence[Node], skip_none: bool = False
+) -> Sequence[ChunkingMeta | None]:
     return [
         get_chunking_meta(node)
         for node in nodes
@@ -106,7 +116,7 @@ eligible_amplifier_node = OrderedSet(
 
 def find_amplifier_node(graph: Graph) -> Optional[Node]:
     r"""
-    Find the 'amplifier' node which is a not that generates large
+    Find the 'amplifier' node which is a node that generates large
     output with small/medium input.
 
     If there are multiple amplifier nodes, return the one with the largest
@@ -143,7 +153,7 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
     return amplifier_nodes_ratio[0][0] if len(amplifier_nodes_ratio) > 0 else None
 
 
-def reorder_nodes(graph):
+def reorder_nodes(graph: Graph) -> Graph:
     """
     Create a new graph to be like:
     1. all nodes run before `chunking_subgraph_nodes`
@@ -156,7 +166,7 @@ def reorder_nodes(graph):
 
     # `pre_chunking_nodes` are all nodes that only depends on
     # nodes inside `pre_chuning_nodes`
-    pre_chunking_nodes: OrderedSet[str] = OrderedSet()
+    pre_chunking_nodes: OrderedSet[Node] = OrderedSet()
 
     for node in graph.nodes:
         if node.op == "placeholder" or is_chunking_subgraph_input(node):
@@ -171,12 +181,12 @@ def reorder_nodes(graph):
 
     post_chunking_nodes = []
 
-    def _copy_node(typestr, node):
-        fake_tensor = get_fake_tensor_from_node_arg(node)
-        shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
-        log.debug(" - %s: %s %s", typestr, shape, node.format_node())
+    def _copy_node(typestr: str, node: Node) -> None:
+        if log.isEnabledFor(logging.DEBUG):
+            fake_tensor = get_fake_tensor_from_node_arg(node)
+            shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
+            log.debug(" - %s: %s %s", typestr, shape, node.format_node())
         env[node] = new_graph.node_copy(node, lambda x: env[x])
-        return env[node]
 
     # add pre_chunking_nodes
     new_graph = Graph()
@@ -185,13 +195,11 @@ def reorder_nodes(graph):
         _copy_node("prechunking", node)
 
     # add nodes in the chunking subgraph
-    new_chunking_subgraph_nodes: OrderedSet[Node] = OrderedSet()
     for node in graph.nodes:
         if node in pre_chunking_nodes:
             continue
         elif get_chunking_meta(node):
             _copy_node("chunking", node)
-            new_chunking_subgraph_nodes.add(env[node])
         else:
             post_chunking_nodes.append(node)
 

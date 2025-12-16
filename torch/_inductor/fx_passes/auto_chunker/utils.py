@@ -8,6 +8,10 @@ from torch.utils._pytree import tree_flatten
 from .common import CantChunk, ChunkingMeta
 
 
+def is_tangent_node(node: Node) -> bool:
+    return node.op == "placeholder" and "tangent" in node.name
+
+
 def get_args_of_node_type(node: Node) -> Sequence[Node]:
     return [x for x in tree_flatten((node.args, node.kwargs))[0] if isinstance(x, Node)]
 
@@ -18,7 +22,7 @@ def use_tangent(node: Node) -> bool:
     """
 
     return any(
-        arg.op == "placeholder" and "tangent" in arg.target  # type: ignore[operator]
+        is_tangent_node(arg)  # type: ignore[operator]
         for arg in get_args_of_node_type(node)
     )
 
@@ -104,7 +108,7 @@ def get_first_chunking_meta(*node_list: Node) -> Optional[ChunkingMeta]:
 
 def get_scale_by_from_metas(*metas: ChunkingMeta) -> Optional[Node]:
     """
-    If there are multiple ChunkingMeta has the scale_by field,
+    If there are multiple ChunkingMeta having the scale_by field,
     raise a CantChunk exception.
 
     If no ChunkingMeta has scale_by field, return None.
@@ -145,7 +149,7 @@ def get_node_is_scalar(nodes: Sequence[Node]) -> dict[Node, bool]:
 
 def get_node_ndim(nodes: Sequence[Node]) -> dict[Node, int]:
     """
-    Returns a dict map a node to 'ndum'.
+    Returns a dict map a node to 'ndim'.
     """
     node_ndim = {}
     for node in nodes:
@@ -159,23 +163,21 @@ def is_chunked_by_dim(node: Node, dim: int) -> bool:
     from .core import get_chunking_meta
 
     meta = get_chunking_meta(node)
-    return meta and meta.chunked_by_dim(dim)
+    return meta is not None and meta.chunked_by_dim(dim)
 
 
 def tangent_has_chunking_meta(gm: GraphModule) -> bool:
     from .core import get_chunking_meta
 
     return any(
-        node.op == "placeholder"
-        and "tangent" in node.target
-        and get_chunking_meta(node) is not None
-        for node in gm.graph.nodes
+        is_tangent_node(node) and get_chunking_meta(node) is not None
+        for node in gm.graph.find_nodes(op="placeholder", sort=False)
     )
 
 
 def get_tangent_nodes(graph: Graph) -> Sequence[Node]:
     tangents = []
-    for node in graph.nodes:
-        if node.op == "placeholder" and "tangent" in node.name:
+    for node in graph.find_nodes(op="placeholder", sort=False):
+        if is_tangent_node(node):
             tangents.append(node)
     return tangents

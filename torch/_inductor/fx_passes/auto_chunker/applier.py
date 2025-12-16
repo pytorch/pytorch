@@ -9,7 +9,7 @@ from torch.fx import Graph, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .core import get_chunking_meta, reorder_nodes
-from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg
+from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg, is_tangent_node
 
 
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
@@ -40,9 +40,7 @@ def fake_tensor_prop(gm):
 
 def is_chunking_subgraph_input(node):
     meta = get_chunking_meta(node)
-    if meta is None:
-        return False
-    if node.op == "placeholder" and "tangent" in node.target:
+    if meta is None or is_tangent_node(node):
         return False
     arg_nodes = get_args_of_node_type(node)
     arg_nodes_no_meta = [node for node in arg_nodes if get_chunking_meta(node) is None]
