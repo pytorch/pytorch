@@ -305,6 +305,50 @@ inline common_dtype<T, U> remainder(const T x, const U y) {
   return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
 }
 
+// Based on aten/src/ATen/native/Pow.h
+template <
+    typename T,
+    ::metal::enable_if_t<is_scalar_integral_v<T>, bool> = true>
+inline T powi_impl(T a, T b) {
+  T result = 1;
+  while (b) {
+    if (b & 1) {
+      result *= a;
+    }
+    b /= 2;
+    a *= a;
+  }
+  return result;
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && !::metal::is_signed_v<T>,
+        bool> = true>
+inline T powi(T a, T b) {
+  return powi_impl(a, b);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T>&& ::metal::is_signed_v<T>,
+        bool> = true>
+inline T powi(T a, T b) {
+  if (b < 0) {
+    if (a == 1) {
+      return 1;
+    } else if (a == -1) {
+      auto negative = (-b) % static_cast<T>(2);
+      return negative ? -1 : 1;
+    } else {
+      return 0;
+    }
+  }
+  return powi_impl(a, b);
+}
+
 // Based on algorithm described in
 // https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
 inline float log1p(float x) {
