@@ -323,7 +323,6 @@ x = add_1, y = add_2);  getitem = None
 
             # Verify the output contains our print messages
             # C++ prints literal format strings (no value substitution)
-            # This is not complete yet with not kwargs printing yet.
             self.assertEqual(
                 captured_output,
                 "C++ print test: value=<Tensor:arg1_1>\nResult=<Tensor:buf1>",

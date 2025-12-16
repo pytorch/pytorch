@@ -1566,9 +1566,13 @@ class PythonWrapperCodegen(CodeGen):
         # First arg is the format string
         format_str = args[0] if args else ""
 
+        # For HOPs, kwargs are stored in node.kwargs directly
+        # Use node.kwargs if available, otherwise fall back to unflatten_args kwargs
+        actual_kwargs = node.kwargs if node.kwargs else kwargs
+
         # Build format kwargs - for Python we can directly use the values
         format_kwargs: dict[str, str] = {}
-        for key, value in kwargs.items():
+        for key, value in actual_kwargs.items():
             if isinstance(value, ir.IRNode):
                 # For tensor nodes, reference the buffer
                 format_kwargs[key] = value.codegen_reference()
@@ -1580,6 +1584,9 @@ class PythonWrapperCodegen(CodeGen):
         if format_kwargs:
             kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
             self.writeline(f"builtins.print({repr(format_str)}.format({kwargs_str}))")
+        else:
+            # No format kwargs, just print the format string directly
+            self.writeline(f"builtins.print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

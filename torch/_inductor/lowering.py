@@ -7558,6 +7558,13 @@ def with_effects(token, op, *args, **kwargs):
         args, kwargs = pytree.tree_map_only(
             ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
         )
+        # For hop_print, gen_schema requires the original kwargs values, not IR nodes.
+        # Since hop_print returns nothing (schema.returns is empty), we can skip schema
+        # generation and return early.
+        from torch._higher_order_ops.print import print as hop_print
+
+        if op == hop_print:
+            return (token, result)
         schema = _get_schema(op, args, kwargs)
     except RuntimeError as e:
         error_msg = str(e)
