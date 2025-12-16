@@ -390,7 +390,9 @@ at::Tensor LazyNativeFunctions::lift(const at::Tensor& tensor) {
       !at::functionalization::impl::isFunctionalTensor(tensor));
   return at::functionalization::impl::to_functional_tensor(tensor);
 }
-at::Tensor LazyNativeFunctions::lift_fresh(const at::Tensor& tensor, at::Device device) {
+at::Tensor LazyNativeFunctions::lift_fresh(
+    const at::Tensor& tensor,
+    at::Device device) {
   TORCH_INTERNAL_ASSERT(
       !at::functionalization::impl::isFunctionalTensor(tensor));
   return at::functionalization::impl::to_functional_tensor(tensor);

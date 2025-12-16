@@ -37,19 +37,20 @@ void THCPGraph_init(PyObject* module) {
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
                 : c10::cuda::MempoolId_t{0, 0};
-                if (capture_error_mode == "global") {
-                  capture_mode = cudaStreamCaptureModeGlobal;
-                } else if (capture_error_mode == "thread_local") {
-                  capture_mode = cudaStreamCaptureModeThreadLocal;
-                } else if (capture_error_mode == "relaxed") {
-                  capture_mode = cudaStreamCaptureModeRelaxed;
-                } else {
-                  TORCH_CHECK(
-                    false,
-                    "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
-                    capture_error_mode);
-                  }
-            self.set_prev_only_lift_cpu_tensors(torch::utils::only_lift_cpu_tensors());
+            if (capture_error_mode == "global") {
+              capture_mode = cudaStreamCaptureModeGlobal;
+            } else if (capture_error_mode == "thread_local") {
+              capture_mode = cudaStreamCaptureModeThreadLocal;
+            } else if (capture_error_mode == "relaxed") {
+              capture_mode = cudaStreamCaptureModeRelaxed;
+            } else {
+              TORCH_CHECK(
+                  false,
+                  "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
+                  capture_error_mode);
+            }
+            self.set_prev_only_lift_cpu_tensors(
+                torch::utils::only_lift_cpu_tensors());
             torch::utils::set_only_lift_cpu_tensors(true);
             return self.capture_begin(pool, capture_mode);
           },
@@ -60,7 +61,8 @@ void THCPGraph_init(PyObject* module) {
           "capture_end",
           [](::at::cuda::CUDAGraph& self) {
             self.capture_end();
-            torch::utils::set_only_lift_cpu_tensors(self.prev_only_lift_cpu_tensors());
+            torch::utils::set_only_lift_cpu_tensors(
+                self.prev_only_lift_cpu_tensors());
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
