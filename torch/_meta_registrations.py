@@ -5344,7 +5344,7 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
-    # pyrefly: ignore [not-iterable]
+
     return torch.empty(size, *args, **kwargs)
 
 
@@ -7095,7 +7095,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore [missing-attribute]
+
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),

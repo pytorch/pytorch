@@ -241,7 +241,7 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
     device = _get_device_index(device, optional=True)
     if not isinstance(fraction, float):
         raise TypeError("Invalid type for fraction argument, must be `float`")
-    # pyrefly: ignore [missing-attribute]
+
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 

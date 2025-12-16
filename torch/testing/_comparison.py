@@ -1122,7 +1122,7 @@ def originate_pairs(
     mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
     id: tuple[Any, ...] = (),
     **options: Any,
-    # pyrefly: ignore [bad-return]
+
 ) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
@@ -1221,7 +1221,7 @@ def originate_pairs(
     else:
         for pair_type in pair_types:
             try:
-                # pyrefly: ignore [bad-instantiation]
+
                 return [pair_type(actual, expected, id=id, **options)]
             # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
             # inputs. Thus, we try the next pair type.

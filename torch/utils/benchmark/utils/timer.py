@@ -234,7 +234,7 @@ class Timer:
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
-        # pyrefly: ignore [bad-instantiation]
+
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,

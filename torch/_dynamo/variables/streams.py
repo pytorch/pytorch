@@ -306,7 +306,7 @@ class StreamVariable(StreamContextVariable):
         self.value = value
         # pyrefly: ignore [read-only]
         self.device = value.device
-        # pyrefly: ignore [read-only]
+
         self.user_object_index = user_object_index
         super().__init__(None, **kwargs)
 

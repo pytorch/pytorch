@@ -1584,7 +1584,7 @@ class WithEnterFunctionVariable(VariableTracker):
         assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
-        # pyrefly: ignore [bad-argument-type]
+
         return tx.enter_ctx(self.ctx, tx.current_instruction)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

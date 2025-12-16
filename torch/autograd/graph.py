@@ -231,7 +231,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
-    # pyrefly: ignore [bad-argument-type]
+
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 

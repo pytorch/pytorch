@@ -692,7 +692,7 @@ def package_pt2(
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
-    # pyrefly: ignore [bad-argument-type]
+
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
             archive_writer, exported_programs, pickle_protocol=pickle_protocol
@@ -707,7 +707,7 @@ def package_pt2(
 
     if isinstance(f, (io.IOBase, IO)):
         f.seek(0)
-    # pyrefly: ignore [bad-return]
+
     return f
 
 
@@ -1094,7 +1094,7 @@ def load_pt2(
 
     weights = {}
     weight_maps = {}
-    # pyrefly: ignore [bad-argument-type]
+
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:

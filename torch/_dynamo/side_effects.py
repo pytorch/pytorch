@@ -706,7 +706,7 @@ class SideEffects:
                     cg.add_cache(var)
                     var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
-                    # pyrefly: ignore [bad-assignment]
+
                     var.source = LocalCellSource(var.local_name)
             elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
@@ -994,7 +994,7 @@ class SideEffects:
                 if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
-                    # pyrefly: ignore [bad-argument-type]
+
                 ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
@@ -1027,7 +1027,7 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
+
                     cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -1050,7 +1050,7 @@ class SideEffects:
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
-                    # pyrefly: ignore [bad-argument-type]
+
                 ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
@@ -1067,7 +1067,7 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
+
                     cg(var._list_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [

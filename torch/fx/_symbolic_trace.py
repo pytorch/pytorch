@@ -427,7 +427,7 @@ class Tracer(TracerBase):
         ):
             qualname: Optional[str] = self.tensor_attrs.get(
                 a
-            )  # pyrefly: ignore[no-matching-overload]
+            )
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -446,7 +446,7 @@ class Tracer(TracerBase):
                     )
                 qualname = self.get_fresh_qualname(base_name)
                 assert isinstance(qualname, str)
-                self.tensor_attrs[a] = (  # pyrefly: ignore[unsupported-operation]
+                self.tensor_attrs[a] = (
                     qualname
                 )
                 setattr(self.root, qualname, a)

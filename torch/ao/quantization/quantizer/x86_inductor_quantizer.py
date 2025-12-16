@@ -830,7 +830,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
-                        # pyrefly: ignore [bad-argument-type]
+
                         input_qspec_map=binary_node_input_qspec_map,
                         _annotated=True,
                     )
@@ -901,7 +901,7 @@ class X86InductorQuantizer(Quantizer):
                 )
                 binary_node.meta[QUANT_ANNOTATION_KEY] = (
                     _X86InductorQuantizationAnnotation(
-                        # pyrefly: ignore [bad-argument-type]
+
                         input_qspec_map=binary_node_input_qspec_map,
                         # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                         output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
@@ -1109,7 +1109,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # pyrefly: ignore [bad-argument-type]
+
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
             )
@@ -1165,7 +1165,7 @@ class X86InductorQuantizer(Quantizer):
                 quantization_config
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # pyrefly: ignore [bad-argument-type]
+
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,

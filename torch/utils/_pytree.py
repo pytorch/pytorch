@@ -1981,7 +1981,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Enum | dict[str, Any]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore [unsupported-operation]
+
         return enum_cls[obj["name"]]
     return obj
 

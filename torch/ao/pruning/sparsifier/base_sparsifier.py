@@ -171,7 +171,7 @@ class BaseSparsifier(abc.ABC):
             self.make_config_from_model(model)
 
         # TODO: Remove the configuration by reference ('module')
-        # pyrefly: ignore [not-iterable]
+
         for module_config in self.config:
             if not isinstance(module_config, dict):
                 raise AssertionError(

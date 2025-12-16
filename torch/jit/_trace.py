@@ -337,7 +337,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
-            # pyrefly: ignore [missing-attribute]
+
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(

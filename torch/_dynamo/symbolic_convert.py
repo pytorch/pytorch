@@ -2056,7 +2056,7 @@ class InstructionTranslatorBase(
         exit, exc = self.popn(2)
         assert exc is None
         self.push(exc)
-        # pyrefly: ignore [bad-argument-type]
+
         self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
@@ -3796,13 +3796,13 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            # pyrefly: ignore [bad-argument-type]
+
             args = args + contents[2 : -len(kw_names)]
-            # pyrefly: ignore [bad-argument-type]
+
             kwargs_list = contents[-len(kw_names) :]
-            # pyrefly: ignore [no-matching-overload]
+
             kwargs = dict(zip(kw_names, kwargs_list))
-            # pyrefly: ignore [bad-argument-type]
+
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
@@ -4777,7 +4777,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-                # pyrefly: ignore [missing-attribute]
+
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4852,14 +4852,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracing_ctx.previously_inlined_functions[code] = result
 
         try:
-            # pyrefly: ignore [missing-attribute]
+
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
-                    # pyrefly: ignore [missing-attribute]
+
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
                     args=[arg.python_type() for arg in args],
                     kwargs=kwargs,

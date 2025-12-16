@@ -100,7 +100,7 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        # pyrefly: ignore [read-only]
+
         self.fn = self._artifacts.runtime_env.forward_callable(
             self._artifacts.backend_id,
             self._artifacts.compiled_fn,

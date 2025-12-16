@@ -876,7 +876,7 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        # pyrefly: ignore [missing-attribute]
+
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return

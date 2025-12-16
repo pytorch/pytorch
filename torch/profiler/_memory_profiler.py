@@ -231,7 +231,7 @@ class SchemaMatcher:
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
-                # pyrefly: ignore [unsupported-operation]
+
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
         return tuple(mutable or (None for _ in t.inputs))
@@ -1109,7 +1109,7 @@ class MemoryProfileTimeline:
 
             if action in (Action.PREEXISTING, Action.CREATE):
                 raw_events.append(
-                    # pyrefly: ignore [bad-argument-type]
+
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1120,7 +1120,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.INCREMENT_VERSION:
                 raw_events.append(
-                    # pyrefly: ignore [bad-argument-type]
+
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1129,7 +1129,7 @@ class MemoryProfileTimeline:
                     )
                 )
                 raw_events.append(
-                    # pyrefly: ignore [bad-argument-type]
+
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1140,7 +1140,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.DESTROY:
                 raw_events.append(
-                    # pyrefly: ignore [bad-argument-type]
+
                     (
                         t,
                         _ACTION_TO_INDEX[action],

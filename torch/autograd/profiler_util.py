@@ -96,7 +96,7 @@ class EventList(list):
         use_device = kwargs.pop("use_device", None)
         profile_memory = kwargs.pop("profile_memory", False)
         with_flops = kwargs.pop("with_flops", False)
-        # pyrefly: ignore [not-iterable]
+
         super().__init__(*args, **kwargs)
         self._use_device = use_device
         self._profile_memory = profile_memory

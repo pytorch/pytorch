@@ -1001,9 +1001,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r  # pyrefly: ignore [unsupported-operation]
+            self._dispatch_cache[key] = r
             add_cached_op(self)
-        return r  # pyrefly: ignore [bad-return]
+        return r
 
     def name(self):
         return self._name
@@ -1109,7 +1109,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
 
         if not isinstance(handler, Callable):  # type: ignore[arg-type]
             raise AssertionError(f"handler must be callable, got {type(handler)}")
-        return handler(*args, **kwargs)  # pyrefly: ignore [bad-return]
+        return handler(*args, **kwargs)
 
 
 def _must_dispatch_in_python(args, kwargs):

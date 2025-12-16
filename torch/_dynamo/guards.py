@@ -646,7 +646,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore [bad-argument-type]
+
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -707,7 +707,7 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore [bad-argument-type]
+
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:

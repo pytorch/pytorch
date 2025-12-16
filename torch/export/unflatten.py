@@ -1412,7 +1412,7 @@ class _ModuleFrame:
 
     def print(self, *args, **kwargs):
         if self.verbose:
-            # pyrefly: ignore [not-iterable]
+
             print(*args, **kwargs)
 
     def run_from(self, node_idx):
@@ -1506,7 +1506,7 @@ class _ModuleFrame:
                 self.seen_attrs[self.child_fqn].add(node.target)
 
             self.copy_node(node)
-            # pyrefly: ignore [unsupported-operation]
+
             node_idx += 1
 
 

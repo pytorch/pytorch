@@ -548,7 +548,7 @@ def make_graphed_callables(
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
                 return tuple(
-                    # pyrefly: ignore [bad-argument-type]
+
                     b.detach() if b is not None else b
                     for b in static_grad_inputs
                 )

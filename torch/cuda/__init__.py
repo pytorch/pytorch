@@ -1214,7 +1214,7 @@ def _get_pynvml_handler(device: Device = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
             "nvidia-ml-py does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
+
         ) from _PYNVML_ERR
     # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
     from pynvml import NVMLError_DriverNotLoaded
@@ -1233,7 +1233,7 @@ def _get_amdsmi_handler(device: Device = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
+
         ) from _PYNVML_ERR
     try:
         amdsmi.amdsmi_init()
@@ -1497,7 +1497,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
     return default_generator.get_offset()
 
 
-# pyrefly: ignore [deprecated]
+
 from .memory import *  # noqa: F403
 from .random import *  # noqa: F403
 

@@ -2072,13 +2072,13 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                # pyrefly: ignore [missing-attribute]
+
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             num_store_subgraphs = kernel.get_store_output_count()
             for i in range(num_store_subgraphs):
                 subgraph_name = kernel._get_store_output_subgraph_name(i)
-                # pyrefly: ignore [missing-attribute]
+
                 partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):

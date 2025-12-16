@@ -421,7 +421,7 @@ class Unpickler:
                 inst = self.stack[-1]
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
-                    # pyrefly: ignore [not-iterable]
+
                     inst.set_(*state)
                 elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
