@@ -30,6 +30,50 @@ from torch.testing._internal.inductor_utils import (
 def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)
 
+class _tempTensorSamplerForQualName:
+    def __init__(self, val, mask, prob):
+        self.val = val
+        self.mask = mask
+        self.prob = prob
+
+    @classmethod
+    def from_tensor(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    @classmethod
+    def from_tensor_fake_fn(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    def __add__(self, other):
+        return _tempTensorSamplerForQualName.from_tensor(self.val + other.val)
+
+    def __sub__(self, other):
+        return _tempTensorSamplerForQualName.from_tensor(self.val - other.val)
+
+
+class _tempNetForQualName(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def _prepare_extra_input(self):
+        shape = [1, 2, 3, 4]
+        x = torch.randn(shape)
+        return x
+
+    def forward(self, x):
+        x *= x
+        with torch.device(x.device):
+            y = self._prepare_extra_input()
+        sampler = _tempTensorSamplerForQualName.from_tensor(x)
+        x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+        x += y.sum()
+        return x
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -676,6 +720,22 @@ def add(x, y):
             )
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_classmethod_qualname(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        x = torch.rand(10, device=device)
+        model = _tempNetForQualName()
+        model.forward(x)
+        compiled_fn = torch.compile(
+            model.forward,
+            options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
+        )
 
 
 if __name__ == "__main__":
