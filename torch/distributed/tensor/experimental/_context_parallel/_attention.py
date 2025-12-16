@@ -1091,13 +1091,6 @@ def _context_parallel_buffers(
         if isinstance(buffer, torch.Tensor):
             # NOTE: assuming batch dim is 0
 
-            # TODO(chienchin): add support for buffer with more than 2 dimensions.
-            if len(buffer.shape) > 2:
-                raise ValueError(
-                    "context_parallel_shard currently only supports tensors "
-                    "with shape (seq_len,) or (batch_size, seq_len)."
-                )
-
             if load_balance_indices is not None:
                 # TODO: we should expclitly ask users to unsqueeze the batch dim.
                 # But this is a BC breaking ask.
@@ -1113,6 +1106,8 @@ def _context_parallel_buffers(
                     )
 
                 if seq_dim == 0:
+                    # buffer has shape [seq_len] or [seq_len, ...]
+                    # Just use the first (and only) batch of indices
                     buffer = torch.index_select(
                         buffer, dim=0, index=load_balance_indices[0]
                     )
@@ -1121,6 +1116,23 @@ def _context_parallel_buffers(
                     if idx_batch_size == 1:
                         size = [data_batch_size] + list(indices.size())[1:]
                         indices = indices.expand(*size)
+
+                    # load_balance_indices that has shape [B, seq_len] where:
+                    #   - dim 0 corresponds to buffer dim 0 (batch)
+                    #   - dim 1 corresponds to buffer dim seq_dim
+                    # Need to insert dimensions for all dims between 0 and seq_dim,
+                    # and all dims after seq_dim.
+
+                    # Insert dimensions between batch (dim 0) and seq_dim
+                    for i in range(1, seq_dim):
+                        indices = indices.unsqueeze(i)
+
+                    # Insert dimensions after seq_dim
+                    for _ in range(seq_dim + 1, buffer.ndim):
+                        indices = indices.unsqueeze(-1)
+
+                    # Expand to match buffer's shape
+                    indices = indices.expand(buffer.shape)
 
                     buffer = torch.gather(buffer, dim=seq_dim, index=indices)
 
