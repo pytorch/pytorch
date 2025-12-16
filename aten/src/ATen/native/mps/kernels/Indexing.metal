@@ -516,3 +516,54 @@ INSTANTIATE_INDEX_COPY(float2, int);
 INSTANTIATE_INDEX_COPY(float2, long);
 INSTANTIATE_INDEX_COPY(half2, int);
 INSTANTIATE_INDEX_COPY(half2, long);
+
+// Scatter index validation kernel
+// Validates that all indices are within bounds [0, size_limit)
+template <typename index_t>
+kernel void validate_scatter_indices(
+    constant index_t* indices [[buffer(0)]],
+    constant int64_t& size_limit [[buffer(1)]],
+    constant uint64_t& numel [[buffer(2)]],
+    device ErrorMessages* error_buffer [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  if (tid >= numel) {
+    return;
+  }
+
+  int64_t idx = static_cast<int64_t>(indices[tid]);
+
+  if (idx < 0) {
+    TORCH_REPORT_ERROR(
+        error_buffer,
+        "Class values must be non-negative, but got index ",
+        idx,
+        " at position ",
+        tid);
+  } else if (idx >= size_limit) {
+    TORCH_REPORT_ERROR(
+        error_buffer,
+        "Class values must be smaller than num_classes (",
+        size_limit,
+        "), but got index ",
+        idx,
+        " at position ",
+        tid);
+  }
+}
+
+// Instantiate for int32 and int64 indices
+template [[host_name("validate_scatter_indices_int32")]]
+kernel void validate_scatter_indices<int32_t>(
+    constant int32_t* indices [[buffer(0)]],
+    constant int64_t& size_limit [[buffer(1)]],
+    constant uint64_t& numel [[buffer(2)]],
+    device ErrorMessages* error_buffer [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]);
+
+template [[host_name("validate_scatter_indices_int64")]]
+kernel void validate_scatter_indices<int64_t>(
+    constant int64_t* indices [[buffer(0)]],
+    constant int64_t& size_limit [[buffer(1)]],
+    constant uint64_t& numel [[buffer(2)]],
+    device ErrorMessages* error_buffer [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]);

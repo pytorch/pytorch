@@ -13,6 +13,15 @@
 #endif
 
 namespace at::native {
+namespace mps {
+
+#ifdef USE_MPS_BUNDLED_METAL_LIBRARY
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Indexing_metallib.h>
+#endif
+
+} // namespace mps
 
 TORCH_IMPL_FUNC(gather_out_mps)
 (const Tensor& self_arg, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& output) {
@@ -147,9 +156,33 @@ static void scatter_mps_general(const Tensor& self_arg,
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(!self.is_complex(), "scatter(): Yet not supported for complex");
 
-  // Add bounds checking for index values to ensure consistent behavior with CPU
-  TORCH_CHECK(index.min().item().toLong() >= 0, "Class values must be non-negative.");
-  TORCH_CHECK(index.max().item().toLong() < self.size(dim), "Class values must be smaller than num_classes.");
+  // Validate index bounds on device to avoid host-device synchronization
+  {
+    MPSStream* stream = getCurrentMPSStream();
+
+    int64_t size_limit = self.size(dim);
+    uint64_t numel = index.numel();
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+
+        // Select kernel based on index dtype
+        std::string kernel_name = index.scalar_type() == ScalarType::Long ? "validate_scatter_indices_int64"
+                                                                          : "validate_scatter_indices_int32";
+
+        id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(kernel_name);
+        [encoder setComputePipelineState:pso];
+
+        mtl_setBuffer(encoder, index, 0);
+        mtl_setBytes(encoder, size_limit, 1);
+        mtl_setBytes(encoder, numel, 2);
+        [encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:3];
+
+        mtl_dispatch1DJob(encoder, pso, numel);
+      }
+    });
+  }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
