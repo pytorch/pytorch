@@ -13,6 +13,9 @@ Verbose = False
 
 class XpuProfilerTest(TestCase):
     def test_profiler(self):
+        if not torch.xpu.is_available():
+            self.skipTest("XPU not available")
+
         t = torch.empty(1000, dtype=torch.int, device="xpu")
         with torch.profiler.profile(
             activities=[
