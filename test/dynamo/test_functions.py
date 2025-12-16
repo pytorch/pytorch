@@ -3654,7 +3654,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 range[index],
-                range_variable.apply_index(index).as_python_constant(),
+                range_variable.apply_index(None, index).as_python_constant(),
             )
 
             if expected is not None:

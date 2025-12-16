@@ -751,10 +751,10 @@ class TensorVariable(VariableTracker):
             ),
         )
 
-    def method_size(self, *args, **kwargs):
+    def method_size(self, tx, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
 
-    def method_stride(self, *args, **kwargs):
+    def method_stride(self, tx, *args, **kwargs):
         return self._method_size_stride("stride", *args, **kwargs)
 
     def _method_size_stride(self, name, dim=None):
@@ -798,7 +798,7 @@ class TensorVariable(VariableTracker):
                 if not has_free_symbols(fake_r):
                     return ConstantVariable.create(int(fake_r))
 
-    def method_numel(self):
+    def method_numel(self, tx):
         if self.valid_size():
             return ConstantVariable.create(product(self.size))
 
@@ -810,17 +810,17 @@ class TensorVariable(VariableTracker):
 
     method_nelement = method_numel
 
-    def method_dim(self):
+    def method_dim(self, tx):
         if self.ndim is not None:
             return ConstantVariable.create(self.ndim)
 
     method_ndimension = method_dim
 
-    def method_is_floating_point(self):
+    def method_is_floating_point(self, tx):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
-    def method_is_inference(self):
+    def method_is_inference(self, tx):
         if config.fake_tensor_disable_inference_mode:
             unimplemented(
                 gb_type="Encountered tensor.is_inference() during tracing",
@@ -834,11 +834,11 @@ class TensorVariable(VariableTracker):
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             return ConstantVariable.create(fake.is_inference())
 
-    def method_is_complex(self):
+    def method_is_complex(self, tx):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_complex)
 
-    def method_is_contiguous(self, memory_format=None):
+    def method_is_contiguous(self, tx, memory_format=None):
         memory_format = (
             memory_format.as_python_constant()
             if memory_format is not None
@@ -913,12 +913,12 @@ class TensorVariable(VariableTracker):
             ],
         )
 
-    def method_get_device(self):
+    def method_get_device(self, tx):
         if isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             return ConstantVariable.create(index)
 
-    def method_element_size(self):
+    def method_element_size(self, tx):
         return ConstantVariable.create(self.dtype.itemsize)
 
     def method_numpy(self, tx, *, force=False):
@@ -1003,7 +1003,7 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
-    def method_backward(self, *args, **kwargs):
+    def method_backward(self, tx, *args, **kwargs):
         unimplemented(
             gb_type="Unsupported Tensor.backward() call",
             context=f"call_method {self} backward {args} {kwargs}",
@@ -1011,7 +1011,7 @@ class TensorVariable(VariableTracker):
             hints=[*graph_break_hints.FUNDAMENTAL],
         )
 
-    def method_data_ptr(self, *args, **kwargs):
+    def method_data_ptr(self, tx, *args, **kwargs):
         return DataPtrVariable(self)
 
     def method_item(self, tx, *args, **kwargs):
@@ -1136,7 +1136,7 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable.create(None)
 
-    def method_resize_(self, *args, **kwargs):
+    def method_resize_(self, tx, *args, **kwargs):
         unimplemented(
             gb_type="Unsupported Tensor.resize_() call",
             context=f"call_method {self} resize_ {args} {kwargs}",
@@ -1144,7 +1144,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_resize_as_(self, *args, **kwargs):
+    def method_resize_as_(self, tx, *args, **kwargs):
         unimplemented(
             gb_type="Unsupported Tensor.resize_as_() call",
             context=f"call_method {self} resize_as_ {args} {kwargs}",
@@ -1152,7 +1152,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_sparse_resize_(self, *args, **kwargs):
+    def method_sparse_resize_(self, tx, *args, **kwargs):
         unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_() call",
             context=f"call_method {self} sparse_resize_ {args} {kwargs}",
@@ -1160,7 +1160,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_sparse_resize_and_clear_(self, *args, **kwargs):
+    def method_sparse_resize_and_clear_(self, tx, *args, **kwargs):
         unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_and_clear_() call",
             context=f"call_method {self} sparse_resize_and_clear_ {args} {kwargs}",
@@ -1168,7 +1168,7 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
-    def method_set_(self, *args, **kwargs):
+    def method_set_(self, tx, *args, **kwargs):
         if len(args) > 1:
             # torch.Tensor.set_() has several overloads.
             # aten::set_.source_Tensor(Tensor) gets special handling
@@ -1347,7 +1347,7 @@ class TensorVariable(VariableTracker):
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
-    def method_requires_grad_(self, requires_grad=True):
+    def method_requires_grad_(self, tx, requires_grad=True):
         if requires_grad is not True:
             requires_grad = requires_grad.as_python_constant()
 
@@ -1374,7 +1374,7 @@ class TensorVariable(VariableTracker):
         ):
             return self.call_method(tx, "new_empty", args, kwargs)
 
-    def method_untyped_storage(self):
+    def method_untyped_storage(self, tx):
         return UntypedStorageVariable(
             self, self.as_proxy().node.meta["example_value"].untyped_storage()
         )
