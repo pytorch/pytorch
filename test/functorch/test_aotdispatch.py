@@ -7599,6 +7599,7 @@ metadata incorrectly.
             self.assertEqual(ref_x.grad, x.grad)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7626,12 +7627,12 @@ metadata incorrectly.
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M()
+            m = M().cuda()
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True)
+                return torch.randn(B, T, E, requires_grad=True, device="cuda")
 
             x = _inp()
             y = m(x)

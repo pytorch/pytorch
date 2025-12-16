@@ -1863,7 +1863,7 @@ class TestFlexAttention(InductorTestCase):
             (2, 2, 128, 4),
             device=device,
             dtype=torch.float64,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decomposition_table is empty
