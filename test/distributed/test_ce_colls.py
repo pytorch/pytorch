@@ -141,9 +141,6 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
         self.assertEqual(out, out_golden)
         self.assertEqual(out2, out_golden)
 
-        # if self.rank == 0:
-        #     prof.export_chrome_trace("test_ce_alltoall.json")
-
 
 if __name__ == "__main__":
     run_tests()
