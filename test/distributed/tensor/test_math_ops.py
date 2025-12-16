@@ -1079,6 +1079,25 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(res.placements, [Shard(0), Replicate()])
         self.assertEqual(res.full_tensor(), expected_answer)
 
+    @with_comms
+    def test_norm_partial_matching_reduction_ops(self):
+        mesh = self.build_device_mesh()
+
+        x = torch.tensor(
+            [
+                [3.0, 4.0, 0.0, 0.0],  # norm = 5.0
+                [5.0, 12.0, 0.0, 0.0],  # norm = 13.0
+            ]
+        )
+
+        dt = distribute_tensor(x, mesh, [Shard(1)])  # shard features across devices
+
+        norm_list = torch.linalg.vector_norm(dt, dim=1)
+
+        res = torch.sum(norm_list)
+        expected_answer = 18.0
+        self.assertEqual(res, expected_answer)
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
