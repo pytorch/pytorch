@@ -1091,6 +1091,7 @@ def _context_parallel_buffers(
         if isinstance(buffer, torch.Tensor):
             # NOTE: assuming batch dim is 0
 
+            # TODO(chienchin): add support for buffer with more than 2 dimensions.
             if len(buffer.shape) > 2:
                 raise ValueError(
                     "context_parallel_shard currently only supports tensors "
