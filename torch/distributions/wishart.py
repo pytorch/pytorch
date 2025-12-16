@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -80,11 +79,11 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[Tensor, Number],
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        df: Tensor | Number,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (
             (covariance_matrix is not None)
@@ -135,6 +134,7 @@ class Wishart(ExponentialFamily):
                 stacklevel=2,
             )
 
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 

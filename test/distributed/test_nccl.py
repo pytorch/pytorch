@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -219,15 +220,6 @@ class TestNCCL(TestCase):
             self.assertEqual(outputs[i], expected[i])
 
 
-# Decorator
-def requires_nccl_backend_for_symmem():
-    return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nccl_symmem_available(),
-        "test_nccl requires at least NCCL 2.28, skipping tests",
-    )
-
-
-@requires_nccl_backend_for_symmem()
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
@@ -236,6 +228,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_alloc(self):
         symm_mem.set_backend("NCCL")
@@ -261,6 +254,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_collective(self):
         symm_mem.set_backend("NCCL")
@@ -290,6 +286,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")

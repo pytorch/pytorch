@@ -11,7 +11,7 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Literal, NamedTuple, TypeAlias
+from typing import Literal, NamedTuple, TypeAlias
 
 import torch
 from torch import Tensor
@@ -28,12 +28,8 @@ except ImportError:
     from typing_extensions import NotRequired
 
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
-from torch._higher_order_ops.utils import _set_compilation_env
+from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
-from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
-)
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
 
@@ -327,7 +323,7 @@ def _vmap_for_bhqkv(
         callable: The vmapped function.
     """
     # We vamp a function 4 times, broadcasting the [b, h, q_idx, kv_idx] dimensions
-    dimensions: list[tuple[None | int, None | int, None | int, None | int]] = []
+    dimensions: list[tuple[int | None, int | None, int | None, int | None]] = []
     dimensions = [
         (None, None, None, 0),
         (None, None, 0, None),
@@ -1012,9 +1008,13 @@ def _convert_mask_to_block_mask(
     )
     B, H, Q, KV = mask.shape
     if Q % Q_BLOCK_SIZE != 0:
-        raise AssertionError(f"Q ({Q}) must be divisible by Q_BLOCK_SIZE ({Q_BLOCK_SIZE})")
+        raise AssertionError(
+            f"Q ({Q}) must be divisible by Q_BLOCK_SIZE ({Q_BLOCK_SIZE})"
+        )
     if KV % KV_BLOCK_SIZE != 0:
-        raise AssertionError(f"KV ({KV}) must be divisible by KV_BLOCK_SIZE ({KV_BLOCK_SIZE})")
+        raise AssertionError(
+            f"KV ({KV}) must be divisible by KV_BLOCK_SIZE ({KV_BLOCK_SIZE})"
+        )
     mask = mask.view(
         B, H, Q // Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV // KV_BLOCK_SIZE, KV_BLOCK_SIZE
     )  # [B, H, Q//Q_BLOCK_SIZE, Q_BLOCK_SIZE, KV//KV_BLOCK_SIZE, KV_BLOCK_SIZE]
@@ -1345,6 +1345,12 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
+    if query.device.type == "cpu" and (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    ):
+        raise NotImplementedError(
+            "FlexAttention does not support backward on CPU. Please set the input requires_grad to False or use another device."
+        )
     supported_devices = {"cuda", "cpu", "xpu", "hpu"}
     if query.device.type not in supported_devices:
         raise ValueError(
@@ -1660,42 +1666,28 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_mode,
-    )
-
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
-    with _set_compilation_env():
-        with torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_pre_dispatch_torch_function_mode():
-                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                    if metadata_mode:
-                        backend: str | Callable[..., Any] = (
-                            make_eager_backend_with_torch_function_mode(metadata_mode)
-                        )
-                    else:
-                        backend = "eager"
+    with setup_compilation_env() as backend:
+        if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+            flex_fn = _flex_attention_hop_wrapper
+        else:
+            flex_fn = torch.compile(
+                _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+            )
 
-                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
-                        flex_fn = _flex_attention_hop_wrapper
-                    else:
-                        flex_fn = torch.compile(
-                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                        )
-
-                    out, lse, max_scores = flex_fn(
-                        query,
-                        key,
-                        value,
-                        score_mod,
-                        block_mask.as_tuple(),  # type: ignore[union-attr]
-                        scale,
-                        kernel_options,
-                    )
+        out, lse, max_scores = flex_fn(
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),  # type: ignore[union-attr]
+            scale,
+            kernel_options,
+        )
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )

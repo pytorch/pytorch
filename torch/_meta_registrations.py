@@ -2400,19 +2400,20 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index]
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -3356,7 +3357,15 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
+    if device_hint(self) == "cpu":
+        return self.new_empty((size, self.dim()), dtype=torch.long)
+    else:
+        return torch.empty_strided(
+            (size, self.dim()),
+            (1, size),
+            dtype=torch.long,
+            device=self.device,
+        )
 
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
