@@ -54,11 +54,11 @@ jobs:
     secrets: inherit
 
   test:
-      name: vllm-x-pytorch-test
-      uses: ./.github/workflows/_linux-test.yml
-      needs: build
-      with:
-        build-environment: linux-jammy-cuda12.9-py3.12-gcc11
-        docker-image: ${{ needs.build.outputs.docker-image }}
-        test-matrix: ${{ needs.build.outputs.test-matrix }}
-      secrets: inherit
+    name: vllm-x-pytorch-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build
+    with:
+      build-environment: linux-jammy-cuda12.9-py3.12-gcc11
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+    secrets: inherit
