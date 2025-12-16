@@ -106,7 +106,7 @@ jobs:
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
-      options: --ipc=host -it
+      options: --ipc=host -tty
       # The env inside and outside the container are different
       env:
         SKIP_SCCACHE_INITIALIZATION: 1
@@ -196,7 +196,7 @@ jobs:
       contents: read
     container:
       image: nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04
-      options: --gpus all --ipc=host -it
+      options: --gpus all --ipc=host -tty
     steps:
       - name: Install system dependencies
         shell: bash
