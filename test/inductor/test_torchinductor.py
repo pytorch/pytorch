@@ -95,10 +95,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -657,6 +659,7 @@ def check_model(
     torch._dynamo.reset()
 
 
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -8698,6 +8701,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_fn = torch.compile(fn)
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
+
+    @skipIfMPS
+    def test_nonzero_static_stride(self):
+        from torch._subclasses import FakeTensorMode
+
+        L = 8
+        x = torch.eye(L, device=self.device)
+
+        eager_result = torch.nonzero_static(x, size=L)
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_result = torch.nonzero_static(fake_x, size=L)
+
+        self.assertEqual(eager_result.stride(), fake_result.stride())
 
     def test_like_channels_last(self):
         def foo():

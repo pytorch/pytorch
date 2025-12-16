@@ -172,7 +172,10 @@ def can_pad(
 
     # In deterministic mode, we can't safely benchmark - disallow padding
     # Check this after other basic checks so force_shape_pad can override
-    if torch._inductor.config.deterministic:
+    if (
+        torch._inductor.config.deterministic
+        and not torch._inductor.config.force_shape_pad
+    ):
         return False
 
     # Triton availability check - required for padding to work
