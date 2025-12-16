@@ -134,6 +134,12 @@ class RNNBase(Module):
             raise TypeError(
                 f"batch_first should be of type bool, got: {type(batch_first).__name__}"
             )
+        if not isinstance(input_size, int):
+            raise TypeError(
+                f"input_size should be of type int, got: {type(input_size).__name__}"
+            )
+        if input_size <= 0:
+            raise ValueError("input_size must be greater than zero")
         if not isinstance(hidden_size, int):
             raise TypeError(
                 f"hidden_size should be of type int, got: {type(hidden_size).__name__}"
