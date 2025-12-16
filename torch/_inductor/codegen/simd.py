@@ -792,12 +792,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # expressions like 64*u0 vs u0, because both could be 0. Similarly for
                     # backed expressions like s25*(((s70 - 5)//4)) - s25 and
                     # (s25*(((s70 - 5)//4)) - s25)*64.
-                    # But
+                    # We want to assume tensor sizes are not 0 and pass the gt
+                    # using the following logic.
+                    #
                     # if A//B = C and C >= 1
                     # then A = B * C + R
                     # and assuming A!=0
                     # A must be > B .
-                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
+                    #
+                    sv.statically_known_g(FloorDiv(size, remaining[current_group]), 1)
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
