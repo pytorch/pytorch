@@ -15,10 +15,10 @@ from tools.stats.upload_stats_lib import (
     _get_request_headers,
     download_s3_artifacts,
     get_job_id,
+    get_s3_resource,
     unzip,
     upload_workflow_stats_to_s3,
 )
-from tools.stats.upload_test_stats_running_jobs import get_s3_resource
 
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
