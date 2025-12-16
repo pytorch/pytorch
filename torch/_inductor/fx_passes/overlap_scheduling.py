@@ -1141,18 +1141,16 @@ class OverlapScheduler:
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                if (not info.is_exposed) and (
-                    curr_overlap_node not in info.hiding_nodes
-                ):
+                # Allow if fully hidden by other nodes
+                if not info.is_exposed and curr_overlap_node not in info.hiding_nodes:
                     continue
 
                 why(
-                    "path blocked by wait node %s (exposed=%s, hidden_by_curr_overlap=%s)",
+                    "path blocked by wait node %s (exposed=%s, hiding_nodes=%s)",
                     node.name,
                     info.is_exposed,
                     curr_overlap_node in info.hiding_nodes,
                 )
-                return None
 
             # Skip c10 ops and dtensor shard ops - they should be scheduled via main loop
             target_str = str(node.target)
