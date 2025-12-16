@@ -75,16 +75,17 @@ myst_enable_extensions = [
     "html_image",
 ]
 
-# sphinx-hoverxref configuration
-hoverxref_auto_ref = True
-hoverxref_domains = ["py", "std"]  # Add 'std' domain for glossary terms
-hoverxref_role_types = {
-    "term": "tooltip",  # Enable tooltips for glossary terms
-    "ref": "tooltip",
-    "std:term": "tooltip",  # Explicitly enable tooltips for std domain terms
+# sphinx-tippy configuration
+tippy_props = {
+    "placement": "auto-start",
+    "maxWidth": 500,
+    "interactive": True,  # Allow clicking links inside tooltips
+    "theme": "material",
 }
-hoverxref_tooltip_maxwidth = 600
-hoverxref_tooltip_theme = ["tooltipster-shadow", "tooltipster-shadow-custom"]
+
+# Skip all URLs except glossary term links (glossary.html#term-*)
+tippy_skip_urls = (r"^(?!.*glossary\.html#term-).*$",)
+tippy_enable_mathjax = True
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
@@ -3091,10 +3092,7 @@ html_css_files = [
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = [
-    "js/runllm-widget.js",
-    "js/glossary-tooltips.js",
-]
+html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
