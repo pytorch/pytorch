@@ -1612,7 +1612,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 (inputs_with_sources, "inputs"),
             ]:
                 for tensor, tensor_source in tensors_with_sources:
-                    reachable_grad_fn = find_reachable_grad_fn(tensor, external_grad_fns)
+                    reachable_grad_fn = find_reachable_grad_fn(
+                        tensor, external_grad_fns
+                    )
                     if reachable_grad_fn is not None:
                         # Build context with specific information
                         input_source = grad_fn_to_source.get(reachable_grad_fn)
@@ -1635,10 +1637,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 f"extends beyond the compiled region boundary, which Dynamo cannot trace."
                             ),
                             hints=[
-                                f"Detach the input tensor before passing to the compiled function: "
-                                f"`tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
-                                f"Or call `.detach()` on the tensor before using it in autograd.grad().",
-                                f"Or move the autograd.grad() call outside the compiled region.",
+                                "Detach the input tensor before passing to the compiled function: "
+                                "`tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
+                                "Or call `.detach()` on the tensor before using it in autograd.grad().",
+                                "Or move the autograd.grad() call outside the compiled region.",
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )

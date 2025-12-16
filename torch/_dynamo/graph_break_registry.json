@@ -3605,6 +3605,14 @@
       ]
     }
   ],
+  "GB2750": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",
@@ -3985,14 +3993,6 @@
     {
       "Gb_type": "autograd.grad with compiled autograd",
       "Context": "torch.autograd.grad()",
-      "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.",
-      "Hints": [
-        "Disable compiled autograd, or move the autograd.grad() call outside the compiled region."
-      ]
-    },
-    {
-      "Gb_type": "autograd.grad with compiled autograd",
-      "Context": "",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.",
       "Hints": [
         "Disable compiled autograd, or move the autograd.grad() call outside the compiled region."

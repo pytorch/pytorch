@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
+import re
 
 import torch
 import torch._dynamo
@@ -389,6 +389,22 @@ class GraphModule(torch.nn.Module):
         self.assertIsNotNone(mod_eager.bias.grad)
         self.assertIsNotNone(mod_compiled.bias.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    def test_autograd_grad_with_external_grad_fn_training_outside(self):
+        x = torch.randn(2, 4, requires_grad=True)
+        external = x * 2
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(ext):
+            y = (ext.sin()).sum()
+            gx = torch.autograd.grad(y, x, retain_graph=True, allow_unused=True)[0]
+            return gx
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Developer debug context: input with external grad_fn: L['ext']"),
+        ):
+            _ = fn(external)
 
     @skipIfCrossRef
     def test_autograd_grad_with_unrelated_requires_grad_output(self):
