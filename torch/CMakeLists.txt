@@ -486,6 +486,7 @@ add_custom_target(
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
     --hip-version=${HIP_VERSION_CLEAN}
+    --hipblaslt-version=${HIPBLASLT_VERSION_CLEAN}
     --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
