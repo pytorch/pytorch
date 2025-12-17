@@ -108,6 +108,7 @@ def offload_activation_fw(graph: fx.Graph) -> None:
         return effective_users
 
     output_node: fx.Node = graph.find_nodes(op="output")[0]
+    # pyrefly: ignore [bad-assignment]
     fwd_outputs: tuple[fx.Node, ...] = output_node.args[
         0
     ]  # pyrefly: ignore [bad-assignment]
