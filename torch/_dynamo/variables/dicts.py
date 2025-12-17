@@ -22,7 +22,7 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
@@ -1017,7 +1017,7 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
         # Items can be either VariableTrackers or _HashableTrackers (from set ops).

@@ -3753,7 +3753,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 #else
   C10D_NCCL_CHECK_TIMEOUT(
       fn(inputs[0], outputs[0], comm, ncclStream),
-      comm,
+      ncclComm,
       ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
 
@@ -3925,7 +3925,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #else
       C10D_NCCL_CHECK_TIMEOUT(
           fn(inputs[i], outputs[i], comm, ncclStream),
-          comm,
+          ncclComm,
           ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
     }
