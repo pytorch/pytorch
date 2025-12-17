@@ -13469,7 +13469,7 @@ class TestAutogradStreamSynchronization(TestCase):
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
-    @skipIfXPU(msg="'torch.xpu' has no attribute 'default_stream', issue=####")
+    @skipIfXpu(msg="'torch.xpu' has no attribute 'default_stream', issue=####")
     def test_consumer_to_single_producer_case_2_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
