@@ -1,10 +1,9 @@
-PyTorch Glossary
-================
+(glossary)=
+# PyTorch Glossary
 
 This glossary provides definitions for terms commonly used in PyTorch documentation.
 
-.. glossary::
-   :sorted:
+```{glossary}
 
    ATen
       Short for "A Tensor Library". The foundational tensor and mathematical
@@ -63,3 +62,4 @@ This glossary provides definitions for terms commonly used in PyTorch documentat
    Scripting
       Using ``torch.jit.script`` on a function to inspect source code and compile it as
       :term:`TorchScript` code.
+```
