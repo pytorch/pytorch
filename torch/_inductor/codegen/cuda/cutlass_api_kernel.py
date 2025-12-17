@@ -1,11 +1,4 @@
 # mypy: allow-untyped-defs
-"""
-Kernel class for cutlass_api code generation.
-
-This module provides the kernel infrastructure for generating Python code
-that calls cutlass_api to execute GEMM operations.
-"""
-
 import logging
 from typing import Any, Optional
 
@@ -78,26 +71,41 @@ class CutlassAPITemplateKernel(Kernel):
         return imports.getvalue()
 
     def render(self) -> str:
-        """Render the kernel code."""
+        """
+        Render the cutlass_api kernel code as a Python source string.
+
+        Generates Python code that:
+        1. Looks up the cutlass_api kernel by name from the manifest (cached in
+           _cutlass_api_kernel_cache to avoid repeated manifest searches)
+        2. Creates GemmArguments with the input/output tensors and accumulator type
+        3. Compiles the kernel for the specific tensor shapes/dtypes (cached in
+           _cutlass_api_artifact_cache keyed by (shape, dtype) tuple)
+        4. Runs the kernel with the compiled artifact and CUDA stream
+
+        The caching strategy ensures:
+        - Kernel lookup happens once per unique kernel name
+        - Compilation happens once per unique (shape, dtype) combination
+        - Runtime execution is just the kernel.run() call with cached artifact
+
+        Returns:
+            Python source code string to be written to a .py file and loaded
+            via async_compile.cutlass_api()
+        """
         code = IndentedBuffer()
 
-        # Generate imports
         code.splice(self.gen_imports())
         code.writeline("")
 
-        # Generate kernel name lookup
         kernel_name_str = self.kernel_metadata["kernel_name"]
         code.writeline(f'_CUTLASS_API_KERNEL_NAME = "{kernel_name_str}"')
         code.writeline("_cutlass_api_kernel_cache = {}")
         code.writeline("_cutlass_api_artifact_cache = {}")
         code.writeline("")
 
-        # Generate dtype mapping
         acc_dtype_str = str(self.accumulator_type).split(".")[-1]  # e.g., "float32"
         code.writeline(f"_ACCUMULATOR_DTYPE = torch.{acc_dtype_str}")
         code.writeline("")
 
-        # Generate helper to get accumulator type
         code.writeline("def _get_accumulator_type():")
         with code.indent():
             code.writeline("dtype_map = {")
@@ -109,26 +117,20 @@ class CutlassAPITemplateKernel(Kernel):
             code.writeline("return dtype_map.get(_ACCUMULATOR_DTYPE, cutlass.Float32)")
         code.writeline("")
 
-        # Generate the main kernel function
-        # Collect input parameter names
         input_params = []
         for i, _ in enumerate(self.input_nodes):
             input_params.append(f"in_ptr{i}")
 
-        # Add output
         input_params.append("out_ptr0")
-        # Add stream parameter
         input_params.append("stream=None")
 
         params_str = ", ".join(input_params)
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
-            # Get or create kernel
             code.writeline(
                 "global _cutlass_api_kernel_cache, _cutlass_api_artifact_cache"
             )
             code.writeline("")
-            code.writeline("# Get or create kernel")
             code.writeline(
                 "if _CUTLASS_API_KERNEL_NAME not in _cutlass_api_kernel_cache:"
             )
@@ -153,8 +155,6 @@ class CutlassAPITemplateKernel(Kernel):
             )
             code.writeline("")
 
-            # Create GemmArguments
-            code.writeline("# Create GEMM arguments")
             code.writeline("args = cutlass_api.arguments.GemmArguments(")
             with code.indent():
                 code.writeline("in_ptr0,")
@@ -164,8 +164,6 @@ class CutlassAPITemplateKernel(Kernel):
             code.writeline(")")
             code.writeline("")
 
-            # Compile if needed
-            code.writeline("# Compile kernel if not cached")
             code.writeline(
                 "cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
             )
@@ -178,9 +176,9 @@ class CutlassAPITemplateKernel(Kernel):
             code.writeline("artifact = _cutlass_api_artifact_cache[cache_key]")
             code.writeline("")
 
-            # Run kernel
-            code.writeline("# Run kernel")
-            code.writeline("kernel.run(args, artifact, assume_supported_args=True)")
+            code.writeline(
+                "kernel.run(args, artifact, stream=stream, assume_supported_args=True)"
+            )
 
         return code.getvalue()
 

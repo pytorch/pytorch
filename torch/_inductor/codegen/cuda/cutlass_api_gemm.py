@@ -1,13 +1,4 @@
 # mypy: allow-untyped-defs
-"""
-CutlassAPI GEMM backend for PyTorch Inductor.
-
-This module provides integration with the cutlass_api library, which offers
-pre-built CUTLASS kernels for GEMM operations. Unlike CuteDSL templates
-(which generate Python code from Jinja templates), cutlass_api provides
-pre-compiled kernel objects that can be directly benchmarked and executed.
-"""
-
 import itertools
 import random
 from typing import Any, Optional, Union
@@ -19,6 +10,7 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.utils import ensure_cutlass_api_available
 from torch._logging import getArtifactLogger
 
 
@@ -60,7 +52,6 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         if self._kernel is None:
             import cutlass_api
 
-            # Find the matching kernel by name
             kernels = cutlass_api.get_kernels(
                 metadata_filter=lambda m: m.kernel_name
                 == self.kernel_metadata["kernel_name"]
@@ -92,7 +83,6 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         kernel = self._get_kernel()
         a, b = input_tensors
 
-        # Create GemmArguments with actual tensors
         args = cutlass_api.arguments.GemmArguments(
             a,
             b,
@@ -100,7 +90,6 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             accumulator_type=self._get_accumulator_type(),
         )
 
-        # Compile if not cached
         if self._compiled_artifact is None:
             self._compiled_artifact = kernel.compile(args)
 
@@ -221,34 +210,156 @@ def _torch_dtype_to_cutlass(dtype: torch.dtype):
     return dtype_map.get(dtype)
 
 
-def _create_metadata_filter(
-    a_dtype: torch.dtype, b_dtype: torch.dtype, out_dtype: torch.dtype
+def _get_stride_pattern(layout: Layout) -> tuple[int, ...]:
+    """
+    Convert Inductor layout strides to normalized stride pattern for comparison.
+
+    Returns tuple like (0, 1) for row-major or (1, 0) for col-major.
+    Normalizes strides: if size is 1, stride becomes 0 (matches cutlass_api convention).
+    Handles symbolic strides using V.graph.sizevars.
+    """
+    from torch._inductor.virtualized import V
+
+    stride = layout.stride
+    size = layout.size
+    result = []
+
+    for s, sz in zip(stride, size):
+        if V.graph.sizevars.statically_known_equals(sz, 1):
+            result.append(0)
+        elif V.graph.sizevars.statically_known_equals(s, 1):
+            result.append(1)
+        else:
+            result.append(V.graph.sizevars.size_hint(s))
+
+    return tuple(result)
+
+
+def _get_alignment_bytes(layout: Layout) -> int:
+    """
+    Compute max alignment in BYTES (to match cutlass_api convention).
+
+    cutlass_api uses byte alignments: 128, 64, 32, 16, 8, 4, 2, 1
+    Inductor's get_max_alignment returns elements, so we convert.
+    """
+    from torch._inductor.codegen.cuda import cutlass_utils
+
+    elem_alignment = cutlass_utils.get_max_alignment(layout)
+    bytes_per_elem = layout.dtype.itemsize
+    return elem_alignment * bytes_per_elem
+
+
+def _stride_compatible(kernel_stride: tuple, operand_stride: tuple) -> bool:
+    """
+    Check if operand stride is compatible with kernel's expected stride.
+
+    Matches TensorAttributes.supports() logic from cutlass_api/metadata.py:138-165.
+    The key check is that the leading mode (stride=1) position must match.
+    """
+    if len(kernel_stride) == len(operand_stride):
+        expected = kernel_stride
+    elif len(kernel_stride) - 1 == len(operand_stride):
+        expected = kernel_stride[1:]
+    else:
+        return False
+
+    if all(x == 0 for x in expected) and all(x == 0 for x in operand_stride):
+        return True
+
+    if 1 not in expected:
+        return True  # No constraint from kernel
+
+    leading_idx = expected.index(1)
+    if leading_idx >= len(operand_stride):
+        return False
+
+    return operand_stride[leading_idx] == 1
+
+
+def _create_full_metadata_filter(
+    a_layout: Layout,
+    b_layout: Layout,
+    out_layout: Layout,
+    accumulator_type: torch.dtype,
 ):
     """
-    Create a metadata filter function for cutlass_api.get_kernels().
+    Create a metadata filter that replicates kernel.supports(args) logic.
 
-    Filters kernels based on input/output dtype compatibility.
+    This should return exactly the same kernels as if we passed actual GemmArguments.
+    Checks: dtype, accumulator_type, stride/layout compatibility, and alignment.
     """
-    cutlass_a_dtype = _torch_dtype_to_cutlass(a_dtype)
-    cutlass_b_dtype = _torch_dtype_to_cutlass(b_dtype)
-    cutlass_out_dtype = _torch_dtype_to_cutlass(out_dtype)
+    import cutlass
+
+    # Convert dtypes
+    dtype_map = {
+        torch.float32: cutlass.Float32,
+        torch.float16: cutlass.Float16,
+        torch.bfloat16: cutlass.BFloat16,
+        torch.int8: cutlass.Int8,
+        torch.int32: cutlass.Int32,
+    }
+
+    a_dtype = dtype_map.get(a_layout.dtype)
+    b_dtype = dtype_map.get(b_layout.dtype)
+    out_dtype = dtype_map.get(out_layout.dtype)
+    acc_dtype = dtype_map.get(accumulator_type)
+
+    # Get stride patterns (normalized)
+    a_stride = _get_stride_pattern(a_layout)
+    b_stride = _get_stride_pattern(b_layout)
+    out_stride = _get_stride_pattern(out_layout)
+
+    # Get alignments in bytes
+    a_align = _get_alignment_bytes(a_layout)
+    b_align = _get_alignment_bytes(b_layout)
+    out_align = _get_alignment_bytes(out_layout)
 
     def metadata_filter(meta) -> bool:
-        """Filter kernels by dtype compatibility."""
+        """
+        Filter kernels to match kernel.supports(args) logic.
+
+        Checks performed (matching cutlass_api/metadata.py):
+        1. dtype match (TensorAttributes.supports)
+        2. accumulator_type match (GemmOperandsMetadata.supports)
+        3. stride compatibility (TensorAttributes.supports)
+        4. alignment divisibility (TensorAttributes.supports)
+        """
         try:
             ops = meta.operands
-            # Check if the kernel's operand dtypes match our requirements
-            if hasattr(ops, "A") and hasattr(ops, "B") and hasattr(ops, "out"):
-                if cutlass_a_dtype is not None and ops.A.dtype != cutlass_a_dtype:
-                    return False
-                if cutlass_b_dtype is not None and ops.B.dtype != cutlass_b_dtype:
-                    return False
-                if cutlass_out_dtype is not None and ops.out.dtype != cutlass_out_dtype:
-                    return False
+
+            # 1. Check dtypes (TensorAttributes.supports)
+            if a_dtype is not None and ops.A.dtype != a_dtype:
+                return False
+            if b_dtype is not None and ops.B.dtype != b_dtype:
+                return False
+            if out_dtype is not None and ops.out.dtype != out_dtype:
+                return False
+
+            # 2. Check accumulator type (GemmOperandsMetadata.supports)
+            if acc_dtype is not None and ops.accumulator_type != acc_dtype:
+                return False
+
+            # 3. Check stride compatibility (TensorAttributes.supports)
+            if not _stride_compatible(ops.A.stride, a_stride):
+                return False
+            if not _stride_compatible(ops.B.stride, b_stride):
+                return False
+            if not _stride_compatible(ops.out.stride, out_stride):
+                return False
+
+            # 4. Check alignment (TensorAttributes.supports)
+            # operand_alignment % kernel_alignment == 0
+            if a_align % ops.A.alignment != 0:
+                return False
+            if b_align % ops.B.alignment != 0:
+                return False
+            if out_align % ops.out.alignment != 0:
+                return False
+
             return True
+
         except Exception:
-            # If we can't check metadata, include the kernel and let runtime check handle it
-            return True
+            return False
 
     return metadata_filter
 
@@ -263,7 +374,9 @@ def add_cutlass_api_gemm_choices(
     Add cutlass_api GEMM kernels to the autotune choices.
 
     This function queries cutlass_api for compatible GEMM kernels and adds
-    them as choices for autotuning.
+    them as choices for autotuning. Uses full metadata filtering to match
+    kernel.supports(args) logic, including dtype, layout, alignment, and
+    compute capability checks.
 
     Args:
         choices: List of ChoiceCaller objects to append to
@@ -271,27 +384,32 @@ def add_cutlass_api_gemm_choices(
         input_nodes: Input buffer nodes [A, B]
         accumulator_type: Data type for accumulation (default: float32)
     """
-    try:
+    if ensure_cutlass_api_available():
         import cutlass_api
-    except ImportError:
+    else:
         log.debug("cutlass_api not available, skipping cutlass_api choices")
         return
 
     if accumulator_type is None:
         accumulator_type = torch.float32
 
-    # Extract dtypes from input nodes
     a_node, b_node = input_nodes
-    a_dtype = a_node.get_dtype()
-    b_dtype = b_node.get_dtype()
-    out_dtype = layout.dtype
+    a_layout = a_node.get_layout()
+    b_layout = b_node.get_layout()
+    out_layout = layout
 
-    # Create metadata filter based on dtypes
-    metadata_filter = _create_metadata_filter(a_dtype, b_dtype, out_dtype)
+    cc = torch.cuda.get_device_capability()
+    cc_int = cc[0] * 10 + cc[1]
 
-    # Get compatible kernels
+    metadata_filter = _create_full_metadata_filter(
+        a_layout, b_layout, out_layout, accumulator_type
+    )
+
     try:
-        kernels = cutlass_api.get_kernels(metadata_filter=metadata_filter)
+        kernels = cutlass_api.get_kernels(
+            metadata_filter=metadata_filter,
+            cc=cc_int,
+        )
     except Exception as e:
         log.debug("Failed to get cutlass_api kernels: %s", e)
         return
@@ -299,9 +417,9 @@ def add_cutlass_api_gemm_choices(
     if not kernels:
         log.debug(
             "No compatible cutlass_api kernels found for dtypes: A=%s, B=%s, out=%s",
-            a_dtype,
-            b_dtype,
-            out_dtype,
+            a_layout.dtype,
+            b_layout.dtype,
+            out_layout.dtype,
         )
         return
 

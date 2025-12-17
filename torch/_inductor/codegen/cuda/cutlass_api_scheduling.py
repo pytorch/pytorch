@@ -1,13 +1,4 @@
 # mypy: allow-untyped-defs
-"""
-Scheduling implementation for cutlass_api kernels.
-
-This module provides the scheduling infrastructure for cutlass_api GEMM kernels,
-delegated to by CUDACombinedScheduling. Unlike CuteDSL which generates Python
-code from Jinja templates, cutlass_api generates simpler Python code that
-directly calls the cutlass_api library.
-"""
-
 import hashlib
 import logging
 from collections.abc import Sequence
@@ -35,7 +26,6 @@ from ..common import BackendFeature, IndentedBuffer
 
 log = logging.getLogger(__name__)
 
-# Suffix for the main kernel function, similar to CuteDSL
 MAIN_SUFFIX = "main"
 
 
