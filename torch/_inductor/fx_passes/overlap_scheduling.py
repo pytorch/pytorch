@@ -321,7 +321,6 @@ class OverlapScheduler:
         # Build and collapse fusion regions FIRST so all subsequent operations
         # work on the collapsed graph where fused ops are atomic units
         self.region_of: dict[fx.Node, Any] = {}
-        self.fusion_replaced: dict[fx.Node, fx.Node] = {}
         if enable_fusion_regions:
             from torch._inductor.fx_passes.fusion_regions import (
                 build_fusion_regions,
@@ -330,9 +329,7 @@ class OverlapScheduler:
 
             self.region_of = build_fusion_regions(self.gm)
             if self.region_of:
-                self.region_of, self.fusion_replaced = collapse_fusion_regions(
-                    self.gm, self.region_of
-                )
+                self.region_of = collapse_fusion_regions(self.gm, self.region_of)
                 # fuse_by_partitions replaces gm.graph, so we need to update our reference
                 self.graph = gm.graph
 
@@ -786,7 +783,6 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,
             max_coll_distance=self.max_node_distance,
             region_of=self.region_of,
-            fusion_replaced=self.fusion_replaced,
         )
 
         return self.gm

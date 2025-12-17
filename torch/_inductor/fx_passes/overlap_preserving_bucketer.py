@@ -138,7 +138,6 @@ class OverlapPreservingBucketer:
         bucket_mode: BucketMode = "custom_ops_multidtype",
         collective_bucketing: bool = True,
         region_of: dict[fx.Node, Any] | None = None,
-        fusion_replaced: dict[fx.Node, fx.Node] | None = None,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -150,7 +149,6 @@ class OverlapPreservingBucketer:
         self.bucket_mode = bucket_mode
         self.collective_bucketing = collective_bucketing
         self.region_of: dict[fx.Node, Any] = region_of or {}
-        self.fusion_replaced: dict[fx.Node, fx.Node] = fusion_replaced or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -364,7 +362,7 @@ class OverlapPreservingBucketer:
             from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
 
             gm = self.graph.owning_module
-            replaced = expand_fusion_regions(gm, self.region_of, self.fusion_replaced)
+            replaced = expand_fusion_regions(gm, self.region_of)
 
         # Step 3: Transfer deps from erased fusion modules to inlined nodes
         if replaced:
@@ -934,7 +932,6 @@ def finalize_overlap_scheduling(
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
     region_of: dict[fx.Node, Any] | None = None,
-    fusion_replaced: dict[fx.Node, fx.Node] | None = None,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -954,7 +951,6 @@ def finalize_overlap_scheduling(
         max_bucket_memory_gb: Maximum memory for a bucket in GB
         max_coll_distance: Maximum distance for bucketing candidates
         region_of: Optional dict mapping module nodes to FusionRegions
-        fusion_replaced: Optional dict mapping original nodes to module nodes
     """
     bucketer = OverlapPreservingBucketer(
         graph=gm.graph,
@@ -965,6 +961,5 @@ def finalize_overlap_scheduling(
         insert_overlap_deps=insert_overlap_deps,
         collective_bucketing=collective_bucketing,
         region_of=region_of,
-        fusion_replaced=fusion_replaced,
     )
     bucketer.bucket_collectives()
