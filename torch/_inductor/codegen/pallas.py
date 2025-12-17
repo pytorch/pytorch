@@ -1054,81 +1054,139 @@ class PallasKernel(SIMDKernel):
         return list(reversed(broadcast_vars))
 
     def _is_transposed_access(self, name: str, index: sympy.Expr) -> bool:
-        """Check if buffer access is transposed based on index expression coefficients
-        or buffer stride.
+        """Check if buffer access needs transpose.
 
-        For a 2D buffer with row-major layout (stride [S, 1]):
-        - Normal access: index = S*row_var + col_var (larger coeff on outer var)
-        - Transposed access: index = row_var + S*col_var (larger coeff on inner var)
-
-        We detect transpose by checking if the coefficient of the first iteration
-        variable (inner/column) is larger than the second (outer/row).
-
-        For single iteration variable cases, we check the buffer's stride directly.
+        Transpose on load is needed when:
+        1. Non-square buffers: dimensions are swapped relative to iteration vars
+        2. Square buffers: index coefficient pattern indicates transposed access
+           (first iteration var has larger coefficient than second)
         """
         try:
             buf_obj = V.graph.get_buffer(name)
             buf_size = buf_obj.get_size()
+            buf_stride = buf_obj.get_layout().stride
 
             # Only handle 2D buffers
             if len(buf_size) != 2:
                 return False
 
-            # Get iteration variables in order (first is inner, second is outer)
+            size0 = int(buf_size[0]) if hasattr(buf_size[0], "__int__") else None
+            size1 = int(buf_size[1]) if hasattr(buf_size[1], "__int__") else None
+            if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
+                return False
+
+            # Check buffer stride - if column-major, don't transpose on load
+            s0 = int(buf_stride[0]) if hasattr(buf_stride[0], "__int__") else None
+            s1 = int(buf_stride[1]) if hasattr(buf_stride[1], "__int__") else None
+            if s0 is not None and s1 is not None and s0 < s1:
+                return False
+
+            # Get iteration variable info
             var_items = list(self.range_tree_nodes.items())
+            if len(var_items) < 2:
+                return False
 
-            if len(var_items) >= 2:
-                # Use coefficient-based detection for 2+ iteration variables
-                first_var = var_items[0][0]
-                second_var = var_items[1][0]
+            # Skip for reduction variables
+            has_reduction_var = any(
+                entry.prefix.startswith("r") for _, entry in var_items
+            )
+            if has_reduction_var:
+                return False
 
-                # Extract coefficients from index expression
-                index = V.graph.sizevars.simplify(index)
+            iter_sizes = []
+            for var, entry in var_items:
+                length = entry.length
+                if hasattr(length, "__int__"):
+                    iter_sizes.append(int(length))
 
-                def get_coefficient(var):
-                    """Get the coefficient of var in the index expression."""
-                    if index == var:
-                        return 1
-                    if index.is_Add:
-                        for term in index.args:
-                            coeff = get_coefficient_from_term(term, var)
-                            if coeff is not None:
-                                return coeff
-                    return get_coefficient_from_term(index, var)
+            if len(iter_sizes) < 2:
+                return False
 
-                def get_coefficient_from_term(term, var):
-                    """Get coefficient from a single term."""
-                    if term == var:
-                        return 1
-                    if term.is_Mul:
-                        coeff = 1
-                        has_var = False
-                        for factor in term.args:
-                            if factor == var:
-                                has_var = True
-                            elif factor.is_number:
-                                coeff *= int(factor)
-                        if has_var:
+            # For 2D: iter_sizes[0] is inner, iter_sizes[1] is outer
+            expected_rows = iter_sizes[1]
+            expected_cols = iter_sizes[0]
+
+            # For non-square buffers: if shape is (cols, rows) instead of (rows, cols)
+            if size0 != size1:
+                if size0 == expected_cols and size1 == expected_rows:
+                    return True
+                return False
+
+            # For square buffers: only transpose if output is also column-major
+            # This distinguishes actual transpose operations from broadcasting
+            # Check by looking at the output buffer name (should end with the store target)
+            # We can't directly check output_buffers here, so check the store_mode
+            # on the kernel - if it's column-major output, it's transpose
+
+            # Get output buffer info from kernel args (may not be populated yet)
+            # Fall back to checking if we have column-major stores expected
+            output_is_column_major = False
+            try:
+                # Check all registered output buffers
+                for out_name in getattr(self.args, "output_buffers", {}).values():
+                    out_buf = V.graph.get_buffer(out_name)
+                    out_stride = out_buf.get_layout().stride
+                    if len(out_stride) >= 2:
+                        out_s0 = (
+                            int(out_stride[0])
+                            if hasattr(out_stride[0], "__int__")
+                            else None
+                        )
+                        out_s1 = (
+                            int(out_stride[1])
+                            if hasattr(out_stride[1], "__int__")
+                            else None
+                        )
+                        if (
+                            out_s0 is not None
+                            and out_s1 is not None
+                            and out_s0 < out_s1
+                        ):
+                            output_is_column_major = True
+                            break
+            except Exception:
+                pass
+
+            # Only use coefficient analysis if output is column-major
+            if not output_is_column_major:
+                return False
+
+            first_var = var_items[0][0]
+            second_var = var_items[1][0]
+
+            index = V.graph.sizevars.simplify(index)
+
+            def get_coefficient(var):
+                if index == var:
+                    return 1
+                if index.is_Add:
+                    for term in index.args:
+                        coeff = get_coefficient_from_term(term, var)
+                        if coeff is not None:
                             return coeff
-                    return None
+                return get_coefficient_from_term(index, var)
 
-                coeff_first = get_coefficient(first_var)
-                coeff_second = get_coefficient(second_var)
+            def get_coefficient_from_term(term, var):
+                if term == var:
+                    return 1
+                if term.is_Mul:
+                    coeff = 1
+                    has_var = False
+                    for factor in term.args:
+                        if factor == var:
+                            has_var = True
+                        elif factor.is_number:
+                            coeff *= int(factor)
+                    if has_var:
+                        return coeff
+                return None
 
-                if coeff_first is not None and coeff_second is not None:
-                    # Buffer stride for row-major is [dim1, 1]
-                    # Normal access: outer var (second) has larger coefficient
-                    # Transposed: inner var (first) has larger coefficient
-                    return coeff_first > coeff_second
+            coeff_first = get_coefficient(first_var)
+            coeff_second = get_coefficient(second_var)
 
-            # Fallback: check buffer stride directly for column-major layout
-            # Column-major has stride[0] < stride[1] (e.g., [1, 8])
-            buf_stride = buf_obj.get_layout().stride
-            if len(buf_stride) == 2:
-                s0 = int(buf_stride[0]) if hasattr(buf_stride[0], "__int__") else None
-                s1 = int(buf_stride[1]) if hasattr(buf_stride[1], "__int__") else None
-                if s0 is not None and s1 is not None:
-                    return s0 < s1  # Column-major = transposed
+            if coeff_first is not None and coeff_second is not None:
+                # Transposed access: first var (inner dim) has larger coefficient
+                return coeff_first > coeff_second
 
             return False
 
@@ -1424,18 +1482,16 @@ class PallasKernel(SIMDKernel):
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
-        # Special case: single iter var + single indirect var = element-wise gather
-        # This applies when:
-        # 1. It's a reduction variable (r prefix), OR
-        # 2. The indirect var has a trailing 1 dimension (needs squeeze for proper broadcast)
-        # In these cases, the iter var and indirect var iterate along the same dimension.
+        # Special case: reduction var + single indirect var = element-wise gather
+        # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
+        # with an indirect var, both are aligned to that dimension (element-wise).
+        # Pointwise vars form output dimensions and need the complex reshape code.
         if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
             var = used_iter_vars[0]
             var_name = str(var)
             is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
                 var
             ].prefix.startswith("r")
-            indirect_var = indirect_vars[0]
 
             if is_reduction_var:
                 # Reduction var: simple element-wise gather
@@ -1445,38 +1501,7 @@ class PallasKernel(SIMDKernel):
                     arange_expr = f"jnp.arange({self.kexpr(range_size)})"
                     index_str = index_str.replace(var_name, arange_expr)
                 return index_str
-
-            # For pointwise vars, only use element-wise if indirect has trailing 1
-            # Otherwise fall through to the complex reshape code
-            if var in self.range_tree_nodes:
-                range_entry = self.range_tree_nodes[var]
-                range_size = range_entry.length
-                # Use a conditional that checks at runtime if element-wise is appropriate
-                # If indirect var has trailing 1, squeeze and use element-wise
-                # Otherwise, the complex code path below will handle it
-                try:
-                    range_val = int(range_size)
-                    arange_expr = f"jnp.arange({range_val})"
-                    # Generate conditional: if indirect has trailing 1 that matches,
-                    # squeeze it; otherwise keep original behavior via complex path
-                    # But we can't do this at codegen time without knowing shapes
-                    # Instead, check if this specific pattern needs squeezing
-                    # (indirect var has trailing 1, iter var is pointwise)
-                    # Use a simpler heuristic: if coeff of indirect is smaller than iter,
-                    # likely need element-wise with squeeze
-                    iter_coeff = get_coefficient(var)
-                    indirect_coeff = next(iter(indirect_coeffs.values()))
-                    if iter_coeff > indirect_coeff:
-                        # iter var varies faster (larger coeff), squeeze indirect
-                        index_str = index_str.replace(var_name, arange_expr)
-                        index_str = index_str.replace(
-                            indirect_var,
-                            f"(jnp.squeeze({indirect_var}, axis=-1) "
-                            f"if {indirect_var}.shape[-1] == 1 else {indirect_var})",
-                        )
-                        return index_str
-                except (TypeError, ValueError):
-                    pass
+            # For pointwise vars, fall through to the complex reshape code
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
@@ -1705,20 +1730,29 @@ class PallasKernel(SIMDKernel):
                     # Use jnp.full for scalars, broadcast_to for broadcast-compatible shapes,
                     # and reshape for same-size different-shape arrays.
 
-                    # Check if output needs transpose based on buffer stride (not index pattern)
-                    # Column-major output (stride [1, N]) needs transpose if value is row-major
-                    # BUT: if we already transposed during load, the value is already in
-                    # the correct layout, so don't transpose again (avoid double transpose)
-                    # NOTE: Only use stride-based detection for stores, not coefficient-based,
-                    # because the index coefficients reflect buffer layout, not computation shape.
+                    # Check if output needs transpose:
+                    # - Output has column-major stride (s0 < s1)
+                    # - But input(s) have row-major stride
+                    # - This indicates an explicit transpose operation in the IR
+                    # If inputs were also column-major, no transpose needed (.copy handles it)
+                    # Also skip if we already transposed on load (avoid double transpose)
                     needs_transpose = False
                     if not self.has_transposed_load:
                         try:
                             buf = V.graph.get_buffer(name)
                             buf_stride = buf.get_layout().stride
                             buf_size = buf.get_size()
-                            # Only transpose for 2D column-major buffers
                             if len(buf_stride) == 2 and len(buf_size) == 2:
+                                size0 = (
+                                    int(buf_size[0])
+                                    if hasattr(buf_size[0], "__int__")
+                                    else None
+                                )
+                                size1 = (
+                                    int(buf_size[1])
+                                    if hasattr(buf_size[1], "__int__")
+                                    else None
+                                )
                                 s0 = (
                                     int(buf_stride[0])
                                     if hasattr(buf_stride[0], "__int__")
@@ -1729,8 +1763,45 @@ class PallasKernel(SIMDKernel):
                                     if hasattr(buf_stride[1], "__int__")
                                     else None
                                 )
-                                if s0 is not None and s1 is not None and s0 < s1:
-                                    needs_transpose = True
+                                # Output is column-major
+                                if (
+                                    s0 is not None
+                                    and s1 is not None
+                                    and s0 < s1
+                                    and size0 is not None
+                                    and size1 is not None
+                                    and size0 > 1
+                                    and size1 > 1
+                                ):
+                                    # Check if any input is column-major
+                                    any_input_column_major = False
+                                    for inp_name in self.args.input_buffers:
+                                        try:
+                                            inp_buf = V.graph.get_buffer(inp_name)
+                                            inp_stride = inp_buf.get_layout().stride
+                                            if len(inp_stride) == 2:
+                                                inp_s0 = (
+                                                    int(inp_stride[0])
+                                                    if hasattr(inp_stride[0], "__int__")
+                                                    else None
+                                                )
+                                                inp_s1 = (
+                                                    int(inp_stride[1])
+                                                    if hasattr(inp_stride[1], "__int__")
+                                                    else None
+                                                )
+                                                if (
+                                                    inp_s0 is not None
+                                                    and inp_s1 is not None
+                                                    and inp_s0 < inp_s1
+                                                ):
+                                                    any_input_column_major = True
+                                                    break
+                                        except Exception:
+                                            pass
+                                    # Transpose only if output is column-major but no inputs are
+                                    if not any_input_column_major:
+                                        needs_transpose = True
                         except Exception:
                             pass
 
