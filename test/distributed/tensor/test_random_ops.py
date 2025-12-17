@@ -790,6 +790,61 @@ class DistTensorRandomOpsTestND(DTensorTestBase):
                 f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
             )
 
+    @with_comms
+    @skip_if_lt_x_gpu(8)
+    def test_dtensor_rng_offset_consistency_across_rank_divergent_execution(self):
+        """
+        Test that DTensor RNG offset tracking remains consistent across rank-divergent execution paths.
+
+        This verifies that:
+        1. RNG offset is correctly tracked when different ranks execute different numbers of random ops
+        2. Even when some ranks execute additional random operations (simulating rank-divergent code paths),
+           the final DTensor random operation produces identical results across all ranks
+        3. The offset-based RNG tracking mechanism correctly accounts for all random operations,
+           regardless of execution order differences between ranks
+        """
+        mesh = torch.arange(self.world_size).view(2, 2, 2)
+        device_mesh = DeviceMesh(self.device_type, mesh)
+
+        # Generate reference tensors using regular torch.randn
+        torch.manual_seed(42)
+        torch.randn(8, 8, device=self.device_type)
+        torch.randn(8, 8, device=self.device_type)
+        reference_tensor = torch.randn(8, 8, device=self.device_type)
+
+        placements_list = [  # this list of placements should be enough to cover
+            [Shard(0), Shard(0), Shard(1)],
+        ]
+        for placements in placements_list:
+            # Generate DTensor tensors with the same seed
+            torch.manual_seed(42)
+            if torch.distributed.get_rank() % 2 == 0:
+                torch.distributed.tensor.randn(
+                    (8, 8), device_mesh=device_mesh, placements=placements
+                )
+
+            torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+
+            if torch.distributed.get_rank() % 2 != 0:
+                torch.distributed.tensor.randn(
+                    (8, 8), device_mesh=device_mesh, placements=placements
+                )
+
+            dtensor = torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+            # Gather distributed tensor to replicate for comparison
+            gathered_tensor = dtensor.full_tensor()
+
+            # Verify DTensor produces identical results to regular torch tensors
+            self.assertTrue(
+                torch.allclose(reference_tensor, gathered_tensor),
+                f"Second DTensor randn call does not match torch.randn with same seed. "
+                f"Expected: {reference_tensor.tolist()}, Got: {gathered_tensor.tolist()}",
+            )
+
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
