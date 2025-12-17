@@ -450,7 +450,8 @@ if __name__ == '__main__':
         dtypes=OpDTypes.none,
     )
     def test_supported_dtypes(self, device, op):
-        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes(device_type))
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("xpu"))
         self.assertEqual(op.supported_dtypes(device_type), op.supported_dtypes(f"{device_type}:0"))
         self.assertEqual(
             op.supported_dtypes(torch.device(device_type)),
