@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from collections import defaultdict
+from pathlib import Path
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
@@ -102,9 +103,42 @@ class XpuScopeProfilerTest(TestCase):
             self.check_metrics(count_x_metrics)
             self.check_metrics(count_c_metrics)
 
+    def required_env_setting(self):
+        zet_enable_metrics = os.environ.get("ZET_ENABLE_METRICS", "unset")
+        if Verbose:
+            print(f"ZET_ENABLE_METRICS={zet_enable_metrics}")
+        return zet_enable_metrics == "1"
+
+    def required_paranoid_setting(self, paranoid_path):
+        try:
+            paranoid_content = Path(paranoid_path).read_text().strip()
+            if Verbose:
+                print(f"{paranoid_path} contains: {paranoid_content}")
+            return paranoid_content == "0"
+
+        except FileNotFoundError:
+            if Verbose:
+                print(f"{paranoid_path} doesn't exists")
+            return False
+
+    def required_paranoid_settings(self):
+        return any(
+            self.required_paranoid_setting(paranoid)
+            for paranoid in [
+                "/proc/sys/dev/xe/observation_paranoid",
+                "/proc/sys/dev/i915/perf_stream_paranoid",
+            ]
+        )
+
     def test_scope_profiler(self):
         if not torch.xpu.is_available():
             self.skipTest("XPU not available")
+
+        if not self.required_env_setting():
+            self.skipTest("ZET_ENABLE_METRICS not set")
+
+        if not self.required_paranoid_settings():
+            self.skipTest("paranoid settings missing")
 
         a = torch.rand([100, 200]).to("xpu")
         b = torch.rand([200, 300]).to("xpu")
