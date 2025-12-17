@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    dtypesIfXPU, onlyNativeDeviceTypes, onlyOn, largeTensorTest, ops, precisionOverride)
+    dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -2466,7 +2466,8 @@ class TestReductions(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
+    # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
         def run_test(input_):
@@ -2818,6 +2819,8 @@ class TestReductions(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2829,6 +2832,8 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2840,6 +2845,8 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_var_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2874,6 +2881,8 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_std_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2908,6 +2917,8 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat)
     def test_std_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2939,6 +2950,8 @@ class TestReductions(TestCase):
             self.assertEqual(mean1, mean2)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat)
     def test_var_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
