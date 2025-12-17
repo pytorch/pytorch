@@ -1424,26 +1424,24 @@ class PallasKernel(SIMDKernel):
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
-        # Special case: single reduction var + single indirect var = element-wise gather
-        # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
-        # with an indirect var, both are aligned to that dimension (element-wise).
-        # Pointwise vars (x, y, z) form output dimensions and create outer products.
+        # Special case: single iter var + single indirect var = element-wise gather
+        # In this case, both should be 1D arrays of the same length, no broadcasting needed
         if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
+            # Simple element-wise gather: just replace iter var with arange
             var = used_iter_vars[0]
             var_name = str(var)
-            # Check if it's a reduction variable (starts with 'r')
-            is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
-                var
-            ].prefix.startswith("r")
-            if is_reduction_var:
-                # Element-wise gather: just replace iter var with arange
-                if var in self.range_tree_nodes:
-                    range_entry = self.range_tree_nodes[var]
-                    range_size = range_entry.length
-                    arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                    index_str = index_str.replace(var_name, arange_expr)
-                # Indirect var stays as-is (no reshaping)
-                return index_str
+            if var in self.range_tree_nodes:
+                range_entry = self.range_tree_nodes[var]
+                range_size = range_entry.length
+                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                index_str = index_str.replace(var_name, arange_expr)
+            # Squeeze trailing 1 dimensions from indirect var for proper broadcasting
+            # e.g., (4, 5, 10, 1) + (10,) -> squeeze to (4, 5, 10) first
+            indirect_var = indirect_vars[0]
+            index_str = index_str.replace(
+                indirect_var, f"jnp.squeeze({indirect_var})"
+            )
+            return index_str
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
@@ -1672,14 +1670,34 @@ class PallasKernel(SIMDKernel):
                     # Use jnp.full for scalars, broadcast_to for broadcast-compatible shapes,
                     # and reshape for same-size different-shape arrays.
 
-                    # Check if output needs transpose based on store index pattern
+                    # Check if output needs transpose based on buffer stride (not index pattern)
                     # Column-major output (stride [1, N]) needs transpose if value is row-major
                     # BUT: if we already transposed during load, the value is already in
                     # the correct layout, so don't transpose again (avoid double transpose)
-                    needs_transpose = (
-                        self._is_transposed_access(name, index)
-                        and not self.has_transposed_load
-                    )
+                    # NOTE: Only use stride-based detection for stores, not coefficient-based,
+                    # because the index coefficients reflect buffer layout, not computation shape.
+                    needs_transpose = False
+                    if not self.has_transposed_load:
+                        try:
+                            buf = V.graph.get_buffer(name)
+                            buf_stride = buf.get_layout().stride
+                            buf_size = buf.get_size()
+                            # Only transpose for 2D column-major buffers
+                            if len(buf_stride) == 2 and len(buf_size) == 2:
+                                s0 = (
+                                    int(buf_stride[0])
+                                    if hasattr(buf_stride[0], "__int__")
+                                    else None
+                                )
+                                s1 = (
+                                    int(buf_stride[1])
+                                    if hasattr(buf_stride[1], "__int__")
+                                    else None
+                                )
+                                if s0 is not None and s1 is not None and s0 < s1:
+                                    needs_transpose = True
+                        except Exception:
+                            pass
 
                     if needs_transpose:
                         store_expr = (
