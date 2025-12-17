@@ -185,7 +185,12 @@ def _is_input_arg_dtype_supported_by_backend(
     if isinstance(arg, (list, tuple)):  # noqa: UP038
         return all(
             _is_input_arg_dtype_supported_by_backend(
-                a, node, qconfig, dtype_config, backend_config
+                # pyrefly: ignore [bad-argument-type]
+                a,
+                node,
+                qconfig,
+                dtype_config,
+                backend_config,
             )
             for a in arg
         )
@@ -731,6 +736,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
+                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -1148,7 +1154,11 @@ def _maybe_insert_observers_before_graph_output(
         elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
             results = [
                 _recursive_maybe_replace_node_with_obs(
-                    inner_node, model, named_modules, graph
+                    # pyrefly: ignore [bad-argument-type]
+                    inner_node,
+                    model,
+                    named_modules,
+                    graph,
                 )
                 for inner_node in maybe_node
             ]
@@ -1288,6 +1298,7 @@ def _maybe_make_input_output_share_observers(
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
+    # pyrefly: ignore [bad-argument-type]
     while not _is_activation_post_process_node(first_arg_arg, named_modules):
         if not isinstance(first_arg_arg, Node):
             return False
@@ -1731,7 +1742,11 @@ def insert_observers_for_model(
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(
-                            node, named_modules, qconfig, qhandler
+                            # pyrefly: ignore [bad-argument-type]
+                            node,
+                            named_modules,
+                            qconfig,
+                            qhandler,
                         ):
                             # Currently custom module outputs are assumed to be already quantized,
                             # so we need to insert a DeQuantStub after the output. For custom module
@@ -1745,17 +1760,28 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(
-                                node, model, named_modules, model.graph
+                                # pyrefly: ignore [bad-argument-type]
+                                node,
+                                model,
+                                named_modules,
+                                model.graph,
                             )
+                            # pyrefly: ignore [missing-attribute]
                             if node.target not in custom_module_names_already_swapped:
+                                # pyrefly: ignore [bad-argument-type]
                                 custom_module_names_already_swapped.add(node.target)
                                 _swap_custom_module_to_observed(
-                                    node, qconfig, named_modules, prepare_custom_config
+                                    # pyrefly: ignore [bad-argument-type]
+                                    node,
+                                    qconfig,
+                                    named_modules,
+                                    prepare_custom_config,
                                 )
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = (
                                 _maybe_insert_output_observer_for_node(
+                                    # pyrefly: ignore [bad-argument-type]
                                     node,
                                     model,
                                     named_modules,
@@ -1781,6 +1807,7 @@ def insert_observers_for_model(
                                 #
                                 # We need to save orig users before updating uses because
                                 # the list of users will change as we update uses
+                                # pyrefly: ignore [missing-attribute]
                                 orig_users = list(node.users.keys())
                                 for user_node in orig_users:
                                     if user_node is maybe_output_obs_node:
@@ -1791,7 +1818,11 @@ def insert_observers_for_model(
 
                                 _is_observer_in_same_graph_ = (
                                     _is_observer_in_same_graph(
-                                        node, named_modules, obs_or_fq_map, is_qat
+                                        # pyrefly: ignore [bad-argument-type]
+                                        node,
+                                        named_modules,
+                                        obs_or_fq_map,
+                                        is_qat,
                                     )
                                 )
 
@@ -1803,21 +1834,30 @@ def insert_observers_for_model(
                                     and _is_observer_in_same_graph_
                                 ) or reuse_input_obs_or_fq:
                                     if not _maybe_make_input_output_share_observers(
-                                        node, model, named_modules
+                                        # pyrefly: ignore [bad-argument-type]
+                                        node,
+                                        model,
+                                        named_modules,
                                     ):
                                         _remove_output_observer(
-                                            node, model, named_modules
+                                            # pyrefly: ignore [bad-argument-type]
+                                            node,
+                                            model,
+                                            named_modules,
                                         )
 
                                 if qhandler is not None and qhandler.is_custom_module():
                                     if (
+                                        # pyrefly: ignore [missing-attribute]
                                         node.target
                                         not in custom_module_names_already_swapped
                                     ):
                                         custom_module_names_already_swapped.add(
+                                            # pyrefly: ignore [bad-argument-type]
                                             node.target
                                         )
                                         _swap_custom_module_to_observed(
+                                            # pyrefly: ignore [bad-argument-type]
                                             node,
                                             qconfig,
                                             named_modules,

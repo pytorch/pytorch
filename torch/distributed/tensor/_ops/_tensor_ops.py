@@ -17,7 +17,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops._embedding_ops import MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops.registration import (
     register_op_strategy,
     register_prop_rule,
@@ -143,9 +143,13 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     return equal_strategy
 
 
+register_op_strategy(
+    aten.empty_like.default, schema_info=RuntimeSchemaInfo(1, ["dtype"])
+)(propagate_single_input_strategy)
+
+
 @register_op_strategy(
     [
-        aten.empty_like.default,
         aten.ones_like.default,
         aten.rand_like.default,
         aten.randn_like.default,
@@ -657,7 +661,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if dim < len(index_shape) and index_shape[dim] == 1:
-        index_partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
@@ -1006,6 +1010,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
             cost_values_spec = generate_redistribute_costs(values_spec, new_values_spec)
             op_strategy.strategies.append(
                 OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     input_specs=(
                         new_in_spec,
                         *new_indices_spec,  # type: ignore[arg-type]

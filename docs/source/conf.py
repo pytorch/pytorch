@@ -950,7 +950,6 @@ coverage_ignore_functions = [
     "get_node_target",
     "is_node_output_tensor",
     "legalize_graph",
-    "stable_topological_sort",
     # torch.fx.passes.utils.common
     "compare_graphs",
     "lift_subgraph_as_module",
