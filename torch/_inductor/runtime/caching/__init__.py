@@ -4,14 +4,11 @@ from .exceptions import (
     CacheError,
     FileLockTimeoutError,
     KeyEncodingError,
-    KeyPicklingError,
     LockTimeoutError,
     SystemError,
     UserError,
     ValueDecodingError,
     ValueEncodingError,
-    ValuePicklingError,
-    ValueUnPicklingError,
 )
 
 
@@ -20,7 +17,6 @@ __all__ = [
     "FileLockTimeoutError",
     "IsolationSchema",
     "KeyEncodingError",
-    "KeyPicklingError",
     "LockTimeoutError",
     "SelectedCompileContext",
     "SelectedRuntimeContext",
@@ -28,6 +24,4 @@ __all__ = [
     "UserError",
     "ValueDecodingError",
     "ValueEncodingError",
-    "ValuePicklingError",
-    "ValueUnPicklingError",
 ]

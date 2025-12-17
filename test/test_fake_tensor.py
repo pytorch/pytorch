@@ -644,24 +644,45 @@ class FakeTensorTest(TestCase):
                 b14,
                 b15,
             ]
-            return torch.ops.aten._cudnn_rnn(
-                a0,
-                a1,
-                4,
-                a3,
-                a4,
-                a5,
-                2,
-                2048,
-                0,
-                2,
-                False,
-                0.0,
-                False,
-                True,
-                [],
-                None,
-            )
+
+            if torch.version.cuda:
+                return torch.ops.aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return torch.ops.aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
 
         mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
@@ -693,7 +714,16 @@ class FakeTensorTest(TestCase):
 
                 for inps in [inps1, inps2]:
                     out = fn(*inps)
-                    self.assertIs(out[4], inps[-3])
+                    # weight_buf is cudnn only <- this is a3 and inps[-3]
+                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
+                    #   so the test expects self.assertIs(out[4], inps[-3])
+                    # in miopen_rnn, it does not need the input argument weight_buf,
+                    #   the miopen_rnn generate a new weight_buf instead,
+                    #   and it returns via out[4]
+                    if torch.version.hip:
+                        self.assertIsNotNone(out[4])
+                    else:
+                        self.assertIs(out[4], inps[-3])
                     for ten in out:
                         if i == 1:
                             self.assertTrue(isinstance(ten, FakeTensor))

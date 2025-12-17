@@ -716,6 +716,7 @@ class CommonListMethodsVariable(BaseListVariable):
             else:
                 const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
+            # type: ignore[arg-type]
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
@@ -769,6 +770,7 @@ class CommonListMethodsVariable(BaseListVariable):
             value = args[1]
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
+                # pyrefly: ignore[unsupported-operation]
                 self.items[key.evaluate_expr()] = value
             elif isinstance(key, SliceVariable):
                 if key.is_python_constant():
@@ -807,7 +809,8 @@ class CommonListMethodsVariable(BaseListVariable):
                     idx = args[0].as_python_constant()
 
                 try:
-                    self.items.__delitem__(idx)
+                    self.items.__delitem__(idx)  # type: ignore[arg-type]
+
                 except (IndexError, ValueError) as exc:
                     raise_observed_exception(
                         type(exc),
@@ -919,6 +922,7 @@ class ListVariable(CommonListMethodsVariable):
                 key = guard_if_dyn(key)
 
                 try:
+                    # pyrefly: ignore[unsupported-operation]
                     self.items[key] = value
                 except (IndexError, TypeError) as e:
                     raise_observed_exception(
