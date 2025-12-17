@@ -640,7 +640,7 @@ def _annotate_fake(tag: str) -> None:
 
 class DebugInterpreter(torch.fx.Interpreter):
     """
-    Interpreter class for running eager/aot_eager compiled regions when DebugMode is active,
+    Interpreter class for running aot_eager compiled regions when DebugMode is active,
     instead of using the compiled code. This gives us access to fx.Node metadata to decorate
     and contextualize DebugMode logs (e.g. nn_module_stack, stack_trace, compiled region boundaries).
 
@@ -777,7 +777,7 @@ class DebugMode(TorchDispatchMode):
         # Currently does not preserve contexts inside torch.compile-d regions.
         self.record_profiler_context: bool = record_profiler_context
 
-        # For eager & aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
+        # For aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
         # and uses it at runtime for node metadata visibility.
         self.run_compile_with_interpreter: bool = run_compile_with_interpreter
 
@@ -991,7 +991,9 @@ class DebugMode(TorchDispatchMode):
             self.fx_stack_trace = None
 
     def _enter_nn_module_call(self, fqn, header):
-        call = _AnnotateCall(fqn, header, self.call_depth + 1)
+        call = _AnnotateCall(
+            fqn, header, self.call_depth + 1, stack=self.record_stack_trace
+        )
         self.operators.append(call)
         self.current_nn_module_stack.append(fqn)
         self.call_depth += 1

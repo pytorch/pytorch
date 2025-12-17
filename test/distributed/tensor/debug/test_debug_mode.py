@@ -504,7 +504,7 @@ class TestDTensorDebugMode(TestCase):
         aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
         )
 
-        for backend in ["eager", "aot_eager", "inductor"]:
+        for backend in ["aot_eager", "inductor"]:
             with DebugMode(run_compile_with_interpreter=True) as debug_mode:
                 torch.compile(mod, backend=backend, fullgraph=True)(x)
 
@@ -516,12 +516,12 @@ class TestDTensorDebugMode(TestCase):
             else:
                 self.assertExpectedInline(
                     debug_mode.debug_string(),
-                    f"""\
-  [{backend} region (compile)] enter
+                    """\
+  [aot_eager region (compile)] enter
   [annotate] Foo
     aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
     aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
-  [{backend} region (compile)] exit""",
+  [aot_eager region (compile)] exit""",
                 )
 
     def test_nn_module_in_eager(self):
@@ -612,7 +612,7 @@ class TestDTensorDebugMode(TestCase):
 
         # Only region of module is compiled, test nn.Mod call hierarchy
         mod = Baz()
-        mod.foo = torch.compile(mod.foo, backend="eager", fullgraph=True)
+        mod.foo = torch.compile(mod.foo, backend="aot_eager", fullgraph=True)
         inp = torch.randn(4, 4)
         with DebugMode(
             record_nn_module=True, run_compile_with_interpreter=True
@@ -623,7 +623,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
     [nn.Mod] Baz
-    [eager region (compile)] enter
+    [aot_eager region (compile)] enter
       [nn.Mod (compile)] L['self'].l1
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
@@ -631,7 +631,7 @@ class TestDTensorDebugMode(TestCase):
       [nn.Mod (compile)] L['self'].l2
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-    [eager region (compile)] exit
+    [aot_eager region (compile)] exit
       [nn.Mod] Baz.bar
         aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
         [nn.Mod] Baz.bar.l3
