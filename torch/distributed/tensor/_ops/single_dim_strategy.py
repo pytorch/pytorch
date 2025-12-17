@@ -177,10 +177,12 @@ def _expand_single_dim_strategy_to_mesh(
 
     unique_input_placements = _get_unique_placements(op_schema)
     num_inputs = _get_num_tensor_inputs(op_schema)
+    import time
 
     def expanded_strategy(
         op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
     ) -> StrategyType:
+        t0 = time.time()
         # Note: op_schema vs [args_schema, kwargs_schema]
         # -----------------------------------------------
         # Inside `expanded_strategy function we purposefully have access to 2 similar structures.
@@ -211,11 +213,14 @@ def _expand_single_dim_strategy_to_mesh(
         # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
         # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
         # dims
-        return expand_to_full_mesh_op_strategy(
+        expanded = expand_to_full_mesh_op_strategy(
             mesh,
             op_schema,
             cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
         )
+        t1 = time.time()
+        print(f"Expanded single_dim_strategy for {op_schema} in {t1-t0} seconds")
+        return expanded
 
     return expanded_strategy
 
