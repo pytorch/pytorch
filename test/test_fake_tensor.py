@@ -596,7 +596,6 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @skipIfRocm
     @parametrize(
         "allow_fallback_kernels",
         [False, True],
