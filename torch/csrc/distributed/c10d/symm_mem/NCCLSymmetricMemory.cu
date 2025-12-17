@@ -116,28 +116,28 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     const size_t arr_size = sizeof(void*) * world_size_;
-    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-    buffers_dev_dp_ = allocator.allocate(arr_size);
-    signal_pads_dev_dp_ = allocator.allocate(arr_size);
+    buffers_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    signal_pads_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, reinterpret_cast<void**>(buffers_dev_dp_.get()), world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, reinterpret_cast<void**>(signal_pads_dev_dp_.get()), world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
     C10_CUDA_CHECK(cudaMemcpy(
       buffers_.data(),  // dst (host)
-      buffers_dev_dp_.get(),  // src (device)
+      buffers_dev_,  // src (device)
       arr_size,
       cudaMemcpyDeviceToHost));
     C10_CUDA_CHECK(cudaMemcpy(
       signal_pads_.data(),  // dst (host)
-      signal_pads_dev_dp_.get(),  // src (device)
+      signal_pads_dev_,  // src (device)
       arr_size,
       cudaMemcpyDeviceToHost));
 #endif
@@ -155,11 +155,11 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   }
 
   void** get_buffer_ptrs_dev() override {
-    return reinterpret_cast<void**>(buffers_dev_dp_.get());
+    return buffers_dev_;
   }
 
   void** get_signal_pad_ptrs_dev() override {
-    return reinterpret_cast<void**>(signal_pads_dev_dp_.get());
+    return signal_pads_dev_;
   }
 
   size_t get_buffer_size() override {
@@ -229,8 +229,8 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   int world_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
-  c10::DataPtr buffers_dev_dp_;
-  c10::DataPtr signal_pads_dev_dp_;
+  void** buffers_dev_;
+  void** signal_pads_dev_;
   std::string group_name_;
   ncclWindow_t buffer_handle_;
   ncclWindow_t signal_handle_;
