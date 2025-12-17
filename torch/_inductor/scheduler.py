@@ -4180,7 +4180,7 @@ class Scheduler:
         def fuse_two_nodes(
             node1: BaseSchedulerNode, node2: BaseSchedulerNode
         ) -> BaseSchedulerNode:
-            fusion_log.error("fusing %s with %s", node1.get_name(), node2.get_name())
+            fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
 
             device = node1.get_device()
             assert node2.get_device() == device
@@ -4220,7 +4220,7 @@ class Scheduler:
                 )
                 assert pending_fusion is not None and len(pending_fusion) == 1
 
-                fusion_log.error(
+                fusion_log.debug(
                     f"Evaluating {node1.get_name()} {node2.get_name()} in pending_fusions"
                 )
                 is_speedup, _, node_key1, node_key2 = pending_fusion[0]
@@ -4285,8 +4285,6 @@ class Scheduler:
                         assert self.get_fused_node(node2) is node2
                     else:
                         node2 = self.get_fused_node(node2)
-
-                    fusion_log.error(f"Evaluating fusion node {fusion_node.get_name()}")
 
                     # Above the fusion potential gets popped. If fusion_node has no other
                     # fusion candidates, delete from pending_fusions
@@ -4357,9 +4355,6 @@ class Scheduler:
                         # Update seen template fusions cache
                         assert (node1, node2) not in self.seen_template_fusions
                         self.seen_template_fusions.add((node1, node2))
-                        fusion_log.debug(
-                            f"Template fusion attempted: {node1.get_name()} -> {node2.get_name()}"
-                        )
 
                         other_node = node2 if epilogue_fusion else node1
                         if epilogue_fusion:
@@ -4367,9 +4362,6 @@ class Scheduler:
                         else:
                             prologue_fusion_nodes.add(other_node)
 
-                    fusion_log.debug(
-                        f"Adding {node1.get_name()} {node2.get_name()} to pending_fusions"
-                    )
                     is_speedup_fn, future = speedup
                     if node1 not in pending_fusions:
                         pending_fusions[node1] = []
