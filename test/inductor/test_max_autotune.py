@@ -2283,6 +2283,38 @@ class TestMaxAutotune(TestCase):
             _, code_out = run_and_get_code(c_f, *args)
             FileCheck().check(output_code_padding_check).run(code_out[0])
 
+    @torch.no_grad()
+    def test_mm_with_unrealized_view_inputs(self):
+        """
+        Test that mm/addmm with unrealized view inputs (e.g., expand) work correctly.
+        Ensures input nodes are realized before TensorMeta creation in ExternKernelCaller.
+        """
+
+        def mm_with_expand(a, b):
+            a_expanded = a.expand(32, 64)
+            return torch.mm(a_expanded, b)
+
+        def addmm_with_expand(c, a, b):
+            a_view = a.view(32, 64)
+            c_expanded = c.expand(32, 128)
+            return torch.addmm(c_expanded, a_view, b)
+
+        a = torch.randn(1, 64, device=GPU_TYPE)
+        b = torch.randn(64, 128, device=GPU_TYPE)
+        c = torch.randn(1, 128, device=GPU_TYPE)
+        a_flat = torch.randn(2048, device=GPU_TYPE)
+
+        with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
+            # Test mm with expand
+            result = torch.compile(mm_with_expand)(a, b)
+            expected = torch.mm(a.expand(32, 64), b)
+            torch.testing.assert_close(result, expected, atol=2e-2, rtol=2e-2)
+
+            # Test addmm with expand
+            result = torch.compile(addmm_with_expand)(c, a_flat, b)
+            expected = torch.addmm(c.expand(32, 128), a_flat.view(32, 64), b)
+            torch.testing.assert_close(result, expected, atol=2e-2, rtol=2e-2)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
