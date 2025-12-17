@@ -3,8 +3,13 @@ name: rocm-nightly
 on:
   push:
     branches:
-      - nightly  # Trigger when nightly branch is updated
-  workflow_dispatch:  # Allow manual triggering
+      - nightly
+    tags:
+      - ciflow/rocm/*
+      - ciflow/rocm-nightly/*
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * *  # midnight UTC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -13,6 +18,14 @@ concurrency:
 permissions: read-all
 
 jobs:
+  target-determination:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
@@ -32,4 +45,28 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-nightly-py3.12-gfx942
       docker-image-name: ci-image:pytorch-linux-noble-rocm-nightly-py3
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1.b" },
+        ]}
+    secrets: inherit
+
+  linux-noble-rocm-nightly-py3_12-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-noble-rocm-nightly-py3.12-gfx942
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-noble-rocm-nightly-py3_12-build
+      - target-determination
+    with:
+      build-environment: ${{ needs.linux-noble-rocm-nightly-py3_12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-nightly-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-nightly-py3_12-build.outputs.test-matrix }}
     secrets: inherit
