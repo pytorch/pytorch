@@ -732,10 +732,12 @@ class TestFP8Matmul(TestCase):
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
         self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
 
-        # Check that all possible matrix layouts are supported on Blackwell
-        if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major == 10:
+        if torch.cuda.is_available():
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
+                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
+                    self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
         with self.assertRaises(
             AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
