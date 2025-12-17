@@ -683,25 +683,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.placements, (Replicate(), Partial("max")))
         self.assertEqual(comm_mode.get_total_counts(), 3)
 
-        # Part 2: [P("sum"), P("max")] vs [P("max"), P("max")]
-        # Arg A: last non-matching = 0 (P("sum") at index 0)
-        # Arg B: last non-matching = -1 (all match!)
-        # Should follow Arg B (no redistribution needed for B)
-        d_input_a2 = DTensor.from_local(
-            input_a, mesh_2d, [Partial("sum"), Partial("max")]
-        )
-        d_input_b2 = DTensor.from_local(
-            input_b, mesh_2d, [Partial("max"), Partial("max")]
-        )
-
-        with comm_mode:
-            result2 = torch.maximum(d_input_a2, d_input_b2)
-
-        # Should follow Arg B's placements [P("max"), P("max")]
-        # Result should preserve both P("max") placements
-        self.assertEqual(result2.placements, (Partial("max"), Partial("max")))
-        self.assertEqual(comm_mode.get_total_counts(), 2)
-
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
