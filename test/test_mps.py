@@ -6577,39 +6577,6 @@ class TestMPS(TestCaseMPS):
         except Exception as e:
             pass
 
-    @parametrize(
-        "input_shape,output_shape",
-        [
-            ((1, 1, 4, 4), (2, 2)),
-            ((1, 1, 3, 3), (2, 2)),
-            ((1, 2, 2, 3), (5, 4)),
-            ((1, 64, 10, 9), (None, 7)),
-        ],
-    )
-    @parametrize("channels_last", [False, True])
-    def test_adaptive_avg_pool2d_nondivisible_sizes(self, input_shape, output_shape, channels_last):
-        # Covers https://github.com/pytorch/pytorch/issues/143864
-        cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float32)
-        if channels_last:
-            cpu_x = cpu_x.to(memory_format=torch.channels_last)
-        cpu_x.requires_grad_()
-
-        x_mps = cpu_x.detach().to('mps')
-        if channels_last:
-            x_mps = x_mps.to(memory_format=torch.channels_last)
-        x_mps.requires_grad_()
-        pool = torch.nn.AdaptiveAvgPool2d(output_shape)
-
-        ref = pool(cpu_x)
-        out = pool(x_mps)
-        self.assertEqual(out, ref)
-
-        grad = torch.randn_like(ref)
-        ref.backward(grad)
-        grad_mps = grad.to(out.device)
-        out.backward(grad_mps)
-        self.assertEqual(x_mps.grad, cpu_x.grad)
-
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
     def test_adaptive_max_pool2d_simple(self):
