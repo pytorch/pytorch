@@ -2023,7 +2023,7 @@ def add_hop_context(cls):
             return original_call_function(self, *args, **kwargs)
         except UncapturedHigherOrderOpError as e:
             if not hasattr(e, "_hop_name"):
-                e._hop_name = self._HOP_NAME
+                e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
             raise
         except (Unsupported, ObservedException) as e:
             # Only tag if not already tagged (reports deepest HOP only)
