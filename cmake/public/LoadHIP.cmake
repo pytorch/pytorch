@@ -194,7 +194,7 @@ if(HIP_FOUND)
     find_package_and_print_version(hiprtc REQUIRED)
   endif()
   find_package_and_print_version(hipblaslt REQUIRED)
-  
+
   # Capture hipblaslt version
   if(hipblaslt_VERSION)
     # Check if hipblaslt_VERSION contains a dash and strip everything after it
