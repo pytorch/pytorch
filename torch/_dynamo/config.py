@@ -651,6 +651,12 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
+
 
 # Checks if we should graph break when seeing nn parameter constructors
 # in dynamo; this is so that we clearly fail and ask users to move outside
@@ -764,8 +770,9 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
-# Deprecated! Please use the config in torch/fx/experimental/_config instead.
-enrich_profiler_metadata: bool = False
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

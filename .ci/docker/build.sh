@@ -147,8 +147,8 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=12.8.1
+  pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.9.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes
@@ -273,6 +273,12 @@ case "$tag" in
     PALLAS=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-tpu-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    TPU=yes
+    ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
@@ -395,6 +401,7 @@ docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
+       --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
