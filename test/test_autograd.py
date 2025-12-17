@@ -15405,7 +15405,10 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
 
 instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+    TestAutogradMultipleDispatch,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None, allow_xpu=True

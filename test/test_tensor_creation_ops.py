@@ -2869,13 +2869,13 @@ class TestTensorCreation(TestCase):
                 sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
-        
+
         if self.device_type == 'xpu':
             with torch.xpu.device(device):
                 sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('xpu'))
-        
+
 
     @onlyCUDA
     @onlyNativeDeviceTypes
