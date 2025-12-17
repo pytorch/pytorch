@@ -111,6 +111,22 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(dst_dtensor.placements, (Partial(),))
             self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
 
+        # test that copy_ preserves any Partial type, not just sum/avg
+        for reduce_op in ["max", "min"]:
+            src_tensor = torch.randn((64, 1))
+            dst_tensor = torch.zeros(16, 32, 64, 128)
+            partial_placement = Partial(reduce_op)
+            src_dtensor = DTensor.from_local(
+                src_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor = DTensor.from_local(
+                dst_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (partial_placement,))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
+
     @with_comms
     def test_contiguous(self):
         device_mesh = self.build_device_mesh()
