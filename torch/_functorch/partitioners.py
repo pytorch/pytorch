@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
@@ -283,6 +284,13 @@ def _is_primal(node: fx.Node) -> bool:
 
 def _is_tangent(node: fx.Node) -> bool:
     return node.op == "placeholder" and "tangents" in str(node.target)
+
+
+def is_non_builtin_to_include(node: fx.Node) -> bool:
+    return config.is_non_builtin_to_include and (
+        (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
+        or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+    )
 
 
 def _is_bwd_seed_offset(node: fx.Node) -> bool:
@@ -1857,7 +1865,11 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return True
         else:
-            if op_types.is_random(node) or op_types.is_compute_intensive(node):
+            if (
+                op_types.is_random(node)
+                or op_types.is_compute_intensive(node)
+                or is_non_builtin_to_include(node)
+            ):
                 return True
 
         # If a node *must* be materialized in the backwards pass, then we
@@ -2543,7 +2555,10 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
-                and get_node_storage(i) not in input_storages
+                and (
+                    get_node_storage(i) not in input_storages
+                    or is_non_builtin_to_include(i)
+                )
             )
         ]
 
