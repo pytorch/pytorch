@@ -30,24 +30,50 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-# convenient wrapper to register sharding propagation rules
-def register_prop_rule(
+def _get_registration_wrapper(
+    registration_fn,
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
-]:
-    def wrapper(
-        impl: Callable[[OpSchema], OutputSharding],
-    ) -> Callable[[OpSchema], OutputSharding]:
+    schema_info: Optional[RuntimeSchemaInfo],
+    arg_names_that_require_specializing_cache_strategy: Optional[list[str]],
+):
+    def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
-                overload, impl, schema_info
-            )
+            curr_schema_info = None
+            if (
+                schema_info is None
+                and arg_names_that_require_specializing_cache_strategy is not None
+            ):
+                specialized_args = [
+                    a.name
+                    for a in overload._schema.arguments
+                    if a.name in arg_names_that_require_specializing_cache_strategy
+                ]
+                if any(specialized_args):
+                    curr_schema_info = RuntimeSchemaInfo(
+                        static_kwargkey=specialized_args
+                    )
+            else:
+                curr_schema_info = schema_info
+            registration_fn(overload, impl, curr_schema_info)
         return impl
 
     return wrapper
+
+
+# convenient wrapper to register sharding propagation rules
+def register_prop_rule(
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
+) -> Callable[
+    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
+]:
+    return _get_registration_wrapper(
+        DTensor._op_dispatcher.sharding_propagator.register_op_strategy,
+        op,
+        schema_info,
+        arg_names_that_require_specializing_cache_strategy=None,
+    )
 
 
 # Note:
@@ -61,8 +87,8 @@ _ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
 
 def register_op_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
 ) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
@@ -72,33 +98,12 @@ def register_op_strategy(
     arg_names_that_require_specializing_cache_strategy = [
         "memory_format",
     ]
-
-    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
-
-        for overload in overloads:
-            curr_schema_info = None
-            if schema_info is None:
-                specialized_args = [
-                    a.name
-                    for a in overload._schema.arguments
-                    if a.name in arg_names_that_require_specializing_cache_strategy
-                ]
-                if any(specialized_args):
-                    curr_schema_info = RuntimeSchemaInfo(
-                        static_kwargkey=specialized_args
-                    )
-            else:
-                curr_schema_info = schema_info
-            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
-                overload, impl, curr_schema_info
-            )
-        return impl
-
-    return wrapper
+    return _get_registration_wrapper(
+        DTensor._op_dispatcher.sharding_propagator.register_op_strategy,
+        op,
+        schema_info,
+        arg_names_that_require_specializing_cache_strategy,
+    )
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
