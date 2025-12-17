@@ -225,12 +225,6 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
-    if query.dtype != key.dtype or query.dtype != value.dtype:
-        raise ValueError(
-            f"Expected query, key, and value to have the same dtype, "
-            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype} instead."
-        )
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)
     value = torch.repeat_interleave(value, G, dim=1)
@@ -269,7 +263,7 @@ def math_attention(
     # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
-        post_mod_scores.to(query.dtype) @ value,
+        post_mod_scores.to(query.dtype) @ value.to(query.dtype),
         logsumexp / math.log(2),
         max_scores / math.log(2),
     )

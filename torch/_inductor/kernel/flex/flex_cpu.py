@@ -70,9 +70,9 @@ def lower_cpu(
 
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
-            f"Expected query, key, and value to have the same dtype, "
-            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype} instead."
+            f"Mixed query, key, and value dtype is not supported on this platform, "
+            f"got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype}."
         )
 
     if kernel_options["OUTPUT_LOGSUMEXP"]:

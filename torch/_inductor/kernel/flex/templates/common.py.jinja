@@ -112,7 +112,6 @@ def forward_block_mn(
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
     v = load_checked_2d(V, offs_n_load, offs_v, stride_vn, stride_vk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
     {%- endif %}
-    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
     acc = tl.dot(p.to(MATMUL_PRECISION), v.to(q.dtype), acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i

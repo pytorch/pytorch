@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+from setuptools.config._apply_pyprojecttoml import _identity
 import unittest
 from contextlib import contextmanager
 
@@ -359,6 +360,27 @@ class TestFlexFlash(InductorTestCase):
                 v,
                 score_mod=score_mod_with_grad,
                 kernel_options={"BACKEND": "FLASH"},
+            )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_mixed_dtypes(self, device, dtype):
+        """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
+        B, H, S, D = 2, 8, 512, 64
+
+        query = torch.randn(B, H, S, D, dtype=torch.float32, device=device)
+        key = torch.randn(B, H, S, D, dtype=dtype, device=device)
+        value = torch.randn(B, H, S, D, dtype=dtype, device=device)
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        from torch._inductor.exc import InductorError
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Mixed query, key, and value dtype is not supported on this platform",
+        ):
+            compiled_fn(
+                query, key, value, _identity, kernel_options={"BACKEND": "FLASH"}
             )
 
     @dtypes(torch.float16, torch.bfloat16)

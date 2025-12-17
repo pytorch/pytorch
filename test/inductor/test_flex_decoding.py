@@ -1558,14 +1558,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    def test_mixed_dtypes_fails(self, device):
+    def test_mixed_dtypes(self, device):
         query = torch.randn((1, 1, 8, 64), dtype=torch.float32, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        with self.assertRaisesRegex(
-            ValueError, "Expected query, key, and value to have the same dtype"
-        ):
-            flex_attention(query, key, value, _identity)
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        out = torch.compile(flex_attention)(
+            query, key, value, _identity, kernel_options=kernel_options
+        )
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
