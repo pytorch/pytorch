@@ -74,16 +74,17 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       redistribute_input(1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
           _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
-      aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt$6: f32[8, 32]| S(0))  ->  dt$8: f32[]| P(sum)
-    aten::sum(dt$6: f32[8, 32]| S(0))
-      aten::sum(t$5: f32[1, 32])  ->  t$7: f32[]""",
+      aten::mm(t$5: f32[1, 8], t$3: f32[8, 32])  ->  t$6: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
+    aten::sum(dt$7: f32[8, 32]| S(0))
+      aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
@@ -221,25 +222,21 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
-      redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
-        _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
-        _c10d_functional::wait_tensor(t: f32[32, 8])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RS(1))
-      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR->RS(1))
+    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
         _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
         aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
         _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
-        aten::chunk(t: f32[8, 128], 2, 1)
-        aten::clone(t: f32[8, 64])
-    aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]| S(0)S(1))
-    aten::sum(t: f32[32, 64])""",
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
         )
 
     def test_debug_mode_einsum(self):
@@ -286,6 +283,7 @@ class TestDTensorDebugMode(TestCase):
           aten::chunk(t: f32[1, 96, 8], 4, 2)
           aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
           _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
           _c10d_functional::wait_tensor(t: f32[1, 96, 2])
           aten::chunk(t: f32[1, 96, 2], 2, 2)
           aten::clone(t: f32[1, 96, 1])
@@ -296,6 +294,7 @@ class TestDTensorDebugMode(TestCase):
           aten::chunk(t: f32[1, 2, 16], 2, 1)
           aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
           _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
           _c10d_functional::wait_tensor(t: f32[1, 1, 16])
       aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
@@ -533,6 +532,44 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
         self.assertTrue(
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
+        )
+
+        # check that nn_module doesn't graph break in compiled regions
+        fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            fn(inp)
+
+    def test_record_function(self):
+        def fn(x, y):
+            z = x @ y
+            with torch.profiler.record_function("this_is_ignored"):
+                z = z + 1
+            return z.sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(4, 2, requires_grad=True)
+        with DebugMode() as debug_mode:
+            with torch.profiler.record_function("FWD"):
+                out = torch.compile(fn, backend="aot_eager")(x, y)
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [record function] FWD
+      aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
+      aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
+      aten::sum(t: f32[8, 2])  ->  t: f32[]
+      aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
+      aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+      aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
+      aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
+    aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
+    aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
         )
 
     def test_in_place_mutation(self):
