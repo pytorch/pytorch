@@ -726,7 +726,9 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Float, float):
                 # Use signature type if available, otherwise default to float
-                cpp_type = signature2dtype.get(arg_signature, "float")
+                cpp_type = signature2dtype.get(  # pyrefly: ignore[no-matching-overload]
+                    arg_signature, "float"
+                )
                 code.writeline(f"{cpp_type} {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
