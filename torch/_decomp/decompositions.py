@@ -355,7 +355,12 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
 @register_decomposition(aten.ldexp)
 @out_wrapper()
 def ldexp(self: Tensor, other: Tensor) -> Tensor:
-    two_tensor = torch.tensor(2.0, dtype=self.dtype, device=self.device)
+    two_dtype = (
+        torch.float32
+        if utils.is_integer_dtype(self.dtype) or utils.is_boolean_dtype(self.dtype)
+        else self.dtype
+    )
+    two_tensor = self.new_full((), 2.0, dtype=two_dtype)
     return self * torch.pow(two_tensor, other)
 
 
