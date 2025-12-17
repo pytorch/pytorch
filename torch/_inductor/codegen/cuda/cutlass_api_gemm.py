@@ -4,6 +4,7 @@ import random
 from typing import Any, Optional, Union
 
 import torch
+from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
     GPUDeviceBenchmarkMixin,
@@ -21,8 +22,6 @@ from torch._logging import getArtifactLogger
 
 
 log = getArtifactLogger(__name__, "output_code")
-
-MAX_CUTLASS_API_PROFILING_CONFIGS = 5
 
 
 class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -429,11 +428,18 @@ def add_cutlass_api_gemm_choices(
         )
         return
 
-    if len(kernels) > MAX_CUTLASS_API_PROFILING_CONFIGS:
-        kernels = random.sample(kernels, MAX_CUTLASS_API_PROFILING_CONFIGS)
+    # Limit kernels to profile if config is set
+    chosen_kernels = (
+        random.sample(
+            kernels,
+            min(len(kernels), config.cuda.cutlass_api_max_profiling_configs),
+        )
+        if config.cuda.cutlass_api_max_profiling_configs
+        else kernels
+    )
 
     num_added = 0
-    for kernel in kernels:
+    for kernel in chosen_kernels:
         name = f"cutlass_api_gemm_{next(CutlassAPIGemmCaller.index_counter)}"
         try:
             caller = CutlassAPIGemmCaller(

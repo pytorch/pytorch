@@ -1926,6 +1926,10 @@ class cuda:
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
 
+    # Configures the maximum number of cutlass_api configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    cutlass_api_max_profiling_configs: Optional[int] = 5
+
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
