@@ -6,7 +6,7 @@ on:
       - nightly
     tags:
       - ciflow/rocm/*
-      - ciflow/rocm-nightly/*
+      - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:
     - cron: 0 0 * * *  # midnight UTC
