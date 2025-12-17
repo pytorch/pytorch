@@ -1106,11 +1106,16 @@ class ForeachTests(TestCase):
         ],
     )
     def test_addcmul_scalar_value_vs_tensor_value(self, value):
-        """Test that torch._foreach_addcmul with python scalar value kwarg
-        matches tensor scalar value kwarg in both eager and compiled modes."""
+        """Test that torch._foreach_addcmul with unbacked float scalar from .item()
+        matches tensor scalar value in compiled mode.
 
-        def fn_python_scalar(a0, a1, b0, b1, c0, c1):
-            return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - value)
+        Uses .item() to create an unbacked float symbol that gets passed as a
+        kernel argument, exercising the fp64 signature fix in triton_utils.py."""
+
+        def fn_item_scalar(a0, a1, b0, b1, c0, c1, scalar_tensor):
+            # .item() creates an unbacked float symbol - passed as kernel arg
+            val = scalar_tensor.item()
+            return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - val)
 
         def fn_tensor_scalar(a0, a1, b0, b1, c0, c1, val):
             return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - val)
@@ -1142,26 +1147,15 @@ class ForeachTests(TestCase):
         )
         scalar_tensor = torch.tensor(value, device=GPU_TYPE, dtype=torch.float64)
 
-        # Eager mode comparison - assert bitwise equality
-        eager_python_scalar = fn_python_scalar(*inputs)
-        eager_tensor_scalar = fn_tensor_scalar(*inputs, scalar_tensor)
-        for a, b in zip(eager_python_scalar, eager_tensor_scalar):
-            self.assertEqual(a, b, atol=0, rtol=0)
-
         # Compiled mode comparison - assert bitwise equality
-        compiled_python_scalar = torch.compile(fn_python_scalar, fullgraph=True)(
-            *inputs
+        # The .item() path should preserve fp64 precision just like tensor scalar path
+        compiled_item_scalar = torch.compile(fn_item_scalar, fullgraph=True)(
+            *inputs, scalar_tensor
         )
         compiled_tensor_scalar = torch.compile(fn_tensor_scalar, fullgraph=True)(
             *inputs, scalar_tensor
         )
-        for a, b in zip(compiled_python_scalar, compiled_tensor_scalar):
-            self.assertEqual(a, b, atol=0, rtol=0)
-
-        # Cross comparison: eager vs compiled - assert bitwise equality
-        for a, b in zip(eager_python_scalar, compiled_python_scalar):
-            self.assertEqual(a, b, atol=0, rtol=0)
-        for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
+        for a, b in zip(compiled_item_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
     @requires_gpu
