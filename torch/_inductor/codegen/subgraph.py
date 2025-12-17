@@ -438,8 +438,15 @@ class SubgraphTemplate(KernelTemplate):
                     concrete_shape = V.graph.sizevars.size_hints(
                         raw_shape, fallback=config.unbacked_symint_fallback
                     )
-                    fake_tensor = torch.empty(
-                        concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
+                    raw_stride = inp.get_stride()
+                    concrete_stride = V.graph.sizevars.size_hints(
+                        raw_stride, fallback=config.unbacked_symint_fallback
+                    )
+                    fake_tensor = torch.empty_strided(
+                        concrete_shape,
+                        concrete_stride,
+                        dtype=inp.get_dtype(),
+                        device=inp.get_device(),
                     )
                 example_inputs.append(fake_tensor)
 

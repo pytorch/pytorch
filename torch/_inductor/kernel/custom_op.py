@@ -14,6 +14,7 @@ from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
 )
+from torch._inductor.utils import convert_symint_to_expr
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -381,6 +382,8 @@ def _create_range_input_gen_fn(
         shape = list(result.shape)
         shape[dim_index] = target_dim
 
+        # We modified the shape of the result, so we need to recalculate the strides
+        # TODO: Refine this to a better way to more directly preserve strides
         fill_order = get_fill_order(result.stride(), shape_env=None)
         new_stride = construct_strides(shape, fill_order)
 
@@ -504,15 +507,6 @@ def autotune_custom_op(
                 fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
                 fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
                 fake_output = op_overload(*fake_inputs, **fallback_kwargs)
-
-            # Convert SymInt to Expr for FixedLayout
-            # FixedLayout expects Expr (sympy expressions) or int, not torch.SymInt
-            # Extract .node.expr from SymInt to get the underlying sympy.Expr
-            def convert_symint_to_expr(val):
-                """Convert SymInt to Expr, leave int as is."""
-                if isinstance(val, torch.SymInt):
-                    return val.node.expr
-                return val
 
             output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
             output_stride = tuple(
@@ -998,6 +992,8 @@ def register_custom_op_autotuning(
                           based on input tensor properties. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
+        dispatch_on: Dict with 'tensor_name' and 'dim' keys for range-based dispatch
+        split_points: List of range endpoints in ascending order for range-based autotuning
 
     Examples:
         # Static configs
