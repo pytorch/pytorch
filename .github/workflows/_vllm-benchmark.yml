@@ -158,6 +158,7 @@ jobs:
       - name: Setup benchmark tests
         env:
           MODELS: ${{ inputs.models }}
+        shell: bash
         run: |
           set -eux
 
@@ -186,6 +187,7 @@ jobs:
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
+        shell: bash
         run: |
           set -eux
 
