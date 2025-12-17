@@ -267,6 +267,49 @@ class ConstDictVariable(VariableTracker):
     def python_type(self) -> type:
         return self.user_cls
 
+    def _realize_aliasing_lazy_keys(self, read_key: VariableTracker) -> None:
+        """Realize any lazy keys that could alias with the read key.
+
+        When reading from a dict, if we previously wrote with a lazy key that
+        could alias with the read key, we need to realize that lazy key to
+        install proper guards. This ensures correct behavior when the lazy
+        key's value equals the read key at runtime.
+
+        Example of the bug this prevents:
+            d = {'x': old_value}
+            d[lazy_key] = new_value  # lazy_key tracked but not realized
+            return d['x']  # If lazy_key == 'x', would return wrong value
+
+        Args:
+            read_key: The key being read from the dict
+        """
+        from .lazy import LazyConstantVariable
+
+        if not hasattr(self, "_lazy_key_writes"):
+            return
+
+        # Check if read_key could potentially alias with any lazy key writes
+        # We need to realize lazy keys when:
+        # 1. read_key is a constant and could equal a lazy key
+        # 2. read_key is a lazy constant and could equal another lazy key
+        for lazy_key in self._lazy_key_writes:
+            if lazy_key.is_realized():
+                continue  # Already realized, has guards
+
+            # Check if types are compatible (could alias)
+            if (
+                isinstance(read_key, LazyConstantVariable)
+                and not read_key.is_realized()
+            ):
+                # Both are lazy - check if same type
+                if type(lazy_key.peek_value()) is type(read_key.peek_value()):
+                    lazy_key.realize()
+            elif read_key.is_python_constant():
+                # read_key is constant - check if types match
+                read_val = read_key.as_python_constant()
+                if type(lazy_key.peek_value()) is type(read_val):
+                    lazy_key.realize()
+
     def __contains__(self, vt: VariableTracker) -> bool:
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
@@ -492,9 +535,12 @@ class ConstDictVariable(VariableTracker):
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
             return ConstantVariable.create(None)
         elif name == "__getitem__":
-            # Key guarding - Nothing to do. LazyVT for value will take care.
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+            # Check for aliasing: if we're reading with a key that could alias
+            # with a lazy key that was written, we need to realize those lazy keys.
+            # This ensures correct behavior when lazy_key == read_key at runtime.
+            self._realize_aliasing_lazy_keys(args[0])
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
             if args or kwargs:
@@ -564,9 +610,10 @@ class ConstDictVariable(VariableTracker):
             # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
             # would have been installed by the earlier mutation.
             #
-            # For LazyConstantVariable keys, we install a TYPE_MATCH guard to ensure
-            # the key type remains consistent (e.g., always a string), but we don't
-            # guard on the specific value.
+            # IMPORTANT: For LazyConstantVariable keys, we must check for potential
+            # aliasing with existing dict keys. If the dict is non-empty, a lazy key
+            # write could alias with an existing key, which would affect subsequent
+            # reads. In this case, we must realize the lazy key to guard its value.
             from .lazy import LazyConstantVariable
 
             key_arg = args[0]
@@ -577,9 +624,14 @@ class ConstDictVariable(VariableTracker):
             elif (
                 isinstance(key_arg, LazyConstantVariable) and not key_arg.is_realized()
             ):
-                # For lazy constant keys, install TYPE_MATCH guard to ensure correctness
-                # if the key type changes (e.g., from string to int)
+                # For lazy constant keys, install TYPE_MATCH guard to ensure
+                # the key type remains consistent (e.g., always a string).
+                # We track lazy key writes for potential aliasing checks later.
                 key_arg._ensure_type_guard()
+                # Track this lazy key write for aliasing detection during reads
+                if not hasattr(self, "_lazy_key_writes"):
+                    self._lazy_key_writes = []
+                self._lazy_key_writes.append(key_arg)
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -608,6 +660,7 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
+            self._realize_aliasing_lazy_keys(args[0])
             if args[0] not in self:
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
@@ -624,6 +677,7 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
+            self._realize_aliasing_lazy_keys(args[0])
             if args[0] not in self:
                 # missing item, return the default value. Install no DICT_CONTAINS guard.
                 self.install_dict_contains_guard(tx, args)
@@ -716,6 +770,7 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
+            self._realize_aliasing_lazy_keys(args[0])
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)

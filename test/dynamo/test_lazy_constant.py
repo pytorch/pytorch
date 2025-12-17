@@ -1611,6 +1611,227 @@ class LazyConstantVariableTests(TestCase):
         # Should recompile because different branch was taken
         self.assertGreater(counter.frame_count, 1)
 
+    def test_dict_lazy_key_write_constant_key_read_aliasing(self):
+        """Test aliasing between lazy key writes and constant key reads.
+
+        This is a critical correctness test. When we write with a lazy key
+        and then read with a constant key, the lazy key might alias with
+        the constant key, which would change the read value.
+
+        Example:
+            d = {'x': old_value}
+            d[lazy_key] = new_value
+            return d['x']  # Depends on whether lazy_key == 'x'
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()  # Write with lazy key
+            return d["x"]  # Read with constant key - might alias!
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: key='a' (different from 'x')
+        # d['a'] = 6.0, return d['x'] = 999.0 (original value)
+        d1 = {"x": torch.tensor(999.0)}
+        eager1 = fn(tensor_input, {"x": torch.tensor(999.0)}, "a")
+        compiled1 = opt_fn(tensor_input, d1, "a")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertTrue(same(compiled1, torch.tensor(999.0)))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: key='x' (SAME as constant 'x' - aliasing!)
+        # d['x'] = 6.0 (overwrites!), return d['x'] = 6.0
+        d2 = {"x": torch.tensor(999.0)}
+        eager2 = fn(tensor_input, {"x": torch.tensor(999.0)}, "x")
+        compiled2 = opt_fn(tensor_input, d2, "x")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertTrue(
+            same(compiled2, tensor_input.sum())
+        )  # Should be 6.0, not 999.0!
+        # Should recompile because key value changed (guard was installed)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dict_lazy_key_on_nonempty_dict_no_read_no_guard(self):
+        """Test that lazy key on non-empty dict without read does NOT install value guard.
+
+        When the dict has existing keys but we don't read from it, there's no
+        aliasing concern, so we should NOT install a value guard.
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return t + 1  # No dict read!
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: non-empty dict but no read
+        d1 = {"existing": torch.tensor(0.0)}
+        opt_fn(tensor_input, d1, "a")
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: different key value should NOT recompile
+        # (no read from dict, so no aliasing concern)
+        d2 = {"existing": torch.tensor(0.0)}
+        opt_fn(tensor_input, d2, "b")
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call: still no recompile
+        d3 = {"existing": torch.tensor(0.0)}
+        opt_fn(tensor_input, d3, "c")
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_dict_lazy_key_on_empty_dict_no_value_guard(self):
+        """Test that lazy key on empty dict does NOT install value guard."""
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: empty dict
+        d1 = {}
+        opt_fn(tensor_input, d1, "a")
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: different key value should NOT recompile
+        # (dict was empty, no aliasing possible, only TYPE_MATCH guard)
+        d2 = {}
+        opt_fn(tensor_input, d2, "b")
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call: still no recompile
+        d3 = {}
+        opt_fn(tensor_input, d3, "c")
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_dict_lazy_key_write_then_contains_aliasing(self):
+        """Test aliasing between lazy key writes and __contains__ checks.
+
+        When we write with a lazy key and then check containment with a constant
+        key, the lazy key might alias, which would change the containment result.
+
+        Example:
+            d = {}
+            d[lazy_key] = value
+            return 'x' in d  # Depends on whether lazy_key == 'x'
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()  # Write with lazy key
+            if "x" in d:  # Check containment with constant key
+                return t + 1
+            return t - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: key='a' (different from 'x')
+        # 'x' not in d, returns t - 1
+        d1 = {}
+        eager1 = fn(tensor_input, {}, "a")
+        compiled1 = opt_fn(tensor_input, d1, "a")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertTrue(same(compiled1, tensor_input - 1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: key='x' (SAME as constant 'x' - aliasing!)
+        # 'x' IS in d, returns t + 1
+        d2 = {}
+        eager2 = fn(tensor_input, {}, "x")
+        compiled2 = opt_fn(tensor_input, d2, "x")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertTrue(same(compiled2, tensor_input + 1))
+        # Should recompile because key value changed (guard was installed)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dict_lazy_key_write_then_get_aliasing(self):
+        """Test aliasing between lazy key writes and .get() calls.
+
+        When we write with a lazy key and then call .get() with a constant
+        key, the lazy key might alias, which would change the .get() result.
+
+        Example:
+            d = {}
+            d[lazy_key] = value
+            return d.get('x', default)  # Depends on whether lazy_key == 'x'
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()  # Write with lazy key
+            result = d.get("x", torch.tensor(-999.0))  # Get with constant key
+            return result
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: key='a' (different from 'x')
+        # d.get('x') returns default -999.0
+        d1 = {}
+        eager1 = fn(tensor_input, {}, "a")
+        compiled1 = opt_fn(tensor_input, d1, "a")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertTrue(same(compiled1, torch.tensor(-999.0)))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: key='x' (SAME as constant 'x' - aliasing!)
+        # d.get('x') returns the sum = 6.0
+        d2 = {}
+        eager2 = fn(tensor_input, {}, "x")
+        compiled2 = opt_fn(tensor_input, d2, "x")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertTrue(same(compiled2, tensor_input.sum()))
+        # Should recompile because key value changed (guard was installed)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dict_lazy_key_write_then_pop_aliasing(self):
+        """Test aliasing between lazy key writes and .pop() calls.
+
+        When we write with a lazy key and then call .pop() with a constant
+        key, the lazy key might alias, which would change the .pop() result.
+
+        Example:
+            d = {}
+            d[lazy_key] = value
+            return d.pop('x', default)  # Depends on whether lazy_key == 'x'
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()  # Write with lazy key
+            result = d.pop("x", torch.tensor(-999.0))  # Pop with constant key
+            return result
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call: key='a' (different from 'x')
+        # d.pop('x') returns default -999.0
+        d1 = {}
+        eager1 = fn(tensor_input, {}, "a")
+        compiled1 = opt_fn(tensor_input, d1, "a")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertTrue(same(compiled1, torch.tensor(-999.0)))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call: key='x' (SAME as constant 'x' - aliasing!)
+        # d.pop('x') returns the sum = 6.0
+        d2 = {}
+        eager2 = fn(tensor_input, {}, "x")
+        compiled2 = opt_fn(tensor_input, d2, "x")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertTrue(same(compiled2, tensor_input.sum()))
+        # Should recompile because key value changed (guard was installed)
+        self.assertEqual(counter.frame_count, 2)
+
 
 if __name__ == "__main__":
     run_tests()
