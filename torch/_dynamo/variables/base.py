@@ -486,7 +486,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
