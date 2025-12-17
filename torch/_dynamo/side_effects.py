@@ -33,7 +33,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
-from . import graph_break_hints, utils, variables
+from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -870,6 +870,11 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen) -> None:
         suffixes = []
         for var in self._get_modified_vars():
+            # When replay_side_effects=False, only update variables with TempLocalSource
+            if not config.replay_side_effects and not isinstance(
+                var.source, TempLocalSource
+            ):
+                continue
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
