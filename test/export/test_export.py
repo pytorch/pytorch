@@ -15322,6 +15322,16 @@ graph():
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
 
+    def test_isin(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.isin(x, torch.tensor(0))
+
+        ep = export(Module(), (0,), dynamic_shapes=(Dim.DYNAMIC,))
+        m = ep.module()
+        self.assertTrue(m(0))
+        self.assertFalse(m(1))
+
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
