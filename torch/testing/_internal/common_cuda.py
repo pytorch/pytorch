@@ -313,6 +313,13 @@ def _get_torch_rocm_version():
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
+def _get_torch_hipblaslt_version():
+    if not TEST_WITH_ROCM or torch.version.hipblaslt is None:
+        return (0, 0)
+    hipblaslt_version = str(torch.version.hipblaslt)
+    hipblaslt_version = hipblaslt_version.split("-", maxsplit=1)[0]    # ignore git sha
+    return tuple(int(x) for x in hipblaslt_version.split("."))
+
 def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
