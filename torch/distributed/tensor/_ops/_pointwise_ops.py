@@ -480,6 +480,7 @@ def pointwise_strategy(
     followed_strategy_index = -1
     max_shards = -1
     max_ndim = -1
+    any_arg_has_shard = False
 
     if op_schema.is_inplace_op():
         # inplace op should follow the first arg strategy
@@ -507,6 +508,10 @@ def pointwise_strategy(
             arg_max_shards = arg_strategy.max_num_shards()
             arg_max_ndim = arg_strategy.ndim
 
+            # Track if any arg has any Shard placement
+            if _has_any_shard_placement(arg_strategy):
+                any_arg_has_shard = True
+
             if (arg_max_shards > max_shards) or (
                 arg_max_shards == max_shards and arg_max_ndim > max_ndim
             ):
@@ -515,9 +520,7 @@ def pointwise_strategy(
                 max_ndim = arg_max_ndim
 
             # Only apply partial optimization when no args have any Shard placements
-            if preserve_partial is not None and not _has_any_shard_placement(
-                arg_strategy
-            ):
+            if preserve_partial is not None and not any_arg_has_shard:
                 current_arg_last_partial_index = _find_last_non_matching_partial_index(
                     arg_strategy, preserve_partial
                 )
