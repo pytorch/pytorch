@@ -507,9 +507,10 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            # Lower tolerance because we are running this as a `@slowTest`
-            # Don't want the periodic tests to fail frequently
-            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
+            atol, rtol = 0, 0
+            if dtype.is_floating_point or dtype.is_complex:
+                atol, rtol = 1e-3, 1e-3
+            self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
