@@ -6875,6 +6875,48 @@ sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
+
+
+@register_lowering(aten.addcmul, type_promotion_kind=None)
+def addcmul(self, tensor1, tensor2, *, value=1):
+    """
+    Computes self + value * tensor1 * tensor2 using FMA for better precision.
+
+    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
+    This is computed as: fma(value, tensor1 * tensor2, self)
+    """
+    self, tensor1, tensor2 = broadcast_tensors(self, tensor1, tensor2)
+    dtype = get_promoted_dtype(
+        self,
+        tensor1,
+        tensor2,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    self_loader = self.make_loader()
+    t1_loader = tensor1.make_loader()
+    t2_loader = tensor2.make_loader()
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        t1_val = t1_loader(idx)
+        t2_val = t2_loader(idx)
+
+        # Match eager order: self + value * (tensor1 * tensor2)
+        # Compute tensor1 * tensor2 first, then fma(value, result, self)
+        t1_times_t2 = ops.mul(t1_val, t2_val)
+        # Always use fma for consistency with eager CUDA kernel
+        value_const = ops.constant(value, dtype)
+        return ops.fma(value_const, t1_times_t2, self_val)
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=self.get_size(),
+    )
+
+
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 abs = register_pointwise(aten.abs)
