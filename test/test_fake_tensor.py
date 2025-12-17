@@ -62,7 +62,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
     TemporaryFileName,
