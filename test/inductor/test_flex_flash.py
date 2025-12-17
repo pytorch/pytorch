@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
@@ -28,8 +30,31 @@ def _causal(score, _b, _h, token_q, token_kv):
     return torch.where(token_q >= token_kv, score, float("-inf"))
 
 
+def _causal_mask(_b, _h, token_q, token_kv):
+    return token_q >= token_kv
+
+
 def _rel_bias(score, _b, _h, token_q, token_kv):
     return score + (token_q - token_kv)
+
+
+def _score_squared(score, _b, _h, _q, _k):
+    return score * score
+
+
+def _softcap(score, _b, _h, _q, _k):
+    cap = 50.0
+    return torch.tanh(score / cap) * cap
+
+
+def _head_offset(score, _b, h, _q, _k):
+    return score + h * 0.1
+
+
+def _distance_decay(score, _b, _h, q_idx, kv_idx):
+    distance_sq = (q_idx - kv_idx) * (q_idx - kv_idx)
+    decay = 1.0 / (1.0 + distance_sq * 0.0001)
+    return score * decay
 
 
 def create_alibi_learned(num_heads=4, dtype=torch.float16):
@@ -98,6 +123,101 @@ def create_dual_buffer_bias(num_heads=4, seq_len=512, dtype=torch.float16):
         return score + head_component + pos_component
 
     return dual_buffer_mod
+
+
+def create_score_view_mod(num_heads=4, dtype=torch.float16, device="cuda"):
+    base_scales = torch.rand(num_heads, 2, device=device, dtype=dtype) + 0.5
+    scales_view = base_scales[:, 0]
+    if scales_view.is_contiguous():
+        raise AssertionError("Expected non-contiguous view")
+
+    def score_view_mod(score, _b, h, _q_idx, _kv_idx):
+        return score + scales_view[h]
+
+    return score_view_mod
+
+
+def create_complex_score_mod(
+    batch_size=2, num_heads=4, seq_len=512, dtype=torch.float16, device="cuda"
+):
+    head_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.15
+    query_scale = torch.randn(seq_len, device=device, dtype=dtype) * 0.05
+    kv_scale = torch.randn(seq_len, device=device, dtype=dtype) * 0.05
+    batch_bias = torch.randn(batch_size, device=device, dtype=dtype) * 0.1
+
+    def complex_score(score, b, h, q_idx, kv_idx):
+        head_term = head_bias[h]
+        query_term = query_scale[q_idx] - kv_scale[kv_idx]
+        batch_term = batch_bias[b]
+        return score + head_term + query_term + batch_term
+
+    return complex_score
+
+
+def create_score_mod_buffer(num_heads=4, dtype=torch.float16, device="cuda"):
+    score_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.2
+
+    def score_with_buffer(score, _b, h, _q_idx, _kv_idx):
+        return score + score_bias[h]
+
+    return score_with_buffer
+
+
+def create_mask_mod_buffer(num_heads=4, dtype=torch.float16, device="cuda"):
+    mask_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.1
+
+    def custom_mask(_b, h, q_idx, kv_idx):
+        bias_value = mask_bias[h]
+        return (q_idx >= kv_idx) | (bias_value > 0)
+
+    return custom_mask
+
+
+def create_document_mask(lengths_per_batch, device):
+    document_ids = []
+    for lengths in lengths_per_batch:
+        doc_tokens = []
+        for doc_id, length in enumerate(lengths):
+            doc_tokens.extend([doc_id] * length)
+        document_ids.append(doc_tokens)
+    document_ids = torch.tensor(document_ids, device=device, dtype=torch.long)
+
+    def document_mask(b, _h, q_idx, kv_idx):
+        doc_id_q = document_ids[b, q_idx // 2]
+        doc_id_kv = document_ids[b, kv_idx]
+        return doc_id_q == doc_id_kv
+
+    return document_mask
+
+
+def create_mask_mod_view_buffer(num_heads=4, dtype=torch.float16, device="cuda"):
+    base_bias = torch.randn(num_heads, 3, device=device, dtype=dtype)
+    mask_bias_view = base_bias[:, 1]
+    if mask_bias_view.is_contiguous():
+        raise AssertionError("Expected non-contiguous view")
+
+    def mask_with_view_buffer(_b, h, q_idx, kv_idx):
+        bias_value = mask_bias_view[h]
+        double_bias = bias_value * 2
+        return (q_idx >= kv_idx) | (double_bias > 0)
+
+    return mask_with_view_buffer
+
+
+def create_mask_mod_dual_buffers(
+    batch_size=2, num_heads=4, dtype=torch.float16, device="cuda"
+):
+    head_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.2
+    batch_bias = torch.randn(batch_size, device=device, dtype=dtype) * 0.2
+
+    def dual_buffer_mask(b, h, q_idx, kv_idx):
+        head_term = head_bias[h]
+        batch_term = batch_bias[b]
+        causal = q_idx >= kv_idx
+        bias_cond = (head_term + batch_term).to(torch.float32) > 0
+        return causal | bias_cond
+
+    return dual_buffer_mask
 
 
 def create_test_tensors(
@@ -233,8 +353,194 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
     return out_flash, out_triton, out_ref_fp32
 
 
-def name_fn(score_mod):
-    return score_mod.__name__.lstrip("_")
+@dataclass
+class ScoreModCase:
+    name: str
+    score_mod_factory: Callable[[torch.dtype, str], Callable | None]
+    batch_size: int = 2
+    num_heads: int = 4
+    seq_len: int = 512
+    dim: int = 64
+    requires_grad: bool = False
+
+
+@dataclass
+class MaskModCase:
+    name: str
+    mask_mod_factory: Callable[[torch.dtype, str], Callable]
+    batch_size: int = 2
+    num_heads: int = 4
+    block_mask_num_heads: int | None = None
+    seq_len: int = 512
+    dim: int = 64
+    score_mod_factory: Callable[[torch.dtype, str], Callable | None] | None = None
+
+
+def score_case_name(case: ScoreModCase):
+    return case.name
+
+
+def mask_case_name(case: MaskModCase):
+    return case.name
+
+
+SCORE_MOD_CASES = [
+    ScoreModCase("basic", lambda _dtype, _device: None),
+    ScoreModCase("times_two", lambda _dtype, _device: _times_two),
+    ScoreModCase("causal", lambda _dtype, _device: _causal),
+    ScoreModCase("rel_bias", lambda _dtype, _device: _rel_bias),
+    ScoreModCase("causal_unfriendly_127", lambda _dtype, _device: _causal, seq_len=127),
+    ScoreModCase("causal_unfriendly_255", lambda _dtype, _device: _causal, seq_len=255),
+    ScoreModCase("causal_unfriendly_383", lambda _dtype, _device: _causal, seq_len=383),
+    ScoreModCase("causal_unfriendly_511", lambda _dtype, _device: _causal, seq_len=511),
+    ScoreModCase(
+        "alibi_learned",
+        lambda dtype, device: create_alibi_learned(num_heads=4, dtype=dtype),
+    ),
+    ScoreModCase(
+        "pos_bias_table",
+        lambda dtype, device: create_pos_bias_table(seq_len=512, dtype=dtype),
+    ),
+    ScoreModCase(
+        "head_scale",
+        lambda dtype, device: create_head_scale(num_heads=4, dtype=dtype),
+    ),
+    ScoreModCase(
+        "batch_bias",
+        lambda dtype, device: create_batch_bias(batch_size=2, dtype=dtype),
+    ),
+    ScoreModCase(
+        "batch_head_bias",
+        lambda dtype, device: create_batch_head_bias(
+            batch_size=2, num_heads=4, dtype=dtype
+        ),
+    ),
+    ScoreModCase(
+        "dual_buffer_bias",
+        lambda dtype, device: create_dual_buffer_bias(
+            num_heads=4, seq_len=512, dtype=dtype
+        ),
+    ),
+    ScoreModCase(
+        "score_view_buffer",
+        lambda dtype, device: create_score_view_mod(
+            num_heads=4, dtype=dtype, device=device
+        ),
+    ),
+    ScoreModCase(
+        "score_many_buffers",
+        lambda dtype, device: create_complex_score_mod(
+            batch_size=2, num_heads=4, seq_len=512, dtype=dtype, device=device
+        ),
+    ),
+    ScoreModCase(
+        "backward_times_two",
+        lambda _dtype, _device: _times_two,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_score_squared",
+        lambda _dtype, _device: _score_squared,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_rel_bias",
+        lambda _dtype, _device: _rel_bias,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_softcap",
+        lambda _dtype, _device: _softcap,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_head_offset",
+        lambda _dtype, _device: _head_offset,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_distance_decay",
+        lambda _dtype, _device: _distance_decay,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_alibi_captured",
+        lambda dtype, device: create_alibi_learned(num_heads=4, dtype=dtype),
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_head_scale_captured",
+        lambda dtype, device: create_head_scale(num_heads=4, dtype=dtype),
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_batch_head_bias_captured",
+        lambda dtype, device: create_batch_head_bias(
+            batch_size=2, num_heads=4, dtype=dtype
+        ),
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_pos_bias_table_captured",
+        lambda dtype, device: create_pos_bias_table(seq_len=257, dtype=dtype),
+        seq_len=257,
+        requires_grad=True,
+    ),
+]
+
+
+MASK_MOD_CASES = [
+    MaskModCase("block_mask_causal", lambda _dtype, _device: _causal_mask),
+    MaskModCase(
+        "block_mask_causal_score_times_two",
+        lambda _dtype, _device: _causal_mask,
+        score_mod_factory=lambda _dtype, _device: _times_two,
+    ),
+    MaskModCase(
+        "mask_mod_buffer",
+        lambda dtype, device: create_mask_mod_buffer(
+            num_heads=4, dtype=dtype, device=device
+        ),
+    ),
+    MaskModCase(
+        "doc_mask",
+        lambda _dtype, device: create_document_mask(
+            ((16, 31, 25, 56), (40, 9, 23, 56)), device=device
+        ),
+        block_mask_num_heads=1,
+        seq_len=128,
+    ),
+    MaskModCase(
+        "mask_mod_view_buffer",
+        lambda dtype, device: create_mask_mod_view_buffer(
+            num_heads=4, dtype=dtype, device=device
+        ),
+    ),
+    MaskModCase(
+        "mask_mod_dual_buffers",
+        lambda dtype, device: create_mask_mod_dual_buffers(
+            batch_size=2, num_heads=4, dtype=dtype, device=device
+        ),
+    ),
+    MaskModCase(
+        "score_and_mask_buffers",
+        lambda dtype, device: create_mask_mod_buffer(
+            num_heads=4, dtype=dtype, device=device
+        ),
+        score_mod_factory=lambda dtype, device: create_score_mod_buffer(
+            num_heads=4, dtype=dtype, device=device
+        ),
+    ),
+]
 
 
 @unittest.skipIf(
@@ -242,32 +548,59 @@ def name_fn(score_mod):
 )
 class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_basic(self, device, dtype):
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        flash_vs_triton(q, k, v)
+    @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
+    def test_flash_attention_score_mod_cases(self, device, dtype, case):
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        flash_vs_triton(
+            q,
+            k,
+            v,
+            score_mod=case.score_mod_factory(dtype, device),
+        )
 
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("score_mod", [_times_two, _causal, _rel_bias], name_fn=name_fn)
-    def test_flash_attention_with_score_mod(self, device, dtype, score_mod):
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("seq_len", [127, 255, 383, 511])
-    def test_flash_attention_unfriendly_seqlen_with_causal(
-        self, device, dtype, seq_len
-    ):
-        """Test flash attention with unfriendly sequence lengths and causal masking."""
-        q, k, v = create_test_tensors(seq_len=seq_len, dtype=dtype, device=device)
-        flash_vs_triton(q, k, v, score_mod=_causal)
+    @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
+    def test_flash_attention_mask_mod_cases(self, device, dtype, case):
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+        )
+        flash_vs_triton(
+            q,
+            k,
+            v,
+            score_mod=(
+                case.score_mod_factory(dtype, device)
+                if case.score_mod_factory
+                else None
+            ),
+            block_mask=_create_block_mask_for_device(
+                case.mask_mod_factory(dtype, device),
+                case.batch_size,
+                case.block_mask_num_heads or case.num_heads,
+                case.seq_len,
+                case.seq_len,
+                device=device,
+            ),
+        )
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
-        """Test that flash attention kernel is actually called when BACKEND='FLASH'."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
         compiled_fn = torch.compile(flex_attention)
 
-        # Test that flash kernel is called with BACKEND='FLASH'
         with cuda_kernel_profiler("flash_attncute") as prof_result:
             compiled_fn(q, k, v, score_mod=_causal, kernel_options={"BACKEND": "FLASH"})
 
@@ -276,7 +609,6 @@ class TestFlexFlash(InductorTestCase):
             f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
         )
 
-        # Test that flash kernel is NOT called with BACKEND='TRITON'
         with cuda_kernel_profiler("flash_attncute") as prof_result:
             compiled_fn(
                 q, k, v, score_mod=_causal, kernel_options={"BACKEND": "TRITON"}
@@ -288,67 +620,8 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_alibi_learned(self, device, dtype):
-        """Test flash attention with ALiBi learned slopes (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_alibi_learned(num_heads=4, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_pos_bias_table(self, device, dtype):
-        """Test flash attention with position bias table (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_pos_bias_table(seq_len=512, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_head_scale(self, device, dtype):
-        """Test flash attention with head scaling (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_head_scale(num_heads=4, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_batch_bias(self, device, dtype):
-        """Test flash attention with batch bias (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_batch_bias(batch_size=2, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_batch_head_bias(self, device, dtype):
-        """Test flash attention with batch-head bias matrix (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_batch_head_bias(batch_size=2, num_heads=4, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_dual_buffer_bias(self, device, dtype):
-        """Test flash attention with dual buffer loading (tensor loading)."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-        score_mod = create_dual_buffer_bias(num_heads=4, seq_len=512, dtype=dtype)
-        flash_vs_triton(q, k, v, score_mod=score_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_score_view_buffer(self, device, dtype):
-        """Score modifier should load from a non-contiguous view."""
-        num_heads = 4
-        q, k, v = create_test_tensors(num_heads=num_heads, dtype=dtype, device=device)
-
-        base_scales = torch.rand(num_heads, 2, device=device, dtype=dtype) + 0.5
-        scales_view = base_scales[:, 0]
-        assert not scales_view.is_contiguous()
-
-        def score_view_mod(score, b, h, q_idx, kv_idx):
-            return score + scales_view[h]
-
-        flash_vs_triton(q, k, v, score_mod=score_view_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_impl_error_with_requires_grad(self, device, dtype):
-        """Test that BACKEND='FLASH' raises error when tensor requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
-
         bias = torch.randn(4, device=device, dtype=dtype, requires_grad=True)
 
         def score_mod_with_grad(score, b, h, q_idx, kv_idx):
@@ -371,12 +644,9 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_backward_rejects_mask_mod(self, device, dtype):
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
-        def causal_mask(b, h, q_idx, kv_idx):
+        def causal_mask(_b, _h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = _create_block_mask_for_device(
-            causal_mask, 2, 4, 512, 512, device=device
-        )
         q.requires_grad_(True)
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
@@ -384,17 +654,20 @@ class TestFlexFlash(InductorTestCase):
             r"NYI: Flex Flash Attention doesn't support block_sparsity yet",
         ):
             compiled_fn(
-                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+                q,
+                k,
+                v,
+                block_mask=_create_block_mask_for_device(
+                    causal_mask, 2, 4, 512, 512, device=device
+                ),
+                kernel_options={"BACKEND": "FLASH"},
             ).sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_captured_buffer_with_grad(
         self, device, dtype
     ):
-        """Test that BACKEND='FLASH' backward raises error when captured buffer requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
-
-        # Captured buffer WITH requires_grad=True should fail
         bias = torch.randn(4, device=device, dtype=dtype, requires_grad=True)
 
         def score_mod_with_capture(score, b, h, q_idx, kv_idx):
@@ -413,164 +686,6 @@ class TestFlexFlash(InductorTestCase):
                 score_mod=score_mod_with_capture,
                 kernel_options={"BACKEND": "FLASH"},
             ).sum().backward()
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_score_mod(self, device, dtype):
-        """Test that score_mod backward works correctly with FLASH backend."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def score_mod_twice(score, b, h, q_idx, kv_idx):
-            return score * 2
-
-        flash_vs_triton(q, k, v, score_mod=score_mod_twice)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_score_squared(self, device, dtype):
-        """Test score**2 backward - requires correct score value for gradient."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def score_mod_squared(score, b, h, q_idx, kv_idx):
-            return score * score
-
-        flash_vs_triton(q, k, v, score_mod=score_mod_squared)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_rel_bias(self, device, dtype):
-        """Test relative position bias backward - uses position indices."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def rel_bias_mod(score, b, h, q_idx, kv_idx):
-            return score + (q_idx - kv_idx)
-
-        flash_vs_triton(q, k, v, score_mod=rel_bias_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_softcap(self, device, dtype):
-        """Test softcapping backward - uses tanh nonlinearity."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def softcap_mod(score, b, h, q_idx, kv_idx):
-            cap = 50.0
-            return torch.tanh(score / cap) * cap
-
-        flash_vs_triton(q, k, v, score_mod=softcap_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_head_offset(self, device, dtype):
-        """Test head-based offset backward - uses head index."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def head_offset_mod(score, b, h, q_idx, kv_idx):
-            return score + h * 0.1
-
-        flash_vs_triton(q, k, v, score_mod=head_offset_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_distance_decay(self, device, dtype):
-        """Test distance-based decay backward - uses position difference."""
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=257, device=device, requires_grad=True
-        )
-
-        def distance_decay_mod(score, b, h, q_idx, kv_idx):
-            # Use squared distance to avoid torch.abs
-            distance_sq = (q_idx - kv_idx) * (q_idx - kv_idx)
-            decay = 1.0 / (1.0 + distance_sq * 0.0001)
-            return score * decay
-
-        flash_vs_triton(q, k, v, score_mod=distance_decay_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_alibi_captured(self, device, dtype):
-        """Test ALiBi backward with captured per-head slopes tensor."""
-        num_heads = 4
-        q, k, v = create_test_tensors(
-            dtype=dtype,
-            num_heads=num_heads,
-            seq_len=257,
-            device=device,
-            requires_grad=True,
-        )
-
-        slopes = torch.exp2(
-            -torch.linspace(1, 8, num_heads, device=device, dtype=dtype)
-        )
-
-        def alibi_mod(score, b, h, q_idx, kv_idx):
-            bias = (kv_idx - q_idx) * slopes[h]
-            return score + bias
-
-        flash_vs_triton(q, k, v, score_mod=alibi_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_head_scale_captured(self, device, dtype):
-        """Test backward with captured per-head scaling factors."""
-        num_heads = 4
-        q, k, v = create_test_tensors(
-            dtype=dtype,
-            num_heads=num_heads,
-            seq_len=257,
-            device=device,
-            requires_grad=True,
-        )
-
-        scales = torch.rand(num_heads, device=device, dtype=dtype) + 0.5
-
-        def head_scale_mod(score, b, h, q_idx, kv_idx):
-            return score * scales[h]
-
-        flash_vs_triton(q, k, v, score_mod=head_scale_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_batch_head_bias_captured(
-        self, device, dtype
-    ):
-        """Test backward with captured 2D batch-head bias matrix."""
-        batch_size, num_heads = 2, 4
-        q, k, v = create_test_tensors(
-            dtype=dtype,
-            batch_size=batch_size,
-            num_heads=num_heads,
-            seq_len=257,
-            device=device,
-            requires_grad=True,
-        )
-
-        bias_matrix = (
-            torch.randn(batch_size, num_heads, device=device, dtype=dtype) * 0.5
-        )
-
-        def batch_head_mod(score, b, h, q_idx, kv_idx):
-            return score + bias_matrix[b, h]
-
-        flash_vs_triton(q, k, v, score_mod=batch_head_mod)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_with_pos_bias_table_captured(self, device, dtype):
-        """Test backward with captured relative position bias table."""
-        seq_len = 257
-        q, k, v = create_test_tensors(
-            dtype=dtype, seq_len=seq_len, device=device, requires_grad=True
-        )
-
-        max_len = seq_len
-        table = torch.randn(2 * max_len - 1, device=device, dtype=dtype) * 0.1
-
-        def pos_bias_mod(score, b, h, q_idx, kv_idx):
-            rel_pos = kv_idx - q_idx + max_len - 1
-            return score + table[rel_pos]
-
-        flash_vs_triton(q, k, v, score_mod=pos_bias_mod)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_kernel_called(self, device, dtype):
@@ -600,178 +715,8 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_block_mask(self, device, dtype):
-        """Test flash attention with block mask and mask_mod."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = _create_block_mask_for_device(
-            causal_mask, 2, 4, 512, 512, device=device
-        )
-        flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_block_mask_with_score_mod(self, device, dtype):
-        """Test flash attention with both block mask and score_mod."""
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = _create_block_mask_for_device(
-            causal_mask, 2, 4, 512, 512, device=device
-        )
-        flash_vs_triton(q, k, v, score_mod=_times_two, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_mask_mod_buffer(self, device, dtype):
-        """Test flash attention with mask_mod that loads from buffer."""
-        q, k, v = create_test_tensors(
-            batch_size=2, num_heads=4, dtype=dtype, device=device
-        )
-
-        mask_bias = torch.randn(4, device=device, dtype=dtype) * 0.1
-
-        def custom_mask(b, h, q_idx, kv_idx):
-            bias_value = mask_bias[h]
-            return (q_idx >= kv_idx) | (bias_value > 0)
-
-        block_mask = _create_block_mask_for_device(
-            custom_mask, 2, 4, 512, 512, device=device
-        )
-        flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_doc_mask(self, device, dtype):
-        """Test flash attention with a document-aware mask_mod."""
-        # Use shorter sequences to make the document layout explicit.
-        seq_len = 128
-        q, k, v = create_test_tensors(
-            batch_size=2, num_heads=4, seq_len=seq_len, dtype=dtype, device=device
-        )
-        lengths_per_batch = (
-            (16, 31, 25, 56),  # batch 0
-            (40, 9, 23, 56),  # batch 1 uses a different document arrangement
-        )
-        document_ids = []
-        for lengths in lengths_per_batch:
-            assert sum(lengths) == seq_len
-            doc_tokens = []
-            for doc_id, length in enumerate(lengths):
-                doc_tokens.extend([doc_id] * length)
-            document_ids.append(doc_tokens)
-        document_ids = torch.tensor(document_ids, device=device, dtype=torch.long)
-
-        def document_mask(b, _h, q_idx, kv_idx):
-            doc_id_q = document_ids[b, q_idx // 2]
-            doc_id_kv = document_ids[b, kv_idx]
-            return doc_id_q == doc_id_kv
-
-        block_mask = _create_block_mask_for_device(
-            document_mask, 2, 1, seq_len, seq_len, device=device
-        )
-        flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_mask_mod_with_view_buffer(self, device, dtype):
-        """Mask modifier should support buffers that are non-contiguous views."""
-        batch_size, num_heads, seq_len = 2, 4, 512
-        q, k, v = create_test_tensors(
-            batch_size=batch_size, num_heads=num_heads, dtype=dtype, device=device
-        )
-
-        base_bias = torch.randn(num_heads, 3, device=device, dtype=dtype)
-        mask_bias_view = base_bias[:, 1]
-        assert not mask_bias_view.is_contiguous()
-
-        def mask_with_view_buffer(b, h, q_idx, kv_idx):
-            bias_value = mask_bias_view[h]
-            double_bias = bias_value * 2
-            return (q_idx >= kv_idx) | (double_bias > 0)
-
-        block_mask = _create_block_mask_for_device(
-            mask_with_view_buffer,
-            batch_size,
-            num_heads,
-            seq_len,
-            seq_len,
-            device=device,
-        )
-        flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_mask_mod_with_dual_buffers(self, device, dtype):
-        """Mask modifier should support multiple captured buffers."""
-        batch_size, num_heads, seq_len = 2, 4, 512
-        q, k, v = create_test_tensors(
-            batch_size=batch_size, num_heads=num_heads, dtype=dtype, device=device
-        )
-
-        head_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.2
-        batch_bias = torch.randn(batch_size, device=device, dtype=dtype) * 0.2
-
-        def dual_buffer_mask(b, h, q_idx, kv_idx):
-            head_term = head_bias[h]
-            batch_term = batch_bias[b]
-            causal = q_idx >= kv_idx
-            bias_cond = (head_term + batch_term).to(torch.float32) > 0
-            return causal | bias_cond
-
-        block_mask = _create_block_mask_for_device(
-            dual_buffer_mask, batch_size, num_heads, seq_len, seq_len, device=device
-        )
-        flash_vs_triton(q, k, v, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_score_mod_with_many_buffer_indexing(self, device, dtype):
-        batch_size, num_heads, seq_len = 2, 4, 512
-        q, k, v = create_test_tensors(
-            batch_size=batch_size, num_heads=num_heads, dtype=dtype, device=device
-        )
-
-        head_bias = torch.randn(num_heads, device=device, dtype=dtype) * 0.15
-        query_scale = torch.randn(seq_len, device=device, dtype=dtype) * 0.05
-        kv_scale = torch.randn(seq_len, device=device, dtype=dtype) * 0.05
-        batch_bias = torch.randn(batch_size, device=device, dtype=dtype) * 0.1
-
-        def complex_score(score, b, h, q_idx, kv_idx):
-            head_term = head_bias[h]
-            query_term = query_scale[q_idx]
-            kv_term = kv_scale[kv_idx]
-            batch_term = batch_bias[b]
-            return score + head_term + query_term - kv_term + batch_term
-
-        flash_vs_triton(q, k, v, score_mod=complex_score)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_with_score_and_mask_buffers(self, device, dtype):
-        """Test flash attention with both score_mod and mask_mod using buffers."""
-        q, k, v = create_test_tensors(
-            batch_size=2, num_heads=4, dtype=dtype, device=device
-        )
-
-        score_bias = torch.randn(4, device=device, dtype=dtype) * 0.2
-        mask_bias = torch.randn(4, device=device, dtype=dtype) * 0.1
-
-        def score_with_buffer(score, b, h, q_idx, kv_idx):
-            return score + score_bias[h]
-
-        def mask_with_buffer(b, h, q_idx, kv_idx):
-            bias_value = mask_bias[h]
-            return (q_idx >= kv_idx) | (bias_value > 0)
-
-        block_mask = _create_block_mask_for_device(
-            mask_with_buffer, 2, 4, 512, 512, device=device
-        )
-        flash_vs_triton(q, k, v, score_mod=score_with_buffer, block_mask=block_mask)
-
-    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_generates_cute_hash(self, device, dtype):
-        """Test that generated code sets __cute_hash__ on score_mod for fast hashing."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
-
         compiled_fn = torch.compile(flex_attention)
         _, code = run_and_get_code(
             compiled_fn,
@@ -782,7 +727,6 @@ class TestFlexFlash(InductorTestCase):
             kernel_options={"BACKEND": "FLASH"},
         )
 
-        # Check that the generated code sets __cute_hash__ on score_mod
         code_str = "\n".join(code)
         self.assertIn(
             "score_mod.__cute_hash__",
@@ -792,12 +736,6 @@ class TestFlexFlash(InductorTestCase):
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_fused_qkv_reinterpret_view(self, device, dtype):
-        """Test that fused QKV projection (creating ReinterpretViews) works.
-
-        When Q/K/V are slices of a shared buffer (from fused QKV projection),
-        they become ReinterpretViews with non-contiguous strides. CuteDSL must
-        handle these by generating proper reinterpret_tensor() calls.
-        """
         B, M, H, D = 2, 256, 4, 64
         embed_dim = H * D
 

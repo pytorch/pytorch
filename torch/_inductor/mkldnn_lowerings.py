@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

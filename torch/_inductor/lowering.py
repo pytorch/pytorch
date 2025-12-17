@@ -7562,7 +7562,10 @@ def with_effects(token, op, *args, **kwargs):
         log.warning(
             "Failed to get schema for %s: %s. Assuming list output", op, error_msg
         )
-        return (token, *result)
+        if isinstance(result, (tuple, list)):
+            return (token, *result)
+        else:
+            return (token, result)
 
     if len(schema.returns) == 0:
         return (token, result)
