@@ -994,6 +994,9 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
+    # Bucket exposed collectives first
+    bucket_exposed_first: bool = True
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
