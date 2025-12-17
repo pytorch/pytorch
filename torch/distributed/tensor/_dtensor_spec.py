@@ -2,7 +2,7 @@ import itertools
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -102,7 +102,7 @@ class DTensorSpec:
     @staticmethod
     def _normalize_placements_into_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> tuple[tuple[Placement, ...], Optional[ShardOrder]]:
+    ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
         # If the returned shard_order is None, it means the StridedShard/Shard
         # combinations can't be interpreted as shard order.
         # If no _StridedShard in placements, we create default order.
