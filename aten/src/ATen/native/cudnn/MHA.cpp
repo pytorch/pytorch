@@ -420,6 +420,9 @@ enum UIDS {
   RAG_Q_OFF,
   RAG_K_OFF,
   RAG_V_OFF,
+  RAG_DQ_OFF,
+  RAG_DK_OFF,
+  RAG_DV_OFF,
   RAG_O_OFF,
   RAG_LSE_OFF
 };
@@ -1158,6 +1161,10 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
   auto q_strides = q.strides();
   auto k_strides = k.strides();
   auto v_strides = v.strides();
+  auto dq_strides = dQ.strides();
+  auto dk_strides = dK.strides();
+  auto dv_strides = dV.strides();
+
   // NB: cuDNN API shape is transposed
   constexpr int strideidx0 = 1;
   constexpr int strideidx1 = 0;
@@ -1232,6 +1239,27 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                             .set_dim({b + 1, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
+  auto RAG_DQ_OFF_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(RAG_DQ_OFF)
+                            .set_name("cum_seq_q")
+                            .set_dim({b + 1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_data_type(fe::DataType_t::INT32));
+  auto RAG_DK_OFF_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(RAG_DK_OFF)
+                            .set_name("cum_seq_k")
+                            .set_dim({b + 1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_data_type(fe::DataType_t::INT32));
+  auto RAG_DV_OFF_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(RAG_DV_OFF)
+                            .set_name("cum_seq_v")
+                            .set_dim({b + 1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_data_type(fe::DataType_t::INT32));
   auto RAG_O_OFF_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_uid(RAG_O_OFF)
@@ -1272,31 +1300,31 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
       Q_, K_, V_, O_, DO_, STATS, sdpa_backward_options);
   Dq->set_output(true)
       .set_uid(DQ)
-      .set_ragged_offset(RAG_Q_OFF_)
+      .set_ragged_offset(RAG_DQ_OFF_)
       .set_dim({b, h_q, s_q, d_qk})
       .set_stride(
           {INT_MAX,
-           q_strides[strideidx0],
-           q_strides[strideidx1],
-           q_strides[strideidx2]});
+           dq_strides[strideidx0],
+           dq_strides[strideidx1],
+           dq_strides[strideidx2]});
   Dk->set_output(true)
       .set_uid(DK)
-      .set_ragged_offset(RAG_K_OFF_)
+      .set_ragged_offset(RAG_DK_OFF_)
       .set_dim({b, h_k, s_kv, d_qk})
       .set_stride(
           {INT_MAX,
-           k_strides[strideidx0],
-           k_strides[strideidx1],
-           k_strides[strideidx2]});
+           dk_strides[strideidx0],
+           dk_strides[strideidx1],
+           dk_strides[strideidx2]});
   Dv->set_output(true)
       .set_uid(DV)
-      .set_ragged_offset(RAG_V_OFF_)
+      .set_ragged_offset(RAG_DV_OFF_)
       .set_dim({b, h_v, s_kv, d_v})
       .set_stride(
           {INT_MAX,
-           v_strides[strideidx0],
-           v_strides[strideidx1],
-           v_strides[strideidx2]});
+           dv_strides[strideidx0],
+           dv_strides[strideidx1],
+           dv_strides[strideidx2]});
 
   AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
@@ -1781,6 +1809,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
   auto rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
   auto rag_v_off = cum_seqlen_kv.mul(v.stride(-3));
   auto rag_o_off = cum_seqlen_q.mul(o.stride(-3));
+  auto rag_dq_off = cum_seqlen_q.mul(dQ.stride(-3));
+  auto rag_dk_off = cum_seqlen_kv.mul(dK.stride(-3));
+  auto rag_dv_off = cum_seqlen_kv.mul(dV.stride(-3));
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
 
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -1844,7 +1875,8 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   const fe::graph::Graph& mha_graph =
       mha_graph_storage ? *mha_graph_storage : *cache_it->second;
-
+  TORCH_WARN("RAG_DQ", rag_dq_off, rag_dq_off.device());
+  TORCH_WARN("SEQ_LEN_Q", seqlen_q, seqlen_q.device());
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
       {Q, q.mutable_data_ptr()},
@@ -1862,6 +1894,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {RAG_O_OFF, rag_o_off.mutable_data_ptr()},
       {RAG_K_OFF, rag_k_off.mutable_data_ptr()},
       {RAG_V_OFF, rag_v_off.mutable_data_ptr()},
+      {RAG_DQ_OFF, rag_dq_off.mutable_data_ptr()},
+      {RAG_DK_OFF, rag_dk_off.mutable_data_ptr()},
+      {RAG_DV_OFF, rag_dv_off.mutable_data_ptr()},
       {RAG_LSE_OFF, rag_stats_off.mutable_data_ptr()},
       {SEQ_LEN_Q, seqlen_q.mutable_data_ptr()},
       {SEQ_LEN_KV, seqlen_kv.mutable_data_ptr()}};
