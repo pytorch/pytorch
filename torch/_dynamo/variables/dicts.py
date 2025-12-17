@@ -99,6 +99,25 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_python_hashable()
 
 
+def is_constant_like(x: VariableTracker) -> bool:
+    """Check if a variable is constant-like without realizing lazy variables.
+
+    This is used for dict key guarding decisions. A constant-like key means
+    we don't need to guard on the specific key value for __setitem__, since
+    the operation behaves the same whether the key exists or not.
+
+    Returns True for:
+    - ConstantVariable (actual constants)
+    - LazyConstantVariable (lazy constants that haven't been realized)
+    - ComputedLazyConstantVariable (computed lazy constants)
+    """
+    from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+    if isinstance(x, (LazyConstantVariable, ComputedLazyConstantVariable)):
+        return True
+    return x.is_python_constant()
+
+
 class ConstDictVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
 
@@ -127,13 +146,19 @@ class ConstDictVariable(VariableTracker):
             """
             Computes the hash value for the wrapped VariableTracker.
 
-            For unrealized LazyVariableTrackers, uses the hash of the original value
-            to avoid realizing the tracker and inserting unnecessary guards.
+            For LazyConstantVariable, uses get_python_hash() which computes hash
+            without full realization (only installs TYPE_MATCH guard).
+            For other unrealized LazyVariableTrackers, uses the hash of the original value.
             For all other cases, delegates to the VariableTracker's get_python_hash method.
 
             Returns:
                 The hash value of the underlying variable tracker
             """
+            from .lazy import LazyConstantVariable
+
+            # LazyConstantVariable has get_python_hash() that installs TYPE_MATCH guard
+            if isinstance(self.vt, LazyConstantVariable) and not self.vt.is_realized():
+                return self.vt.get_python_hash()
             if (
                 isinstance(self.vt, variables.LazyVariableTracker)
                 and not self.vt.is_realized()
@@ -531,17 +556,30 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            # For constant keys, no guard is needed - __setitem__ works the same
-            # whether the key exists or not. This avoids unnecessary recompilation
-            # when unused keys change.
+            # For constant-like keys (constants or lazy constants), no guard is needed
+            # __setitem__ works the same whether the key exists or not. This avoids
+            # unnecessary recompilation when unused keys change.
             # For non-constant keys, we need to guard all keys since the key itself
             # could change behavior.
             # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
             # would have been installed by the earlier mutation.
-            if not args[
-                0
-            ].is_python_constant() and not tx.output.side_effects.is_modified(self):
+            #
+            # For LazyConstantVariable keys, we install a TYPE_MATCH guard to ensure
+            # the key type remains consistent (e.g., always a string), but we don't
+            # guard on the specific value.
+            from .lazy import LazyConstantVariable
+
+            key_arg = args[0]
+            if not is_constant_like(key_arg) and not tx.output.side_effects.is_modified(
+                self
+            ):
                 self.install_dict_keys_match_guard()
+            elif (
+                isinstance(key_arg, LazyConstantVariable) and not key_arg.is_realized()
+            ):
+                # For lazy constant keys, install TYPE_MATCH guard to ensure correctness
+                # if the key type changes (e.g., from string to int)
+                key_arg._ensure_type_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,

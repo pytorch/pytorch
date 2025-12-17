@@ -1325,6 +1325,292 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(d3_copy["counter"], 501)  # 500 + 1 = 501
             self.assertEqual(counter.frame_count, 1)  # Still no recompile!
 
+    def test_dict_setitem_with_lazy_constant_key_no_recompile(self):
+        """Test that dict[lazy_key] = value doesn't recompile when key changes.
+
+        When the key is a LazyConstantVariable, we only install TYPE_MATCH guard,
+        not CONSTANT_MATCH. This allows the key value to change without recompilation.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with key "alpha"
+        d1 = {}
+        eager1 = fn(tensor_input, d1, "alpha")
+        d1_compiled = {}
+        compiled1 = opt_fn(tensor_input, d1_compiled, "alpha")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertIn("alpha", d1_compiled)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different key "beta" - should NOT recompile
+        d2 = {}
+        eager2 = fn(tensor_input, d2, "beta")
+        d2_compiled = {}
+        compiled2 = opt_fn(tensor_input, d2_compiled, "beta")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertIn("beta", d2_compiled)
+        self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+        # Third call with different key "gamma" - still no recompile
+        d3 = {}
+        eager3 = fn(tensor_input, d3, "gamma")
+        d3_compiled = {}
+        compiled3 = opt_fn(tensor_input, d3_compiled, "gamma")
+        self.assertTrue(same(eager3, compiled3))
+        self.assertIn("gamma", d3_compiled)
+        self.assertEqual(counter.frame_count, 1)  # Still no recompile!
+
+    def test_dict_setitem_with_lazy_constant_int_key_no_recompile(self):
+        """Test that dict[lazy_int_key] = value doesn't recompile when key changes.
+
+        Note: This requires specialize_int=True because with specialize_int=False,
+        integers become SymNodeVariables which need to be specialized for use as
+        dict keys (hashing requires concrete values).
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d, key):
+            d[key] = t.mean()
+            return t + 1
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn, backend=counter)
+
+            # First call with int key 10
+            d1 = {}
+            eager1 = fn(tensor_input, d1, 10)
+            d1_compiled = {}
+            compiled1 = opt_fn(tensor_input, d1_compiled, 10)
+            self.assertTrue(same(eager1, compiled1))
+            self.assertIn(10, d1_compiled)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Second call with different int key 20 - should NOT recompile
+            d2 = {}
+            eager2 = fn(tensor_input, d2, 20)
+            d2_compiled = {}
+            compiled2 = opt_fn(tensor_input, d2_compiled, 20)
+            self.assertTrue(same(eager2, compiled2))
+            self.assertIn(20, d2_compiled)
+            self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+    def test_dict_setitem_with_lazy_constant_key_type_change_recompiles(self):
+        """Test that changing key type DOES cause recompilation.
+
+        We install TYPE_MATCH guard on the key, so changing from str to int
+        should trigger recompilation.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with string key
+        d1 = {}
+        eager1 = fn(tensor_input, d1, "alpha")
+        d1_compiled = {}
+        compiled1 = opt_fn(tensor_input, d1_compiled, "alpha")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with int key - SHOULD recompile due to type change
+        d2 = {}
+        eager2 = fn(tensor_input, d2, 42)
+        d2_compiled = {}
+        compiled2 = opt_fn(tensor_input, d2_compiled, 42)
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(counter.frame_count, 2)  # Recompiled due to type change
+
+    def test_dict_setitem_existing_key_overwrite(self):
+        """Test that dict[lazy_key] = value works correctly when overwriting existing keys."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return t + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call - key doesn't exist
+        d1 = {"other": 999}
+        eager1 = fn(tensor_input, d1.copy(), "alpha")
+        d1_compiled = {"other": 999}
+        compiled1 = opt_fn(tensor_input, d1_compiled, "alpha")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call - key already exists (overwriting)
+        d2 = {"alpha": 123, "other": 999}
+        eager2 = fn(tensor_input, d2.copy(), "alpha")
+        d2_compiled = {"alpha": 123, "other": 999}
+        compiled2 = opt_fn(tensor_input, d2_compiled, "alpha")
+        self.assertTrue(same(eager2, compiled2))
+        # Should still not recompile - __setitem__ works the same for existing/new keys
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_dict_setitem_with_tensor_value_and_lazy_key(self):
+        """Test the main use case: dict[string_arg] = tensor works without recompile."""
+        tensor_input = torch.randn(3, 4)
+
+        def fn(t, d, key):
+            # Store processed tensor in dict with lazy key
+            d[key] = t.sin() + t.cos()
+            return t.sum()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call
+        d1 = {}
+        opt_fn(tensor_input, d1, "feature_a")
+        self.assertIn("feature_a", d1)
+        self.assertTrue(isinstance(d1["feature_a"], torch.Tensor))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different key - no recompile
+        d2 = {}
+        opt_fn(tensor_input, d2, "feature_b")
+        self.assertIn("feature_b", d2)
+        self.assertTrue(isinstance(d2["feature_b"], torch.Tensor))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Verify results are correct
+        expected = tensor_input.sin() + tensor_input.cos()
+        self.assertTrue(same(d1["feature_a"], expected))
+        self.assertTrue(same(d2["feature_b"], expected))
+
+    def test_dict_aliasing_keys_setitem_only(self):
+        """Test that aliasing keys without reads works correctly.
+
+        When we only do setitems with potentially aliasing lazy keys,
+        no value guards are needed because:
+        1. The bytecode will reconstruct the operations with actual key values
+        2. If keys alias at runtime, the second setitem overwrites the first
+        3. The dict side effect is correct regardless of aliasing
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key1, key2):
+            d[key1] = t.sum()
+            d[key2] = t.mean()
+            return t + 1  # No dict read!
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # Compile with different keys
+        d1 = {}
+        opt_fn(tensor_input, d1, "a", "b")
+        self.assertEqual(d1, {"a": tensor_input.sum(), "b": tensor_input.mean()})
+        self.assertEqual(counter.frame_count, 1)
+
+        # Call with same keys (aliasing) - no recompile needed!
+        d2 = {}
+        opt_fn(tensor_input, d2, "x", "x")
+        # When keys alias, second setitem overwrites first
+        self.assertEqual(len(d2), 1)
+        self.assertIn("x", d2)
+        self.assertTrue(same(d2["x"], tensor_input.mean()))
+        self.assertEqual(counter.frame_count, 1)  # Still no recompile!
+
+        # Call with different keys again - still no recompile
+        d3 = {}
+        opt_fn(tensor_input, d3, "p", "q")
+        self.assertEqual(d3, {"p": tensor_input.sum(), "q": tensor_input.mean()})
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_dict_aliasing_keys_with_read_recompiles(self):
+        """Test that reading back from a dict with aliasing keys triggers recompilation.
+
+        When we read from a dict key that might alias with another key we wrote to,
+        we MUST guard on the key values to ensure correctness. This is because
+        the value we read depends on whether the keys are equal.
+        """
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key1, key2):
+            d[key1] = t.sum()
+            d[key2] = t.mean()
+            return d[key1]  # Read back - aliasing matters here!
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # Compile with different keys
+        eager1 = fn(tensor_input, {}, "a", "b")
+        compiled1 = opt_fn(tensor_input, {}, "a", "b")
+        self.assertTrue(same(eager1, compiled1))
+        # With different keys: d["a"] = sum, d["b"] = mean, return d["a"] = sum
+        self.assertTrue(same(compiled1, tensor_input.sum()))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Call with same keys - MUST recompile for correctness
+        eager2 = fn(tensor_input, {}, "x", "x")
+        compiled2 = opt_fn(tensor_input, {}, "x", "x")
+        self.assertTrue(same(eager2, compiled2))
+        # With same keys: d["x"] = sum, d["x"] = mean (overwrites!), return d["x"] = mean
+        self.assertTrue(same(compiled2, tensor_input.mean()))
+        self.assertGreater(counter.frame_count, 1)  # Recompilation happened
+
+    def test_dict_aliasing_keys_getitem_installs_guard(self):
+        """Verify that __getitem__ installs proper guards to catch aliasing."""
+        tensor_input = torch.tensor([1.0, 2.0, 3.0])
+
+        def fn(t, d, key):
+            d[key] = t.sum()
+            return d[key]  # getitem installs EQUALS_MATCH guard
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call
+        opt_fn(tensor_input, {}, "a")
+        self.assertEqual(counter.frame_count, 1)
+
+        # Different key value - should recompile due to EQUALS_MATCH guard on key
+        opt_fn(tensor_input, {}, "b")
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dict_contains_with_lazy_key(self):
+        """Test that 'key in dict' operations work correctly with lazy keys."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, d, key):
+            if key in d:
+                return t + d[key]
+            return t - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call - key not in dict
+        d1 = {"other": tensor_input.mean()}
+        eager1 = fn(tensor_input, d1.copy(), "missing")
+        compiled1 = opt_fn(tensor_input, d1.copy(), "missing")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call - key IS in dict, different branch
+        d2 = {"present": tensor_input.sum()}
+        eager2 = fn(tensor_input, d2.copy(), "present")
+        compiled2 = opt_fn(tensor_input, d2.copy(), "present")
+        self.assertTrue(same(eager2, compiled2))
+        # Should recompile because different branch was taken
+        self.assertGreater(counter.frame_count, 1)
+
 
 if __name__ == "__main__":
     run_tests()

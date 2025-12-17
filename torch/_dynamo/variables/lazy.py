@@ -538,6 +538,47 @@ class LazyConstantVariable(LazyVariableTracker):
             return realized.try_peek_constant()
         return (True, True, self.peek_value())
 
+    def is_python_hashable(self) -> bool:
+        """LazyConstantVariable wraps primitive types which are all hashable."""
+        # Primitive types (int, float, bool, str) are always hashable
+        return True
+
+    def get_python_hash(self) -> int:
+        """Get hash without triggering realization.
+
+        We can compute the hash from the peeked value. This installs a TYPE_MATCH
+        guard since the hash behavior depends on the type.
+        """
+        if self.is_realized():
+            return self.realize().get_python_hash()
+        self._ensure_type_guard()
+        return hash(self.peek_value())
+
+    def is_python_equal(self, other: VariableTracker) -> bool:
+        """Check equality without triggering realization when possible.
+
+        For two LazyConstantVariables, we can compare their peeked values.
+        For other types, we delegate to standard comparison.
+
+        Note: This does NOT install guards - it's used for dict key lookup
+        during tracing. Guards are installed separately based on dict operations.
+        """
+        if self.is_realized():
+            return self.realize().is_python_equal(other)
+
+        # For LazyConstantVariable comparison, peek at both values
+        if isinstance(other, LazyConstantVariable) and not other.is_realized():
+            return self.peek_value() == other.peek_value()
+
+        # For ConstantVariable, compare directly
+        from .constant import ConstantVariable
+
+        if isinstance(other, ConstantVariable):
+            return self.peek_value() == other.as_python_constant()
+
+        # For other types, realize and compare
+        return self.realize().is_python_equal(other)
+
 
 class ComputedLazyConstantVariable(LazyVariableTracker):
     """
