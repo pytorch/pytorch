@@ -79,8 +79,8 @@ if True:
 
         This test class supports testing both:
 
-        - libtorch_agnostic_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
-        - libtorch_agnostic_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
+        - libtorch_agn_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
+        - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
 
         Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
         version that they target.
@@ -92,10 +92,10 @@ if True:
             base_dir = Path(__file__).parent
 
             try:
-                import libtorch_agnostic_2_9  # noqa: F401
+                import libtorch_agn_2_9  # noqa: F401
             except Exception:
                 install_cpp_extension(
-                    extension_root=base_dir / "libtorch_agnostic_2_9_extension"
+                    extension_root=base_dir / "libtorch_agn_2_9_extension"
                 )
 
             # Only build 2.10 extension if running on PyTorch 2.10+
@@ -108,10 +108,10 @@ if True:
 
             if (current_major > 2) or (current_major == 2 and current_minor >= 10):
                 try:
-                    import libtorch_agnostic_2_10  # noqa: F401
+                    import libtorch_agn_2_10  # noqa: F401
                 except Exception:
                     install_cpp_extension(
-                        extension_root=base_dir / "libtorch_agnostic_2_10_extension"
+                        extension_root=base_dir / "libtorch_agn_2_10_extension"
                     )
             else:
                 print(
@@ -120,7 +120,7 @@ if True:
 
         @onlyCPU
         def test_slow_sgd(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             param = torch.rand(5, device=device)
             grad = torch.rand_like(param)
@@ -147,7 +147,7 @@ if True:
 
         @onlyCUDA
         def test_identity_does_not_hog_memory(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             def _run_identity(prior_mem):
                 t = torch.rand(32, 32, device=device)
@@ -163,7 +163,7 @@ if True:
                 self.assertEqual(curr_mem, init_mem)
 
         def test_exp_neg_is_leaf(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t1 = torch.rand(2, 3, device=device)
             t2 = torch.rand(3, 2, device=device)
@@ -175,7 +175,7 @@ if True:
             self.assertEqual(is_leaf, t3.is_leaf)
 
         def test_my_abs(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(32, 16, device=device) - 0.5
             res = libtorch_agnostic.ops.my_abs(t)
@@ -194,7 +194,7 @@ if True:
                     self.assertEqual(curr_mem, init_mem)
 
         def test_neg_exp(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(32, 16, device=device) - 0.5
             res = libtorch_agnostic.ops.neg_exp(t)
@@ -213,7 +213,7 @@ if True:
                     self.assertEqual(curr_mem, init_mem)
 
         def test_divide_neg_exp(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.zeros(2, 3, device=device) - 0.5
             res = libtorch_agnostic.ops.divide_neg_exp(t)
@@ -232,7 +232,7 @@ if True:
                     self.assertEqual(curr_mem, init_mem)
 
         def test_is_contiguous(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, device=device)
             self.assertTrue(libtorch_agnostic.ops.is_contiguous(t))
@@ -244,7 +244,7 @@ if True:
         # **{}): got AssertionError("tensor's device must be `meta`, got cpu instead")
         @xfailIfTorchDynamo
         def test_my_ones_like(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(3, 1, device=device) - 0.5
             cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
@@ -263,7 +263,7 @@ if True:
                     self.assertEqual(curr_mem, init_mem)
 
         def test_my_transpose(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, device=device)
             out = libtorch_agnostic.ops.my_transpose(t, 0, 1)
@@ -273,7 +273,7 @@ if True:
                 libtorch_agnostic.ops.my_transpose(t, 1, 2)
 
         def test_my_empty_like(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
@@ -289,7 +289,7 @@ if True:
 
         @onlyCPU
         def test_my_zero_(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, device=device)
             out = libtorch_agnostic.ops.my_zero_(t)
@@ -297,28 +297,28 @@ if True:
             self.assertEqual(out, torch.zeros_like(t))
 
         def test_my_amax(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, device=device)
             out = libtorch_agnostic.ops.my_amax(t)
             self.assertEqual(out, torch.amax(t, 0))
 
         def test_my_amax_vec(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, 5, device=device)
             out = libtorch_agnostic.ops.my_amax_vec(t)
             self.assertEqual(out, torch.amax(t, (0, 1)))
 
         def test_my_is_cpu(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 7, device=device)
             out = libtorch_agnostic.ops.my_is_cpu(t)
             self.assertEqual(out, t.is_cpu)
 
         def test_fill_infinity(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(3, 4, device=device)
             out = libtorch_agnostic.ops.fill_infinity(t)
@@ -329,7 +329,7 @@ if True:
 
         @onlyCPU
         def test_default_constructor(self):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             defined_tensor_is_defined = libtorch_agnostic.ops.test_default_constructor(
                 True
@@ -342,7 +342,7 @@ if True:
             self.assertFalse(undefined_tensor_is_defined)
 
         def test_my_pad(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.rand(2, 3, device=device)
             out = libtorch_agnostic.ops.my_pad(t)
@@ -350,7 +350,7 @@ if True:
             self.assertEqual(out, expected)
 
         def test_my_narrow(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(2, 5, device=device)
 
@@ -364,7 +364,7 @@ if True:
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             device_index = 1
             out = libtorch_agnostic.ops.test_device_guard(device_index)
@@ -373,7 +373,7 @@ if True:
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard_set_index(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             # This test creates a DeviceGuard with index 1, then sets it to index 0
             # and returns the current device (should be 0)
@@ -382,7 +382,7 @@ if True:
 
         @onlyCUDA
         def test_stream(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             stream = torch.cuda.Stream()
             device = torch.cuda.current_device()
@@ -396,7 +396,7 @@ if True:
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_get_current_device_index(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             prev_device = torch.cuda.current_device()
 
@@ -410,7 +410,7 @@ if True:
                 torch.cuda.set_device(prev_device)
 
         def test_my_new_empty_dtype_variant(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
@@ -425,7 +425,7 @@ if True:
                 torch.use_deterministic_algorithms(deterministic)
 
         def test_my_new_zeros_dtype_variant(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device)
             out = libtorch_agnostic.ops.my_new_zeros_dtype_variant(t)
@@ -433,7 +433,7 @@ if True:
             self.assertEqual(out, ref_out, exact_device=True)
 
         def test_my_copy_(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             dst = torch.empty(2, 5, device=device)
             src = torch.randn(2, 5, device=device)
@@ -444,7 +444,7 @@ if True:
             self.assertEqual(result.data_ptr(), dst.data_ptr())
 
         def test_my_clone(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(2, 5, device=device)
 
@@ -456,7 +456,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my__foreach_mul_(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             N = 5
             tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
@@ -471,7 +471,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my__foreach_mul(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             N = 5
             tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
@@ -500,7 +500,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_make_tensor_clones_and_call_foreach(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t1 = torch.rand(2, 5, device=device)
             t2 = torch.rand(3, 4, device=device)
@@ -511,7 +511,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_device(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             cuda_device = libtorch_agnostic.ops.test_device_constructor(
                 is_cuda=True, index=1, use_str=False
@@ -568,7 +568,7 @@ if True:
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_tensor_device(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(2, 3)
             self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
@@ -593,7 +593,7 @@ if True:
         # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
         @xfailIfTorchDynamo
         def test_parallel_for(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             num_threads = torch.get_num_threads()
             size = 100
@@ -613,7 +613,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCPU
         def test_get_num_threads(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             num_threads = libtorch_agnostic.ops.test_get_num_threads()
             expected_num_threads = torch.get_num_threads()
@@ -625,7 +625,7 @@ if True:
             "memory_format", [None, torch.channels_last, torch.contiguous_format]
         )
         def test_my_empty(self, device, layout, memory_format):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
@@ -711,7 +711,7 @@ if True:
                 torch.use_deterministic_algorithms(deterministic)
 
         def test_my_flatten(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(2, 3, 4, device=device)
             result = libtorch_agnostic.ops.my_flatten(t)
@@ -730,7 +730,7 @@ if True:
         @xfailIfTorchDynamo
         def test_my_optional_tensor_ref(self, device):
             """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             # Test with a tensor provided
             t = torch.randn(5, device=device)
@@ -746,7 +746,7 @@ if True:
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_storage_offset(self, device):
             """Test storage_offset method on Tensor."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             # Test with a regular tensor (storage_offset should be 0)
             t = torch.randn(3, 4, device=device)
@@ -769,7 +769,7 @@ if True:
         @dtypes(*all_types_and(torch.float16, torch.bool))
         def test_my_element_size(self, device, dtype):
             """Test element_size method on Tensor."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.zeros(2, 3, device=device, dtype=dtype)
             result = libtorch_agnostic.ops.my_element_size(t)
@@ -777,7 +777,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_reshape(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(2, 3, 4, device=device)
 
@@ -795,7 +795,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_view(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(2, 3, 4, device=device)
 
@@ -813,7 +813,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_shape(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             expected = (3, 5)
             t = torch.rand(*expected, device=device)
@@ -822,7 +822,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_sum(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, 5, device=device)
 
@@ -849,7 +849,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_sum_out(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, 5, device=device)
 
@@ -876,7 +876,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_sum_all(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, 5, device=device)
 
@@ -888,7 +888,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_sum_dim1(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, 5, device=device)
 
@@ -900,7 +900,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_full(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             # Test basic full with default parameters
             result = libtorch_agnostic.ops.my_full([2, 3], 3.14)
@@ -927,7 +927,7 @@ if True:
             self.assertEqual(result_both, expected_both, exact_device=True)
 
         def test_mv_tensor_accessor(self, device):
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             m = torch.rand(3, 5, device=device)
             v = torch.rand(5, device=device)
@@ -945,7 +945,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_get_any_data_ptr(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.empty(2, 5, device=device, dtype=torch.float32)
             expected_p = t.data_ptr()
@@ -957,7 +957,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_get_template_any_data_ptr(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             supported_dtypes = get_supported_dtypes()
 
@@ -984,7 +984,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_get_curr_cuda_blas_handle(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
             expected = torch.cuda.current_blas_handle()
@@ -992,7 +992,7 @@ if True:
 
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.empty(3, 4, 5, device=device)
 
@@ -1018,7 +1018,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my__foreach_mul_vec(self, device):
             """Test my__foreach_mul_vec which uses const std::vector<Tensor>& parameters."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             N = 5
             tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
@@ -1033,7 +1033,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_const_string_ref(self, device):
             """Test my_string_op_const_string_ref which uses const std::string& parameters."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.empty(3, 4, 5, device=device)
 
@@ -1052,7 +1052,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_const_string_view_ref(self, device):
             """Test my_string_op_const_string_view_ref which uses const std::string_view& parameters."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.empty(3, 4, 5, device=device)
 
@@ -1075,7 +1075,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_string_ref(self, device):
             """Test my_string_op_string_ref which uses std::string& (non-const) parameters."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.empty(3, 4, 5, device=device)
 
@@ -1095,7 +1095,7 @@ if True:
         @onlyCPU
         def test_my_set_requires_grad(self, device):
             """Test set_requires_grad method on Tensor."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             # Use torch.no_grad() to prevent autograd from wrapping the output
             # tensor with a grad_fn. When a tensor with requires_grad=True goes
@@ -1116,7 +1116,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_get_current_cuda_stream(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             device_index = torch.device(device).index
             res = libtorch_agnostic.ops.my_get_current_cuda_stream(device_index)
@@ -1126,7 +1126,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_set_current_cuda_stream(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             device_index = torch.device(device).index
             prev_stream = torch.cuda.current_stream(device_index).cuda_stream
@@ -1146,7 +1146,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_get_cuda_stream_from_pool(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             device_index = torch.device(device).index
             prev_stream = torch.cuda.current_stream(device_index).cuda_stream
@@ -1169,7 +1169,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_cuda_stream_synchronize(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             device_index = torch.device(device).index
             stream = torch.cuda.current_stream(device_index).cuda_stream
@@ -1179,7 +1179,7 @@ if True:
         @skipIfTorchVersionLessThan(2, 10)
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_from_blob(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             # Create reference implementation using unstable torch::from_blob via load_inline
             source = """
@@ -1236,7 +1236,7 @@ if True:
         @onlyCUDA
         def test_std_cuda_check_success(self, device):
             """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             result = libtorch_agnostic.ops.test_std_cuda_check_success()
             expected_device = torch.cuda.current_device()
@@ -1258,7 +1258,7 @@ if True:
 
             test_script = """
 import torch
-import libtorch_agnostic_2_10 as libtorch_agnostic
+import libtorch_agn_2_10 as libtorch_agnostic
 
 try:
     libtorch_agnostic.ops.test_std_cuda_check_error()
@@ -1302,7 +1302,7 @@ except RuntimeError as e:
         @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
         def test_my_to_device(self, device):
             """Test to(device) convenience overload."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, device="cpu")
 
@@ -1314,7 +1314,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_to_dtype(self, device):
             """Test to(dtype) via the main to function."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device, dtype=torch.float32)
 
@@ -1333,7 +1333,7 @@ except RuntimeError as e:
         @skipIfTorchDynamo(" Dynamo failed to run FX node with fake tensors")
         def test_my_to_dtype_layout(self, device):
             """Test the full to.dtype_layout op with various parameter combinations."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             # Test dtype conversion
             t = torch.randn(3, 4, device=device, dtype=torch.float32)
@@ -1383,7 +1383,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_contiguous(self, device):
             """Test contiguous with default memory format."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device).t()
             self.assertFalse(t.is_contiguous())
@@ -1394,7 +1394,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_contiguous_memory_format(self, device):
             """Test contiguous with specified memory format."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             # Create a 4D tensor (N, C, H, W)
             t = torch.randn(2, 3, 4, 5, device=device)
@@ -1409,7 +1409,7 @@ except RuntimeError as e:
         @onlyCUDA
         def test_std_cuda_kernel_launch_check_success(self, device):
             """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_success()
 
@@ -1432,7 +1432,7 @@ except RuntimeError as e:
 
             test_script = """
 import torch
-import libtorch_agnostic_2_10 as libtorch_agnostic
+import libtorch_agn_2_10 as libtorch_agnostic
 
 try:
     libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
@@ -1474,7 +1474,7 @@ except RuntimeError as e:
         )
         def test_my_new_empty(self, device):
             """Test new_empty with all kwargs."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device, dtype=torch.float32)
 
@@ -1514,7 +1514,7 @@ except RuntimeError as e:
         )
         def test_my_new_zeros(self, device):
             """Test new_zeros with all kwargs."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device, dtype=torch.float32)
 
@@ -1544,7 +1544,7 @@ except RuntimeError as e:
 
         def test_my_unsqueeze(self, device):
             """Test unsqueeze op."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(3, 4, device=device)
 
@@ -1568,7 +1568,7 @@ except RuntimeError as e:
 
         def test_my_squeeze(self, device):
             """Test squeeze.dim op."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(3, 1, 4, device=device)
 
@@ -1592,7 +1592,7 @@ except RuntimeError as e:
 
         def test_my_select(self, device):
             """Test select.int op."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             t = torch.randn(3, 4, 5, device=device)
 
@@ -1616,7 +1616,7 @@ except RuntimeError as e:
 
         def test_my_matmul(self, device):
             """Test matmul op."""
-            import libtorch_agnostic_2_9 as libtorch_agnostic
+            import libtorch_agn_2_9 as libtorch_agnostic
 
             # Test 2D x 2D matrix multiplication
             a = torch.randn(3, 4, device=device)
@@ -1650,7 +1650,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_subtract(self, device):
             """Test subtract.Tensor op."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agn_2_10 as libtorch_agnostic
 
             a = torch.randn(3, 4, device=device)
             b = torch.randn(3, 4, device=device)
