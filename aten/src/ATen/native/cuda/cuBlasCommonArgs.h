@@ -174,37 +174,40 @@ struct cublasCommonArgs {
 
     this->beta = beta;
     // Prepare bias if it is different from result and beta != 0
-    if (self.has_value() && !c.is_same(*self) && !is_beta_zero()) {
-      if (self->scalar_type() == c.scalar_type() && self->scalar_type() != mat1.scalar_type()) {
-        // NOTE: self and result are different tensors here
-        // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and
-        // mat1.dtype/mat2.dtype if of reduced float type -- we do not have
-        // such a kernel specialization yet.
-        return;
-      }
-      const bool can_use_bias_in_epilogue = (
-          transpose_result // required so that bias properly broadcasts in epilogue
-          && is_beta_one() // no scaling for bias in epilogue
-          && self->is_contiguous()
-          // == m -> should match the rows, hence transpose_result is essential
-          && (self->dim() >= 1 && self->sizes().back() == m && self->numel() == m) // shapes [1, ..., 1, m] are fine
-          && !result->is_complex() // no Epilogue support for complex types
-      );
-      if (can_use_bias_in_epilogue) { // Case for bias in epilogue
+    if (!self.has_value() || c.is_same(*self) || is_beta_zero()) {
+      return;
+    }
+    if (self->scalar_type() == c.scalar_type() && self->scalar_type() != mat1.scalar_type()) {
+      // NOTE: self and result are different tensors here
+      // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and
+      // mat1.dtype/mat2.dtype if of reduced float type -- we do not have
+      // such a kernel specialization yet.
+      return;
+    }
+    const bool can_use_1D_bias_no_copy = (
+        transpose_result // required so that bias properly broadcasts
+        && self->is_contiguous()
+        // == m -> should match the rows, hence transpose_result is essential
+        && (self->dim() >= 1 && self->sizes().back() == m && self->numel() == m) // shapes [1, ..., 1, m] are fine
+    );
+    const bool can_use_bias_in_epilogue = (
+        can_use_1D_bias_no_copy
+        && is_beta_one() // no scaling for bias in epilogue
+        && !result->is_complex() // no Epilogue support for complex types
+    );
+    if (can_use_bias_in_epilogue) { // Case for bias in epilogue
+      bias = c10::MaybeOwned<Tensor>::borrowed(*self);
+    } else { // Case for, potentially, an out-of-place GEMM
+      if (can_use_1D_bias_no_copy) { // 1D bias
+        // Bias expanded to a matrix with the leading dimension 0
         bias = c10::MaybeOwned<Tensor>::borrowed(*self);
-      } else { // Case for, potentially, an out-of-place GEMM
-        if (self->dim() == 2) { // 2D bias
-          // Bias should match the result's layout
-          bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result, result->sizes());
-          if (bias.has_value()) {
-            bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
-          }
-        } else { // 1D bias
-          if (transpose_result && self->is_contiguous()) {
-            // Bias expanded to a matrix with the leading dimension 0
-            bias = c10::MaybeOwned<Tensor>::borrowed(*self);
-            bias_ld = static_cast<int64_t>(0);
-          }
+        bias_ld = static_cast<int64_t>(0);
+      }
+      if (self->dim() == 2) { // 2D bias
+        // Bias should match the result's layout
+        bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result, result->sizes());
+        if (bias.has_value()) {
+          bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
         }
       }
     }
