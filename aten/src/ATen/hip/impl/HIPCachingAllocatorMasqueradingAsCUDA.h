@@ -102,9 +102,10 @@ inline void recordHistory(
     HIPCachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     HIPCachingAllocator::RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   return get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory, skip_actions);
 }
 
 inline void recordAnnotation(
