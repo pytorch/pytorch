@@ -842,6 +842,9 @@ class PallasKernel(SIMDKernel):
         self.load_index_exprs: dict[str, sympy.Expr] = {}
         # Track outputs that need to be readable (for scatter operations)
         self.outputs_need_read: OrderedSet[str] = OrderedSet()
+        # Track if any load in this kernel used transpose
+        # Used to avoid double transpose (load + store)
+        self.has_transposed_load = False
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1022,6 +1025,115 @@ class PallasKernel(SIMDKernel):
             if str(sym).startswith("tmp"):
                 return True
         return False
+
+    def _get_expected_output_shape(self) -> list:
+        """Get the expected output shape from iteration variables.
+
+        Iteration variables are shaped for broadcasting. For 2D outputs:
+        - First var (e.g., y0) gets shape (1, N) - innermost dimension
+        - Second var (e.g., x1) gets shape (M, 1) - outermost dimension
+        The broadcast result is (M, N).
+        """
+        # Collect variable lengths
+        var_items = list(self.range_tree_nodes.items())
+        broadcast_vars = []
+        for var_sym, entry in var_items:
+            try:
+                length = int(entry.length) if hasattr(entry.length, "__int__") else None
+                if length is not None:
+                    broadcast_vars.append(length)
+            except (TypeError, ValueError):
+                pass
+
+        if len(broadcast_vars) <= 1:
+            return broadcast_vars
+
+        # For 2D case: variables are reshaped in reverse order
+        # First var is innermost (last dim), second var is outermost (first dim)
+        # So output shape is [second_var_length, first_var_length, ...]
+        return list(reversed(broadcast_vars))
+
+    def _is_transposed_access(self, name: str, index: sympy.Expr) -> bool:
+        """Check if buffer access is transposed based on index expression coefficients
+        or buffer stride.
+
+        For a 2D buffer with row-major layout (stride [S, 1]):
+        - Normal access: index = S*row_var + col_var (larger coeff on outer var)
+        - Transposed access: index = row_var + S*col_var (larger coeff on inner var)
+
+        We detect transpose by checking if the coefficient of the first iteration
+        variable (inner/column) is larger than the second (outer/row).
+
+        For single iteration variable cases, we check the buffer's stride directly.
+        """
+        try:
+            buf_obj = V.graph.get_buffer(name)
+            buf_size = buf_obj.get_size()
+
+            # Only handle 2D buffers
+            if len(buf_size) != 2:
+                return False
+
+            # Get iteration variables in order (first is inner, second is outer)
+            var_items = list(self.range_tree_nodes.items())
+
+            if len(var_items) >= 2:
+                # Use coefficient-based detection for 2+ iteration variables
+                first_var = var_items[0][0]
+                second_var = var_items[1][0]
+
+                # Extract coefficients from index expression
+                index = V.graph.sizevars.simplify(index)
+
+                def get_coefficient(var):
+                    """Get the coefficient of var in the index expression."""
+                    if index == var:
+                        return 1
+                    if index.is_Add:
+                        for term in index.args:
+                            coeff = get_coefficient_from_term(term, var)
+                            if coeff is not None:
+                                return coeff
+                    return get_coefficient_from_term(index, var)
+
+                def get_coefficient_from_term(term, var):
+                    """Get coefficient from a single term."""
+                    if term == var:
+                        return 1
+                    if term.is_Mul:
+                        coeff = 1
+                        has_var = False
+                        for factor in term.args:
+                            if factor == var:
+                                has_var = True
+                            elif factor.is_number:
+                                coeff *= int(factor)
+                        if has_var:
+                            return coeff
+                    return None
+
+                coeff_first = get_coefficient(first_var)
+                coeff_second = get_coefficient(second_var)
+
+                if coeff_first is not None and coeff_second is not None:
+                    # Buffer stride for row-major is [dim1, 1]
+                    # Normal access: outer var (second) has larger coefficient
+                    # Transposed: inner var (first) has larger coefficient
+                    return coeff_first > coeff_second
+
+            # Fallback: check buffer stride directly for column-major layout
+            # Column-major has stride[0] < stride[1] (e.g., [1, 8])
+            buf_stride = buf_obj.get_layout().stride
+            if len(buf_stride) == 2:
+                s0 = int(buf_stride[0]) if hasattr(buf_stride[0], "__int__") else None
+                s1 = int(buf_stride[1]) if hasattr(buf_stride[1], "__int__") else None
+                if s0 is not None and s1 is not None:
+                    return s0 < s1  # Column-major = transposed
+
+            return False
+
+        except Exception:
+            return False
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
         """
@@ -1222,6 +1334,17 @@ class PallasKernel(SIMDKernel):
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
+            # Check for transposed access using index expression coefficients
+            # For a 2D buffer with strides [S, 1], normal access is S*outer + inner
+            # Transposed access is outer + S*inner (coefficients are swapped)
+            if index_str == "...":
+                try:
+                    needs_transpose = self._is_transposed_access(name, index)
+                    if needs_transpose:
+                        load_expr = f"jnp.transpose({load_expr})"
+                        self.has_transposed_load = True
+                except Exception:
+                    pass
             # Squeeze (N,1) intermediate buffers when kernel has 1D graph inputs
             # to avoid wrong broadcasting: (N,) op (N,1) -> (N,N) instead of (N,)
             # Check on demand since input_buffers may not be fully populated at __init__ time
@@ -1544,16 +1667,34 @@ class PallasKernel(SIMDKernel):
                     # - Squeeze operations where value has more dims than output
                     # - Scalar values that need to be broadcast to the output shape
                     # - Expand/broadcast operations (e.g., cat((x, x), 0) -> expand)
+                    # - Transpose for column-major outputs when computation is row-major
                     # - If shapes already match, operations are no-ops.
                     # Use jnp.full for scalars, broadcast_to for broadcast-compatible shapes,
                     # and reshape for same-size different-shape arrays.
-                    store_expr = (
-                        f"{out}[...] = ("
-                        f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                        f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
-                        f"if jnp.asarray({value}).size != {out}.size "
-                        f"else jnp.asarray({value}).reshape({out}.shape)))"
+
+                    # Check if output needs transpose based on store index pattern
+                    # Column-major output (stride [1, N]) needs transpose if value is row-major
+                    # BUT: if we already transposed during load, the value is already in
+                    # the correct layout, so don't transpose again (avoid double transpose)
+                    needs_transpose = (
+                        self._is_transposed_access(name, index)
+                        and not self.has_transposed_load
                     )
+
+                    if needs_transpose:
+                        store_expr = (
+                            f"{out}[...] = ("
+                            f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                            f"else jnp.transpose(jnp.asarray({value})))"
+                        )
+                    else:
+                        store_expr = (
+                            f"{out}[...] = ("
+                            f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                            f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
+                            f"if jnp.asarray({value}).size != {out}.size "
+                            f"else jnp.asarray({value}).reshape({out}.shape)))"
+                        )
                 else:
                     # Direct indexed assignment
                     # Check if we need special handling for constant indices on multi-dim outputs
