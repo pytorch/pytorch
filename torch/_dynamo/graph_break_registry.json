@@ -648,6 +648,16 @@
       "Hints": []
     }
   ],
+  "GB4636": [
+    {
+      "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
+      "Context": "",
+      "Explanation": "User-inserted step_unsupported.",
+      "Hints": [
+        "Remove the `torch._dynamo.step_unsupported()` call."
+      ]
+    }
+  ],
   "GB0065": [
     {
       "Gb_type": "Graph break in inlined function",
