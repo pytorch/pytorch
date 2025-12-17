@@ -2318,12 +2318,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     self.assertTrue("External id" not in event["args"])
                 else:
                     excluded_events = (
-                        {"hipDeviceSynchronize"} if TEST_WITH_ROCM 
+                        {"hipDeviceSynchronize"} if TEST_WITH_ROCM
                         else {"cudaDeviceSynchronize"})
                     if event["name"] not in excluded_events:
                         self.assertTrue("External id" in event["args"])
                         self.assertTrue(event["args"]["External id"] > 0)
- 
+
         def validate_json(prof, disable_external_correlation):
             with TemporaryFileName(mode="w+") as fname:
                 prof.export_chrome_trace(fname)
