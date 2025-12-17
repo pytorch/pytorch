@@ -13469,6 +13469,7 @@ class TestAutogradStreamSynchronization(TestCase):
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
+    @skipIfXPU(msg="'torch.xpu' has no attribute 'default_stream', issue=####")
     def test_consumer_to_single_producer_case_2_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
@@ -13580,6 +13581,7 @@ class TestAutogradStreamSynchronization(TestCase):
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
+    @skipIfXpu(msg="'torch.xpu' has no attribute 'default_stream', issue #####")
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self, device
     ):
@@ -13595,6 +13597,7 @@ class TestAutogradStreamSynchronization(TestCase):
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
+    @skipIfXpu(msg="'torch.xpu' has no attribute 'default_stream', issue #####")
     def test_consumer_to_single_producer_case_3_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
@@ -13608,6 +13611,7 @@ class TestAutogradStreamSynchronization(TestCase):
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
+    @skipIfXpu(msg="'torch.xpu' has no attribute 'default_stream', issue #####")
     def test_consumer_to_single_producer_case_4_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
@@ -13673,6 +13677,7 @@ class TestAutogradStreamSynchronization(TestCase):
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
+    @skipIfXpu(msg="'torch.xpu' has no attribute 'default_stream', issue #####")
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
         if device == "cpu":
             self.skipTest("requires accelerator")
@@ -15201,6 +15206,7 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(a.grad, c * c + c)
         self.assertEqual(b.grad, d * d + d)
 
+    @skipIfXpu(msg="Forward AD for an OP that does not implement it should raise a NotImplementedError, issue #####")
     def test_foward_mode_AD(self, device):
         # check that forward mode AD is only registered for the Default
         # dispatch for _test_autograd_multiple_dispatch.fullcoverage and not AutogradCUDA
