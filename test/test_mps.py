@@ -7926,35 +7926,6 @@ class TestMPS(TestCaseMPS):
                 self.assertLess(abs(std - expected_std) / expected_std, 0.2,
                               f"Std {std} not close to expected {expected_std} for alpha={alpha}")
 
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_cauchy_sample(self, dtype):
-        # Test Cauchy distribution
-        from torch.distributions import Cauchy
-        
-        median = torch.tensor([0.0], device='mps', dtype=dtype)
-        scale = torch.tensor([1.0], device='mps', dtype=dtype)
-        
-        cauchy = Cauchy(median, scale)
-        samples = cauchy.sample((1000,))
-        
-        # Check shape and device
-        self.assertEqual(samples.shape, (1000, 1))
-        self.assertEqual(samples.device.type, 'mps')
-        self.assertEqual(samples.dtype, dtype)
-        
-        # Cauchy distribution has undefined mean and variance
-        # But we can check that samples are generated (no NaN/Inf except possibly a few outliers)
-        finite_ratio = torch.isfinite(samples).float().mean().item()
-        self.assertGreater(finite_ratio, 0.95,  # Most samples should be finite
-                          f"Too many non-finite values: {1-finite_ratio:.2%}")
-        
-        # Test with different median and scale
-        median2 = torch.tensor([5.0], device='mps', dtype=dtype)
-        scale2 = torch.tensor([2.0], device='mps', dtype=dtype)
-        cauchy2 = Cauchy(median2, scale2)
-        samples2 = cauchy2.sample((100,))
-        self.assertEqual(samples2.shape, (100, 1))
-
     # Test add
     def test_add_sub(self):
         def helper(shape, alpha, op_name, inplace):

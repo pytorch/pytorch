@@ -13493,8 +13493,7 @@
   python_module: special
   variants: function
   dispatch:
-    CPU, CUDA: special_ndtri_out
-    MPS: special_ndtri_out_mps
+    CPU, CUDA, MPS: special_ndtri_out
   tags: pointwise
 
 - func: special_log_ndtr(Tensor self) -> Tensor

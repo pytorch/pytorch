@@ -303,8 +303,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cauchy_": None,
-            "cauchy": None,
             "cholesky_inverse": None,
             "cholesky_solve": None,
             "frexp": None,

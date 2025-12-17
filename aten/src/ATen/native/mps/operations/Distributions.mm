@@ -1058,96 +1058,13 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
     return at::empty(lambda.sizes(), lambda.options());
   }
 
-  const auto need_reshape = lambda.ndimension() > 4;
-  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
-  auto stream = getCurrentMPSStream();
-
   Tensor result = at::empty(lambda.sizes(), lambda.options());
+  Tensor std = lambda.sqrt();
 
-  @autoreleasepool {
-    using namespace mps;
-    auto key = "_poisson:" + getTensorsStringKey({lambda});
-    auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->stateTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
-      
-      auto lambda_shape = getMPSShape(lambda);
-      newCachedGraph->probTensor = mpsGraphRankedPlaceHolder(mpsGraph, lambda);
-      
-      MPSGraphTensor* lambdaTensor = newCachedGraph->probTensor;
-      
-      // For Poisson, we use the Knuth algorithm for small lambda
-      // For large lambda (> 10), we use normal approximation
-      // Simplified: always use exponential + geometric approximation
-      
-      MPSGraphRandomOpDescriptor* uniformDesc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionUniform
-                                                                                              dataType:MPSDataTypeFloat32];
-      uniformDesc.min = 0.0f;
-      uniformDesc.max = 1.0f;
-      
-      // Generate multiple uniform samples and count until product < exp(-lambda)
-      // Simplified: use normal approximation N(lambda, sqrt(lambda))
-      
-      MPSGraphTensor* sqrtLambda = [mpsGraph squareRootWithTensor:lambdaTensor name:nil];
-      
-      MPSGraphRandomOpDescriptor* normalDesc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionNormal
-                                                                                            dataType:MPSDataTypeFloat32];
-      normalDesc.mean = 0.0f;
-      normalDesc.standardDeviation = 1.0f;
-      
-      NSArray<MPSGraphTensor*>* normalTensors =
-          [mpsGraph randomTensorWithShape:(need_reshape ? @[ @(lambda.numel()) ] : lambda_shape)
-                               descriptor:normalDesc
-                              stateTensor:newCachedGraph->stateTensor
-                                     name:nil];
-      MPSGraphTensor* normalSample = normalTensors[0];
-      
-      // Poisson ~ lambda + sqrt(lambda) * N(0,1)
-      MPSGraphTensor* scaled = [mpsGraph multiplicationWithPrimaryTensor:sqrtLambda
-                                                         secondaryTensor:normalSample
-                                                                    name:nil];
-      MPSGraphTensor* poissonSample = [mpsGraph additionWithPrimaryTensor:lambdaTensor
-                                                          secondaryTensor:scaled
-                                                                     name:nil];
-      
-      // Clamp to non-negative and round
-      MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0f dataType:MPSDataTypeFloat32];
-      MPSGraphTensor* clamped = [mpsGraph maximumWithPrimaryTensor:poissonSample
-                                                   secondaryTensor:zero
-                                                              name:nil];
-      newCachedGraph->resultTensor = [mpsGraph roundWithTensor:clamped name:nil];
-      
-      if (need_reshape) {
-        newCachedGraph->resultTensor = [mpsGraph reshapeTensor:newCachedGraph->resultTensor
-                                                     withShape:lambda_shape
-                                                          name:nil];
-      }
-      
-      if (getMPSDataType(lambda) != getMPSDataType(newCachedGraph->resultTensor)) {
-        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, lambda.scalar_type());
-      }
-    });
+  // Normal approximation: lambda + sqrt(lambda) * N(0, 1)
+  mps::normal_mps_impl(result, 0.0, 1.0, lambda, std, gen, "poisson_normal_mps");
 
-    MPSNDArrayDescriptor* stateDesc =
-        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
-    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
-    {
-      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      mps_gen->update_philox_counters();
-      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
-    }
-    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
-
-    Placeholder lambdaPlaceholder = Placeholder(cachedGraph->probTensor, lambda);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, result);
-    
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[cachedGraph->stateTensor] = stateTensorData;
-    feeds[lambdaPlaceholder.getMPSGraphTensor()] = lambdaPlaceholder.getMPSGraphTensorData();
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
+  result = result.clamp_min(0).round();
   return result;
 }
 
@@ -1157,115 +1074,29 @@ Tensor _s_binomial_mps(const Tensor& count, const Tensor& prob, std::optional<Ge
     return at::empty(count.sizes(), count.options());
   }
 
-  const auto need_reshape = count.ndimension() > 4;
-  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
-  auto stream = getCurrentMPSStream();
-
-  Tensor result = at::empty(count.sizes(), count.options());
-
-  @autoreleasepool {
-    using namespace mps;
-    auto key = "_binomial:" + getTensorsStringKey({count, prob});
-    
-    struct BinomialCachedGraph : public MPSCachedGraph {
-      BinomialCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor* countTensor = nil;
-      MPSGraphTensor* probTensor = nil;
-      MPSGraphTensor* stateTensor = nil;
-      MPSGraphTensor* resultTensor = nil;
-    };
-    
-    auto cachedGraph = LookUpOrCreateCachedGraph<BinomialCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->stateTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
-      
-      auto count_shape = getMPSShape(count);
-      newCachedGraph->countTensor = mpsGraphRankedPlaceHolder(mpsGraph, count);
-      newCachedGraph->probTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob);
-      
-      // For binomial, use normal approximation: N(n*p, sqrt(n*p*(1-p)))
-      // Valid for large n and p not too close to 0 or 1
-      
-      MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0f dataType:MPSDataTypeFloat32];
-      MPSGraphTensor* oneMinusP = [mpsGraph subtractionWithPrimaryTensor:one
-                                                         secondaryTensor:newCachedGraph->probTensor
-                                                                    name:nil];
-      
-      // mean = n * p
-      MPSGraphTensor* mean = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->countTensor
-                                                       secondaryTensor:newCachedGraph->probTensor
-                                                                  name:nil];
-      
-      // variance = n * p * (1-p)
-      MPSGraphTensor* variance = [mpsGraph multiplicationWithPrimaryTensor:mean
-                                                           secondaryTensor:oneMinusP
-                                                                      name:nil];
-      MPSGraphTensor* stddev = [mpsGraph squareRootWithTensor:variance name:nil];
-      
-      // Generate standard normal
-      MPSGraphRandomOpDescriptor* normalDesc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:MPSGraphRandomDistributionNormal
-                                                                                            dataType:MPSDataTypeFloat32];
-      normalDesc.mean = 0.0f;
-      normalDesc.standardDeviation = 1.0f;
-      
-      NSArray<MPSGraphTensor*>* normalTensors =
-          [mpsGraph randomTensorWithShape:(need_reshape ? @[ @(count.numel()) ] : count_shape)
-                               descriptor:normalDesc
-                              stateTensor:newCachedGraph->stateTensor
-                                     name:nil];
-      MPSGraphTensor* normalSample = normalTensors[0];
-      
-      // binomial ~ mean + stddev * N(0,1)
-      MPSGraphTensor* scaled = [mpsGraph multiplicationWithPrimaryTensor:stddev
-                                                         secondaryTensor:normalSample
-                                                                    name:nil];
-      MPSGraphTensor* binomialSample = [mpsGraph additionWithPrimaryTensor:mean
-                                                           secondaryTensor:scaled
-                                                                      name:nil];
-      
-      // Clamp to [0, n] and round
-      MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0f dataType:MPSDataTypeFloat32];
-      MPSGraphTensor* clampedLow = [mpsGraph maximumWithPrimaryTensor:binomialSample
-                                                      secondaryTensor:zero
-                                                                 name:nil];
-      MPSGraphTensor* clampedHigh = [mpsGraph minimumWithPrimaryTensor:clampedLow
-                                                       secondaryTensor:newCachedGraph->countTensor
-                                                                  name:nil];
-      newCachedGraph->resultTensor = [mpsGraph roundWithTensor:clampedHigh name:nil];
-      
-      if (need_reshape) {
-        newCachedGraph->resultTensor = [mpsGraph reshapeTensor:newCachedGraph->resultTensor
-                                                     withShape:count_shape
-                                                          name:nil];
-      }
-      
-      if (getMPSDataType(count) != getMPSDataType(newCachedGraph->resultTensor)) {
-        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, count.scalar_type());
-      }
-    });
-
-    MPSNDArrayDescriptor* stateDesc =
-        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
-    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
-    {
-      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      mps_gen->update_philox_counters();
-      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
-    }
-    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
-
-    Placeholder countPlaceholder = Placeholder(cachedGraph->countTensor, count);
-    Placeholder probPlaceholder = Placeholder(cachedGraph->probTensor, prob);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, result);
-    
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[cachedGraph->stateTensor] = stateTensorData;
-    feeds[countPlaceholder.getMPSGraphTensor()] = countPlaceholder.getMPSGraphTensorData();
-    feeds[probPlaceholder.getMPSGraphTensor()] = probPlaceholder.getMPSGraphTensorData();
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  // Normal approximation: n * p + sqrt(n * p * (1 - p)) * N(0, 1)
+  auto compute_dtype = prob.scalar_type();
+  if (!at::isFloatingType(compute_dtype)) {
+    compute_dtype = kFloat;
   }
 
+  Tensor prob_f = prob.to(compute_dtype);
+  Tensor count_f = count.to(compute_dtype);
+
+  Tensor mean = count_f * prob_f;
+  Tensor std = (mean * (1 - prob_f)).clamp_min(0).sqrt();
+
+  Tensor tmp = at::empty(mean.sizes(), mean.options());
+  mps::normal_mps_impl(tmp, 0.0, 1.0, mean, std, gen, "binomial_normal_mps");
+
+  tmp = tmp.clamp_min(0).clamp_max(count_f).round();
+
+  Tensor result = at::empty(count.sizes(), count.options());
+  if (result.scalar_type() != tmp.scalar_type()) {
+    result.copy_(tmp.to(result.scalar_type()));
+  } else {
+    result.copy_(tmp);
+  }
   return result;
 }
 
