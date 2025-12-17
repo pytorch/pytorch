@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
-    11
+    17
     CACHE STRING
           "The C standard whose features are requested to build this target.")
 

@@ -42,11 +42,11 @@ from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.dicts import ConstDictVariable
 from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (

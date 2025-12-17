@@ -22,7 +22,7 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
@@ -538,10 +538,9 @@ class ConstDictVariable(VariableTracker):
             # could change behavior.
             # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
             # would have been installed by the earlier mutation.
-            if (
-                not args[0].is_python_constant()
-                and not tx.output.side_effects.is_modified(self)
-            ):
+            if not args[
+                0
+            ].is_python_constant() and not tx.output.side_effects.is_modified(self):
                 self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -1028,7 +1027,7 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
         # Items can be either VariableTrackers or _HashableTrackers (from set ops).

@@ -437,10 +437,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (
-                trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
-            )
+            and (trace_rules.check(self._orig_mod.forward))
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -478,7 +475,7 @@ class OptimizedModule(torch.nn.Module):
         assert hooks is not None
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         if not self.dynamo_ctx.fullgraph:
             raise RuntimeError(
@@ -498,7 +495,7 @@ class OptimizedModule(torch.nn.Module):
     def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -512,7 +509,7 @@ class OptimizedModule(torch.nn.Module):
     def _load_aot_compiled_module(self, data: bytes) -> None:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 

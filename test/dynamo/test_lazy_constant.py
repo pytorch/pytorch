@@ -1229,7 +1229,6 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(compiled6[1], 3)  # Correct value
             self.assertEqual(counter2.frame_count, frame_count_after_second)
 
-
     def test_dict_mutation_no_recompile_on_unused_key_change(self):
         """Test that mutating a dict doesn't guard on unused keys.
 
