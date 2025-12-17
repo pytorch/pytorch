@@ -72,7 +72,6 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -772,9 +771,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-def to_dtype(
-    x: Union[TensorBox, ShapeAsConstantBuffer], dtype: torch.dtype, copy: bool = False
-):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
@@ -1471,7 +1468,7 @@ def quantized_decomposed_quantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
@@ -1554,7 +1551,7 @@ def quantized_decomposed_dequantize_per_channel(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
     assert input.get_dtype() == dtype, (
@@ -1604,7 +1601,7 @@ def quantized_decomposed_quantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1645,7 +1642,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
     )
@@ -1682,7 +1679,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1732,7 +1729,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -2546,7 +2543,7 @@ def searchsorted(
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[TensorBox] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )
@@ -2962,6 +2959,8 @@ make_fallback(aten._grouped_mm, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.miopen_rnn, require_dense)
+make_fallback(aten.miopen_rnn_backward, require_contiguous)
 
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
@@ -3924,24 +3923,7 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    from .utils import _fx_node_is_input_dependent_cudagraph_unsafe
-
     op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
-
-    # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
-    # because boolean indices trigger .nonzero() during CUDA graph capture
-    # When graph_partition is enabled, skip - partitioning handles this
-    fx_node = V.graph.current_node
-    if (
-        not config.graph_partition
-        and fx_node is not None
-        and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
-    ):
-        msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
-        if stack_trace := fx_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
@@ -4834,7 +4816,7 @@ def _pool_offsets_to_indices(
         [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
         torch._inductor.virtualized.OpsValue,
     ],
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     n_dim = len(kernel_size)
     offsets_loader = offsets.make_loader()
     window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
@@ -7301,9 +7283,9 @@ def triton_kernel_wrap_(
 
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
-def cond(pred, true_fn, false_fn, operands):
-    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
-    # we run into memory cleanup issue
+def cond(
+    pred, true_fn, false_fn, operands
+) -> list[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]]:
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -7311,14 +7293,12 @@ def cond(pred, true_fn, false_fn, operands):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
-    return list(map(TensorBox.create, result))
+    return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
-    # we run into memory cleanup issue
-    if not config.graph_partition and any(
+    if any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
@@ -7571,7 +7551,10 @@ def with_effects(token, op, *args, **kwargs):
         log.warning(
             "Failed to get schema for %s: %s. Assuming list output", op, error_msg
         )
-        return (token, *result)
+        if isinstance(result, (tuple, list)):
+            return (token, *result)
+        else:
+            return (token, result)
 
     if len(schema.returns) == 0:
         return (token, result)
