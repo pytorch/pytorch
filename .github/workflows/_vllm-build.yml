@@ -15,10 +15,6 @@ on:
         required: true
         type: string
         description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
-      torch_cuda_arch_list:
-        required: true
-        type: string
-        description: The list of CUDA archs to build.
       pytorch_branch:
         required: false
         type: string
@@ -27,6 +23,10 @@ on:
         required: false
         type: string
         description: The PyTorch commit to checkout. Default to the current checkout.
+      torch_cuda_arch_list:
+        required: true
+        type: string
+        description: The list of CUDA archs to build.
 
 jobs:
   build:

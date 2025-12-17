@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: The name of the base docker image to use.
+      build_environment:
+        required: true
+        type: string
+        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
       pytorch_branch:
         required: false
         type: string
@@ -85,7 +89,7 @@ jobs:
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
-          name: ${{ needs.set-parameters.outputs.build-environment }}
+          name: ${{ inputs.build-environment }}
           s3-bucket: gha-artifacts
 
       - name: Install build artifacts

@@ -100,9 +100,9 @@ jobs:
       runner: linux.24xlarge.memory
       docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
-      torch_cuda_arch_list: ${{ needs.set-parameters.outputs.torch_cuda_arch_list }}
       pytorch_branch: ${{ inputs.pytorch_branch }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
+      torch_cuda_arch_list: ${{ needs.set-parameters.outputs.torch_cuda_arch_list }}
     secrets: inherit
 
   benchmarks:
@@ -120,6 +120,7 @@ jobs:
     with:
       runner: ${{ matrix.runner }}
       docker_image: 'nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04'
+      build_environment: ${{ needs.set-parameters.outputs.build_environment }}
       pytorch_branch: ${{ inputs.pytorch_branch }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
