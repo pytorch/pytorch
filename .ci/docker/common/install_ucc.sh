@@ -67,8 +67,8 @@ function install_ucc() {
     HIP_OFFLOAD="$HIP_OFFLOAD --rocm-path=${ROCM_PATH}"
 
     # Set device library path if detected (handles TheRock vs traditional ROCm)
-    if [ -n "${ROCM_DEVICE_LIB_PATH}" ] && [ -d "${ROCM_DEVICE_LIB_PATH}" ]; then
-      HIP_OFFLOAD="$HIP_OFFLOAD --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}"
+    if [[ -n "${HIP_DEVICE_LIB_PATH}" ]] && [[ -d "${HIP_DEVICE_LIB_PATH}" ]]; then
+      HIP_OFFLOAD="$HIP_OFFLOAD --rocm-device-lib-path=${HIP_DEVICE_LIB_PATH}"
     fi
   else
     HIP_OFFLOAD="all-arch-no-native"
