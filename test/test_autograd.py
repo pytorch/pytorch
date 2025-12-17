@@ -13426,7 +13426,8 @@ def _sleep_if_gpu(cycles):
     if "cuda" == torch.accelerator.current_accelerator().type:
         return torch.cuda._sleep(cycles)
     elif "xpu" == torch.accelerator.current_accelerator().type:
-        return torch.xpu._sleep(cycles)
+        # XPU is not supported _sleep yet.
+        return
     else:
         # Update this if non-cuda accelerators support something like sleep
         return
