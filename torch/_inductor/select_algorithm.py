@@ -2383,13 +2383,11 @@ class ExternKernelCaller(ChoiceCaller):
         if device.type == "cpu":
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
-            try:
-                self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
-                self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
-            except Exception:
-                log.warning(
-                    "Constructing input/output tensor meta failed for Extern Choice"
-                )
+            # Realize input nodes to ensure they have proper layouts for TensorMeta
+            for node in self.input_nodes:
+                node.realize()
+            self.input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+            self.output_tensor_meta = TensorMeta.from_irnodes(self.layout)
 
             benchmark_cls = ExternKernelGPUBenchmarkRequest
 
