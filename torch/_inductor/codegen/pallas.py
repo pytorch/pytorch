@@ -1484,13 +1484,16 @@ class PallasKernel(SIMDKernel):
                     # - Mixed indexing producing flat results needing reshape
                     # - Squeeze operations where value has more dims than output
                     # - Scalar values that need to be broadcast to the output shape
+                    # - Expand/broadcast operations (e.g., cat((x, x), 0) -> expand)
                     # - If shapes already match, operations are no-ops.
-                    # Use jnp.full for scalars (fills output with value),
-                    # otherwise reshape for arrays with matching element count.
+                    # Use jnp.full for scalars, broadcast_to for broadcast-compatible shapes,
+                    # and reshape for same-size different-shape arrays.
                     store_expr = (
-                        f"{out}[...] = (jnp.full({out}.shape, {value}) "
-                        f"if jnp.asarray({value}).ndim == 0 "
-                        f"else jnp.asarray({value}).reshape({out}.shape))"
+                        f"{out}[...] = ("
+                        f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                        f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
+                        f"if jnp.asarray({value}).size != {out}.size "
+                        f"else jnp.asarray({value}).reshape({out}.shape)))"
                     )
                 else:
                     # Direct indexed assignment
@@ -1503,9 +1506,11 @@ class PallasKernel(SIMDKernel):
                             # Multi-dim output with constant index - use [...] for full assignment
                             # This handles cases like out_ptr0[0] where output is (1,1,1)
                             store_expr = (
-                                f"{out}[...] = (jnp.full({out}.shape, {value}) "
-                                f"if jnp.asarray({value}).ndim == 0 "
-                                f"else jnp.asarray({value}).reshape({out}.shape))"
+                                f"{out}[...] = ("
+                                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                                f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
+                                f"if jnp.asarray({value}).size != {out}.size "
+                                f"else jnp.asarray({value}).reshape({out}.shape)))"
                             )
                         else:
                             store_expr = f"{out}[{index_str}] = {value}"
