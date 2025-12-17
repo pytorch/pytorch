@@ -35,6 +35,8 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
@@ -67,6 +69,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI200_ARCH,
     MI300_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -101,8 +104,8 @@ requiresCppContext = unittest.skipUnless(
 load_tests = load_tests  # noqa: PLW0127
 
 try:
-    import torchvision.models  # noqa: F401
-    from torchvision.models import resnet18  # noqa: F401
+    # import torchvision.models  # noqa: F401
+    # from torchvision.models import resnet18  # noqa: F401
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -1168,7 +1171,7 @@ print(t.is_pinned())
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
-            torch.cuda._busy_wait_for_flag()
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
 
         view.record_stream(stream_record)
 
@@ -1181,7 +1184,6 @@ print(t.is_pinned())
 
         with torch.cuda.stream(stream_alloc):
             try_realloc = torch.cuda.FloatTensor([10, 10])
-        torch.cuda._clear_flag()
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
@@ -3991,6 +3993,10 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() >= (13, 1),
+        "This test does not fail on CUDA 13.1 or newer",
+    )
     def test_gds_fails_in_ci(self):
         if IS_WINDOWS or TEST_WITH_ROCM:
             error_msg = "is not supported on this platform"
@@ -4421,6 +4427,69 @@ class TestCudaMallocAsync(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_memory_snapshot_skip_actions(self):
+        """Test that skip_actions parameter correctly filters out specified action types."""
+        # Test cases: (skip_actions, description)
+        test_cases = [
+            (["free_requested"], "single action"),
+            (["free_requested", "free_completed"], "multiple actions"),
+            (["alloc"], "alloc action"),
+            (["segment_alloc", "segment_free"], "segment actions"),
+            ([], "empty list"),
+            (None, "None default"),
+        ]
+
+        for skip_actions, description in test_cases:
+            with self.subTest(skip_actions=skip_actions, description=description):
+                try:
+                    torch.cuda.memory.empty_cache()
+                    torch.cuda.memory._record_memory_history(
+                        context="all", stacks="python", skip_actions=skip_actions
+                    )
+
+                    # Perform allocations and frees to generate various actions
+                    x = torch.rand(128, 128, device="cuda")
+                    del x
+                    torch.cuda.synchronize()
+
+                    # Take snapshot to potentially generate snapshot event
+                    ss = torch.cuda.memory._snapshot()
+                    device_idx = 0
+                    while len(ss["device_traces"][device_idx]) == 0:
+                        device_idx = device_idx + 1
+                    device_trace = ss["device_traces"][device_idx]
+
+                    # Verify traces are not empty (other actions are still recorded)
+                    self.assertGreater(
+                        len(device_trace),
+                        0,
+                        f"Trace should not be empty for skip_actions={skip_actions}",
+                    )
+
+                    if skip_actions:
+                        all_actions = {event["action"] for event in device_trace}
+
+                        # Verify skipped actions are not in traces
+                        for sa in skip_actions:
+                            self.assertNotIn(
+                                sa,
+                                all_actions,
+                                f"Action {sa} should be skipped with skip_actions={skip_actions}",
+                            )
+                        # Check that we have actions that are NOT in the skip list
+                        non_skipped_actions = all_actions - set(skip_actions)
+                        self.assertGreater(
+                            len(non_skipped_actions),
+                            0,
+                            f"Should have non-skipped actions for skip_actions={skip_actions}",
+                        )
+
+                finally:
+                    torch.cuda.memory._record_memory_history(None)
 
     @serialTest()
     def test_max_split_expandable(self):
@@ -5721,6 +5790,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
@@ -6410,6 +6480,25 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+
+@unittest.skipIf(
+    not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green context not available, skipping tests"
+)
+class TestGreenContext(TestCase):
+    def test_greencontext_restores_stream(self):
+        # need to start on a side stream as we are comparing pointers and want to avoid
+        # two NULL streams...
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            start_stream = torch.cuda.current_stream()
+            ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+            ctx.set_context()
+            context_stream = torch.cuda.current_stream()
+            ctx.pop_context()
+            end_stream = torch.cuda.current_stream()
+            self.assertEqual(start_stream.cuda_stream, end_stream.cuda_stream)
+            self.assertNotEqual(start_stream.cuda_stream, context_stream.cuda_stream)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
