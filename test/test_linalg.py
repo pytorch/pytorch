@@ -2251,33 +2251,21 @@ class TestLinalg(TestCase):
 
             self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
-            #calculate eigenvalues only and check all are returned
+            # calculate eigenvalues only and check all are returned
             w_only = torch.linalg.eigvals(a)
             self.assertEqual(w_only.shape, w.shape)
 
-            # move to CPU for better performance
-            w_only = w_only.cpu()
-            w = w.cpu()
+            if a.numel() != 0:
+                # calculate distance matrix and find best matches
+                match_min_diff, match_idx = (w.unsqueeze(-1) - w_only.unsqueeze(-2)).abs().min(-1)
 
-            #check all eigenvalues found by eig are in eigvals output
-            for batch_idx in itertools.product(*[range(s) for s in w.shape[:-1]]):
-                w_b = w[batch_idx]
-                w_only_b = w_only[batch_idx]
-                for wi in w_b:
-                    found = False
-                    closest = None
-
-                    for wj in w_only_b:
-                        if closest is None or torch.abs(wi - wj) < closest:
-                            closest = torch.abs(wi - wj)
-
-                        if torch.isclose(wi, wj, atol=atol, rtol=0):
-                            found = True
-                            break
-
-                    if not found:
-                        self.fail(f"eigenvalue from eigvals out of tolerance, closest was: {closest.item():.2e}")
-
+                # check eigenvalues match within tolerance
+                self.assertEqual(match_min_diff, torch.zeros_like(match_min_diff),
+                                 atol=atol, rtol=0, msg="eigenvalues do not match within tolerance!")
+                # check all eigenvalues have unique matches
+                self.assertEqual(match_idx.sort(-1).values,
+                                 torch.arange(0, match_idx.shape[-1]).expand_as(match_idx),
+                                 atol=0, rtol=0, msg="some eigenvalues have multiple matches!")
 
 
         shapes = [(0, 0),  # Empty matrix
