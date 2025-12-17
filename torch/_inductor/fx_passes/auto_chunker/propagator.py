@@ -600,9 +600,7 @@ def propagate_sum_to_scalar(sum_node):
             return _bool_to_status(False)
 
         if input_meta.chunk_dim is not None:
-            changed = update_chunking_meta(
-                sum_node, scale_by=input_meta.scale_by, need_sum=True, chunk_by=None
-            )
+            changed = update_chunking_meta(sum_node, need_sum=True, chunk_by=None)
             return _bool_to_status(changed)
         return PropagateStatus.FAIL
 
