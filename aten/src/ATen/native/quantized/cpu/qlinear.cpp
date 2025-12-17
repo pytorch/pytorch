@@ -1177,7 +1177,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   // Fast path with cache of params
   static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
   static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
-  static const bool context_cache_enabled = cache_flag_str != "" && cache_flag_str == "1";
+  static const bool context_cache_enabled = !cache_flag_str.empty() && cache_flag_str == "1";
   static std::unordered_map<int64_t, QlinearForwardParams> qlinear_forward_params_map;
   int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
   if (context_cache_enabled) {
