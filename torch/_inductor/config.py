@@ -969,6 +969,15 @@ partitioned_scatter_enabled = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
 )
 
+# Min partitions for scatter optimization
+partitioned_scatter_min_partitions: int = 2
+
+# Max partitions for scatter optimization
+partitioned_scatter_max_partitions: int = 128
+
+# Memory budget fraction for scatter buffers
+partitioned_scatter_memory_budget: float = 0.10
+
 
 class _collective:
     auto_select: bool = False
