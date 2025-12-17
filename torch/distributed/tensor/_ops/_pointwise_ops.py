@@ -521,17 +521,19 @@ def pointwise_strategy(
 
             # Only apply partial optimization when no args have any Shard placements
             if preserve_partial is not None and not any_arg_has_shard:
-                current_arg_last_partial_index = _find_last_non_matching_partial_index(
-                    arg_strategy, preserve_partial
+                current_arg_last_non_matching_partial_index = (
+                    _find_last_non_matching_partial_index(
+                        arg_strategy, preserve_partial
+                    )
                 )
 
                 if (
-                    current_arg_last_partial_index
+                    current_arg_last_non_matching_partial_index
                     < partial_followed_strategy_last_non_matching_index
                 ):
                     followed_strategy_index = idx
                     partial_followed_strategy_last_non_matching_index = (
-                        current_arg_last_partial_index
+                        current_arg_last_non_matching_partial_index
                     )
 
         followed_strategy = op_schema.args_schema[followed_strategy_index]
