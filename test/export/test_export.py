@@ -926,9 +926,21 @@ class TestExport(TestCase):
                     KV_LEN=seq_len,
                     device=x.device,
                 )
-                q = self.q_proj(processed).view(batch_size, 1, seq_len, self.dim)
-                k = self.k_proj(processed).view(batch_size, 1, seq_len, self.dim)
-                v = self.v_proj(processed).view(batch_size, 1, seq_len, self.dim)
+                q = (
+                    self.q_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
+                k = (
+                    self.k_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
+                v = (
+                    self.v_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
 
                 # Use flex_attention with torch.compile - during export, compile should be skipped
                 backend = "inductor" if self.use_inductor else "eager"
@@ -1087,13 +1099,16 @@ def forward(self, x):
     to_13 = torch.ops.aten.to.dtype(argsort_3, torch.int32, False, False, torch.contiguous_format);  argsort_3 = None
     linear_1 = torch.ops.aten.linear.default(linear, q_proj_weight, q_proj_bias);  q_proj_weight = q_proj_bias = None
     view_1 = torch.ops.aten.view.default(linear_1, [2, 1, 128, 64]);  linear_1 = None
+    detach_19 = torch.ops.aten.detach.default(view_1);  view_1 = None
     linear_2 = torch.ops.aten.linear.default(linear, k_proj_weight, k_proj_bias);  k_proj_weight = k_proj_bias = None
     view_2 = torch.ops.aten.view.default(linear_2, [2, 1, 128, 64]);  linear_2 = None
+    detach_20 = torch.ops.aten.detach.default(view_2);  view_2 = None
     linear_3 = torch.ops.aten.linear.default(linear, v_proj_weight, v_proj_bias);  linear = v_proj_weight = v_proj_bias = None
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
+    detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -15306,6 +15321,16 @@ graph():
         args = (torch.ones(4),)
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
+
+    def test_isin(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.isin(x, torch.tensor(0))
+
+        ep = export(Module(), (0,), dynamic_shapes=(Dim.DYNAMIC,))
+        m = ep.module()
+        self.assertTrue(m(0))
+        self.assertFalse(m(1))
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
