@@ -5376,6 +5376,7 @@ class CommonTemplate:
 
     @config.patch(
         {
+            "max_autotune": True,
             "max_autotune_conv_bwd_weight_backends": "TRITON",
             "max_autotune_conv_bwd_input_backends": "TRITON",
         }
