@@ -3,7 +3,7 @@
 import abc
 import io
 from collections.abc import Sequence
-from typing import cast, IO, Optional
+from typing import cast, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -132,7 +132,7 @@ class ZStandard(StreamTransformExtension):
             def writeable(self) -> bool:
                 return True
 
-            def write(self, b: Buffer) -> Optional[int]:
+            def write(self, b: Buffer) -> int | None:
                 outdata = self.compressor.compress(b)
                 if outdata:
                     self.output.write(outdata)
@@ -159,7 +159,7 @@ class ZStandard(StreamTransformExtension):
             def readable(self) -> bool:
                 return True
 
-            def readinto(self, b: Buffer) -> Optional[int]:
+            def readinto(self, b: Buffer) -> int | None:
                 # This needs to read enough so it can decompress
                 # something so the output doesn't look like EOF.  This
                 # means reading at least one block.  The max block
