@@ -140,7 +140,6 @@ class AutoChunkerTest(TestCase):
         opt_f = torch.compile(f)
 
         x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
-        x.retain_grad()
         y = torch.randint(0, V, (B, T)).cuda()
 
         expect = (f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
