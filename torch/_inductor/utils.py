@@ -255,7 +255,7 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
             event
             for event in p.events()
             if (
-                event.device_type in [DeviceType.CUDA, DeviceType.XPU]
+                event.device_type == DeviceType.CUDA
                 and re.match(r"fused_abs_max_\d", event.name) is not None
             )
         ]
@@ -314,6 +314,7 @@ def _do_bench_using_profiling(
         may_ban_benchmarking()
 
     device_type = get_gpu_type()
+    device_type_upper = device_type.upper()
     device_interface = get_interface_for_device(device_type)
     fn()
     device_interface.synchronize()
@@ -341,7 +342,7 @@ def _do_bench_using_profiling(
     device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+            getattr(torch.profiler.ProfilerActivity, device_type_upper),
         ]
     ) as p:
         # Benchmark
@@ -360,7 +361,7 @@ def _do_bench_using_profiling(
         [
             event
             for event in p.events()
-            if event.device_type in [DeviceType.CUDA, DeviceType.XPU]
+            if event.device_type == getattr(DeviceType, device_type_upper)
             and event.name != "Context Sync"
         ]
     )
