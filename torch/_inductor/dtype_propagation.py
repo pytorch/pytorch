@@ -395,6 +395,6 @@ class DtypePropagationOpsHandler:
 
 
 if TYPE_CHECKING:
-
+    # pyrefly: ignore [inconsistent-inheritance]
     class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
         pass  # mypy will error if we got any of the signatures wrong

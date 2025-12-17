@@ -14,7 +14,7 @@ import torch
 from torch.fx import GraphModule
 from torch.utils._sympy.functions import Identity
 
-from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...ir import FixedLayout, Subgraph, TensorBox
 from ...lowering import empty_strided
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
@@ -256,7 +256,7 @@ def create_flex_flash_attention_kernel(
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
+) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
@@ -341,18 +341,35 @@ def create_flex_flash_attention_kernel(
 def _can_use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
+    joint_outputs: Optional[Any] = None,
+    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
 
-    if not is_trivial_score_graph(fw_subgraph.graph_module):
-        return (
-            False,
-            "NYI: Flex Flash Attention doesn't support score_mods in bwds yet.",
-        )
-
     if not is_trivial_mask_graph(mask_graph.graph_module):
         return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
+
+    if input_buffers_require_grads(
+        fw_subgraph.graph_module, num_score_mod_placeholders
+    ):
+        return (
+            False,
+            "Input buffers require gradients (not supported by flash attention backward)",
+        )
+
+    if joint_outputs is not None:
+        if joint_outputs.captured_grads_compute:
+            return (
+                False,
+                "NYI: Flex Flash Attention bwd doesn't support captured grads yet.",
+            )
+        if joint_outputs.mutated_grads:
+            return (
+                False,
+                "NYI: Flex Flash Attention bwd doesn't support mutated grads yet.",
+            )
 
     return True, ""
 
@@ -361,15 +378,17 @@ def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    joint_outputs: Optional[Any] = None,
+    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
     Args:
-        subgraph: The score modification subgraph
+        fw_subgraph: The forward score modification subgraph
         mask_graph: The mask modification subgraph
-        kernel_options: Kernel configuration options
-        num_score_mod_placeholders: Number of placeholders in score_mod
         backend: Implementation selector (AUTO, TRITON, FLASH, TRITON_DECODE)
+        joint_outputs: Processed joint outputs (for PR1 constraint checking)
+        score_mod_other_buffers: Additional buffers used by score_mod
 
     Returns:
         True if flash attention should be used, False otherwise
@@ -381,6 +400,8 @@ def _use_flex_flash_attention_backward(
     can_use, reason = _can_use_flex_flash_attention_backward(
         fw_subgraph,
         mask_graph,
+        joint_outputs,
+        score_mod_other_buffers,
     )
 
     if not can_use:
@@ -400,18 +421,17 @@ def create_flex_flash_attention_backward_kernel(
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
-    # TODO: will be needed
-    # grad_logsumexp,
-    # fw_graph: SubgraphResults,
-    # joint_graph: SubgraphResults,
+    fw_subgraph_buffer: Optional[SubgraphResults] = None,
+    joint_subgraph_buffer: Optional[Any] = None,
+    score_mod_other_buffers: Optional[list[TensorBox]] = None,
+    # TODO: will be needed for block sparsity
     # mask_graph: SubgraphResults,
-    # score_mod_other_buffers: list[TensorBox],
     # mask_mod_other_buffers: list[TensorBox],
     # kv_num_blocks: TensorBox | None,
     # kv_indices: TensorBox | None,
     # full_kv_num_blocks: TensorBox | None,
     # full_kv_indices: TensorBox | None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
+) -> tuple[TensorBox, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
@@ -472,12 +492,17 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
+    has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
+    subgraphs = [fw_subgraph_buffer, joint_subgraph_buffer] if has_score_mod else []
+
     error = flash_attention_backward_cutedsl_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=output_layout,
         mutated_inputs=[grad_key, grad_value],
+        subgraphs=subgraphs if subgraphs else None,
         SM_SCALE=scale,
+        HAS_SCORE_MOD=has_score_mod,
     )
 
     for choice in choices:
