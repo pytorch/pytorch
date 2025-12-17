@@ -901,8 +901,19 @@ class Partial(torch._C._distributed.Partial):
 
     Args:
         reduce_op (str, optional): The reduction op to be used for the partial DTensor
-            to produce Replicated/Sharded DTensor. Only element-wise reduction operations
-            are supported, including: "sum", "avg", "product", "max", "min", default: "sum".
+            to produce Replicated/Sharded DTensor. Corresponds to the reduce operations
+            supported by ``torch.distributed.ReduceOp``. Default: "sum".
+
+            Supported values:
+
+            * ``"sum"``: Element-wise sum across all ranks.
+            * ``"avg"``: Element-wise average across all ranks.
+            * ``"min"``: Element-wise minimum across all ranks.
+            * ``"max"``: Element-wise maximum across all ranks.
+            * ``"product"``: Element-wise product across all ranks.
+            * ``"band"``: Bitwise AND across all ranks (integer tensors only).
+            * ``"bor"``: Bitwise OR across all ranks (integer tensors only).
+            * ``"bxor"``: Bitwise XOR across all ranks (integer tensors only).
 
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
@@ -932,12 +943,36 @@ class Partial(torch._C._distributed.Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # Partial placement contract #3:
-        # _partition_value: partition the value of a replicated tensor on the mesh dimension
+        """
+        Partition a replicated tensor to create partial values for Replicate → Partial.
 
-        # _partition_value is the conjugate operation of _reduce_value, e.g.
-        # - _partition_value on a sum reduce op is just a division operation
-        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        This is the conjugate operation of _reduce_value. The partition operation
+        must satisfy the invariant that applying _reduce_value to the partitioned
+        values recovers the original replicated value (modulo floating-point error).
+
+        Mathematical analysis by reduce_op:
+
+        * "sum": partition(v) = v / n, then sum([v/n] * n) = v
+          Introduces floating-point error from the division and summation.
+          Error grows with n (the number of ranks).
+
+        * "avg": partition(v) = v, then avg([v] * n) = v
+          Numerically exact (averaging identical values).
+
+        * "min": partition(v) = v, then min([v] * n) = v
+          Numerically exact.
+
+        * "max": partition(v) = v, then max([v] * n) = v
+          Numerically exact.
+
+        * "product": Would need partition(v) = v^(1/n), but n-th root is not exact
+          for general values and undefined for negative values with even n.
+          NOT SUPPORTED.
+
+        * "band"/"bor"/"bxor": Bitwise operations have no well-defined inverse
+          that partitions a value such that reducing recovers the original.
+          NOT SUPPORTED.
+        """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         if self.reduce_op == "sum":
             return tensor / num_chunks
