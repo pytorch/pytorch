@@ -6917,6 +6917,10 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     )
 
 
+foreach_ops.add(aten._foreach_addcmul.Scalar)
+
+
+@register_lowering(aten._foreach_addcmul.Scalar, type_promotion_kind=None)
 def _foreach_addcmul_scalar(self_tensors, tensor1_list, tensor2_list, value=1):
     """
     Foreach version of addcmul using FMA for better precision.
@@ -6950,17 +6954,6 @@ def _foreach_addcmul_scalar(self_tensors, tensor1_list, tensor2_list, value=1):
 
     assert all(x is not None for x in outputs)
     return outputs
-
-
-def _wrapped_foreach_addcmul_scalar(*args, **kwargs):
-    out = _foreach_addcmul_scalar(*args, **kwargs)
-    validate_ir(out)
-    return out
-
-
-# Register directly since _register_foreach_lowering has assertion len(args) <= 2
-foreach_ops.add(aten._foreach_addcmul.Scalar)
-lowerings[aten._foreach_addcmul.Scalar] = _wrapped_foreach_addcmul_scalar
 
 
 register_pointwise_numeric_ldf64(aten.cos)
