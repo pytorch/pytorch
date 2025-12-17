@@ -18,6 +18,11 @@ TORCH_XPU_API dnnl::memory make_onednn_memory(
     dnnl::engine& engine,
     void* ptr);
 
+TORCH_XPU_API dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr);
+
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 
