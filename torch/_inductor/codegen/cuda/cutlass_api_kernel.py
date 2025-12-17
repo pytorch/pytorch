@@ -38,7 +38,7 @@ class CutlassAPITemplateKernel(Kernel):
         input_nodes: list[Buffer],
         output_node: Buffer,
         kernel_metadata: dict[str, Any],
-        accumulator_type: Any,  # torch.dtype
+        accumulator_type: Any,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -47,11 +47,9 @@ class CutlassAPITemplateKernel(Kernel):
         self.kernel_metadata = kernel_metadata
         self.accumulator_type = accumulator_type
 
-        # Track input args for call_kernel
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
 
-        # Create named input nodes mapping
         for i, input_node in enumerate(input_nodes):
             param_name = f"in_ptr{i}"
             self._template_input_args.append((param_name, input_node))
@@ -195,7 +193,6 @@ class CutlassAPITemplateKernel(Kernel):
         """
         wrapper = V.graph.wrapper_code
 
-        # Build call args matching the signature
         call_args = []
         arg_types = []
 
@@ -207,7 +204,6 @@ class CutlassAPITemplateKernel(Kernel):
                 call_args.append(input_node.get_name())
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
-        # Add output
         output_name = self.output_node.get_name()
         call_args.append(output_name)
         arg_types.append(V.graph.get_dtype(output_name))

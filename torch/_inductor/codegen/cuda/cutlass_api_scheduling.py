@@ -78,7 +78,6 @@ class CutlassAPIScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
 
-        # Generate unique kernel name
         fused_name = (
             get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
             if config.triton.descriptive_names
@@ -93,12 +92,10 @@ class CutlassAPIScheduling(BaseScheduling):
 
         wrapper.src_to_kernel[src_code] = kernel_name
 
-        # Replace placeholder with actual kernel name
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
 
         _, _, kernel_path = get_path(code_hash(src_code), "py")
 
-        # Wrap in async_compile.cutlass_api() call
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.cutlass_api({kernel_name!r}, r'''")
         compile_wrapper.splice(src_code, strip=True)
@@ -131,7 +128,6 @@ class CutlassAPIScheduling(BaseScheduling):
         template_node = cast(SchedulerNode, template_node)
         ctb: CutlassAPIGemmBuffer = cast(CutlassAPIGemmBuffer, template_node.node)
 
-        # Get the kernel and render function
         assert ctb.make_kernel_render is not None
         kernel, render = ctb.make_kernel_render(ctb)
         template_node.mark_run()

@@ -7,7 +7,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_cutlass_api_available, ensure_cute_available
+from torch._inductor.utils import ensure_cutlass_api_available
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -221,10 +221,11 @@ class TestCutlassAPIMetadataFiltering(TestCase):
 
     def test_dtype_conversion(self):
         """Test torch dtype to cutlass dtype conversion."""
+        import cutlass
+
         from torch._inductor.codegen.cuda.cutlass_api_gemm import (
             _torch_dtype_to_cutlass,
         )
-        import cutlass
 
         self.assertEqual(_torch_dtype_to_cutlass(torch.float32), cutlass.Float32)
         self.assertEqual(_torch_dtype_to_cutlass(torch.float16), cutlass.Float16)

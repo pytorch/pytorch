@@ -5449,15 +5449,15 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        kernel: Any,  # cutlass_api.Kernel object
-        accumulator_type: Any,  # torch.dtype
+        kernel: Any,
+        accumulator_type: Any,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
-        # Store kernel metadata for code generation
+        # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
             "min_cc": kernel.metadata.min_cc,
@@ -5484,7 +5484,6 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
         )
         from torch._inductor.utils import Placeholder
 
-        # Get input nodes as Buffer objects
         input_nodes: list[Any] = []
         for inp in self.inputs:
             if isinstance(inp, TensorBox):
@@ -5493,10 +5492,8 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
-        # Create kernel name
         kernel_name = str(Placeholder.KERNEL_NAME)
 
-        # Create the template kernel
         render_kernel = CutlassAPITemplateKernel(
             kernel_name=kernel_name,
             input_nodes=input_nodes,
