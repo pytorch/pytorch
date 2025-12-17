@@ -690,6 +690,32 @@ class SerializationMixin:
                 torch.device('mtia', torch.mtia.device_count() - 1)
             )
 
+    def test_map_location_meta_skips_storage_read(self):
+        """Verify that map_location='meta' doesn't read storage data from disk."""
+        sd = torch.nn.Linear(10, 10).state_dict()
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+
+            # Mock get_storage_from_record to verify it's never called
+            original_get_storage = torch._C.PyTorchFileReader.get_storage_from_record
+
+            def mock_get_storage(*args, **kwargs):
+                raise AssertionError("get_storage_from_record should not be called with map_location='meta'")
+
+            with patch.object(torch._C.PyTorchFileReader, 'get_storage_from_record', mock_get_storage):
+                # This should succeed without calling get_storage_from_record
+                sd_meta = torch.load(f, map_location='meta')
+
+            # Verify the loaded tensors are on meta device with correct properties
+            self.assertEqual(sd_meta['weight'].device, torch.device('meta'))
+            self.assertEqual(sd_meta['bias'].device, torch.device('meta'))
+            self.assertEqual(sd_meta['weight'].shape, sd['weight'].shape)
+            self.assertEqual(sd_meta['bias'].shape, sd['bias'].shape)
+            self.assertEqual(sd_meta['weight'].untyped_storage().nbytes(), sd['weight'].untyped_storage().nbytes())
+            self.assertEqual(sd_meta['bias'].untyped_storage().nbytes(), sd['bias'].untyped_storage().nbytes())
+
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:0' restore location
@@ -4767,16 +4793,37 @@ class TestSerialization(TestCase, SerializationMixin):
             ):
                 torch.load(filepath)
 
-    def test_storage_alignment(self):
+    @parametrize("load_mode", ["fake_tensor_mode", "map_location_meta"])
+    def test_storage_alignment(self, load_mode):
         sd = torch.nn.Linear(10, 10).state_dict()
+
+        def load_with_mode(file_obj):
+            """Load using the specified mode."""
+            if load_mode == "fake_tensor_mode":
+                with FakeTensorMode():
+                    return torch.load(file_obj)
+            else:  # map_location_meta
+                return torch.load(file_obj, map_location='meta')
+
+        def check_loaded_state_dict(sd_loaded, sd_orig, expected_weight_offset, expected_bias_offset):
+            """Verify the loaded state dict has correct properties."""
+            self.assertEqual(sd_loaded['weight'].shape, sd_orig['weight'].shape)
+            self.assertEqual(sd_loaded['bias'].shape, sd_orig['bias'].shape)
+
+            self.assertEqual(sd_loaded['weight'].dtype, sd_orig['weight'].dtype)
+            self.assertEqual(sd_loaded['bias'].dtype, sd_orig['bias'].dtype)
+
+            self.assertEqual(sd_loaded['weight'].untyped_storage()._checkpoint_offset, expected_weight_offset)
+            self.assertEqual(sd_loaded['bias'].untyped_storage()._checkpoint_offset, expected_bias_offset)
+
+            self.assertEqual(sd_loaded['weight'].untyped_storage().nbytes(), sd_orig['weight'].untyped_storage().nbytes())
+            self.assertEqual(sd_loaded['bias'].untyped_storage().nbytes(), sd_orig['bias'].untyped_storage().nbytes())
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
             f.seek(0)
-            with FakeTensorMode():
-                sd_fake = torch.load(f)
-            self.assertEqual(sd_fake['weight'].untyped_storage()._checkpoint_offset, 832)
-            self.assertEqual(sd_fake['bias'].untyped_storage()._checkpoint_offset, 1344)
+            sd_loaded = load_with_mode(f)
+            check_loaded_state_dict(sd_loaded, sd, expected_weight_offset=832, expected_bias_offset=1344)
 
         storage_alignment_before = serialization_config.save.storage_alignment
         with tempfile.NamedTemporaryFile() as f:
@@ -4784,10 +4831,9 @@ class TestSerialization(TestCase, SerializationMixin):
                 serialization_config.save.storage_alignment = 4096
                 torch.save(sd, f)
                 f.seek(0)
-                with FakeTensorMode():
-                    sd_fake = torch.load(f)
-                self.assertEqual(sd_fake['weight'].untyped_storage()._checkpoint_offset, 20480)
-                self.assertEqual(sd_fake['bias'].untyped_storage()._checkpoint_offset, 24576)
+                sd_loaded = load_with_mode(f)
+                check_loaded_state_dict(sd_loaded, sd, expected_weight_offset=20480, expected_bias_offset=24576)
+
                 f.seek(0)
                 sd_loaded = torch.load(f)
                 self.assertEqual(sd_loaded, sd)
