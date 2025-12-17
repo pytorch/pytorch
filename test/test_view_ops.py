@@ -1058,6 +1058,54 @@ class TestViewOps(TestCase):
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
 
+    @skipLazy  # Lazy backend has issues with this operation
+    def test_maybe_view_chunk_cat(self, device):
+        """Test _maybe_view_chunk_cat is equivalent to torch.cat(torch.chunk(...))"""
+        from torch._utils import _maybe_view_chunk_cat
+
+        # Helper to test a configuration
+        def test_config(shape, group_size, gather_dim):
+            x = torch.randn(shape, device=device)
+            result = _maybe_view_chunk_cat(
+                x, group_size=group_size, gather_dim=gather_dim
+            )
+            expected = torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
+            self.assertEqual(result, expected)
+            self.assertTrue(result.is_contiguous())
+
+            # Check that whether result is a view matches the movedim reference implementation
+            # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
+            #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+            chunks = torch.unflatten(x, 0, [group_size, -1])
+            ref = torch.flatten(
+                torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1
+            )
+
+            # Check if result is a view of x by comparing data pointers
+            result_is_view = result.data_ptr() == x.data_ptr()
+            # Check if ref is a view of x by comparing data pointers
+            ref_is_view = ref.data_ptr() == x.data_ptr()
+
+            self.assertEqual(
+                result_is_view,
+                ref_is_view,
+                f"View status mismatch for shape={shape}, group_size={group_size}, "
+                f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
+                f"ref_is_view={ref_is_view}",
+            )
+
+        # Test various configurations - one per line as requested
+        test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
+        test_config((4, 8, 16), group_size=4, gather_dim=1)  # docstring example 1
+        test_config((4, 2, 8), group_size=4, gather_dim=2)  # docstring example 2
+        test_config((2, 10, 20), group_size=2, gather_dim=1)  # different group_size
+        test_config((4, 16), group_size=4, gather_dim=1)  # 2D tensor
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=0)  # 4D, gather_dim=0
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=1)  # 4D, gather_dim=1
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
+        test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

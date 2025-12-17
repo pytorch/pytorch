@@ -410,8 +410,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Iterable[torch.nn.Parameter]
-        | None
-        | Iterable[torch.nn.Module] = None,
+        | Iterable[torch.nn.Module]
+        | None = None,
         device_mesh: DeviceMesh | None = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")

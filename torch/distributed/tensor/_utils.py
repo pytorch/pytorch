@@ -1,7 +1,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -143,7 +143,7 @@ def _get_shard_size_and_offsets(
     previous_offsets,
     zero_global_offset: int,
     skip_offset: bool,
-) -> tuple[int, Optional[torch.Tensor]]:
+) -> tuple[int, torch.Tensor | None]:
     kwargs: dict[str, Any] = {
         "curr_local_size": curr_local_size,
         "num_chunks": mesh_dim_size,

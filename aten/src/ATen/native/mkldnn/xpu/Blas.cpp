@@ -642,11 +642,27 @@ Tensor _bmm_dtype_xpu(
   return _bmm_out_dtype_xpu(batch1, batch2, out_dtype, out);
 }
 
+static void out_dtype_checks(
+    const Tensor& mat1,
+    const at::ScalarType out_dtype,
+    const Tensor& out) {
+  TORCH_CHECK(
+      out_dtype == out.scalar_type(),
+      "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(
+      out_dtype == mat1.scalar_type() ||
+          (out_dtype == at::ScalarType::Float &&
+           (mat1.scalar_type() == at::ScalarType::Half ||
+            mat1.scalar_type() == at::ScalarType::BFloat16)),
+      "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+}
+
 Tensor& _bmm_out_dtype_xpu(
     const Tensor& batch1,
     const Tensor& batch2,
     const at::ScalarType out_dtype,
     Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
   xpu::bmm_out(batch1, batch2, const_cast<Tensor&>(out));
   return out;
 }
@@ -676,6 +692,7 @@ Tensor& _baddbmm_out_dtype_xpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
   xpu::baddbmm_out(
       self,
       batch1,
@@ -701,38 +718,7 @@ Tensor& _mm_dtype_out_xpu(
     const Tensor& mat2,
     const at::ScalarType out_dtype,
     Tensor& out) {
-  TORCH_CHECK(
-      self.dim() == 2, "self must be a matrix, got ", self.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0],
-      "x",
-      self.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
-
-  TORCH_CHECK(
-      out_dtype == out.scalar_type(),
-      "out_dtype must be the same as the dtype of the provided out tensor");
-  TORCH_CHECK(
-      self.scalar_type() == mat2.scalar_type(),
-      "input dtypes must be the same");
-  TORCH_CHECK(
-      out_dtype == self.scalar_type() ||
-          (out_dtype == at::ScalarType::Float &&
-           (self.scalar_type() == at::ScalarType::Half ||
-            self.scalar_type() == at::ScalarType::BFloat16)),
-      "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
-  TORCH_CHECK(
-      out_dtype == out.scalar_type(),
-      "out_dtype must be the same as the dtype of the provided out tensor");
-
+  out_dtype_checks(self, out_dtype, out);
   xpu::mm_out(self, mat2, const_cast<Tensor&>(out));
   return out;
 }
@@ -761,43 +747,7 @@ Tensor& _addmm_dtype_out_xpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& out) {
-  // repeat dimensionality checks for direct calls to `out` overload
-  TORCH_CHECK(
-      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
-  TORCH_CHECK(
-      mat1.scalar_type() == mat2.scalar_type(),
-      "mat1 and mat2 must have the same dtype, but got ",
-      mat1.scalar_type(),
-      " and ",
-      mat2.scalar_type());
-  TORCH_CHECK(
-      out_dtype == mat1.scalar_type() ||
-          (out_dtype == at::ScalarType::Float &&
-           (mat1.scalar_type() == at::ScalarType::Half ||
-            mat1.scalar_type() == at::ScalarType::BFloat16)),
-      "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
-
-  TORCH_CHECK(
-      out_dtype == out.scalar_type(),
-      "out_dtype must be the same as the dtype of the provided out tensor");
-  TORCH_CHECK(
-      out_dtype == self.scalar_type() ||
-          self.scalar_type() == mat1.scalar_type(),
-      "self dtype must match either out_dtype or mat1 dtype");
-
+  out_dtype_checks(mat1, out_dtype, out);
   xpu::addmm_out(self, mat1, mat2, beta, alpha, out);
   return out;
 }
