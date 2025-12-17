@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import inspect
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -108,7 +107,7 @@ class TorchDispatchMode:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if "__torch_dispatch__" in cls.__dict__:
-            raw = inspect.getattr_static(cls, "__torch_dispatch__")
+            raw = cls.__dict__["__torch_dispatch__"]
             if not isinstance(raw, classmethod):
                 cls.__torch_dispatch__ = torch._disable_dynamo(raw, recursive=True)
 
@@ -822,7 +821,10 @@ def autograd_would_have_decomposed(
             backend_key = torch._C._parse_dispatch_key(
                 torch._C._dispatch_key_for_device(a.device.type)
             )
-            assert backend_key is not None
+            if backend_key is None:
+                raise AssertionError(
+                    f"failed to parse dispatch key for device {a.device.type}"
+                )
             # TODO: use func.has_kernel_for_dispatch_key(backend_key)
             # but this one checks py_impl and CompositeImplicitAutograd
             # incorrectly shows up as has backend reg here

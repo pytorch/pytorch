@@ -659,3 +659,19 @@ def my_full(
     return torch.ops.libtorch_agnostic_2_10.my_full.default(
         size, fill_value, dtype, layout, device, pin_memory
     )
+
+
+def my_subtract(self, other, alpha=1.0) -> Tensor:
+    """
+    Subtracts other from self, scaled by alpha.
+
+    Computes: self - alpha * other
+
+    Args:
+        self: Tensor - input tensor
+        other: Tensor - tensor to subtract
+        alpha: float - scaling factor for other (default: 1.0)
+
+    Returns: Tensor - result of subtraction
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_subtract.default(self, other, alpha)
