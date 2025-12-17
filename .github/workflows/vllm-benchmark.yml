@@ -187,7 +187,7 @@ jobs:
     needs:
       - set-parameters
       - build
-    # if: always()
+    if: needs.build.result == 'success' || needs.build.result == 'skipped'
     strategy:
       matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
       fail-fast: false
@@ -237,10 +237,10 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      - name: Install nightly
+      - name: Install latest nightly
         if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
         run: |
-          uv pip install vllm --pre \
+          uv pip install vllm torch torchvision torchaudio --pre \
             --extra-index-url https://download.pytorch.org/whl/nightly/cu129 \
             --index-strategy unsafe-best-match
 
