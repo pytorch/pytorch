@@ -106,7 +106,7 @@ jobs:
       - name: Store the build artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
-          name: ${{ needs.set-parameters.outputs.build-environment }}
+          name: ${{ inputs.build_environment }}
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
