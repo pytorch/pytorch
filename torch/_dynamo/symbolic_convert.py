@@ -1386,7 +1386,7 @@ class InstructionTranslatorBase(
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
                 "then skipping the rest of the function. "
-                f"Graph break encountered:\n{str(e)}"
+                f"Graph break encountered:\n\n{str(e)}"
             )
             self.log_graph_break(
                 self.code_options,
