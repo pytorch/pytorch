@@ -1988,6 +1988,42 @@ class ConvertFrame:
 
             soft_fail = isinstance(e, Unsupported)
             code = frame.f_code
+            # Log soft failure that was not already logged by symbolic_convert.
+            # This happens e.g. for graph breaks that are raised in convert_frame.py
+            if (
+                soft_fail
+                and not getattr(e, "logged", False)
+                and graph_break_log.isEnabledFor(logging.DEBUG)
+            ):
+                # Log this message in the graph break. Also use the string
+                # "skip: " to tell that the whole frame is falling back to
+                # eager.
+                if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
+                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                        user_stack = e.real_stack
+                        user_stack_formatted = "".join(
+                            traceback.format_list(user_stack)
+                        )
+                        frame_info = exc.format_frame_info(code)
+                        user_stack_trace = (
+                            "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
+                            f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
+                            "The graph break occurred in the following user code:\n"
+                            f"{user_stack_formatted}"
+                        )
+                        torch._logging.trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "dynamo_graph_break_reason",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+                        )
+                        graph_break_log.debug(
+                            user_stack_trace,
+                            exc_info=True,
+                            stack_info=config.verbose,
+                        )
 
             if not config.suppress_errors and not soft_fail:
                 raise

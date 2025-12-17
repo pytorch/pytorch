@@ -190,6 +190,7 @@ class Unsupported(TorchDynamoException):
         self.category: Optional[str] = None
         self.add_to_stats()
         self.gb_type: Optional[str] = gb_type
+        self.logged = False
 
     def remove_from_stats(self) -> None:
         assert self.category is not None
@@ -284,6 +285,7 @@ class StepUnsupported(TorchDynamoException):
         if not real_stack:
             real_stack = torch._guards.TracingContext.extract_stack()
         self.real_stack = real_stack
+        self.logged = False
 
 
 class UnsafeScriptObjectError(TorchDynamoException):

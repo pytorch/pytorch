@@ -148,7 +148,7 @@ User code traceback:
     torch.compile(fn001, backend="eager")(torch.randn(1))
   File "test_exc.py", line N, in fn001
     return {1, 2}
-""",
+""",  # noqa: B950
         )
 
     @torch._dynamo.config.patch(suppress_errors=False)

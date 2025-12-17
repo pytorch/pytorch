@@ -4226,6 +4226,9 @@ class InstructionTranslatorBase(
         exc: Unsupported | StepUnsupported,
         reason: str,
     ) -> None:
+        if exc.logged:
+            return
+
         user_stack = getattr(exc, "real_stack", None)
 
         if user_stack is None:
@@ -4325,6 +4328,8 @@ class InstructionTranslatorBase(
                 frame_loc[1],
                 reason,
             )
+
+        exc.logged = True
 
     @staticmethod
     def raise_loop_graph_break(code: types.CodeType, exc: Unsupported) -> NoReturn:
