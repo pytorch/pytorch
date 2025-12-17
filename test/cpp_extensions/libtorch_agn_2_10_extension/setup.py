@@ -9,7 +9,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 
 ROOT_DIR = Path(__file__).parent
-CSRC_DIR = ROOT_DIR / "libtorch_agn_2_10" / "csrc"
+CSRC_DIR = ROOT_DIR / "csrc"
 
 
 class clean(distutils.command.clean.clean):
