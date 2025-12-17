@@ -964,9 +964,9 @@ _micro_pipeline_tp: bool = False
 
 
 # Enable/disable partitioned scatter optimization for atomic add kernels
-# this will improve kernel performance at cost of memory usage.:wq
+# this will improve kernel performance at cost of memory usage.
 partitioned_scatter_enabled = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "1") == "1"
 )
 
 # Min partitions for scatter optimization
