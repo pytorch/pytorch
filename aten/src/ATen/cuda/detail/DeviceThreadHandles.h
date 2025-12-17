@@ -26,7 +26,6 @@
 #include <c10/util/Exception.h>
 
 namespace at::cuda {
-namespace {
 
 template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
 struct DeviceThreadHandlePool
@@ -180,5 +179,4 @@ struct DeviceThreadHandlePool
     return std::make_unique<PoolWindow>(this->weak_from_this());
   }
 };
-} // namespace
 } // namespace at::cuda
