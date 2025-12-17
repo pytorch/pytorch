@@ -24,7 +24,7 @@ import types
 from collections.abc import Sequence
 from contextlib import nullcontext
 from types import NoneType
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import sympy
 
@@ -764,7 +764,9 @@ class TensorVariable(VariableTracker):
             pass
         else:
             try:
-                result = handler_method(*args, **kwargs)
+                # Realize any LazyVariableTracker in kwargs before calling handler
+                realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
+                result = handler_method(*args, **realized_kwargs)
                 if result:
                     return result
             except TypeError as e:
@@ -1622,7 +1624,7 @@ class SymNodeVariable(VariableTracker):
         return self._tensor_var
 
     def evaluate_expr(
-        self, output_graph: Optional["OutputGraph"] = None
+        self, output_graph: "OutputGraph | None" = None
     ) -> bool | int | float:
         try:
             return guard_scalar(self.sym_num)
@@ -1635,6 +1637,15 @@ class SymNodeVariable(VariableTracker):
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """SymNodeVariable is not a constant - it represents a symbolic value.
+
+        Operations on SymNodeVariable should go through the graph, not be
+        constant-folded. Returning (False, ...) ensures we don't try to
+        constant-fold through symbolic values.
+        """
+        return (False, False, None)
 
     def call_method(
         self,

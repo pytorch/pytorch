@@ -531,7 +531,17 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            self.install_dict_keys_match_guard()
+            # For constant keys, no guard is needed - __setitem__ works the same
+            # whether the key exists or not. This avoids unnecessary recompilation
+            # when unused keys change.
+            # For non-constant keys, we need to guard all keys since the key itself
+            # could change behavior.
+            # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
+            # would have been installed by the earlier mutation.
+            if not args[
+                0
+            ].is_python_constant() and not tx.output.side_effects.is_modified(self):
+                self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -1020,7 +1030,20 @@ class SetVariable(ConstDictVariable):
         items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        items = dict.fromkeys(items, SetVariable._default_value())
+        # Items can be either VariableTrackers or _HashableTrackers (from set ops).
+        # For VariableTrackers, realize them to ensure aliasing guards are installed
+        # when the same object appears multiple times.
+        realized_items = []
+        for item in items:
+            if isinstance(item, ConstDictVariable._HashableTracker):
+                # Already a _HashableTracker from a set operation
+                realized_items.append(item)
+            else:
+                # VariableTracker - realize to install guards
+                realized_items.append(item.realize())
+        # pyrefly: ignore[bad-assignment]
+        items = dict.fromkeys(realized_items, SetVariable._default_value())
+        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:

@@ -1434,6 +1434,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
+    def test_min_max_tuple_const(self):
+        # min/max on tuple constants should use ConstantVariable.create
+        # to properly handle the tuple return type
+        def fn():
+            a = min((1, 2), (3, 4))
+            b = max((1, 2), (3, 4))
+            return a, b
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, ((1, 2), (3, 4)))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):

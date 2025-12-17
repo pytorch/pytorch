@@ -398,11 +398,23 @@ def raise_observed_exception(
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
-    from .variables import BuiltinVariable
+    from .variables import BuiltinVariable, ConstantVariable, VariableTracker
+
+    # Wrap any non-VariableTracker args in ConstantVariable
+    def wrap_arg(arg: Any) -> VariableTracker:
+        if isinstance(arg, VariableTracker):
+            return arg
+        return ConstantVariable.create(arg)
+
+    wrapped_args = [wrap_arg(a) for a in args] if args else []
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    exception_vt = BuiltinVariable(exc_type).call_function(
+        tx,  # pyrefly: ignore[bad-argument-type]
+        wrapped_args,
+        kwargs or {},
+    )
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages

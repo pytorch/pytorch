@@ -1363,9 +1363,13 @@ class OutputGraph(OutputGraphCommon):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
-            variables.LazyVariableTracker.realize_all(value)
+            # Allow lazy constants through for values being returned (top of stack)
+            allow_lazy_constant = len(tx.stack) - i <= stack_pops
+            variables.LazyVariableTracker.realize_all(
+                value, allow_lazy_constant=allow_lazy_constant
+            )
             # ignore top `stack_pops` values on the stack
-            if len(tx.stack) - i <= stack_pops:
+            if allow_lazy_constant:
                 stack_values.append(value)
                 continue
             if isinstance(value, NullVariable):
