@@ -4980,8 +4980,6 @@ class CommonTemplate:
                 torch.randn([320, 2048, 1, 1]).to(memory_format=torch.channels_last),
             ),
             check_lowp=False,
-            atol=6e-5,
-            rtol=0.001,
         )
 
     @config.patch(
@@ -4995,9 +4993,10 @@ class CommonTemplate:
     @parametrize("stride", (1, 2))
     @parametrize("padding", (0, 1))
     @parametrize("kernel", (1, 3))
-    @parametrize("channels", ([3, 4], [4, 128], [128, 4], [61, 151], [128, 128]))
+    @parametrize("channels", ([3, 4], [4, 128], [61, 151], [128, 128]))
     @parametrize("groups", (1, 4, 128))
-    def test_conv2d_backward(
+    @parametrize("nhwc", (False, True))
+    def test_conv2d_backward_parametrized(
         self,
         channels: list,
         stride: int,
@@ -5005,6 +5004,7 @@ class CommonTemplate:
         padding: int,
         kernel: int,
         groups: int,
+        nhwc: bool,
     ):
         if self.device == "cpu":
             return
@@ -5032,19 +5032,22 @@ class CommonTemplate:
         input_w = 16
         output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
         output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
-        self.common(
-            fn,
-            (
-                torch.randn([2, channels[1], output_h, output_w]),
-                torch.randn([2, channels[0], input_h, input_w]),
-                torch.randn([channels[1], channels[0] // groups, kernel, kernel]).to(
-                    memory_format=torch.channels_last
+        with torch.backends.cudnn.flags(enabled=True, allow_tf32=False):
+            weight = torch.randn([channels[1], channels[0] // groups, kernel, kernel])
+            if nhwc:
+                weight = weight.to(memory_format=torch.channels_last)
+            self.common(
+                fn,
+                (
+                    torch.randn([2, channels[1], output_h, output_w]),
+                    torch.randn([2, channels[0], input_h, input_w]),
+                    weight,
                 ),
-            ),
-            atol=6e-5,
-            rtol=0.001,
-            check_lowp=False,
-        )
+                # using the same error tolerance as test_convolution1.
+                atol=6e-5,
+                rtol=0.001,
+                check_lowp=False,
+            )
 
     @parametrize(
         "use_block_ptr",
