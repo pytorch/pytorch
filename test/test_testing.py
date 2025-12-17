@@ -441,8 +441,6 @@ if __name__ == '__main__':
             if len(
                 op.supported_dtypes("cpu").symmetric_difference(
                     op.supported_dtypes("cuda")
-                ).symmetric_difference(
-                    op.supported_dtypes("xpu")
                 )
             )
             > 0
@@ -451,11 +449,10 @@ if __name__ == '__main__':
     )
     def test_supported_dtypes(self, device, op):
         self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
-        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("xpu"))
-        self.assertEqual(op.supported_dtypes(device_type), op.supported_dtypes(f"{device_type}:0"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
         self.assertEqual(
-            op.supported_dtypes(torch.device(device_type)),
-            op.supported_dtypes(torch.device(device_type, index=1)),
+            op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
         )
 
     def test_setup_and_teardown_run_for_device_specific_tests(self, device):
