@@ -1975,6 +1975,19 @@ def ensure_cute_available() -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def ensure_cutlass_api_available() -> bool:
+    """Check if CUTLASS universal GEMM API is importable; cache the result for reuse.
+
+    Call ensure_cute_available.cache_clear() after installing cutlass_api
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass_api") is not None
+    except ImportError:
+        return False
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,
@@ -2077,6 +2090,9 @@ def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> boo
     """
     Check if cutlass_api GEMM template should be used.
     """
+    if not ensure_cutlass_api_available():
+        return False
+
     if not _use_autotune_backend("CUTEDSL"):
         return False
 

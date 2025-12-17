@@ -24,7 +24,7 @@ from torch._logging import getArtifactLogger
 
 log = getArtifactLogger(__name__, "output_code")
 
-MAX_CUTLASS_API_PROFILING_CONFIGS = 200
+MAX_CUTLASS_API_PROFILING_CONFIGS = 5
 
 
 class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -305,7 +305,6 @@ def add_cutlass_api_gemm_choices(
         )
         return
 
-    # Limit to MAX_CUTLASS_API_PROFILING_CONFIGS kernels
     if len(kernels) > MAX_CUTLASS_API_PROFILING_CONFIGS:
         kernels = random.sample(kernels, MAX_CUTLASS_API_PROFILING_CONFIGS)
 
