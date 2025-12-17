@@ -59,7 +59,7 @@ bmm_template = TritonTemplate(
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_cuda",
+    "at::_bmm_out_dtype_xpu" if torch.xpu.is_available() else "at::_bmm_out_dtype_cuda",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
@@ -162,7 +162,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     aten_handler: ExternKernelChoice = aten_bmm
     aten_extra_kwargs = {}
     if out_dtype:
-        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        assert mat1.get_device().type in ("cuda", "xpu"), (
+            "out_dtype is only supported for CUDA or XPU"
+        )
         aten_handler = aten_bmm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
