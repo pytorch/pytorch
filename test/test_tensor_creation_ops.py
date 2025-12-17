@@ -4174,7 +4174,7 @@ def get_another_device(device):
     return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
 def get_another_xpu_device(device):
-    return "xpu" if torch.device(device).type == "xpu" else "cpu"
+    return "xpu" if torch.device(device).type == "cpu" else "cpu"
 
 def identity(tensor):
     return tensor

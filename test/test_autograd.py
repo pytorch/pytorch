@@ -4129,6 +4129,7 @@ class TestAutograd(TestCase):
         self.assertEqual(dvar.grad, torch.ones_like(dvar))
         self.assertEqual(type(dvar.grad), type(dvar))
 
+    @skipIfXpu(msg="torch.xpu' has no attribute 'FloatTensor', issue #####")
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -14139,6 +14140,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
             warnings.warn("pack")
