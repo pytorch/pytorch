@@ -13,7 +13,11 @@ import logging
 from collections.abc import Sequence
 from typing import cast
 
-from torch._inductor.utils import get_fused_kernel_name, get_kernel_metadata, Placeholder
+from torch._inductor.utils import (
+    get_fused_kernel_name,
+    get_kernel_metadata,
+    Placeholder,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
@@ -146,6 +150,7 @@ class CutlassAPIScheduling(BaseScheduling):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(src_code, node_schedule)
 
+        self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()

@@ -11,8 +11,8 @@ from typing import Any, Optional
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
 from torch._inductor.ir import Buffer, ReinterpretView
-from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class CutlassAPITemplateKernel(Kernel):
 
         # Track input args for call_kernel
         self._template_input_args: list[tuple[str, Buffer]] = []
-        self._seen_input_args: set[str] = set()
+        self._seen_input_args: OrderedSet[str] = OrderedSet()
 
         # Create named input nodes mapping
         for i, input_node in enumerate(input_nodes):
@@ -124,14 +124,16 @@ class CutlassAPITemplateKernel(Kernel):
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
             # Get or create kernel
-            code.writeline("global _cutlass_api_kernel_cache, _cutlass_api_artifact_cache")
+            code.writeline(
+                "global _cutlass_api_kernel_cache, _cutlass_api_artifact_cache"
+            )
             code.writeline("")
             code.writeline("# Get or create kernel")
-            code.writeline("if _CUTLASS_API_KERNEL_NAME not in _cutlass_api_kernel_cache:")
+            code.writeline(
+                "if _CUTLASS_API_KERNEL_NAME not in _cutlass_api_kernel_cache:"
+            )
             with code.indent():
-                code.writeline(
-                    "kernels = cutlass_api.get_kernels("
-                )
+                code.writeline("kernels = cutlass_api.get_kernels(")
                 with code.indent():
                     code.writeline(
                         "metadata_filter=lambda m: m.kernel_name == _CUTLASS_API_KERNEL_NAME"
@@ -142,9 +144,13 @@ class CutlassAPITemplateKernel(Kernel):
                     code.writeline(
                         'raise RuntimeError(f"Could not find cutlass_api kernel: {_CUTLASS_API_KERNEL_NAME}")'
                     )
-                code.writeline("_cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME] = kernels[0]")
+                code.writeline(
+                    "_cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME] = kernels[0]"
+                )
             code.writeline("")
-            code.writeline("kernel = _cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME]")
+            code.writeline(
+                "kernel = _cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME]"
+            )
             code.writeline("")
 
             # Create GemmArguments
@@ -160,10 +166,14 @@ class CutlassAPITemplateKernel(Kernel):
 
             # Compile if needed
             code.writeline("# Compile kernel if not cached")
-            code.writeline("cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)")
+            code.writeline(
+                "cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
+            )
             code.writeline("if cache_key not in _cutlass_api_artifact_cache:")
             with code.indent():
-                code.writeline("_cutlass_api_artifact_cache[cache_key] = kernel.compile(args)")
+                code.writeline(
+                    "_cutlass_api_artifact_cache[cache_key] = kernel.compile(args)"
+                )
             code.writeline("")
             code.writeline("artifact = _cutlass_api_artifact_cache[cache_key]")
             code.writeline("")

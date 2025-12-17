@@ -2076,9 +2076,6 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
 def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     """
     Check if cutlass_api GEMM template should be used.
-
-    cutlass_api provides pre-built CUTLASS kernels via a Python API, supporting
-    SM90+ (Hopper) and SM100+ (Blackwell) architectures.
     """
     if not _use_autotune_backend("CUTEDSL"):
         return False
@@ -2091,12 +2088,10 @@ def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> boo
     if not is_datacenter_blackwell_arch():
         return False
 
-    # Check dtype support - currently fp16 and bf16
     layout_dtypes = [torch.float16, torch.bfloat16]
     if not _use_template_for_gpu(layout, layout_dtypes):
         return False
 
-    # Require max_autotune to be enabled
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 

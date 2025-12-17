@@ -668,7 +668,9 @@ class AsyncCompile:
                     f"Could not find cutlass_api main kernel function '{main_func_name}'. Available callables: {available}"
                 )
 
-            return CutlassAPIKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+            return CutlassAPIKernelWrapper(
+                getattr(mod, main_func_name), kernel_path=path
+            )
 
         if get_compile_threads() <= 1:
             return task()

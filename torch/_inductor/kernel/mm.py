@@ -451,7 +451,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
 
-    if out_dtype is None and is_nonzero and use_cutlass_api_gemm_template(layout, m, n, k):
+    if (
+        out_dtype is None
+        and is_nonzero
+        and use_cutlass_api_gemm_template(layout, m, n, k)
+    ):
         from ..codegen.cuda.cutlass_api_gemm import add_cutlass_api_gemm_choices
 
         add_cutlass_api_gemm_choices(choices, layout, kernel_inputs.nodes())

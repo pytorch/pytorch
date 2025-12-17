@@ -9,7 +9,6 @@ pre-compiled kernel objects that can be directly benchmarked and executed.
 """
 
 import itertools
-import logging
 import random
 from typing import Any, Optional, Union
 
@@ -25,7 +24,7 @@ from torch._logging import getArtifactLogger
 
 log = getArtifactLogger(__name__, "output_code")
 
-MAX_CUTLASS_API_PROFILING_CONFIGS = 10
+MAX_CUTLASS_API_PROFILING_CONFIGS = 200
 
 
 class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
@@ -114,7 +113,6 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def cleanup_run_fn(self) -> None:
         """Clean up any resources used by the kernel."""
-        pass
 
 
 class CutlassAPIGemmCaller(ChoiceCaller):
@@ -223,7 +221,9 @@ def _torch_dtype_to_cutlass(dtype: torch.dtype):
     return dtype_map.get(dtype)
 
 
-def _create_metadata_filter(a_dtype: torch.dtype, b_dtype: torch.dtype, out_dtype: torch.dtype):
+def _create_metadata_filter(
+    a_dtype: torch.dtype, b_dtype: torch.dtype, out_dtype: torch.dtype
+):
     """
     Create a metadata filter function for cutlass_api.get_kernels().
 
