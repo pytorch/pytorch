@@ -3048,6 +3048,7 @@
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
     MPS: _fft_c2r_mps
+  tags: core
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4998,8 +4999,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: reciprocal_out
-    MPS: reciprocal_out_mps
+    CPU, CUDA, MPS, MTIA: reciprocal_out
   tags: pointwise
 
 - func: neg(Tensor self) -> Tensor
@@ -10501,9 +10501,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: pow_Tensor_Scalar_out
+    CPU, CUDA, MPS: pow_Tensor_Scalar_out
     SparseCPU, SparseCUDA, SparseMPS: pow_out_sparse_scalar
-    MPS: pow_tensor_scalar_out_mps
   tags: pointwise
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
