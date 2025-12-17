@@ -1425,23 +1425,58 @@ class PallasKernel(SIMDKernel):
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
         # Special case: single iter var + single indirect var = element-wise gather
-        # In this case, both should be 1D arrays of the same length, no broadcasting needed
+        # This applies when:
+        # 1. It's a reduction variable (r prefix), OR
+        # 2. The indirect var has a trailing 1 dimension (needs squeeze for proper broadcast)
+        # In these cases, the iter var and indirect var iterate along the same dimension.
         if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
-            # Simple element-wise gather: just replace iter var with arange
             var = used_iter_vars[0]
             var_name = str(var)
+            is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
+                var
+            ].prefix.startswith("r")
+            indirect_var = indirect_vars[0]
+
+            if is_reduction_var:
+                # Reduction var: simple element-wise gather
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+                    arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                    index_str = index_str.replace(var_name, arange_expr)
+                return index_str
+
+            # For pointwise vars, only use element-wise if indirect has trailing 1
+            # Otherwise fall through to the complex reshape code
             if var in self.range_tree_nodes:
                 range_entry = self.range_tree_nodes[var]
                 range_size = range_entry.length
-                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                index_str = index_str.replace(var_name, arange_expr)
-            # Squeeze trailing 1 dimensions from indirect var for proper broadcasting
-            # e.g., (4, 5, 10, 1) + (10,) -> squeeze to (4, 5, 10) first
-            indirect_var = indirect_vars[0]
-            index_str = index_str.replace(
-                indirect_var, f"jnp.squeeze({indirect_var})"
-            )
-            return index_str
+                # Use a conditional that checks at runtime if element-wise is appropriate
+                # If indirect var has trailing 1, squeeze and use element-wise
+                # Otherwise, the complex code path below will handle it
+                try:
+                    range_val = int(range_size)
+                    arange_expr = f"jnp.arange({range_val})"
+                    # Generate conditional: if indirect has trailing 1 that matches,
+                    # squeeze it; otherwise keep original behavior via complex path
+                    # But we can't do this at codegen time without knowing shapes
+                    # Instead, check if this specific pattern needs squeezing
+                    # (indirect var has trailing 1, iter var is pointwise)
+                    # Use a simpler heuristic: if coeff of indirect is smaller than iter,
+                    # likely need element-wise with squeeze
+                    iter_coeff = get_coefficient(var)
+                    indirect_coeff = next(iter(indirect_coeffs.values()))
+                    if iter_coeff > indirect_coeff:
+                        # iter var varies faster (larger coeff), squeeze indirect
+                        index_str = index_str.replace(var_name, arange_expr)
+                        index_str = index_str.replace(
+                            indirect_var,
+                            f"(jnp.squeeze({indirect_var}, axis=-1) "
+                            f"if {indirect_var}.shape[-1] == 1 else {indirect_var})",
+                        )
+                        return index_str
+                except (TypeError, ValueError):
+                    pass
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
