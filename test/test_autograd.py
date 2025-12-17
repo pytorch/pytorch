@@ -15206,7 +15206,9 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(a.grad, c * c + c)
         self.assertEqual(b.grad, d * d + d)
 
-    @skipIfXpu(msg="Forward AD for an OP that does not implement it should raise a NotImplementedError, issue #####")
+    @skipIfXpu(
+        msg="Forward AD for an OP that does not implement it should raise a NotImplementedError, issue #####"
+    )
     def test_foward_mode_AD(self, device):
         # check that forward mode AD is only registered for the Default
         # dispatch for _test_autograd_multiple_dispatch.fullcoverage and not AutogradCUDA
