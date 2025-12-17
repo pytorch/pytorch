@@ -151,7 +151,8 @@ class Library:
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
             raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
-        assert self.m is not None
+        if self.m is None:
+            raise AssertionError("Library object has been destroyed")
         if isinstance(tags, torch.Tag):
             tags = (tags,)
 
@@ -244,7 +245,10 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
         # pyrefly: ignore [bad-argument-type]
-        assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
+        if not torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense):
+            raise AssertionError(
+                f"dispatch_key {dispatch_key} does not have Dense in its keyset"
+            )
 
         if isinstance(op_name, str):
             name = op_name
@@ -270,7 +274,8 @@ class Library:
                 )
             )
 
-        assert self.m is not None
+        if self.m is None:
+            raise AssertionError("Library object has been destroyed")
         impl_fn: Callable = self.m.impl_with_aoti_compile
         impl_fn(self.ns, name.split("::")[-1], dispatch_key)
 
@@ -353,7 +358,8 @@ class Library:
                     " for the base ops that it decomposes into."
                 )
 
-        assert self.m is not None
+        if self.m is None:
+            raise AssertionError("Library object has been destroyed")
         self.m.impl(
             name,
             dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd",
@@ -394,8 +400,10 @@ class Library:
                 f"""Fallback can only be registered using library fragment on the global namespace "_" but it is {self.ns}"""
             )
 
-        assert dispatch_key != ""
-        assert self.m is not None
+        if dispatch_key == "":
+            raise AssertionError("dispatch_key must not be empty for fallback")
+        if self.m is None:
+            raise AssertionError("Library object has been destroyed")
 
         self.m.fallback(dispatch_key, fn, with_keyset)
 
@@ -798,7 +806,7 @@ def register_kernel(
 
     Args:
         op (str | OpOverload): The operator to register an impl to.
-        device_types (None | str | Sequence[str]): The device_types to register an impl to.
+        device_types (str | None | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
         func (Callable): The function to register as the implementation for
@@ -844,7 +852,8 @@ def register_kernel(
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
         return opdef.register_kernel(device_types, func)
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
 
@@ -908,7 +917,8 @@ def register_autocast(
     if opdef is not None:
         return opdef.register_autocast(device_type, cast_inputs)
 
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     qualname = op
     _op = torch._library.utils.lookup_op(qualname)
 
@@ -928,7 +938,8 @@ def register_autocast(
     @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCPU)
     @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCUDA)
     def _autocast_py_impl(*args, **kwargs):
-        assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+        if len(kwargs) != 0:
+            raise AssertionError("Custom ops do not support kwargs yet.")
         autocast_keyset = torch._C.DispatchKeySet(
             torch._C.DispatchKey.AutocastCPU
         ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
@@ -936,7 +947,8 @@ def register_autocast(
             return _op(*_cast(args, device_type, cast_inputs))
 
     def kernel(_, *args, **kwargs):
-        assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+        if len(kwargs) != 0:
+            raise AssertionError("Custom ops do not support kwargs yet.")
         return _autocast_py_impl(*args, **kwargs)
 
     if device_type == "cuda":
@@ -1059,7 +1071,8 @@ def register_fake(
             return opdef.register_fake
         else:
             return opdef.register_fake(func)
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
 
     stacklevel = _stacklevel
 
@@ -1109,7 +1122,8 @@ def _register_effectful_op(
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
         opdef.register_effect(effect)
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
 
     namespace, _ = torch._library.utils.parse_namespace(op)
     if lib is None:
@@ -1224,7 +1238,8 @@ def register_autograd(
         opdef.register_autograd(backward, setup_context=setup_context)
         return
 
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
@@ -1313,7 +1328,8 @@ def register_torch_dispatch(
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
         return opdef.register_torch_dispatch(torch_dispatch_class, func)
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
 
     def register(func):
         namespace, op_name = torch._library.utils.parse_namespace(op)
@@ -1425,7 +1441,8 @@ def register_vmap(
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
         return opdef.register_vmap(func)
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str at this point, got {type(op).__name__}")
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema

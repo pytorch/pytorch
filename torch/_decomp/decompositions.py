@@ -5260,7 +5260,7 @@ def _weight_norm_interface(v, g, dim=0):
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
     # handle when either elements or test_elements are Scalars (they can't both be)
     if not isinstance(elements, torch.Tensor):
-        elements = torch.tensor(elements, device=test_elements.device)
+        elements = torch.scalar_tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
         if invert:
             return torch.ne(elements, test_elements)
