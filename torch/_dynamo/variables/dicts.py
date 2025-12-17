@@ -22,14 +22,16 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
+
+from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import is_constant_source, is_from_local_source
+from ..source import AttrSource, is_constant_source, is_from_local_source
 from ..utils import (
     cmp_name_to_op_mapping,
     dict_items,
@@ -1015,12 +1017,10 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(items, SetVariable._default_value())
-        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:
@@ -1146,7 +1146,11 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": self.python_type_var()},
+            )
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
@@ -1157,7 +1161,9 @@ class SetVariable(ConstDictVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, *args], {}
+                tx,
+                [self, *args],
+                {"cls": self.python_type_var()},
             )
         elif name == "difference":
             if kwargs:
@@ -1166,7 +1172,11 @@ class SetVariable(ConstDictVariable):
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": self.python_type_var()},
+            )
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
@@ -1183,7 +1193,11 @@ class SetVariable(ConstDictVariable):
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": self.python_type_var()},
+            )
         elif name == "symmetric_difference_update":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -1280,6 +1294,9 @@ class SetVariable(ConstDictVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
+    def python_type_var(self):
+        return variables.BuiltinVariable(set)
+
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
@@ -1288,6 +1305,99 @@ class SetVariable(ConstDictVariable):
     def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
         pass
+
+
+class OrderedSetClassVariable(VariableTracker):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
+    def as_python_constant(self):
+        return OrderedSet
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "__new__":
+            from .misc import GetAttrVariable
+
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+            else:
+                attr_source = None
+            return GetAttrVariable(self, name, source=attr_source)
+        else:
+            return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builtin import set_methods
+
+        if name == "__new__":
+            if len(args) != 2 or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "OrderedSet.__new__ only accepts one arg"
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            return variables.OrderedSetVariable([], mutation_type=ValueMutationNew())
+
+        resolved_fn = getattr(set, name)
+        if resolved_fn in set_methods and isinstance(args[0], variables.SetVariable):
+            return args[0].call_method(tx, name, args[1:], kwargs)
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ):
+        if len(args) > 1 or kwargs:
+            raise_args_mismatch(
+                tx,
+                "OrderedSet",
+                "OrderedSet only accepts one arg"
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+
+        if len(args) == 0:
+            items = []
+        else:
+            items = args[0].force_unpack_var_sequence(tx)
+        return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
+
+
+class OrderedSetVariable(SetVariable):
+    def debug_repr(self) -> str:
+        if not self.items:
+            return "OrderedSet([])"
+        else:
+            return (
+                "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
+            )
+
+    def as_python_constant(self) -> OrderedSet:
+        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
+
+    def python_type(self) -> type[OrderedSet]:
+        return OrderedSet
+
+    def python_type_var(self):
+        return OrderedSetClassVariable()
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch.utils._ordered_set", "OrderedSet")
+        )
+        codegen.foreach([x.vt for x in self.set_items])
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
+        codegen.extend_output(create_call_function(1, False))
 
 
 class FrozensetVariable(SetVariable):
@@ -1303,6 +1413,9 @@ class FrozensetVariable(SetVariable):
 
     def python_type(self) -> type:
         return frozenset
+
+    def python_type_var(self):
+        return variables.BuiltinVariable(frozenset)
 
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
