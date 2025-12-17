@@ -3496,10 +3496,6 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
 
-        custom_gen_indices = OrderedSet(
-            i for i, node in enumerate(input_nodes) if i in input_gen_fns
-        )
-
         for i, input_node in enumerate(input_nodes):
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
@@ -3509,7 +3505,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 base = unique_example_inputs[input_node.get_name()]
                 base = base if base._base is None else base._base
 
-                if i in custom_gen_indices:
+                if i in input_gen_fns:
                     # Use tensor's actual shape from input_gen_fn
                     generated_tensor = unique_example_inputs[input_node.get_name()]
                     sizes = tuple(generated_tensor.size())

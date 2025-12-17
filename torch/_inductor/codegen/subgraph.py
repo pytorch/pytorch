@@ -95,7 +95,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self._compiled_module: Any = None
 
     def _compute_sym_input_values(self) -> list[int]:
-        """Map symbolic dimensions to concrete values from example_inputs."""
+        """Extract concrete dimension values for sym_inputs from example_inputs.
+
+        The compiled module expects symbolic dimension values as runtime arguments.
+        This maps each symbolic variable to its concrete value from the example tensors.
+        Used for range based autotuning.
+        """
         sym_input_names = OrderedSet(
             [s.name for s in self.sym_inputs if hasattr(s, "name")]
         )
@@ -129,8 +134,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def _compile_for_benchmarking(self) -> tuple[Any, list[Any]]:
-        """Compile the subgraph for benchmarking."""
+    def _compile_for_benchmarking(self) -> Any:
+        """Compile the subgraph for benchmarking, returns the compiled module."""
         from torch._inductor.graph import GraphLowering
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
@@ -159,19 +164,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 max_autotune_gemm_backends="ATEN",
             ):
                 bm_graph_lowering.run(*self.example_inputs)
-                mod = bm_graph_lowering.compile_to_module()
-
-        return mod, self.sym_input_values
+                return bm_graph_lowering.compile_to_module()
 
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
         """Regular benchmarking: compile and use benchmarker with warmup/rep."""
         if self._compiled_module is None:
-            mod, _ = self._compile_for_benchmarking()
-            self._compiled_module = mod
-        else:
-            mod = self._compiled_module
+            self._compiled_module = self._compile_for_benchmarking()
 
-        bm_func = mod.call
+        bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
@@ -184,13 +184,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
         if self._compiled_module is None:
-            mod, _ = self._compile_for_benchmarking()
-            self._compiled_module = mod
-        else:
-            mod = self._compiled_module
+            self._compiled_module = self._compile_for_benchmarking()
 
-        bm_func = mod.call
-        bm_func([*self.sym_input_values, *args])
+        self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
         return "-".join(
