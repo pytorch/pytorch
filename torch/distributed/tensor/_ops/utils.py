@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import itertools
+import logging
 import operator
 from collections.abc import Callable, Iterable, Sequence
 from typing import cast, Optional, TypeAlias, TypeVar, Union
@@ -28,6 +29,9 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _get_registration_wrapper(
@@ -393,16 +397,24 @@ def expand_to_full_mesh_op_strategy(
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
     all_strategies = []
+    skipped_non_shard_order = []
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
+        non_ordered_shard = False
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
                 # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs))
+                spec = DTensorSpec(mesh, specs)
+                if spec.shard_order is None:
+                    non_ordered_shard = True
+                    break
+                spec_list.append(spec)
             else:
                 spec_list.append(None)
-
+        if non_ordered_shard:
+            skipped_non_shard_order.append(strategy_comb)
+            continue
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
@@ -455,6 +467,13 @@ def expand_to_full_mesh_op_strategy(
             redistribute_cost=redistribute_cost,
         )
         all_strategies.append(strategy)
+
+    if skipped_non_shard_order:
+        logger.warning(
+            "Skipped %d non-ordered shard order combinations: %s",
+            len(skipped_non_shard_order),
+            skipped_non_shard_order,
+        )
     return OpStrategy(all_strategies)
 
 
