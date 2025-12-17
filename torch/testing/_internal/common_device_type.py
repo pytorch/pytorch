@@ -19,8 +19,8 @@ import torch
 from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
-    _get_torch_rocm_version,
     _get_torch_hipblaslt_version,
+    _get_torch_rocm_version,
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
@@ -1885,6 +1885,7 @@ def skipCUDAIfRocmVersionLessThan(version=None):
 
     return dec_fn
 
+
 def skipCUDAIfRocmHipBlasltVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
@@ -1902,8 +1903,11 @@ def skipCUDAIfRocmHipBlasltVersionLessThan(version=None):
                     reason = f"ROCm HipBlaslt {hipblaslt_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
+
         return wrap_fn
+
     return dec_fn
+
 
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfNotMiopenSuggestNHWC(fn):

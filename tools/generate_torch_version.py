@@ -128,7 +128,9 @@ if __name__ == "__main__":
     assert args.is_debug is not None
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
-    args.hipblaslt_version = None if args.hipblaslt_version == "" else args.hipblaslt_version
+    args.hipblaslt_version = (
+        None if args.hipblaslt_version == "" else args.hipblaslt_version
+    )
     args.rocm_version = None if args.rocm_version == "" else args.rocm_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
 
