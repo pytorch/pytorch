@@ -179,7 +179,8 @@ function calculate_fragmentation(blocks, sorted_segments) {
     let addr = seg.addr;
     total_size += seg.size;
     // See Note [BigInt and Number Safe Arithmetic]
-    const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
+    const seg_end =
+      seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
     while (
       block_i < sorted_blocks.length &&
       sorted_blocks[block_i].addr < seg_end
@@ -188,7 +189,8 @@ function calculate_fragmentation(blocks, sorted_segments) {
       if (block.addr > addr) {
         sum_squared_free += Number(block.addr - addr) ** 2;
       }
-      addr = block.addr + typeof block.addr === "bigint" ? BigInt(block.size) : block.size;
+      addr =
+        block.addr + (typeof block.addr === "bigint" ? BigInt(block.size) : block.size);
       block_i += 1;
     }
     if (addr < seg_end) {
@@ -271,7 +273,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
       if (idx + 1 < l_segments.length) {
         const next = l_segments[idx + 1];
         // See Note [BigInt and Number Safe Arithmetic]
-        const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
+        const seg_end =
+          seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
         if (seg_end === next.addr && seg.stream === next.stream) {
           seg.size += next.size;
           l_segments.splice(idx + 1, 1);
@@ -279,7 +282,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
       }
       if (idx > 0) {
         const prev = l_segments[idx - 1];
-        const prev_end = prev.addr + typeof prev.addr === "bigint" ? BigInt(prev.size) : prev.size;
+        const prev_end =
+          prev.addr + (typeof prev.addr === "bigint" ? BigInt(prev.size) : prev.size);
         if (prev_end === seg.addr && prev.stream === seg.stream) {
           prev.size += seg.size;
           l_segments.splice(idx, 1);
@@ -295,16 +299,18 @@ function MemoryView(outer, stack_info, snapshot, device) {
         return;
       }
       // See Note [BigInt and Number Safe Arithmetic]
-      const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
+      const seg_end =
+        seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
       const idx = l_segments.findIndex( e => {
-        const e_end = e.addr + typeof e.addr === "bigint" ? BigInt(e.size) : e.size;
+        const e_end =
+          e.addr + (typeof e.addr === "bigint" ? BigInt(e.size) : e.size);
         return e.addr <= seg.addr && seg_end <= e_end;
       });
       const existing = l_segments[idx];
       const existing_end =
-        existing.addr + typeof existing.addr === "bigint" ? BigInt(existing.size) : existing.size;
+        existing.addr + (typeof existing.addr === "bigint" ? BigInt(existing.size) : existing.size);
       if (existing.addr === seg.addr) {
-        existing.addr += typeof existing.addr === "bigint"? BigInt(seg.size) : seg.size;
+        existing.addr += typeof existing.addr === "bigint" ? BigInt(seg.size) : seg.size;
         existing.size -= seg.size;
         if (existing.size === 0) {
           l_segments.splice(idx, 1);
@@ -490,7 +496,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           const seg = segments_by_addr[mid];
           // See Note [BigInt and Number Safe Arithmetic]
           const seg_end =
-            seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
+            seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
           if (addr < segments_by_addr[mid].addr) {
             right = mid - 1;
           } else if (addr >= seg_end) {
