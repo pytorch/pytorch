@@ -121,7 +121,7 @@ function formatEvent(event) {
     event.stream === null ? '' : `\n              (stream ${event.stream})`;
   switch (event.action) {
     case 'oom':
-      return `OOM (requested ${formatSize(event.size)}, Device has ${formatSize(
+      return `OOM (requested ${formatSize(event.size)}, CUDA has ${formatSize(
         event.device_free,
       )} memory free)${stream}`;
     case 'snapshot':
@@ -236,14 +236,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
       );
     }
   }
-  sorted_segments.sort((x, y) => {
-    // Note [Sort BigInt and Number Safely]
-    // x.addr and y.addr may be BigInt, so subtracting them directly can cause
-    // errors. Use explicit comparison instead to safely handle both BigInt and
-    // Number.
-    if (x.addr === y.addr) return 0;
-    return x.addr < y.addr ? -1 : 1;
-  });
+  sorted_segments.sort((x, y) => x.addr - y.addr);
 
   function simulate_memory(idx) {
     // create a copy of segments because we edit size properties below
@@ -388,20 +381,11 @@ function MemoryView(outer, stack_info, snapshot, device) {
       segment_d.selectAll('rect').remove();
       block_g.selectAll('rect').remove();
       block_r.selectAll('rect').remove();
-      const segments = [...segments_unsorted].sort((x, y) => {
-        // See Note [Sort BigInt and Number Safely].
-        if (x.size > y.size) return 1;
-        if (x.size < y.size) return -1;
-        if (x.addr > y.addr) return 1;
-        if (x.addr < y.addr) return -1;
-        return 0;
-      });
+      const segments = [...segments_unsorted].sort((x, y) =>
+        x.size === y.size ? x.addr - y.addr : x.size - y.size,
+      );
 
-      const segments_by_addr = [...segments].sort((x, y) => {
-        // See Note [Sort BigInt and Number Safely]
-        if (x.addr === y.addr) return 0;
-        return x.addr < y.addr ? -1 : 1;
-      });
+      const segments_by_addr = [...segments].sort((x, y) => x.addr - y.addr);
 
       const max_size = segments.length === 0 ? 0 : segments.at(-1).size;
 
@@ -475,16 +459,12 @@ function MemoryView(outer, stack_info, snapshot, device) {
         let right = segments_by_addr.length - 1;
         while (left <= right) {
           const mid = Math.floor((left + right) / 2);
-          const seg = segments_by_addr[mid];
-          // Device pointer addresses may be Number or BigInt; ensure safe
-          // arithmetic without JS type errors.
-          const seg_end =
-            typeof seg.addr === "bigint"
-              ? seg.addr + BigInt(seg.size)
-              : seg.addr + seg.size;
           if (addr < segments_by_addr[mid].addr) {
             right = mid - 1;
-          } else if (addr >= seg_end) {
+          } else if (
+            addr >=
+            segments_by_addr[mid].addr + segments_by_addr[mid].size
+          ) {
             left = mid + 1;
           } else {
             return segments_by_addr[mid];
@@ -504,7 +484,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .data(blocks)
         .enter()
         .append('rect')
-        .attr('x', x => xScale(x.segment.offset + Number(x.addr - x.segment.addr)))
+        .attr('x', x => xScale(x.segment.offset + (x.addr - x.segment.addr)))
         .attr('y', x => yScale(x.segment.row))
         .attr('width', x => xScale(x.requested_size))
         .attr('height', yScale(4 / 5))
@@ -546,7 +526,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         .append('rect')
         .attr('x', x =>
           xScale(
-            x.segment.offset + Number(x.addr - x.segment.addr) + x.requested_size,
+            x.segment.offset + (x.addr - x.segment.addr) + x.requested_size,
           ),
         )
         .attr('y', x => yScale(x.segment.row))
@@ -722,9 +702,7 @@ function annotate_snapshot(snapshot) {
         }
       }
       b.version = snapshot.block_version(b.addr, false);
-      // Device pointer addresses may be Number or BigInt; ensure safe
-      // arithmetic without JS type errors
-      addr += typeof addr === "bigint" ? BigInt(b.size) : b.size;
+      addr += b.size;
     }
   }
 
@@ -1367,7 +1345,7 @@ function create_settings_view(dst, snapshot, device) {
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
   const settings_div = dst.append('div');
-  settings_div.append('p').text('Caching Allocator Settings:');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
 
   // Check if allocator_settings exists in snapshot
   if ('allocator_settings' in snapshot) {
