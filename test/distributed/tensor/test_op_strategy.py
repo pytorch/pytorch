@@ -34,7 +34,7 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
     replicate_op_strategy,
 )
-from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
