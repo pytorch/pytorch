@@ -1624,14 +1624,8 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
-            elif is_wrapper_or_member_descriptor(repr_method):
-                unimplemented(
-                    gb_type="Attempted to call repr() method implemented in C/C++",
-                    context="",
-                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
-                    hints=["Write the repr method in Python"],
-                )
             else:
+                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
@@ -1786,6 +1780,7 @@ class BuiltinVariable(VariableTracker):
                 for i in [a, b]
             ):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
+                    # type: ignore[arg-type]
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -1803,7 +1798,9 @@ class BuiltinVariable(VariableTracker):
                     if isinstance(x, variables.UnspecializedPythonVariable)
                 )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    result, raw_res, need_unwrap
+                    result,  # type: ignore[arg-type]
+                    raw_res,
+                    need_unwrap,
                 )
             # otherwise return tensor
             else:
@@ -2660,6 +2657,7 @@ class BuiltinVariable(VariableTracker):
                     ],
                 )
             if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
                 fake_val = obj.as_proxy().node.meta["example_value"]
                 if (
                     isinstance(fake_val, torch.Tensor)

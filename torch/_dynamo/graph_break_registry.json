@@ -389,6 +389,16 @@
     {
       "Gb_type": "Encountered aliasing during higher order op tracing",
       "Context": "context",
+      "Explanation": "Higher order ops do not support aliasing. Found in {name}",
+      "Hints": [
+        "Replace `return input` with `return input.clone()` to avoid aliasing.",
+        "Consider using the debug context to change user code to avoid aliasing.",
+        "Please open an issue."
+      ]
+    },
+    {
+      "Gb_type": "Encountered aliasing during higher order op tracing",
+      "Context": "context",
       "Explanation": "Higher order ops do not support aliasing. Found in {source_target.name}",
       "Hints": [
         "Replace `return input` with `return input.clone()` to avoid aliasing.",
@@ -398,6 +408,15 @@
     }
   ],
   "GB0041": [
+    {
+      "Gb_type": "Encountered input mutation during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support input mutation. Found in {name}",
+      "Hints": [
+        "Consider using the debug context to change user code to avoid mutation.",
+        "Please open an issue."
+      ]
+    },
     {
       "Gb_type": "Encountered input mutation during higher order op tracing",
       "Context": "context",
@@ -627,6 +646,16 @@
       "Context": "str(e.reason)",
       "Explanation": "msg",
       "Hints": []
+    }
+  ],
+  "GB4636": [
+    {
+      "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
+      "Context": "",
+      "Explanation": "User-inserted step_unsupported.",
+      "Hints": [
+        "Remove the `torch._dynamo.step_unsupported()` call."
+      ]
     }
   ],
   "GB0065": [
@@ -2086,16 +2115,6 @@
       ]
     }
   ],
-  "GB9198": [
-    {
-      "Gb_type": "Attempted to call repr() method implemented in C/C++",
-      "Context": "",
-      "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
-      "Hints": [
-        "Write the repr method in Python"
-      ]
-    }
-  ],
   "GB0206": [
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
@@ -2785,6 +2804,14 @@
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
+    }
+  ],
+  "GB6017": [
+    {
+      "Gb_type": "executorch_call_delegate: first arg not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "executorch_call_delegate expects the first argument to be a nn.Module (got {args[0]})",
+      "Hints": []
     }
   ],
   "GB0269": [
@@ -3633,6 +3660,12 @@
     }
   ],
   "GB0352": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
+      "Context": "str(self.bwd_fn)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    },
     {
       "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
       "Context": "str(self.bwd_graph)",
