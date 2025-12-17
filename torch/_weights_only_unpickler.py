@@ -277,7 +277,8 @@ def get_globals_in_pkl(file) -> set[str]:
         key = read(1)
         if not key:
             raise EOFError
-        assert isinstance(key, bytes_types)
+        if not isinstance(key, bytes_types):
+            raise AssertionError(f"Expected bytes, got {type(key).__name__}")
         if key[0] == GLOBAL[0]:
             module, name = _read_global_instruction(readline)
             globals_in_checkpoint.add(f"{module}.{name}")
@@ -324,7 +325,8 @@ class Unpickler:
             key = read(1)
             if not key:
                 raise EOFError
-            assert isinstance(key, bytes_types)
+            if not isinstance(key, bytes_types):
+                raise AssertionError(f"Expected bytes, got {type(key).__name__}")
             # Risky operators
             if key[0] == GLOBAL[0]:
                 module, name = _read_global_instruction(self.readline)
