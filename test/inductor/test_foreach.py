@@ -157,7 +157,7 @@ un_ops_under_test = [
     *foreach_map_un_ops_under_test,
 ]
 
-compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
+compose_ops = [torch._foreach_addcdiv]
 all_ops = parametrize(
     "op",
     ternary_ops_under_test + bin_ops_under_test + un_ops_under_test,
@@ -1312,6 +1312,74 @@ class ForeachTests(TestCase):
             return torch.addcmul(s, t1, t2, value=2.0)
 
         _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
+        code = " ".join(code)
+        self.assertIn(
+            "libdevice.fma", code, "Expected FMA to be used in generated code"
+        )
+
+    @requires_gpu
+    def test_foreach_addcmul_fma_bitwise_equal(self):
+        """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        # Test with default value=1
+        eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2)
+
+        compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result, compiled_result):
+            self.assertEqual(eager, compiled, atol=0, rtol=0)
+
+        # Test with value != 1
+        eager_result2 = torch._foreach_addcmul(
+            self_tensors, tensor1_list, tensor2_list, value=2.5
+        )
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.5)
+
+        compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result2, compiled_result2):
+            self.assertEqual(eager, compiled, atol=0, rtol=0)
+
+    @requires_gpu
+    def test_foreach_addcmul_uses_fma_instruction(self):
+        """Test that _foreach_addcmul generates code using FMA instruction."""
+        from torch._inductor.utils import run_and_get_code
+
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.0)
+
+        _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
         self.assertIn(
             "libdevice.fma", code, "Expected FMA to be used in generated code"
