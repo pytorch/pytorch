@@ -729,9 +729,21 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         mask_graph,
         backend=backend,
+        joint_outputs=joint_outputs,
+        score_mod_other_buffers=score_mod_other_buffers,
     ):
         return create_flex_flash_attention_backward_kernel(
-            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            scale,
+            kernel_options,
+            fw_subgraph_buffer=fw_subgraph_buffer,
+            joint_subgraph_buffer=joint_outputs.grad_input,
+            score_mod_other_buffers=list(score_mod_other_buffers),
         )
 
     # Construct layout with stride order matching K

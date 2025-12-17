@@ -29,6 +29,7 @@ ADDITIONAL_MAPPINGS = {
 
 class EditedByPR(HeuristicInterface):
     def __init__(self, **kwargs: dict[str, Any]) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

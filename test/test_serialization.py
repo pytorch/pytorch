@@ -4726,6 +4726,39 @@ class TestSerialization(TestCase, SerializationMixin):
                     self.assertTrue(opened_zipfile.has_record(".format_version"))
                     self.assertEqual(opened_zipfile.get_record(".format_version"), b'1')
 
+    @unittest.skipIf(IS_WINDOWS, "TemporaryFileName on windows")
+    def test_corrupted_checkpoint_error_message(self):
+        """Test that corrupted checkpoint files produce helpful error messages."""
+        sd = torch.nn.Linear(2, 3).state_dict()
+
+        with TemporaryFileName() as filepath:
+            torch.save(sd, filepath)
+
+            with open(filepath, 'r+b') as f:
+                data = bytearray(f.read())
+
+                # Find and corrupt a local file header signature (PK\x03\x04)
+                # This triggers MZ_ZIP_INVALID_HEADER_OR_CORRUPTED in miniz
+                local_header_sig = b'PK\x03\x04'
+                first_idx = data.find(local_header_sig)
+                if first_idx != -1:
+                    second_idx = data.find(local_header_sig, first_idx + 1)
+                    if second_idx != -1:
+                        # Corrupt the signature
+                        data[second_idx] = 0x00
+                        data[second_idx + 1] = 0x00
+
+                f.seek(0)
+                f.write(data)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"invalid header or archive is corrupted\. "
+                r"This is an internal miniz error[\s\S]*"
+                r"there is a high likelihood that your checkpoint file is corrupted"
+            ):
+                torch.load(filepath)
+
     def test_storage_alignment(self):
         sd = torch.nn.Linear(10, 10).state_dict()
 

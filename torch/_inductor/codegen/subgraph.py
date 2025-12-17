@@ -1,7 +1,7 @@
 import itertools
 import logging
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._inductor.config as config
@@ -184,7 +184,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             ]
         )
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+    def output_node(self) -> ir.TensorBox:
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
