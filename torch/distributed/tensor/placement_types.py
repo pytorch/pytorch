@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass, field
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch._C
@@ -21,7 +21,7 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -499,13 +499,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
     We call this right-to-left sharding which is the opposite of the default
-    left-to-right sharding. See the example below:
+    left-to-right sharding. See the example below::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [Shard(0), Shard(0)]
 
     The default sharding behavior shards the tensor on "dp" mesh dimension first then
-    "tp" dimension. The sharding result will be:
+    "tp" dimension. The sharding result will be::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -515,7 +517,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
     "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
-    result:
+    result::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -529,13 +532,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     this, we use _StridedShard placement to make this right-to-left sharding compatible
     with our left-to-right convention on both tensor distribution and redistribution.
 
-    Now with _StridedShard, the right-to-left sharding above can be represented as:
+    Now with _StridedShard, the right-to-left sharding above can be represented as::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [_StridedShard(0, split_factor=2), Shard(0)]
 
     And a left-to-right processing of `placements` will produce the same result, which is
-    different from using the `Shard` placement:
+    different from using the `Shard` placement::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -590,7 +595,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
@@ -901,8 +906,19 @@ class Partial(torch._C._distributed.Partial):
 
     Args:
         reduce_op (str, optional): The reduction op to be used for the partial DTensor
-            to produce Replicated/Sharded DTensor. Only element-wise reduction operations
-            are supported, including: "sum", "avg", "product", "max", "min", default: "sum".
+            to produce Replicated/Sharded DTensor. Corresponds to the reduce operations
+            supported by ``torch.distributed.ReduceOp``. Default: "sum".
+
+            Supported values:
+
+            * ``"sum"``: Element-wise sum across all ranks.
+            * ``"avg"``: Element-wise average across all ranks.
+            * ``"min"``: Element-wise minimum across all ranks.
+            * ``"max"``: Element-wise maximum across all ranks.
+            * ``"product"``: Element-wise product across all ranks.
+            * ``"band"``: Bitwise AND across all ranks (integer tensors only).
+            * ``"bor"``: Bitwise OR across all ranks (integer tensors only).
+            * ``"bxor"``: Bitwise XOR across all ranks (integer tensors only).
 
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
@@ -932,12 +948,36 @@ class Partial(torch._C._distributed.Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # Partial placement contract #3:
-        # _partition_value: partition the value of a replicated tensor on the mesh dimension
+        """
+        Partition a replicated tensor to create partial values for Replicate → Partial.
 
-        # _partition_value is the conjugate operation of _reduce_value, e.g.
-        # - _partition_value on a sum reduce op is just a division operation
-        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        This is the conjugate operation of _reduce_value. The partition operation
+        must satisfy the invariant that applying _reduce_value to the partitioned
+        values recovers the original replicated value (modulo floating-point error).
+
+        Mathematical analysis by reduce_op:
+
+        * "sum": partition(v) = v / n, then sum([v/n] * n) = v
+          Introduces floating-point error from the division and summation.
+          Error grows with n (the number of ranks).
+
+        * "avg": partition(v) = v, then avg([v] * n) = v
+          Numerically exact (averaging identical values).
+
+        * "min": partition(v) = v, then min([v] * n) = v
+          Numerically exact.
+
+        * "max": partition(v) = v, then max([v] * n) = v
+          Numerically exact.
+
+        * "product": Would need partition(v) = v^(1/n), but n-th root is not exact
+          for general values and undefined for negative values with even n.
+          NOT SUPPORTED.
+
+        * "band"/"bor"/"bxor": Bitwise operations have no well-defined inverse
+          that partitions a value such that reducing recovers the original.
+          NOT SUPPORTED.
+        """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         if self.reduce_op == "sum":
             return tensor / num_chunks
@@ -969,13 +1009,13 @@ _Partial = Partial
 
 
 @dataclass(frozen=True)
-class MaskPartial(Partial):
+class _MaskPartial(Partial):
     """
     A partial mask placement devised for rowwise sharded embedding op, where we need
     to mask and adjust the indices to the local embedding shard, embedding masking
     is a special type of the Partial placement
 
-    NOTE: the lifecycle of this MaskPartial placement follows the corresponding DTensor
+    NOTE: the lifecycle of this _MaskPartial placement follows the corresponding DTensor
     lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
     """
 
@@ -1026,14 +1066,14 @@ class MaskPartial(Partial):
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
         assert self.offset_shape is not None, (
-            "offset_shape needs to be set for MaskPartial"
+            "offset_shape needs to be set for _MaskPartial"
         )
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
             my_coordinate[mesh_dim],
         )
-        mask, masked_tensor = MaskPartial._mask_tensor(
+        mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size
         )
         # materialize the mask buffer to be used for reduction
@@ -1078,11 +1118,11 @@ class MaskPartial(Partial):
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, MaskPartial):
+        if not isinstance(other, _MaskPartial):
             return False
 
         # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
+        # the current _MaskPartial placement is still in use and should not be used for cache hit.
         if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
             return False
 
@@ -1103,12 +1143,12 @@ class MaskPartial(Partial):
 
     def __repr__(self) -> str:
         """
-        machine readable representation of the MaskPartial placement
+        machine readable representation of the _MaskPartial placement
         """
-        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"_MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
-        human readable representation of the MaskPartial placement
+        human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
