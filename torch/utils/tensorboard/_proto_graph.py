@@ -6,7 +6,7 @@ from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-
+# pyrefly: ignore [not-a-type]
 def attr_value_proto(dtype: object, shape: Sequence[int] | None, s: str | None) -> dict[str, AttrValue]:
     """Create a dict of objects matching a NodeDef's attr field.
 
@@ -19,12 +19,12 @@ def attr_value_proto(dtype: object, shape: Sequence[int] | None, s: str | None) 
         attr["attr"] = AttrValue(s=s.encode(encoding="utf_8"))
     if shape is not None:
         shapeproto = tensor_shape_proto(shape)
-
+        # pyrefly: ignore [missing-attribute]
         attr["_output_shapes"] = AttrValue(list=AttrValue.ListValue(shape=[shapeproto]))
     return attr
 
 
-
+# pyrefly: ignore [not-a-type]
 def tensor_shape_proto(outputsize: Sequence[int]) -> TensorShapeProto:
     """Create an object matching a tensor_shape field.
 
