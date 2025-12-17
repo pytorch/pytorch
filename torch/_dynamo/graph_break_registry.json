@@ -3305,16 +3305,6 @@
       ]
     }
   ],
-  "GB9625": [
-    {
-      "Gb_type": "traceback.tb_lasti not supported",
-      "Context": "{self} accessing 'tb_lasti'",
-      "Explanation": "Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0316": [
     {
       "Gb_type": "torch.associative_scan: improper additional_inputs",
