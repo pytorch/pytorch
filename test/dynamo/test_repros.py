@@ -7427,9 +7427,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     device=x.device,
                     _compile=False,
                 )
-                q = processed.view(batch_size, 1, seq_len, self.dim)
-                k = processed.view(batch_size, 1, seq_len, self.dim)
-                v = processed.view(batch_size, 1, seq_len, self.dim)
+                q = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                k = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                v = processed.view(batch_size, 1, seq_len, self.dim).detach()
 
                 out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
                 out = flex_attention(q, k, v, block_mask=block_mask)

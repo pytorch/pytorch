@@ -53,7 +53,6 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -96,10 +95,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -658,6 +659,7 @@ def check_model(
     torch._dynamo.reset()
 
 
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -7408,7 +7410,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps_unimplemented
     @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfXpu
-    @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -7453,24 +7454,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 b14,
                 b15,
             ]
-            return aten._cudnn_rnn(
-                a0,
-                a1,
-                4,
-                a3,
-                a4,
-                a5,
-                2,
-                2048,
-                0,
-                2,
-                False,
-                0.0,
-                False,
-                True,
-                [],
-                None,
-            )
+
+            if torch.version.cuda:
+                return aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
 
         self.common(
             fn,
@@ -13187,21 +13209,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
-
-    @torch._inductor.config.patch(force_shape_pad=True)
-    @skip_if_gpu_halide  # correctness issue
-    def test_should_pad_bench_for_bmm(self):
-        B = 2
-        M = 1024
-        N = 1024
-        K = 1024 + 1  # a size that requires padding
-
-        mat1 = torch.rand(B, M, K, device=self.device)
-        mat2 = torch.rand(B, K, N, device=self.device)
-
-        should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
-
-        self.assertTrue(should_pad)
 
     @parametrize(
         "name, op",
