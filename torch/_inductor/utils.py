@@ -2086,9 +2086,21 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+def use_cutlass_api_gemm_template(
+    layout: Layout, m: _IntLike, n: _IntLike, k: _IntLike, mat_a: IRNode, mat_b: IRNode
+) -> bool:
     """
-    Check if cutlass_api GEMM template should be used.
+    Returns True if we can use the cutlass_api kernel for gemm.
+    Required conditions:
+        1. CuTeDSL backend is enabled
+        2. cutlass_api is available
+        3. We are on a Blackwell arch
+        4. The dtype is fp16 or bf16
+        5. Max autotune or max autotune gemm is enabled
+        6. We are not using dynamic shapes
+        7. A and B base pointers are 16B aligned
+        8. n and k are divisible by 16
+        9. Non-unit strides are divisible by 16
     """
     if not ensure_cutlass_api_available():
         return False
@@ -2097,6 +2109,7 @@ def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> boo
         return False
 
     from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+    from .virtualized import V
 
     if not is_gpu(layout.device.type):
         return False
@@ -2110,6 +2123,30 @@ def use_cutlass_api_gemm_template(layout: Layout, m: int, n: int, k: int) -> boo
 
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
+
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+        return False
+
+    if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
+        return False
+
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
+        return False
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
+        return False
+
+    a_layout = mat_a.get_layout()
+    b_layout = mat_b.get_layout()
+
+    for stride in a_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
+
+    for stride in b_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
 
     return True
 
