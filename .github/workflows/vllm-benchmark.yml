@@ -99,8 +99,7 @@ jobs:
     name: Build PyTorch and vLLM
     needs:
       - set-parameters
-    # TODO: TURN IT OFF BY DEFAULT WHEN BRANCH IS NOT SET
-    # if: ${{ inputs.pytorch_commit != '' || inputs.pytorch_branch != '' }}
+    if: ${{ inputs.pytorch_commit != '' || inputs.pytorch_branch != '' }}
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
@@ -238,12 +237,12 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      #- name: Install nightly
-      #  if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
-      #  run: |
-      #    uv pip install vllm --pre \
-      #      --extra-index-url https://download.pytorch.org/whl/nightly/cu129 \
-      #      --index-strategy unsafe-best-match
+      - name: Install nightly
+        if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
+        run: |
+          uv pip install vllm --pre \
+            --extra-index-url https://download.pytorch.org/whl/nightly/cu129 \
+            --index-strategy unsafe-best-match
 
       - name: Authenticate with AWS
         if: ${{ always() && contains(matrix.runner, 'b200') }}
@@ -283,14 +282,13 @@ jobs:
         run: |
           uv pip list
 
-          PYTORCH_SHA=$(git rev-parse HEAD)
           PYTORCH_WHL=$(uv pip list | grep torch)
           VLLM_WHL=$(uv pip list | grep vllm)
 
           {
-            echo "### Run vLLM benchmark with:"
-            echo "PyTorch @ ${PYTORCH_SHA}: ${PYTORCH_WHL}"
-            echo "vLLM @ ${VLLM_PINNED_COMMIT}: ${VLLM_WHL}"
+            echo "### Run vLLM benchmark with the following packages:"
+            echo "PyTorch: ${PYTORCH_WHL}"
+            echo "vLLM: ${VLLM_WHL}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout pytorch-integration-testing repository
