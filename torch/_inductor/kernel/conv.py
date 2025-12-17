@@ -689,7 +689,7 @@ add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)
 
 
 def conv_bwd_input_layout(
-    grad_output: TensorBox,
+    grad_out: TensorBox,
     input: TensorBox,
     weight: TensorBox,
     stride: Sequence[int],
@@ -700,7 +700,7 @@ def conv_bwd_input_layout(
     groups: int,
 ) -> ir.Layout:
     with V.graph.fake_mode:
-        go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
+        go = ir.ir_node_to_tensor(grad_out, guard_shape=True)
         x = ir.ir_node_to_tensor(input, guard_shape=True)
         w = ir.ir_node_to_tensor(weight, guard_shape=True)
 
@@ -729,7 +729,7 @@ def conv_bwd_input_layout(
 
 
 def conv_bwd_weight_layout(
-    grad_output: TensorBox,
+    grad_out: TensorBox,
     input: TensorBox,
     weight: TensorBox,
     stride: Sequence[int],
@@ -740,7 +740,7 @@ def conv_bwd_weight_layout(
     groups: int,
 ) -> ir.Layout:
     with V.graph.fake_mode:
-        go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
+        go = ir.ir_node_to_tensor(grad_out, guard_shape=True)
         x = ir.ir_node_to_tensor(input, guard_shape=True)
         w = ir.ir_node_to_tensor(weight, guard_shape=True)
 
@@ -1113,7 +1113,7 @@ aten_convolution_backward_fallback = fallback_handler(aten.convolution_backward.
 
 @register_lowering(aten.convolution_backward.default)
 def convolution_backward_lowering(
-    grad_output: TensorBox,
+    grad_out: TensorBox,
     input: TensorBox,
     weight: TensorBox,
     bias_sizes: Optional[Sequence[int]],
@@ -1127,6 +1127,11 @@ def convolution_backward_lowering(
 ):
     """
     Lowering function for backward convolution operator.
+
+    TRITON kernels are only registered for supported configurations (currently 2D convolutions). 
+    For unsupported dimensions or configurations, the choices list remains empty, 
+    triggering an automatic fallback to the ATen reference implementation. 
+    This ensures correctness for all cases while enabling TRITON optimizations only where implemented.
     """
     stride = tuple(stride)
     padding = tuple(padding)
@@ -1142,7 +1147,7 @@ def convolution_backward_lowering(
 
     input.realize()
     weight.realize()
-    grad_output.realize()
+    grad_out.realize()
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -1168,21 +1173,21 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
-    layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
+    layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
     if output_mask[1]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
             input = ir.ExternKernel.require_channels_last(input)  # type: ignore[assignment]
-            grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
-            layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
+            grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
+            layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
         else:
-            req_stride_order = ir.get_stride_order(
+            req_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dw.stride)
             )
-            input = ir.ExternKernel.require_stride_order(input, req_stride_order)  # type: ignore[assignment]
-            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)  # type: ignore[assignment]
+            input = ir.ExternKernel.require_stride_order(input, req_order)  # type: ignore[assignment]
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_order)  # type: ignore[assignment]
 
-        args_w = [input, grad_output]
+        args_w = [input, grad_out]
 
         if (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
@@ -1200,7 +1205,7 @@ def convolution_backward_lowering(
                     has_triton_dw_choices = True
                     conv2d_bwd_weight_template.maybe_append_choice(
                         choices_dw,
-                        input_nodes=(input, grad_output),
+                        input_nodes=(input, grad_out),
                         layout=layout_dw,
                         KERNEL_H=kernel_shape[0],
                         KERNEL_W=kernel_shape[1],
@@ -1223,20 +1228,21 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
-    layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
+    layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
     if output_mask[0]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
-            grad_output = ir.ExternKernel.require_channels_last(grad_output)  # type: ignore[assignment]
+            grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
-            layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
+            layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
         else:
-            req_stride_order = ir.get_stride_order(
+            req_order = ir.get_stride_order(
                 V.graph.sizevars.size_hints(layout_dx.stride)
             )
-            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)  # type: ignore[assignment]
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_order)  # type: ignore[assignment]
+            weight = ir.ExternKernel.require_stride_order(weight, req_order)  # type: ignore[assignment]
 
-        args_x = [grad_output, weight]
+        args_x = [grad_out, weight]
 
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
@@ -1255,7 +1261,7 @@ def convolution_backward_lowering(
                     has_triton_dx_choices = True
                     conv2d_bwd_input_template.maybe_append_choice(
                         choices_dx,
-                        input_nodes=(grad_output, weight),
+                        input_nodes=(grad_out, weight),
                         layout=layout_dx,
                         KERNEL_H=kernel_shape[0],
                         KERNEL_W=kernel_shape[1],
@@ -1274,9 +1280,10 @@ def convolution_backward_lowering(
 
                 # TODO: backward input 3D
 
+    # Fallback when no TRITON choices available, i.e., ndim != 2, backend config = ATEN,...
     if not has_triton_dx_choices and not has_triton_dw_choices:
         return aten_convolution_backward_fallback(
-            grad_output,
+            grad_out,
             input,
             weight,
             bias_sizes,
@@ -1292,7 +1299,7 @@ def convolution_backward_lowering(
     if output_mask[1]:
         if (
             torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
-            or len(choices_dw) == 0
+            or not has_triton_dw_choices
         ):
             choices_dw.append(
                 ext_kn_aten_dw.bind(
@@ -1326,7 +1333,7 @@ def convolution_backward_lowering(
     if output_mask[0]:
         if (
             torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
-            or len(choices_dx) == 0
+            or not has_triton_dx_choices
         ):
             choices_dx.append(
                 ext_kn_aten_dx.bind(
@@ -1359,7 +1366,7 @@ def convolution_backward_lowering(
 
     db = None
     if output_mask[2] and bias_sizes is not None:
-        db = L[aten.sum](grad_output, axis=[0] + list(range(2, ndim + 2)))
+        db = L[aten.sum](grad_out, axis=[0] + list(range(2, ndim + 2)))
 
     return (dx, dw, db)
 
