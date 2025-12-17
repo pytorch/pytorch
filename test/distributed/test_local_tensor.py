@@ -104,7 +104,34 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         with self.assertRaises(AssertionError):
             LocalTensor(local_tensors)
 
-        # TODO: test flatten/unflatten
+    def test_flatten_unflatten(self):
+        """Test that LocalTensor can be flattened and unflattened correctly."""
+        device = torch.device("cpu")
+        dtype = torch.float32
+        rank = dist.get_rank()
+        # test samples
+        test_cases = [
+            {
+                i: torch.randn(2, 3, dtype=dtype, device=device)
+                for i in range(self.world_size)
+            },
+            {
+                0: torch.randn(2, 3, dtype=dtype, device=device),
+                1: torch.randn(3, 3, dtype=dtype, device=device),
+            },
+        ]
+
+        for local_tensors in test_cases:
+            lt = LocalTensor(local_tensors)
+            attrs, spec = lt.__tensor_flatten__()
+            inner_tensors = {attr: getattr(lt, attr) for attr in attrs}
+            lt_reconstruct = LocalTensor.__tensor_unflatten__(
+                inner_tensors, spec, lt.size(), lt.stride()
+            )
+
+            self.assertEqual(
+                lt._local_tensors[rank], lt_reconstruct._local_tensors[rank]
+            )
 
     def test_basic_arithmetic_operations(self):
         """Test basic arithmetic operations on LocalTensors."""
