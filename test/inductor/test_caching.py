@@ -21,6 +21,7 @@ from torch._inductor.runtime.caching import (
     context,
     exceptions,
     implementations as impls,
+    interfaces,
     locks,
     utils,
 )
@@ -859,6 +860,408 @@ class UtilsTest(TestMixin, TestCase):
                 {"bar": "bar"},
             ),
         )
+
+
+@instantiate_parametrized_tests
+class InterfacesTest(TestMixin, TestCase):
+    """Test class for Memoizer and PersistentMemoizer interfaces."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-interfaces-instance-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    # ============= Memoizer Tests =============
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_record_caches_result(self) -> None:
+        """Test that Memoizer.record() caches function results.
+
+        Verifies that when a function is decorated with record(), its result
+        is cached and can be retrieved later.
+        """
+        # Setup: create a memoizer and a function that tracks call count
+        memoizer = interfaces.Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice with the same argument
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called twice (record always executes)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_retrieves_cached_result(self) -> None:
+        """Test that Memoizer.replay() retrieves cached results without executing the function.
+
+        Verifies that when a function is decorated with replay(), it retrieves
+        results from cache without executing the original function.
+        """
+        # Setup: create a memoizer, record a result, then try to replay it
+        memoizer = interfaces.Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: record a result first
+        compute(5)
+        self.assertEqual(call_count, 1)
+
+        # Create a replay function for the same computation
+        @memoizer.replay()
+        def compute_replay(x: int) -> int:
+            # This should never be called
+            raise AssertionError("Function should not be executed during replay")
+
+        # Assert: replay retrieves the cached result without calling the function
+        result = compute_replay(5)
+        self.assertEqual(result, 10)
+        self.assertEqual(call_count, 1)  # No additional calls
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_raises_on_cache_miss(self) -> None:
+        """Test that Memoizer.replay() raises KeyError on cache miss.
+
+        Verifies that when replay() is called with arguments that have no cached
+        result, it raises a KeyError.
+        """
+        # Setup: create a memoizer with replay decorator
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay raises KeyError for uncached arguments
+        with self.assertRaises(KeyError):
+            compute(5)
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_memoize_caches_and_retrieves(self) -> None:
+        """Test that Memoizer.memoize() caches on first call and retrieves on subsequent calls.
+
+        Verifies that memoize() combines record and replay functionality:
+        - First call executes the function and caches the result
+        - Subsequent calls retrieve from cache without executing
+        """
+        # Setup: create a memoizer and a function that tracks call count
+        memoizer = interfaces.Memoizer()
+        call_count = 0
+
+        @memoizer.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice with the same argument
+        result1 = compute(5)
+        self.assertEqual(call_count, 1)  # Function called on first invocation
+
+        result2 = compute(5)
+        self.assertEqual(call_count, 1)  # Function not called on second invocation
+
+        # Assert: both calls return the same result
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_record_disabled_returns_original_function(self) -> None:
+        """Test that Memoizer.record() returns original function when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, record()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = interfaces.Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_replay_disabled_always_raises(self) -> None:
+        """Test that Memoizer.replay() always raises KeyError when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, replay()
+        always raises KeyError regardless of what's in the cache.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay always raises KeyError when disabled
+        with self.assertRaises(KeyError) as cm:
+            compute(5)
+        self.assertIn("Caching is disabled", str(cm.exception))
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_memoize_disabled_returns_original_function(self) -> None:
+        """Test that Memoizer.memoize() returns original function when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, memoize()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = interfaces.Memoizer()
+        call_count = 0
+
+        @memoizer.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    # ============= PersistentMemoizer Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_record_caches_to_both(self) -> None:
+        """Test that PersistentMemoizer.record() caches to both memory and disk.
+
+        Verifies that when a function is decorated with record(), its result
+        is cached in both the in-memory cache and the on-disk cache.
+        """
+        # Setup: create a persistent memoizer
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function
+        result = compute(5)
+
+        # Assert: result is correct and cached in memory
+        self.assertEqual(result, 10)
+        self.assertEqual(call_count, 1)
+
+        # Verify memory cache has the result
+        cache_key = interfaces._make_key(None, 5)
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+        self.assertEqual(memory_hit.value, 10)
+
+        # Verify disk cache has the result (pickled)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNotNone(disk_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_replay_checks_memory_then_disk(self) -> None:
+        """Test that PersistentMemoizer.replay() checks memory first, then disk.
+
+        Verifies that replay() uses a two-level cache strategy:
+        1. Check memory cache first (fast)
+        2. Fall back to disk cache on memory miss
+        3. Populate memory cache from disk on disk hit
+        """
+        # Setup: create a persistent memoizer and store only to disk
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+
+        # Store a value directly to disk cache only
+        cache_key = interfaces._make_key(None, 5)
+        import pickle
+
+        pickled_value = pickle.dumps(10)
+        persistent._disk_cache.insert(cache_key, pickled_value)
+
+        # Verify it's not in memory cache yet
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNone(memory_hit)
+
+        # Create a replay function
+        @persistent.replay()
+        def compute(x: int) -> int:
+            raise AssertionError("Function should not be executed during replay")
+
+        # Execute: replay retrieves from disk and populates memory
+        result = compute(5)
+
+        # Assert: result is correct
+        self.assertEqual(result, 10)
+
+        # Verify memory cache was populated from disk
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+        self.assertEqual(memory_hit.value, 10)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_memoize_two_level_caching(self) -> None:
+        """Test that PersistentMemoizer.memoize() uses two-level caching.
+
+        Verifies that memoize() combines two-level caching behavior:
+        - First call executes and caches to both memory and disk
+        - Second call (same process) retrieves from memory
+        - After clearing memory, retrieves from disk
+        """
+        # Setup: create a persistent memoizer
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: first call - cache miss, executes function
+        result1 = compute(5)
+        self.assertEqual(call_count, 1)
+        self.assertEqual(result1, 10)
+
+        # Second call - memory cache hit
+        result2 = compute(5)
+        self.assertEqual(call_count, 1)  # No additional execution
+        self.assertEqual(result2, 10)
+
+        # Clear memory cache to simulate a new process
+        cache_key = interfaces._make_key(None, 5)
+        persistent._memoizer._cache = impls._InMemoryCacheImpl()
+
+        # Third call - memory miss, disk hit, populates memory
+        result3 = compute(5)
+        self.assertEqual(call_count, 1)  # Still no additional execution
+        self.assertEqual(result3, 10)
+
+        # Verify memory cache was repopulated
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_record_disabled(self) -> None:
+        """Test that PersistentMemoizer.record() returns original function when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, record()
+        returns the original function without any caching to memory or disk.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+        # Verify nothing was cached
+        cache_key = interfaces._make_key(None, 5)
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNone(memory_hit)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNone(disk_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_replay_disabled(self) -> None:
+        """Test that PersistentMemoizer.replay() always raises when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, replay()
+        always raises KeyError.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+
+        @persistent.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay always raises KeyError when disabled
+        with self.assertRaises(KeyError) as cm:
+            compute(5)
+        self.assertIn("Caching is disabled", str(cm.exception))
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_memoize_disabled(self) -> None:
+        """Test that PersistentMemoizer.memoize() returns original function when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, memoize()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
 
 
 if __name__ == "__main__":
