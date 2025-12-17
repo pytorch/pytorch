@@ -136,6 +136,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_exposed_first: bool = True,
         collective_bucketing: bool = True,
         region_of: dict[fx.Node, Any] | None = None,
     ):
@@ -146,6 +147,7 @@ class OverlapPreservingBucketer:
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
+        self.bucket_exposed_first = bucket_exposed_first
         self.bucket_mode = bucket_mode
         self.collective_bucketing = collective_bucketing
         self.region_of: dict[fx.Node, Any] = region_of or {}
@@ -372,6 +374,17 @@ class OverlapPreservingBucketer:
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 
+    def _compute_overlap_ratio(self, node: fx.Node) -> float:
+        """
+        Compute what fraction of the collective's time is hidden by compute.
+        Returns 0.0 for fully exposed, 1.0 for fully hidden.
+        """
+        info = self.collective_info[node]
+        if info.estimated_time_ms <= 0:
+            return 0.0
+        hidden_time = info.estimated_time_ms - info.exposed_time_ms
+        return hidden_time / info.estimated_time_ms
+
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
@@ -381,8 +394,20 @@ class OverlapPreservingBucketer:
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
 
-        # Sort collectives by node index for efficient distance checking
-        sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
+        if self.bucket_exposed_first:
+            # Sort by overlap ratio (ascending) to bucket least hidden collectives first.
+            # Exposed collectives benefit most from bucketing since their latency is on the
+            # critical path. Prioritizing them also preserves hiding relationships for
+            # already-hidden collectives, which have less to gain from bucketing.
+            sorted_collectives = sorted(
+                collective_group,
+                key=lambda n: (self._compute_overlap_ratio(n), self.node_idx[n]),
+            )
+        else:
+            sorted_collectives = sorted(
+                collective_group,
+                key=lambda n: self.node_idx[n],
+            )
 
         for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
@@ -404,6 +429,7 @@ class OverlapPreservingBucketer:
             # Greedy optimization: stop after consecutive failures
             consecutive_failures = 0
             max_consecutive_failures = 20
+            start_node_idx = self.node_idx[start_node]
 
             # Check candidates in sorted order, break when beyond max distance
             for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
@@ -414,6 +440,17 @@ class OverlapPreservingBucketer:
                     break
 
                 if candidate in processed:
+                    continue
+
+                candidate_node_idx = self.node_idx[candidate]
+                if (
+                    self.bucket_exposed_first
+                    and abs(candidate_node_idx - start_node_idx)
+                    > max_consecutive_failures
+                ):
+                    # Since collectives are sorted by overlap ratio rather than graph
+                    # position, skip candidates too far apart in the graph to avoid
+                    # creating buckets that block future bucketing opportunities.
                     continue
 
                 if self._can_add_to_bucket(bucket_info, candidate):
