@@ -41,9 +41,7 @@ template <
     int ADims,
     int VEC,
     typename mask_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
 __global__ void
 fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                          at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
@@ -139,9 +137,7 @@ template <
     int ADims,
     int BDims = ADims,
     typename mask_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<scalar_t, IndexType> b,

@@ -238,14 +238,6 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
-def _busy_wait_for_flag():
-    torch._C._cuda_busy_wait_for_flag()
-
-
-def _clear_flag():
-    torch._C._cuda_clear_flag()
-
-
 def _extract_arch_version(arch_string: str) -> int:
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_", maxsplit=2)[1]
@@ -1228,7 +1220,7 @@ def _get_pynvml_handler(device: "Device" = None):
             "nvidia-ml-py does not seem to be installed or it can't be imported."
             # pyrefly: ignore [invalid-inheritance]
         ) from _PYNVML_ERR
-    # pyrefly: ignore [import-error,missing-module-attribute]
+    # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
     from pynvml import NVMLError_DriverNotLoaded
 
     try:

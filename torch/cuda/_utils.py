@@ -13,7 +13,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     # path to the library provided by those packages, including any version suffix.
     # See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md#dynamic-library-resolution
     try:
-        # pyrefly: ignore[import-error]
+        # pyrefly: ignore [import-error, missing-import]
         import rocm_sdk
 
         lib = ctypes.CDLL(str(rocm_sdk.find_libraries("amdhip64")[0]))
@@ -61,7 +61,7 @@ def _check_cuda(result: int) -> None:
 
 def _get_hiprtc_library() -> ctypes.CDLL:
     try:
-        # pyrefly: ignore[import-error]
+        # pyrefly: ignore [import-error, missing-import]
         import rocm_sdk
 
         lib = ctypes.CDLL(str(rocm_sdk.find_libraries("hiprtc")[0]))
