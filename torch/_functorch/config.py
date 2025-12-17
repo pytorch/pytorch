@@ -71,6 +71,8 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+bypass_autograd_cache_key: bool = False
+
 # Whether or not to normalize placeholder names in graphs
 # from dynaom in AOTAutogradCache
 autograd_cache_normalize_inputs = not is_fbcode()
