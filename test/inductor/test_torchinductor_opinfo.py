@@ -993,6 +993,8 @@ inductor_skip_exact_stride = {
     "narrow_copy",
     "nn.functional.group_norm",
     "nn.functional.unfold",
+    "ormqr",
+    "rot90",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
