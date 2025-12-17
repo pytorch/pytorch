@@ -433,7 +433,7 @@ class LocalIntNode:
     def __init__(self, local_ints: dict[int, int]):
         self._local_ints = local_ints
 
-    def maybe_as_int(self) -> Optional[int]:
+    def maybe_as_int(self) -> int | None:
         return None
 
     def is_int(self) -> bool:
@@ -1169,7 +1169,7 @@ class LocalTensorMode(TorchDispatchMode):
     """
 
     # What ranks this local tensor mode is operating over
-    def __init__(self, ranks: Union[int, frozenset[int]]):
+    def __init__(self, ranks: int | frozenset[int]):
         if isinstance(ranks, int):
             # assume is world size
             self.ranks = frozenset(range(ranks))
@@ -1509,7 +1509,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> Optional[list[int] | None]:
+    def get_coordinate(self: DeviceMesh) -> list[int] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
@@ -1589,7 +1589,7 @@ def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:
     return pytree.tree_unflatten(reconciled_args, args_spec)
 
 
-def local_tensor_mode() -> Optional[LocalTensorMode]:
+def local_tensor_mode() -> LocalTensorMode | None:
     """
     Returns the current active LocalTensorMode if one exists.
 
@@ -1606,7 +1606,7 @@ def local_tensor_mode() -> Optional[LocalTensorMode]:
     return None
 
 
-def enabled_local_tensor_mode() -> Optional[LocalTensorMode]:
+def enabled_local_tensor_mode() -> LocalTensorMode | None:
     """
     Returns the current active LocalTensorMode only if it's enabled.
 
@@ -1879,7 +1879,7 @@ class _LocalPhiloxState:
         return LocalTensor(self._per_rank_states)  # type: ignore[name-defined]
 
     @property
-    def offset(self) -> Union[int, SymInt]:
+    def offset(self) -> int | SymInt:
         from torch.distributed.tensor._random import _PhiloxState
 
         offsets = {}
@@ -1893,7 +1893,7 @@ class _LocalPhiloxState:
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter
-    def offset(self, offset: Union[int, SymInt]) -> None:
+    def offset(self, offset: int | SymInt) -> None:
         from torch.distributed.tensor._random import _PhiloxState
 
         if isinstance(offset, SymInt) and isinstance(offset.node, LocalIntNode):
@@ -1908,7 +1908,7 @@ class _LocalPhiloxState:
                 rank_philox.offset = offset_int
 
     @property
-    def seed(self) -> Union[int, SymInt]:
+    def seed(self) -> int | SymInt:
         from torch.distributed.tensor._random import _PhiloxState
 
         seeds = {}
@@ -1921,7 +1921,7 @@ class _LocalPhiloxState:
         return SymInt(LocalIntNode(seeds))
 
     @seed.setter
-    def seed(self, seed: Union[int, SymInt]) -> None:
+    def seed(self, seed: int | SymInt) -> None:
         from torch.distributed.tensor._random import _PhiloxState
 
         if isinstance(seed, SymInt) and isinstance(seed.node, LocalIntNode):
