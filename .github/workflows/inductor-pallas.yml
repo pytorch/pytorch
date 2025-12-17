@@ -7,6 +7,12 @@ on:
       - release/*
     tags:
       - ciflow/inductor-pallas/*
+  pull_request:
+    paths:
+      - torch/_inductor/codegen/pallas.py
+      - test/inductor/test_pallas.py
+      - benchmarks/pallas/benchmark_strided.py
+      - .github/workflows/inductor-pallas.yml
   workflow_dispatch:
 
 concurrency:
@@ -42,6 +48,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "inductor-pallas-strided-benchmark-h100", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
     secrets: inherit
 
@@ -69,6 +76,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv6e.1" },
+          { config: "inductor-pallas-strided-benchmark-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv6e.1" },
         ]}
     secrets: inherit
 
@@ -83,4 +91,34 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-py3_10-inductor-pallas-b200-build:
+    name: pallas-b200-py3.10-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor-pallas-strided-benchmark-b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_10-inductor-pallas-b200-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: pallas-b200-py3.10-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_10-inductor-pallas-b200-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-inductor-pallas-b200-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-inductor-pallas-b200-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-inductor-pallas-b200-build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit

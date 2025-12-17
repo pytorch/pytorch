@@ -919,23 +919,10 @@ class PallasKernel(SIMDKernel):
             stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
 
             if stride is not None:
-                # Extract the constant offset (terms not involving var)
-                offset = index - var_expr
-                offset = V.graph.sizevars.simplify(offset)
-
-                # Generate JAX slice notation
-                if stride == 1 and offset == 0:
-                    # Contiguous access
-                    return "..."
-                elif offset == 0:
-                    # Pure stride: ::stride
-                    stride_str = self.kexpr(stride)
-                    return f"::{stride_str}"
-                else:
-                    # Offset + stride: offset::stride
-                    offset_str = self.kexpr(offset)
-                    stride_str = self.kexpr(stride)
-                    return f"{offset_str}::{stride_str}"
+                # Both TPU (jax.device_put) and CPU (dlpack with .contiguous())
+                # paths make input arrays contiguous at runtime, so always use
+                # "..." to avoid double-striding
+                return "..."
             else:
                 # Couldn't match affine pattern, fall back to original logic
                 offset = index - var_expr
