@@ -1558,6 +1558,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_mixed_dtypes(self, device):
         query = torch.randn((1, 1, 8, 64), dtype=torch.float32, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)

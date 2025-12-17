@@ -1,8 +1,9 @@
 # Owner(s): ["module: inductor"]
 
-from setuptools.config._apply_pyprojecttoml import _identity
 import unittest
 from contextlib import contextmanager
+
+from setuptools.config._apply_pyprojecttoml import _identity
 
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available

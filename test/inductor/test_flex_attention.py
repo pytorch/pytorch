@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # flake8: noqa: B950
 
-from torch._inductor.exc import InductorError
 import functools
 import json
 import os
@@ -23,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
+from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
