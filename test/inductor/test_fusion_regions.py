@@ -1,3 +1,5 @@
+# Owner(s): ["module: inductor"]
+
 """Tests for fusion region detection."""
 
 import unittest
