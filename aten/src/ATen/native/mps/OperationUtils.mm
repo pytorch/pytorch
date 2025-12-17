@@ -8,6 +8,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -1347,6 +1348,11 @@ void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
 void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   TORCH_CHECK(size > 0);
   [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {
+  auto stream = ::at::mps::getCurrentMPSStream();
+  [encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:idx];
 }
 
 uint64_t MetalKernelFunction::getMaxThreadsPerThreadgroup() const {
