@@ -89,6 +89,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
+@config.patch("combo_kernels", True)
 class TestCase(InductorTestCase):
     device = DEVICE
 
@@ -233,7 +234,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """400""")
+        self.assertExpectedInline(count_numel(f, *inp), """440""")
 
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
@@ -320,7 +321,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat(input) + 10
 
         inp = (T(10, 10) for _ in range(16))
-        self.assertExpectedInline(count_numel(f, *inp), """9600""")
+        self.assertExpectedInline(count_numel(f, *inp), """11200""")
 
     @patch.object(config, "max_pointwise_cat_inputs", 0)
     def test_cat_pointwise_config_option(self):
@@ -738,7 +739,7 @@ class MinCutPartitioningTests(TestCase):
             return (a * b).cos().sum(dim=1)
 
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
-        self.assertExpectedInline(count_numel_train(f, *inp), """220""")
+        self.assertExpectedInline(count_numel_train(f, *inp), """160""")
 
     def test_partitioning_cat(self):
         def f(a, b):

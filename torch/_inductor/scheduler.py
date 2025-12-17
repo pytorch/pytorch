@@ -2847,12 +2847,17 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+
         if (
             config.max_autotune_gemm or config.max_autotune
         ) and config.pipeline_max_autotune_gemm:
             torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
 
-        if config.combo_kernels:
+        # foreachkernel not works with cooperative_reductions
+        if config.combo_kernels and not (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
             with dynamo_timed(
                 "Scheduler.create_combo_kernel_nodes",
                 log_pt2_compile_event=True,
