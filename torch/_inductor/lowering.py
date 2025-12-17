@@ -2246,11 +2246,11 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcmul/addcdiv
-    # to use the native CUDA kernel which preserves FMA semantics
-    skip_decomp_for_precision = config.emulate_precision_casts and op in (
-        aten._foreach_addcmul.Scalar,
-        aten._foreach_addcdiv.Scalar,
+    # When emulate_precision_casts is enabled, we skip decomposing addcdiv
+    # to use the native CUDA kernel which preserves FMA semantics.
+    # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
+    skip_decomp_for_precision = (
+        config.emulate_precision_casts and op == aten._foreach_addcdiv.Scalar
     )
     assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
@@ -6915,6 +6915,52 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         inner_fn=inner_fn,
         ranges=self.get_size(),
     )
+
+
+def _foreach_addcmul_scalar(self_tensors, tensor1_list, tensor2_list, value=1):
+    """
+    Foreach version of addcmul using FMA for better precision.
+    Computes self + value * tensor1 * tensor2 for each tensor in the lists.
+    """
+    realize_outputs = (
+        len(V.graph.current_node.users) == 0
+        or V.graph.current_node.target in inplace_foreach_ops
+        or cur_node_has_non_foreach_users()
+    )
+
+    groups = group_foreach_args(zip(self_tensors, tensor1_list, tensor2_list))
+
+    outputs = [None] * len(self_tensors)
+    for (device, use_foreach), group in groups.items():
+        operation_list: list[str] = []
+        for output_ind, (self_tensor, t1, t2) in group:
+            output = addcmul(self_tensor, t1, t2, value=value)
+            outputs[output_ind] = output
+
+            if (
+                V.graph.has_feature(device, BackendFeature.FOREACH)
+                and use_foreach
+                and realize_outputs
+            ):
+                output.realize()
+                operation_list.append(output.get_operation_name())
+
+        if operation_list:
+            V.graph.register_operation_list(operation_list)
+
+    assert all(x is not None for x in outputs)
+    return outputs
+
+
+def _wrapped_foreach_addcmul_scalar(*args, **kwargs):
+    out = _foreach_addcmul_scalar(*args, **kwargs)
+    validate_ir(out)
+    return out
+
+
+# Register directly since _register_foreach_lowering has assertion len(args) <= 2
+foreach_ops.add(aten._foreach_addcmul.Scalar)
+lowerings[aten._foreach_addcmul.Scalar] = _wrapped_foreach_addcmul_scalar
 
 
 register_pointwise_numeric_ldf64(aten.cos)
