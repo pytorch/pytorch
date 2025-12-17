@@ -457,24 +457,6 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::busy_wait_for_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::clear_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // We need to ensure that as long as a thread will NEVER loose the GIL as long
 // as it holds the CUDA mutex. Otherwise another thread might be scheduled and
 // try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
@@ -1093,10 +1075,13 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
+#if USE_ROCM
+      // ROCm: expose shared_memory_per_block for shared memory based pruning
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+#endif
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -1131,7 +1116,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool)>(
+      static_cast<void (*)(
+          bool,
+          bool,
+          int64_t,
+          bool,
+          bool,
+          bool,
+          bool,
+          bool,
+          const std::vector<std::string>&)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1143,7 +1137,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           size_t,
           bool,
           bool,
-          bool)>(torch::cuda::_record_memory_history));
+          bool,
+          const std::vector<std::string>&)>(
+          torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -2094,11 +2090,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
-    {"_cuda_busy_wait_for_flag",
-     THCPModule_cudaBusyWaitForFlag,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",
