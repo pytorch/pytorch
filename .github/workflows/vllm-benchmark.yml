@@ -40,7 +40,7 @@ concurrency:
 jobs:
   set-parameters:
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
-    runs-on: linux.2xlarge
+    runs-on: linux.c7i.2xlarge
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
