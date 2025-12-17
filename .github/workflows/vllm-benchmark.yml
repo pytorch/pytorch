@@ -7,7 +7,7 @@ on:
     inputs:
       pytorch_branch:
         description: |
-          PyTorch branch (main, nightly, or refs/pull/PR_NUMBER/head for pull request)
+          PyTorch branch (main or refs/pull/PR_NUMBER/head for pull request)
         required: true
         type: string
         default: main
@@ -99,7 +99,6 @@ jobs:
     name: Build PyTorch and vLLM
     needs:
       - set-parameters
-    if: ${{ inputs.pytorch_commit != '' || inputs.pytorch_branch != '' }}
     runs-on: linux.24xlarge.memory
     container:
       image: ${{ needs.set-parameters.outputs.build-docker-image }}
@@ -187,7 +186,6 @@ jobs:
     needs:
       - set-parameters
       - build
-    if: needs.build.result == 'success' || needs.build.result == 'skipped'
     strategy:
       matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
       fail-fast: false
@@ -237,13 +235,6 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      - name: Install latest nightly
-        if: inputs.pytorch_commit == '' && inputs.pytorch_branch == ''
-        run: |
-          uv pip install vllm torch torchvision torchaudio --pre \
-            --extra-index-url https://download.pytorch.org/whl/nightly/cu129 \
-            --index-strategy unsafe-best-match
-
       - name: Authenticate with AWS
         if: ${{ always() && contains(matrix.runner, 'b200') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
@@ -254,18 +245,14 @@ jobs:
           aws-region: us-east-1
 
       - name: Download build artifacts
-        # if: inputs.pytorch_commit != '' || inputs.pytorch_branch != ''
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ needs.set-parameters.outputs.build-environment }}
           s3-bucket: gha-artifacts
 
       - name: Install build artifacts
-        # if: inputs.pytorch_commit != '' || inputs.pytorch_branch != ''
         run: |
           set -eux
-
-          # DEBUG
           ls -laR dist
 
           uv pip install \
