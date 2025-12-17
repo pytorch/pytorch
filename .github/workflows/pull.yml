@@ -37,6 +37,13 @@ permissions:
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
   # action is inlined temporarily to avoid issues on the PRs
+  test-job:
+    runs-on: linux.google.tpuv7x.1
+    steps:
+      - name: Check JAX
+        run: |
+          docker run --privileged --net=host -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES python:3.12 /bin/bash -c "pip install -U \"jax[tpu]\" && python3 -c \"import jax; print(jax.devices('tpu'))\""
+          
   job-filter:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
