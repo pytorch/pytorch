@@ -475,7 +475,7 @@ class OptimizedModule(torch.nn.Module):
         assert hooks is not None
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         if not self.dynamo_ctx.fullgraph:
             raise RuntimeError(
@@ -495,7 +495,7 @@ class OptimizedModule(torch.nn.Module):
     def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -509,7 +509,7 @@ class OptimizedModule(torch.nn.Module):
     def _load_aot_compiled_module(self, data: bytes) -> None:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -1422,7 +1422,8 @@ def _optimize(
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
