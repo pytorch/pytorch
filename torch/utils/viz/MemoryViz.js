@@ -497,12 +497,12 @@ function MemoryView(outer, stack_info, snapshot, device) {
           // See Note [BigInt and Number Safe Arithmetic]
           const seg_end =
             seg.addr + (typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size);
-          if (addr < segments_by_addr[mid].addr) {
+          if (addr < seg.addr) {
             right = mid - 1;
           } else if (addr >= seg_end) {
             left = mid + 1;
           } else {
-            return segments_by_addr[mid];
+            return seg;
           }
         }
         return null;
