@@ -1208,13 +1208,36 @@ class PallasKernel(SIMDKernel):
             mask_var = self._get_or_create_mask(name)
             load_expr = f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
         elif needs_flatten:
-            # Flatten then index for non-contiguous access
+            # Flatten then index for non-contiguous access (gather operation)
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
             # Direct indexing for contiguous access
-            # Squeeze trailing 1s for proper broadcasting with other arrays
-            # e.g., (512, 1) -> (512,) to broadcast correctly with (512,) arrays
-            load_expr = f"jnp.squeeze({buf}[{index_str}])"
+            load_expr = f"{buf}[{index_str}]"
+            # Squeeze (N,1) intermediate buffers when kernel has 1D graph inputs
+            # to avoid wrong broadcasting: (N,) op (N,1) -> (N,N) instead of (N,)
+            # Check on demand since input_buffers may not be fully populated at __init__ time
+            is_intermediate_buffer = name.startswith("buf")
+            if is_intermediate_buffer:
+                # Check if any input buffer is a 1D graph input
+                has_1d_input = False
+                for buf_name in self.args.input_buffers:
+                    if not buf_name.startswith("buf"):
+                        try:
+                            buf_obj = V.graph.get_buffer(buf_name)
+                            buf_size = buf_obj.get_size()
+                            if len(buf_size) == 1:
+                                has_1d_input = True
+                                break
+                        except Exception:
+                            pass
+                if has_1d_input:
+                    try:
+                        buf_obj = V.graph.get_buffer(name)
+                        buf_size = buf_obj.get_size()
+                        if len(buf_size) == 2 and buf_size[-1] == 1:
+                            load_expr = f"jnp.squeeze({load_expr}, axis=-1)"
+                    except Exception:
+                        pass
 
         return self.cse.generate(
             self.compute,
@@ -1269,19 +1292,26 @@ class PallasKernel(SIMDKernel):
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
-        # Special case: single iter var + single indirect var = element-wise gather
-        # In this case, both should be 1D arrays of the same length, no broadcasting needed
+        # Special case: single reduction var + single indirect var = element-wise gather
+        # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
+        # with an indirect var, both are aligned to that dimension (element-wise).
+        # Pointwise vars (x, y, z) form output dimensions and create outer products.
         if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
-            # Simple element-wise gather: just replace iter var with arange
             var = used_iter_vars[0]
             var_name = str(var)
-            if var in self.range_tree_nodes:
-                range_entry = self.range_tree_nodes[var]
-                range_size = range_entry.length
-                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-                index_str = index_str.replace(var_name, arange_expr)
-            # Indirect var stays as-is (no reshaping)
-            return index_str
+            # Check if it's a reduction variable (starts with 'r')
+            is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
+                var
+            ].prefix.startswith("r")
+            if is_reduction_var:
+                # Element-wise gather: just replace iter var with arange
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+                    arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                    index_str = index_str.replace(var_name, arange_expr)
+                # Indirect var stays as-is (no reshaping)
+                return index_str
 
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
