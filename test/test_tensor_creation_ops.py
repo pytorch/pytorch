@@ -2203,7 +2203,7 @@ class TestTensorCreation(TestCase):
 
         def _verify_when_device_avaliable(device_type):
             device = torch.get_device_module(device_type)
-            if device`.is_available():
+            if device.is_available():
                 self.assertRaises(RuntimeError, lambda: device.FloatTensor(device='cpu'))
                 self.assertRaises(RuntimeError, lambda: device.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
                 self.assertRaises(RuntimeError, lambda: device.FloatTensor((2.0, 3.0), device='cpu'))
