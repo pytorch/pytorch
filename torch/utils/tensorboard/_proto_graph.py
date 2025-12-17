@@ -30,7 +30,7 @@ def tensor_shape_proto(outputsize: Sequence[int]) -> TensorShapeProto:
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/tensor_shape.proto .
     """
-
+    # pyrefly: ignore [missing-attribute]
     return TensorShapeProto(dim=[TensorShapeProto.Dim(size=d) for d in outputsize])
 
 
@@ -42,6 +42,7 @@ def node_proto(
     shape: tuple[int, ...] | None = None,
     outputsize: Sequence[int] | None = None,
     attributes: str = "",
+    # pyrefly: ignore [not-a-type]
 ) -> NodeDef:
     """Create an object matching a NodeDef.
 
