@@ -5,6 +5,7 @@ Collective runtime estimation using CUDA events and power-of-2 rounding.
 from __future__ import annotations
 
 import itertools
+import json
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -263,17 +264,7 @@ def _log_collective_benchmarks(
     world_size: int,
 ) -> None:
     """Log collective benchmarks with analytical comparisons for tlparse."""
-    headers = [
-        "Collective Key",
-        "Benchmarked(ms)",
-        "NCCL Est(ms)",
-        "Inductor Est(ms)",
-        "NCCL Diff(%)",
-        "Inductor Diff(%)",
-    ]
-
-    rows = []
-    collective_benchmarks = {}
+    collective_benchmarks: list[dict[str, Any]] = []
     for key, benchmarked_ms, coll_node in zip(
         collective_keys, benchmarked_medians, collective_nodes
     ):
@@ -291,35 +282,29 @@ def _log_collective_benchmarks(
             )
         )
 
-        collective_benchmarks[key] = {
-            "benchmarked_ms": benchmarked_ms,
-            "analytical_nccl_ms": nccl_ms,
-            "analytical_inductor_ms": inductor_ms,
-        }
-
         # Compute percentage differences
         nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
         inductor_diff_pct = (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
 
-        rows.append(
-            [
-                key[:80],
-                f"{benchmarked_ms:.4f}",
-                f"{nccl_ms:.4f}",
-                f"{inductor_ms:.4f}",
-                f"{nccl_diff_pct:.2f}",
-                f"{inductor_diff_pct:.2f}",
-            ]
-        )
+        collective_benchmarks.append({
+            "key": key,
+            "benchmarked_ms": benchmarked_ms,
+            "nccl_est_ms": nccl_ms,
+            "inductor_est_ms": inductor_ms,
+            "nccl_diff_pct": nccl_diff_pct,
+            "inductor_diff_pct": inductor_diff_pct,
+        })
 
-    log_str = f"World size: {world_size}\n"
-    log_str += tabulate_2d(rows, headers)
+    output = {
+        "world_size": world_size,
+        "collectives": collective_benchmarks,
+    }
 
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
             "name": "fx_collectives_node_runtime_estimation",
-            "encoding": "string",
+            "encoding": "json",
         },
-        payload_fn=lambda: log_str,
+        payload_fn=lambda: json.dumps(output),
     )
