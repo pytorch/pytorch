@@ -274,9 +274,7 @@ def my_get_current_cuda_stream(device_index: int) -> int:
     Args:
         device_index: int - device index
     """
-    return torch.ops.libtorch_agn_2_10.my_get_current_cuda_stream.default(
-        device_index
-    )
+    return torch.ops.libtorch_agn_2_10.my_get_current_cuda_stream.default(device_index)
 
 
 def my_set_current_cuda_stream(stream: int, device_index: int):
@@ -313,9 +311,7 @@ def my_cuda_stream_synchronize(stream: int, device_index: int):
         stream: int - cudaStream_t pointer value
         device_index: int - device index
     """
-    return torch.ops.libtorch_agn_2_10.my_cuda_stream_synchronize(
-        stream, device_index
-    )
+    return torch.ops.libtorch_agn_2_10.my_cuda_stream_synchronize(stream, device_index)
 
 
 def my_from_blob(data_ptr, sizes, strides, device, dtype) -> Tensor:
@@ -442,9 +438,7 @@ def my_set_requires_grad(t, requires_grad) -> Tensor:
 
     Returns: Tensor - the input tensor with requires_grad set
     """
-    return torch.ops.libtorch_agn_2_10.my_set_requires_grad.default(
-        t, requires_grad
-    )
+    return torch.ops.libtorch_agn_2_10.my_set_requires_grad.default(t, requires_grad)
 
 
 def my_to_device(t, device) -> Tensor:

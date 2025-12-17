@@ -1296,7 +1296,7 @@ test_libtorch_agnostic_targetting() {
 
     # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
     echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
+    pushd test/cpp_extensions/libtorch_agn_2_9_extension
     time python setup.py bdist_wheel
 
     # Save the wheel
