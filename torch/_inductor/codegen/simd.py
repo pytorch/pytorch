@@ -366,9 +366,6 @@ def constant_repr(value: Union[int, float]) -> str:
         return 'float("-inf")'
     elif math.isnan(value):
         return 'float("nan")'
-    elif value == 0.0 and math.copysign(1.0, value) < 0:
-        # Preserve negative zero sign
-        return 'float("-0.0")'
     return repr(value)
 
 
