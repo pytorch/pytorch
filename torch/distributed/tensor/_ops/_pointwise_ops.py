@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence
+import functools
+from collections.abc import Callable, Sequence
 from typing import cast, Optional
 
 import torch
@@ -527,6 +528,14 @@ def single_mesh_dim_pointwise_strategy(
     linearity: int = -1,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
+
+
+def single_mesh_dim_linear_pointwise_strategy(
+    linearity: int = -1,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
 
 
 def single_mesh_dim_common_pointwise_strategy(

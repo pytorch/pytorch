@@ -1,6 +1,6 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable
-from typing import TypeAlias, TypeVar
+from typing import Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch.distributed.tensor._api import DTensor
