@@ -957,27 +957,10 @@ class PallasKernel(SIMDKernel):
             stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
 
             if stride is not None:
-                # Extract the constant offset (terms not involving var)
-                offset = index - var_expr
-                offset = V.graph.sizevars.simplify(offset)
-
-                # Pallas doesn't support negative stride slices, fall back to explicit indexing
-                if stride < 0:
-                    return self.kexpr(index)
-
-                # Generate JAX slice notation
-                if stride == 1 and offset == 0:
-                    # Contiguous access
-                    return "..."
-                elif offset == 0:
-                    # Pure stride: ::stride
-                    stride_str = self.kexpr(stride)
-                    return f"::{stride_str}"
-                else:
-                    # Offset + stride: offset::stride
-                    offset_str = self.kexpr(offset)
-                    stride_str = self.kexpr(stride)
-                    return f"{offset_str}::{stride_str}"
+                # Both TPU (jax.device_put) and CPU (dlpack with .contiguous())
+                # paths make input arrays contiguous at runtime, so always use
+                # "..." to avoid double-striding
+                return "..."
             else:
                 # Couldn't match affine pattern, fall back to original logic
                 offset = index - var_expr
@@ -1386,55 +1369,87 @@ class PallasKernel(SIMDKernel):
                     # Check if original buffer is contiguous (stride matches size)
                     is_originally_contiguous = True
                     expected_strides = [1]  # 1D buffers have stride 1
-                    if len(buf_size) > 1:
+                    actual_buf_strides = []  # Track actual buffer strides
+
+                    # First, collect all actual buffer strides
+                    for i in range(len(buf_size)):
+                        actual_stride = (
+                            int(buf_stride[i])
+                            if hasattr(buf_stride[i], "__int__")
+                            else None
+                        )
+                        actual_buf_strides.append(actual_stride)
+
+                    # For 1D buffers, check if stride is 1
+                    if len(buf_size) == 1:
+                        if actual_buf_strides[0] is not None and actual_buf_strides[0] != 1:
+                            is_originally_contiguous = False
+                    elif len(buf_size) > 1:
                         expected_stride = 1
                         expected_strides = []  # Reset for multi-dim
                         for i in range(len(buf_size) - 1, -1, -1):
                             expected_strides.insert(0, expected_stride)
-                            actual_stride = (
-                                int(buf_stride[i])
-                                if hasattr(buf_stride[i], "__int__")
-                                else None
-                            )
+                            actual_stride = actual_buf_strides[i]
                             if (
                                 actual_stride is None
                                 or actual_stride != expected_stride
                             ):
                                 is_originally_contiguous = False
-                                break
+                                # Don't break - continue to compute expected_strides
                             dim_size = (
                                 int(buf_size[i])
                                 if hasattr(buf_size[i], "__int__")
                                 else None
                             )
-                            if dim_size is None:
-                                is_originally_contiguous = False
-                                break
-                            expected_stride *= dim_size
+                            if dim_size is not None:
+                                expected_stride *= dim_size
+
+                    # Get index coefficients
+                    coefficients = OrderedSet()
+                    for var in used_vars:
+                        var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
+                            index, var
+                        )
+                        stride = BlockPatternMatcher.match_affine_block_expr(
+                            var_expr, var
+                        )
+                        if stride is None:
+                            stride = 1  # Variable without explicit coefficient has stride 1
+                        coefficients.add(
+                            int(stride) if hasattr(stride, "__int__") else stride
+                        )
 
                     if is_originally_contiguous:
-                        # Buffer is contiguous - check if access coefficients match buffer strides
-                        # Coefficients should be a subset of expected strides for normal access
-                        coefficients = OrderedSet()
-                        for var in used_vars:
-                            var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
-                                index, var
-                            )
-                            stride = BlockPatternMatcher.match_affine_block_expr(
-                                var_expr, var
-                            )
-                            if stride is None:
-                                stride = 1  # Variable without explicit coefficient has stride 1
-                            coefficients.add(
-                                int(stride) if hasattr(stride, "__int__") else stride
-                            )
-
+                        # Buffer is contiguous - check if access coefficients match expected strides
                         # If any coefficient is not in expected strides, it's a gather
                         expected_stride_set = OrderedSet(expected_strides)
                         for coef in coefficients:
                             if coef not in expected_stride_set:
                                 has_non_unit_strides = True
                                 break
+                    else:
+                        # Buffer is NOT contiguous (strided input)
+                        # For TPU path (no .contiguous() call), check if index coefficients
+                        # match actual buffer strides - if so, the striding is already in the
+                        # data layout and we should use [...] not strided indexing
+                        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+                        if is_tpu:
+                            # If all coefficients match actual buffer strides, no gather needed
+                            actual_stride_set = OrderedSet(
+                                s for s in actual_buf_strides if s is not None
+                            )
+                            for coef in coefficients:
+                                if coef not in actual_stride_set:
+                                    has_non_unit_strides = True
+                                    break
+                        else:
+                            # CPU/CUDA path calls .contiguous(), so buffer becomes contiguous
+                            # Check against expected (contiguous) strides
+                            expected_stride_set = OrderedSet(expected_strides)
+                            for coef in coefficients:
+                                if coef not in expected_stride_set:
+                                    has_non_unit_strides = True
+                                    break
                 except Exception:
                     pass
 
