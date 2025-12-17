@@ -5,7 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex -o pipefail
 
-# Source ROCm environment for theRock nightly builds
+# for ROCm environment variables
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # shellcheck disable=SC1091
   source /etc/rocm_env.sh
