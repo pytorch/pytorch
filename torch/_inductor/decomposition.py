@@ -116,6 +116,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
+    aten.addcmul,  # inductor lowers this directly using FMA for precision
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
@@ -913,7 +914,7 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         return decompositions
     result = fast_random_decomps()
     if config.emulate_precision_casts:
-        # When emulating precision casts, skip decomposition of addcmul/addcdiv
+        # When emulating precision casts, skip decomposition of foreach addcmul/addcdiv
         # so that we use the native CUDA kernel which preserves FMA semantics.
         # The decomposed version uses separate mul+add ops which don't match
         # eager's FMA rounding behavior.
