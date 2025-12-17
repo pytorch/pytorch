@@ -724,6 +724,7 @@ class DebugMode(TorchDispatchMode):
         record_output=True,
         record_ids=False,
         record_profiler_context=True,
+        record_localtensor=True,
         run_compile_with_interpreter=False,
     ) -> None:
         super().__init__()
@@ -741,6 +742,9 @@ class DebugMode(TorchDispatchMode):
 
         # Records __torch_dispatch__ calls on real tensors.
         self.record_realtensor = record_realtensor
+
+        # Records __torch_dispatch__ calls on LocalTensor.
+        self.record_localtensor = record_localtensor
 
         # Optional list[str] of tensor attributes, to be annotated in the string dump.
         self.record_tensor_attributes = record_tensor_attributes or []
@@ -893,6 +897,8 @@ class DebugMode(TorchDispatchMode):
             self._handle_annotate(args[0])
             return
 
+        from torch.distributed._local_tensor import LocalTensor
+
         # Record the operation with its call depth
         call = None
         if torch.distributed.tensor.DTensor in types:
@@ -914,6 +920,17 @@ class DebugMode(TorchDispatchMode):
                         stack=self.record_stack_trace,
                     )
                     self._record_call(call)
+        # TODO: check the context manager
+        elif LocalTensor in types:
+            if self.record_localtensor:
+                call = _OpCall(
+                    func,
+                    args,
+                    kwargs,
+                    self.call_depth + 1,
+                    stack=self.record_stack_trace,
+                )
+                self._record_call(call)
         elif len(types) == 0:
             if self.record_realtensor:
                 call = _OpCall(
