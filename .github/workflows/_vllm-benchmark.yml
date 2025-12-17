@@ -52,16 +52,6 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
-        with:
-          python-version: 3.12
-          activate-environment: true
-
-      - name: Install benchmark dependencies
-        run: |
-          set -eux
-          uv pip install pip==25.3
-
       - name: Get vLLM pinned commit
         id: vllm-pinned-commit
         run: |
@@ -97,7 +87,7 @@ jobs:
           set -eux
           ls -laR dist
 
-          uv pip install \
+           pip install \
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
@@ -109,10 +99,10 @@ jobs:
         env:
           VLLM_PINNED_COMMIT: ${{ steps.vllm-pinned-commit.outputs.commit }}
         run: |
-          uv pip list
+          pip list
 
-          PYTORCH_WHL=$(uv pip list | grep torch)
-          VLLM_WHL=$(uv pip list | grep vllm)
+          PYTORCH_WHL=$(pip list | grep torch)
+          VLLM_WHL=$(pip list | grep vllm)
 
           {
             echo "### Run vLLM benchmark with the following packages:"
@@ -192,7 +182,7 @@ jobs:
           set -eux
 
           # Remove this once torchao become a vLLM dependency
-          uv pip install torchao==0.14.1
+          pip install torchao==0.14.1
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
 
       - name: Get the actual device name to name the uploaded artifacts

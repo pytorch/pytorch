@@ -47,7 +47,7 @@ jobs:
         run: |
           set -eux
           sudo apt-get update
-          sudo apt-get install -y zip
+          sudo apt-get install -y git zip
 
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

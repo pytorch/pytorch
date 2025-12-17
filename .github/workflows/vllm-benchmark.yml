@@ -119,7 +119,7 @@ jobs:
       contents: read
     with:
       runner: ${{ matrix.runner }}
-      docker_image: 'nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04'
+      docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
       pytorch_branch: ${{ inputs.pytorch_branch }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
