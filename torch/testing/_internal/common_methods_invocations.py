@@ -5873,7 +5873,7 @@ def sample_inputs_nn_fold(op_info, device, dtype, requires_grad, **kwargs):
     for input_shape, output_size, kernel_size, dilation, padding, stride in cases:
         input_tensor = make_arg(input_shape)
         yield SampleInput(input_tensor, output_size=output_size, kernel_size=kernel_size,
-                         dilation=dilation, padding=padding, stride=stride)
+                          dilation=dilation, padding=padding, stride=stride)
 
 
 def error_inputs_fold(op, device, **kwargs):
