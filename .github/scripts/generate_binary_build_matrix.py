@@ -106,7 +106,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.0": (
         "cuda-bindings==13.0.3; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc==13.0.88; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux' | "
+        "nvidia-cuda-runtime~=13.0.48; platform_system == 'Linux' | "
         "nvidia-cuda-cupti==13.0.85; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' | "
         "nvidia-cublas==13.1.0.3; platform_system == 'Linux' | "
