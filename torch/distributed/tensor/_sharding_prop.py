@@ -26,6 +26,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
+    _find_lowest_cost_sharding,
     _SingleDimStrategyFunc,
 )
 from torch.distributed.tensor._utils import (
@@ -476,16 +477,22 @@ class ShardingPropagator:
             mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
             assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            # expand to generate the full set of strategy combinations, each one
-            # with a redistribute cost, and then find the min strategy over those costs.
-            # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
-            # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
-            _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh, strategy_schema, single_dim_strategy
-            )
-            strategy = _expanded_strategy_fn(
-                op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
-            )
+            single_dim_expand_fully = True
+            if single_dim_expand_fully:
+                # expand to generate the full set of strategy combinations, each one
+                # with a redistribute cost, and then find the min strategy over those costs.
+                # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
+                # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
+                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                    mesh, strategy_schema, single_dim_strategy
+                )
+                strategy = _expanded_strategy_fn(
+                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
+                )
+            else:
+                strategy = _find_lowest_cost_sharding(
+                    mesh, strategy_schema, single_dim_strategy
+                )
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
             output_strategy = _select_min_cost_strategy(strategy, op_schema)
             # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
