@@ -52,39 +52,47 @@ def is_view_node(n: fx.Node) -> bool:
 
 
 def is_fusible_node(n: fx.Node) -> bool:
-    """Check if a node is fusible (pointwise, reduction, views, indexing ops, small cats).
+    """Check if a node is fusible based on whether it has an inductor lowering.
 
-    Excludes: mm/conv, collectives, waits, placeholders, outputs.
+    A node is fusible if:
+    - It has a lowering in torch._inductor.lowering.lowerings
+    - It does NOT have a flop counter (expensive compute ops like mm/conv)
+    - It is NOT a registered fallback (ops that fall back to eager)
+    - For aten.cat, it must have <= max_pointwise_cat_inputs inputs
     """
     if n.op != "call_function":
         return False
 
-    # Include pointwise, reduction, views
-    tags = getattr(n.target, "tags", ())
-    if torch.Tag.pointwise in tags or torch.Tag.reduction in tags:
-        return True
+    target = n.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
 
-    if is_view_node(n):
-        return True
+    from torch._inductor.lowering import fallbacks, lowerings
+    from torch.utils.flop_counter import flop_registry
 
-    aten = torch.ops.aten
+    # Must have a lowering
+    if target not in lowerings:
+        return False
 
-    # Include cat if inputs within pointwise cat threshold
-    if n.target == aten.cat.default:
+    # Exclude fallbacks (ops that fall back to eager execution)
+    if target in fallbacks:
+        return False
+
+    # Exclude ops with flop counters (expensive compute ops like mm, conv, etc.)
+    overload_packet = target.overloadpacket
+    if overload_packet in flop_registry:
+        return False
+
+    # Special case: cat is only fusible if it has few enough inputs
+    if target == torch.ops.aten.cat.default:
         inputs = n.args[0] if n.args else []
         if isinstance(inputs, (list, tuple)):
             import torch._inductor.config as inductor_config
 
-            if len(inputs) <= inductor_config.max_pointwise_cat_inputs:
-                return True
+            if len(inputs) > inductor_config.max_pointwise_cat_inputs:
+                return False
 
-    if n.target == aten.constant_pad_nd.default:
-        return True
-
-    if n.target in (aten.slice.Tensor, aten.gather.default, aten.embedding.default):
-        return True
-
-    return False
+    return True
 
 
 def _get_contiguous_fusible_spans(gm: fx.GraphModule) -> list[list[fx.Node]]:

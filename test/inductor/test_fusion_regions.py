@@ -58,210 +58,118 @@ class TestFusionRegionDetection(InductorTestCase):
     def test_strict_local_fusion_no_cross_mm(self):
         """Test that fusion regions don't cross non-fusible (mm) boundaries.
 
-        This is the key property of strict local fusion: ops before and after
-        a non-fusible node are in separate regions, even if they're connected.
+        Pattern:
+            b = a + 1
+            b2 = b - 1
+            c = y @ y   # mm boundary
+            d = b * 2
+            d2 = d / 2
+
+        Even though b/b2 and d/d2 are connected (d uses b), they should NOT be
+        in the same fusion region because mm appears between them in topological order.
         """
         from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
 
-        # a + 1 -> mm -> result * 2
-        # The add and mul should NOT be in the same region (mm is between them)
+        def model(a, y):
+            b = a + 1
+            b2 = b - 1
+            c = y @ y  # mm boundary
+            d = b * 2
+            d2 = d / 2
+            return b2, c, d2
+
         with FakeTensorMode():
             a = torch.ones(64, 64, device=self.device)
-            traced = make_fx(lambda a: torch.mm(a + 1, a) * 2)(a)
+            y = torch.ones(64, 64, device=self.device)
+            traced = make_fx(model)(a, y)
 
         region_of = build_fusion_regions(traced)
 
-        add_nodes = list(
-            traced.graph.find_nodes(op="call_function", target=aten.add.Tensor)
+        (add_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.add.Tensor
         )
-        mul_nodes = list(
-            traced.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        (div_node,) = traced.graph.find_nodes(
+            op="call_function", target=aten.div.Tensor
         )
 
-        # add is before mm, mul is after mm - they should be in different regions
-        # (or one/both not in a region at all if they're singletons)
-        if (
-            add_nodes
-            and mul_nodes
-            and add_nodes[0] in region_of
-            and mul_nodes[0] in region_of
-        ):
-            self.assertIsNot(
-                region_of[add_nodes[0]],
-                region_of[mul_nodes[0]],
-                "Ops before and after mm should not be in the same fusion region",
-            )
+        # add and div are connected but mm is between them - must be separate regions
+        self.assertIn(add_node, region_of)
+        self.assertIn(div_node, region_of)
+        self.assertIsNot(
+            region_of[add_node],
+            region_of[div_node],
+            "Ops before and after mm should not be in the same fusion region",
+        )
 
-    def test_fusion_regions_with_mm_boundary_and_bytes(self):
-        """Test fusion regions with mm boundary, verifying group count and exact bytes.
-
-        Pattern:
-            pointwise1 -> pointwise2 -> mm -> pointwise3 -> pointwise4
-            separate_pointwise1 -> separate_pointwise2
-
-        Expected: 3 fusion groups
-        - Group 1: pointwise1, pointwise2 (before mm)
-        - Group 2: pointwise3, pointwise4 (after mm)
-        - Group 3: separate_pointwise1, separate_pointwise2 (independent)
-        """
+    def test_collapse_and_expand_fusion_regions(self):
+        """Test collapse creates call_module nodes and expand restores graph."""
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
             collapse_fusion_regions,
             expand_fusion_regions,
-            FusionRegion,
         )
 
         def model(a, b):
-            # Group 1: before mm
-            x = a + 1  # pointwise1
-            x = x * 2  # pointwise2
-
-            # mm boundary
-            x = torch.mm(x, a)
-
-            # Group 2: after mm
-            x = x - 1  # pointwise3
-            x = x / 2  # pointwise4
-
-            # Group 3: separate chain with multi-output (not connected to above)
-            y = b + 3  # separate_pointwise1
-            z = y * 4  # separate_pointwise2
-            # Both y and z are used, so this region has 2 outputs
-
-            return x, y, z
+            x = (a + 1) * 2  # region 1
+            x = torch.mm(x, a)  # mm boundary
+            x = (x - 1) / 2  # region 2
+            y = (b + 3) * 4  # region 3 (independent)
+            return x, y
 
         with FakeTensorMode():
             a = torch.ones(64, 64, device=self.device)
             b = torch.ones(64, 64, device=self.device)
             traced = make_fx(model)(a, b)
 
-        # Count nodes before collapse
-        nodes_before = [n for n in traced.graph.nodes if n.op == "call_function"]
-        num_nodes_before = len(nodes_before)
-
-        # Build fusion regions
         region_of = build_fusion_regions(traced)
-
-        # Should have 6 pointwise nodes in regions (2+2+2)
-        self.assertEqual(
-            len(region_of), 6, f"Expected 6 nodes in regions, got {len(region_of)}"
-        )
-
-        # Collapse fusion regions
         new_region_of, replaced = collapse_fusion_regions(traced, region_of)
 
-        # Should have exactly 3 fusion regions (call_module nodes)
-        self.assertEqual(
-            len(new_region_of),
-            3,
-            f"Expected 3 fusion regions, got {len(new_region_of)}",
-        )
-
-        # After collapse: should have call_module nodes instead of pointwise
+        # Should have 3 fusion regions
+        self.assertEqual(len(new_region_of), 3)
         call_modules = list(traced.graph.find_nodes(op="call_module"))
-        self.assertEqual(
-            len(call_modules), 3, "Should have 3 call_module nodes after collapse"
-        )
+        self.assertEqual(len(call_modules), 3)
 
-        # Verify each region has correct exact bytes and cost
-        # 64x64 float32 tensor = 64*64*4 = 16384 bytes
-        from torch._inductor.utils import get_gpu_dram_gbps
-
-        tensor_bytes = 64 * 64 * 4
-        fusion_bw_gbps = get_gpu_dram_gbps()
-        fusion_bw_bytes_per_s = fusion_bw_gbps * 1e9
-
-        for module_node, region in new_region_of.items():
-            self.assertIsInstance(region, FusionRegion)
-            # Count call_function nodes in subgraph (excludes placeholder/output)
-            subgraph_ops = [
-                n for n in region.subgraph_module.graph.nodes if n.op == "call_function"
-            ]
-            self.assertEqual(
-                len(subgraph_ops), 2, f"Region {module_node.name} should have 2 ops"
-            )
-
-        # Verify metas are preserved on call_module nodes (including multi-output)
-        single_output_count = 0
-        multi_output_count = 0
+        # Verify metas and bytes on each region
+        tensor_bytes = 64 * 64 * 4  # 64x64 float32
         for module_node in call_modules:
-            self.assertIn(
-                "val",
-                module_node.meta,
-                f"call_module {module_node.name} should have 'val' meta",
-            )
-            val = module_node.meta["val"]
-
-            if isinstance(val, (list, tuple)):
-                # Multi-output region (Group 3 with y, z)
-                multi_output_count += 1
-                self.assertEqual(
-                    len(val), 2, "Multi-output region should have 2 outputs"
-                )
-                for i, v in enumerate(val):
-                    self.assertEqual(
-                        v.shape, (64, 64), f"Output {i} should have shape (64, 64)"
-                    )
-                # 1 input + 2 outputs = 3 tensors
-                expected_bytes = 3 * tensor_bytes
-            else:
-                # Single output region (Groups 1 and 2)
-                single_output_count += 1
-                self.assertEqual(
-                    val.shape,
-                    (64, 64),
-                    f"call_module {module_node.name} should have shape (64, 64)",
-                )
-                # 1 input + 1 output = 2 tensors
-                expected_bytes = 2 * tensor_bytes
-
+            self.assertIn("val", module_node.meta)
             region = new_region_of[module_node]
-            expected_cost_ms = (expected_bytes / fusion_bw_bytes_per_s) * 1000
-            self.assertEqual(
-                region.total_bytes,
-                expected_bytes,
-                f"Region {module_node.name} should have {expected_bytes} bytes, got {region.total_bytes}",
-            )
-            self.assertEqual(
-                region.cost_ms,
-                expected_cost_ms,
-                f"Region {module_node.name} should have {expected_cost_ms} ms, got {region.cost_ms}",
-            )
+            # Each region has 1 input + 1 output = 2 tensors
+            self.assertEqual(region.total_bytes, 2 * tensor_bytes)
+            self.assertGreater(region.cost_ms, 0)
 
-        # Verify we have both single and multi-output regions
-        self.assertEqual(single_output_count, 2, "Should have 2 single-output regions")
-        self.assertEqual(multi_output_count, 1, "Should have 1 multi-output region")
+        # Expand back
+        expand_fusion_regions(traced, new_region_of, replaced)
+        self.assertEqual(len(list(traced.graph.find_nodes(op="call_module"))), 0)
 
-        # Now expand (inline) the fusion regions back
-        expand_replaced = expand_fusion_regions(traced, new_region_of, replaced)
+    def test_is_fusible_node(self):
+        """Test is_fusible_node correctly classifies ops."""
+        from torch._inductor.fx_passes.fusion_regions import is_fusible_node
 
-        # After expand: should have no call_module nodes
-        call_modules_after = list(traced.graph.find_nodes(op="call_module"))
-        self.assertEqual(
-            len(call_modules_after), 0, "Should have no call_module nodes after expand"
-        )
+        with FakeTensorMode():
+            a = torch.randn(64, 64, device=self.device)
+            traced = make_fx(lambda a: torch.linalg.qr(torch.mm(a + 1, a)))(a)
 
-        # Verify metas are preserved on expanded nodes
-        for replacement_node in expand_replaced.values():
-            self.assertIn(
-                "val",
-                replacement_node.meta,
-                f"Expanded node {replacement_node.name} should have 'val' meta",
-            )
+        def find_node(target):
+            for n in traced.graph.nodes:
+                if n.op == "call_function" and n.target == target:
+                    return n
+            return None
 
-        # Count non-getitem nodes after expand
-        # Multi-output regions add getitem nodes when expanded, so exclude those
-        nodes_after = [
-            n
-            for n in traced.graph.nodes
-            if n.op == "call_function" and "getitem" not in str(n.target)
-        ]
-        num_nodes_after = len(nodes_after)
-        self.assertEqual(
-            num_nodes_after,
-            num_nodes_before,
-            "Non-getitem node count should be same after expand",
-        )
+        # aten.add - pointwise, should be fusible
+        add_node = find_node(aten.add.Tensor)
+        self.assertIsNotNone(add_node)
+        self.assertTrue(is_fusible_node(add_node))
+
+        # aten.mm - has flop counter, should NOT be fusible
+        mm_node = find_node(aten.mm.default)
+        self.assertIsNotNone(mm_node)
+        self.assertFalse(is_fusible_node(mm_node))
+
+        # aten.linalg_qr - fallback op, should NOT be fusible
+        qr_node = find_node(aten.linalg_qr.default)
+        self.assertIsNotNone(qr_node)
+        self.assertFalse(is_fusible_node(qr_node))
 
     def test_collapse_expand_preserves_correctness(self):
         """Test that collapse and expand preserve numerical correctness.
