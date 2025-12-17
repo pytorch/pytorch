@@ -4999,8 +4999,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: reciprocal_out
-    MPS: reciprocal_out_mps
+    CPU, CUDA, MPS, MTIA: reciprocal_out
   tags: pointwise
 
 - func: neg(Tensor self) -> Tensor
@@ -10502,9 +10501,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: pow_Tensor_Scalar_out
+    CPU, CUDA, MPS: pow_Tensor_Scalar_out
     SparseCPU, SparseCUDA, SparseMPS: pow_out_sparse_scalar
-    MPS: pow_tensor_scalar_out_mps
   tags: pointwise
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
