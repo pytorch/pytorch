@@ -680,19 +680,19 @@ class _BaseDataLoaderIter:
         # behavior in forked implementations using _BaseDataLoaderIter.
         self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
 
+        # Currently, pin_memory would raise error on the MPS backend (see
+        # https://github.com/pytorch/pytorch/issues/86060), so forcibly
+        # disable pin_memory on MPS. Remove this restriction once pinned
+        # memory allocation for MPS is fixed.
+
         # Set pin memory device based on the current accelerator.
-        self._pin_memory_device = (
+        pin_memory_device = (
             acc.type
             if self._pin_memory
             and (acc := torch.accelerator.current_accelerator()) is not None
             else None
         )
-
-        # Currently, pin_memory would raise error on the MPS backend (see
-        # https://github.com/pytorch/pytorch/issues/86060), so forcibly
-        # disable pin_memory on MPS. Remove this restriction once pinned
-        # memory allocation for MPS is fixed.
-        if self._pin_memory_device == "mps":
+        if pin_memory_device == "mps":
             self._pin_memory = False
             warn_msg = (
                 "'pin_memory' argument is set as true but not supported on MPS now, "
@@ -800,7 +800,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
+            data = _utils.pin_memory.pin_memory(data)
         return data
 
 
@@ -1216,7 +1216,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._data_queue,
                     current_device_id,
                     self._pin_memory_thread_done_event,
-                    self._pin_memory_device,
                 ),
             )
             pin_memory_thread.daemon = True

@@ -3798,6 +3798,62 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
+import torch.utils.data._utils.pin_memory as pm
+
+
+@unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+class TestPinMemory(TestCase):
+    def test_pin_memory_on_tensor(self):
+        x = torch.randn(2, 3)
+        y = pm.pin_memory(x)
+        self.assertTrue(isinstance(y, torch.Tensor))
+        self.assertTrue(y.is_pinned())
+        self.assertTrue(torch.allclose(x, y))
+
+    def test_pin_memory_on_nested_structure(self):
+        nested = {
+            "a": torch.zeros(5),
+            "b": [torch.ones(2), ("x", torch.arange(3))],
+            "c": "string",
+            "d": (b"bytes", None),
+        }
+        out = pm.pin_memory(nested)
+
+        self.assertTrue(out["a"].is_pinned())
+        self.assertTrue(out["b"][0].is_pinned())
+        self.assertTrue(out["b"][1][1].is_pinned())
+        # non-tensor objects unchanged
+        self.assertEqual(out["c"], "string")
+        self.assertEqual(out["d"][0], b"bytes")
+        self.assertEqual(out["d"][1], None)
+
+    def test_pin_memory_with_empty_containers(self):
+        self.assertEqual(pm.pin_memory([]), [])
+        self.assertEqual(pm.pin_memory({}), {})
+        # Note: implementation normalizes empty tuple -> empty list
+        self.assertEqual(pm.pin_memory(()), [])
+
+    def test_dataloader_pin_memory_enabled(self):
+        ds = TensorDataset(torch.randn(8, 4))
+        dl = DataLoader(ds, batch_size=2, pin_memory=True, num_workers=0)
+
+        for (batch,) in dl:
+            self.assertFalse(batch.is_pinned())
+
+    def test_dataloader_pin_memory_disabled(self):
+        ds = TensorDataset(torch.randn(8, 4))
+        dl = DataLoader(ds, batch_size=2, pin_memory=False, num_workers=0)
+
+        for (batch,) in dl:
+            self.assertFalse(batch.is_pinned())
+
+    def test_pin_memory_does_not_accept_device_arg(self):
+        # The deprecated device arg should now raise
+        x = torch.randn(2, 2)
+        with self.assertRaises(TypeError):
+            pm.pin_memory(x, device="cuda:0")
+
+
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
 
