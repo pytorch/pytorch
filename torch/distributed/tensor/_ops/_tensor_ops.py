@@ -4,9 +4,12 @@ from collections.abc import Sequence, Sized
 from typing import cast
 
 import torch
+from torch._ops import OpOverload
 from torch._prims_common import IntLike
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -14,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
     StrategyType,
+    TensorMeta,
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
@@ -22,6 +26,7 @@ from torch.distributed.tensor._ops.registration import (
     register_op_strategy,
     register_prop_rule,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -803,6 +808,34 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         )
     )
     return op_strategy
+
+
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def cat_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_list = args_schema[0]
+    # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
+    assert isinstance(input_list, tuple), type(input_list)
+    assert all(isinstance(tm, TensorMeta) for tm in input_list)
+    num_inputs = len(input_list)
+    ndim_set = {len(meta.shape) for meta in input_list}
+    assert len(ndim_set) in (1, 2), (
+        "Expected all cat inputs to be the same ndim, except empty tensors"
+    )
+    if len(ndim_set) == 2:
+        assert 0 in ndim_set
+    common_ndim = max(ndim_set)
+    cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    cat_dim = normalize_dim(cat_dim, common_ndim)
+    single_dim_strategies = []
+    for i in range(common_ndim):
+        if i != cat_dim:
+            single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    return single_dim_strategies
 
 
 @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
