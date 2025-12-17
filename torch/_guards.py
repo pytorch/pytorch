@@ -1162,6 +1162,18 @@ def dataclass_with_cached_hash(
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclass_with_cached_hash(frozen=True)
 class Source:
+    def __getstate__(self) -> dict[str, Any]:
+        # Exclude _hash from pickle to ensure deterministic serialization.
+        # _hash is cached by @dataclass_with_cached_hash and uses Python's
+        # hash() which varies across processes due to PYTHONHASHSEED when used
+        # on string.
+        return {k: v for k, v in self.__dict__.items() if k != "_hash"}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Restore state without _hash (it will be recomputed on demand)
+        for k, v in state.items():
+            object.__setattr__(self, k, v)
+
     def is_dict_key(self) -> bool:
         return False
 

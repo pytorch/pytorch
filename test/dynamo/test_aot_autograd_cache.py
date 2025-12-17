@@ -2046,33 +2046,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
-        # Reset dynamo between runs
-        torch._dynamo.reset()
-        fx_graph = None
-        example_inputs = None
-
-        def compiler(gm, inputs, **kwargs):
-            nonlocal fx_graph
-            nonlocal example_inputs
-            fx_graph = gm
-            example_inputs = inputs
-            return gm
-
-        g = torch.compile(fn, backend=compiler, fullgraph=True)
-        result = g(*args, **kwargs)
-        return (result, fx_graph, example_inputs)
+        return _get_dynamo_output(fn, *args, **kwargs)
 
     def gen_cache_key(self, f, config, inputs=None):
-        if inputs is None:
-            inputs = [torch.ones(3)]
-        _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        shape_env = ShapeEnv()
-        ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
-        # Needs a shape env for FxGraphCache.check_can_cache to pass.
-        # Not needed for actual key calculation.
-        with torch._guards.tracing(ctx):
-            with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, {})
+        return gen_cache_key(f, config, inputs)
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -2083,6 +2060,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
+
+    def test_different_process_hash_key(self):
+        import multiprocessing
+
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(target=gen_cache_callable, args=(queue, gen_cache_key))
+            p.start()
+            p.join()
+            results.append(queue.get())
+
+        self.assertEqual(results[0], results[1])
 
     def test_identical_graphs_and_configs(self):
         def fn(x):
@@ -2292,6 +2283,67 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
+
+
+def _get_dynamo_output(fn, *args, **kwargs):
+    # Reset dynamo between runs
+    torch._dynamo.reset()
+    fx_graph = None
+    example_inputs = None
+
+    def compiler(gm, inputs, **kwargs):
+        nonlocal fx_graph
+        nonlocal example_inputs
+        fx_graph = gm
+        example_inputs = inputs
+        return gm
+
+    g = torch.compile(fn, backend=compiler, fullgraph=True)
+    result = g(*args, **kwargs)
+    return (result, fx_graph, example_inputs)
+
+
+def gen_cache_key(fn, config, inputs=None):
+    if inputs is None:
+        inputs = [torch.ones(3)]
+    _, fx_g, example_inputs = _get_dynamo_output(fn, *inputs)
+    shape_env = ShapeEnv()
+    ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
+    # Needs a shape env for FxGraphCache.check_can_cache to pass.
+    # Not needed for actual key calculation.
+    with torch._guards.tracing(ctx):
+        with sanitize_gm_for_cache(fx_g):
+            return autograd_cache_key(fx_g, example_inputs, config, {})
+
+
+def gen_cache_callable(queue, gen_cache_key):
+    from torch._dynamo.source import LocalSource
+
+    source = LocalSource("x", is_input=True)
+    hash(source)  # triggers _hash caching
+
+    def fn(x):
+        return x.sin().cos()
+
+    config = AOTConfig(
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+        dynamic_shapes=True,
+        aot_autograd_arg_pos_to_source=[source],
+        is_export=False,
+        no_tangents=False,
+        enable_log=False,
+        precompile_backend_id=None,
+    )
+
+    cache_key = gen_cache_key(fn, config)
+    queue.put(cache_key)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):
