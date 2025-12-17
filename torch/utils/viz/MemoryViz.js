@@ -178,8 +178,7 @@ function calculate_fragmentation(blocks, sorted_segments) {
   for (const seg of sorted_segments) {
     let addr = seg.addr;
     total_size += seg.size;
-    // Device pointer addresses may be Number or BigInt; ensure safe arithmetic
-    // without JS type errors.
+    // See Note [BigInt and Number Safe Arithmetic]
     const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
     while (
       block_i < sorted_blocks.length &&
@@ -271,6 +270,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
       l_segments.splice(idx, 0, seg);
       if (idx + 1 < l_segments.length) {
         const next = l_segments[idx + 1];
+        // See Note [BigInt and Number Safe Arithmetic]
         const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
         if (seg_end === next.addr && seg.stream === next.stream) {
           seg.size += next.size;
@@ -294,6 +294,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         );
         return;
       }
+      // See Note [BigInt and Number Safe Arithmetic]
       const seg_end = seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
       const idx = l_segments.findIndex( e => {
         const e_end = e.addr + typeof e.addr === "bigint" ? BigInt(e.size) : e.size;
@@ -487,8 +488,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
         while (left <= right) {
           const mid = Math.floor((left + right) / 2);
           const seg = segments_by_addr[mid];
-          // Device pointer addresses may be Number or BigInt; ensure safe
-          // arithmetic without JS type errors.
+          // See Note [BigInt and Number Safe Arithmetic]
           const seg_end =
             seg.addr + typeof seg.addr === "bigint" ? BigInt(seg.size) : seg.size;
           if (addr < segments_by_addr[mid].addr) {
@@ -731,8 +731,10 @@ function annotate_snapshot(snapshot) {
         }
       }
       b.version = snapshot.block_version(b.addr, false);
-      // Device pointer addresses may be Number or BigInt; ensure safe
-      // arithmetic without JS type errors
+      // Note [BigInt and Number Safe Arithmetic]
+      // Device pointer addresses may be represented as either Number or BigInt.
+      // Use explicit conversions to perform arithmetic safely and avoid mixing
+      // BigInt and Number types, which would otherwise trigger JS type errors.
       addr += typeof addr === "bigint" ? BigInt(b.size) : b.size;
     }
   }
