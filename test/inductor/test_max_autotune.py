@@ -3309,7 +3309,7 @@ class TestPrologueFusion(TestCase):
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
 
 
 class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):

@@ -10310,7 +10310,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # the triton signature specializes on 1 vs non-1, you might get 1
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
     def test_roll(self):
         def fn(a):
@@ -16146,6 +16146,7 @@ if RUN_GPU:
         # The inplace updating does not happen after we fused the
         # layernorm backward
         @torch._inductor.config.patch("triton.mix_order_reduction", False)
+        @torch._inductor.config.patch("combo_kernels", False)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50

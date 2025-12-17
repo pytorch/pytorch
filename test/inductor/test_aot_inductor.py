@@ -5619,8 +5619,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randint(high=1024, size=(1,), device=self.device),)
 
         expected_scalar_args = [
-            "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_ones_1_xnumel",
+            "triton_poi_fused_0_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
@@ -5785,17 +5784,9 @@ class AOTInductorTestsTemplate:
         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
         # it gets explicitly declared using its data types in the cpp wrapper codegen code.
         expected_scalar_args = [
-            "buf3, u0",
-            "buf4, u0",
-            "buf4, buf5, buf3, u0",
+            "buf4, buf5, buf6, u0, u0, u0",
+            "buf5, buf6, buf4, u0",
         ]
-        if full_aoti_runtime_assert():
-            # we'll have one more assertion
-            expected_scalar_args = [
-                "buf4, u0",
-                "buf5, u0",
-                "buf5, buf6, buf4, u0",
-            ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile, Model(), example_inputs

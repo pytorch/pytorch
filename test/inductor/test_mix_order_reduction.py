@@ -33,6 +33,7 @@ class SkipPatternTest(TestBase):
     """
 
     @inductor_config.patch(split_reductions=False)
+    @inductor_config.patch(combo_kernels=False)
     def test_dimension_too_close(self):
         """
         Skip if the two reduction size are too close.
