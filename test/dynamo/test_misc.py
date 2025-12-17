@@ -327,6 +327,25 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertIn("6", val[1]._tensors)
             self.assertEqual(val[1]._tensors["6"], inp + 2)
 
+    def test_fullgraph_errors_if_skipped_due_to_torch_dispatch_mode(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class PassthroughMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                return func(*args, **kwargs)
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            return x.sin().cos()
+
+        x = torch.randn(3)
+        with PassthroughMode():
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "fullgraph=True"):
+                g(x)
+
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
         cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
