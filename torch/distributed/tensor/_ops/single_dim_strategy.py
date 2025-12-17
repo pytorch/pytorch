@@ -219,7 +219,7 @@ def _expand_single_dim_strategy_to_mesh(
             cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
         )
         t1 = time.time()
-        print(f"Expanded single_dim_strategy for {op_schema} in {t1-t0} seconds")
+        print(f"Expanded single_dim_strategy for {op_schema} in {t1 - t0} seconds")
         return expanded
 
     return expanded_strategy
