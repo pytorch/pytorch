@@ -53,7 +53,6 @@ class CutlassAPITemplateKernel(Kernel):
 
         # Create named input nodes mapping
         for i, input_node in enumerate(input_nodes):
-            node_name = getattr(input_node, "name", f"input_{i}")
             param_name = f"in_ptr{i}"
             self._template_input_args.append((param_name, input_node))
             self._seen_input_args.add(param_name)

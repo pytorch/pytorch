@@ -9,7 +9,13 @@ from torch._inductor.autotune_process import (
     GPUDeviceBenchmarkMixin,
     TensorMeta,
 )
-from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.ir import (
+    Buffer,
+    ChoiceCaller,
+    Layout,
+    ShapeAsConstantBuffer,
+    TensorBox,
+)
 from torch._inductor.utils import ensure_cutlass_api_available
 from torch._logging import getArtifactLogger
 
@@ -161,7 +167,7 @@ class CutlassAPIGemmCaller(ChoiceCaller):
         """Benchmark the kernel execution."""
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> TensorBox:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """Create the output node for this kernel choice."""
         # Import here to avoid circular imports
         from torch._inductor.ir import CutlassAPIGemmBuffer
@@ -410,8 +416,8 @@ def add_cutlass_api_gemm_choices(
             metadata_filter=metadata_filter,
             cc=cc_int,
         )
-    except Exception as e:
-        log.debug("Failed to get cutlass_api kernels: %s", e)
+    except Exception:
+        log.debug("Failed to get cutlass_api kernels", exc_info=True)
         return
 
     if not kernels:
@@ -439,7 +445,7 @@ def add_cutlass_api_gemm_choices(
             )
             choices.append(caller)
             num_added += 1
-        except Exception as e:
-            log.debug("Failed to create cutlass_api choice for %s: %s", name, e)
+        except Exception:
+            log.debug("Failed to create cutlass_api choice for %s", name, exc_info=True)
 
     log.debug("Added %d cutlass_api GEMM choices", num_added)

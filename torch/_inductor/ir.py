@@ -5485,7 +5485,7 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
         from torch._inductor.utils import Placeholder
 
         # Get input nodes as Buffer objects
-        input_nodes = []
+        input_nodes: list[Any] = []
         for inp in self.inputs:
             if isinstance(inp, TensorBox):
                 inp = inp.data

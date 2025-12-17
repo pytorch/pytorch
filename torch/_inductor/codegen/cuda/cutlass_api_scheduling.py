@@ -132,6 +132,7 @@ class CutlassAPIScheduling(BaseScheduling):
         ctb: CutlassAPIGemmBuffer = cast(CutlassAPIGemmBuffer, template_node.node)
 
         # Get the kernel and render function
+        assert ctb.make_kernel_render is not None
         kernel, render = ctb.make_kernel_render(ctb)
         template_node.mark_run()
         src_code = render()
