@@ -89,7 +89,7 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(embedding.embedding_dim, 3)
         self.assertEqual(embedding.num_embeddings, 10)
 
-        if not torch.accelerator.is_available():
+        if torch.accelerator.is_available():
             embedding.to(device_type)
             self.assertEqual(embedding.weight.device.type, device_type)
             embedding.to("cpu")
