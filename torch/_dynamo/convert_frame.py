@@ -1498,9 +1498,15 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph:
-                log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
+            if one_graph:
+                err = Unsupported(
+                    "torch.compile(..., fullgraph=True) was requested, but Dynamo did not capture "
+                    f"a graph for {code.co_name} ({code.co_filename}:{code.co_firstlineno}). "
+                    "Skipped frames are not allowed with fullgraph=True."
+                )
+                err._torch_dynamo_tracer_output = e._torch_dynamo_tracer_output  # type: ignore[attr-defined]
+                raise err from e
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
@@ -2164,6 +2170,10 @@ class CatchErrorsWrapper:
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
+        skip_due_to_dispatch = (
+            should_skip_due_to_torch_dispatch_mode()
+            and not getattr(self._torchdynamo_orig_backend, "_export", False)
+        )
         if sys.version_info >= (3, 13):
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
@@ -2186,10 +2196,14 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                should_skip_for_dispatch_mode
-                and not getattr(self._torchdynamo_orig_backend, "_export", False)
+                skip_due_to_dispatch
             )
         ):
+            if getattr(self._torchdynamo_orig_backend, "_one_graph", False) and skip_due_to_dispatch:
+                raise Unsupported(
+                    "torch.compile(..., fullgraph=True) was requested, but Dynamo skipped compiling due to "
+                    "TorchDispatchMode. Skipped frames are not allowed with fullgraph=True."
+                )
             if log.isEnabledFor(logging.DEBUG):
                 if has_started_execution:
                     skip_reason = "traced frame already"
