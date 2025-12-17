@@ -1,9 +1,7 @@
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-#include <nccl_device.h>
-#endif
+
 #include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>

@@ -1,16 +1,15 @@
 #pragma once
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
-#include <nccl_device.h>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <string>
 #include <unordered_map>
 
-namespace c10d::symmetric_memory {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
+namespace c10d::symmetric_memory {
 // Maximum number of barriers for NCCL device communicator.
 // Each CTA will need a separate barrier.
 constexpr int NCCL_DEVCOMM_BARRIER_COUNT = 32;
