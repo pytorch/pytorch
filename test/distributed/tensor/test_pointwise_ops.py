@@ -19,6 +19,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -617,7 +618,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             result = torch.maximum(d_input1, d_input2)
 
         # Should require communication to reduce Partial("sum") to Replicate
-        self.assertGreater(comm_mode.get_total_counts(), 0)
+        self.assertEqual(comm_mode.get_total_counts(), 1)
         # Result should be Partial("max") following the first operand
         self.assertEqual(result.placements, (Partial("max"),))
 
@@ -629,6 +630,77 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # final max = 4
         expected_value = float(self.world_size)
         self.assertEqual(result.full_tensor()[0, 0].item(), expected_value)
+
+        # make sure that we still only redistribute once even though p(sum) is first
+        with comm_mode:
+            result = torch.maximum(d_input2, d_input1)
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_maximum_selects_optimal_strategy(self):
+        """
+        Test that torch.maximum selects the arg with the optimal partial position
+        (smallest last non-matching partial index) when no shards are present.
+
+        Part 1: [P("sum"), P("max")] vs [P("max"), P("sum")]
+            - Arg A has last non-matching at index 0
+            - Arg B has last non-matching at index 1
+            - Should follow Arg A (smaller index)
+
+        Part 2: [P("sum"), P("max")] vs [P("max"), P("max")]
+            - Arg A has last non-matching at index 0
+            - Arg B has no non-matching (-1)
+            - Should follow Arg B (no redistribution needed)
+        """
+        from torch.distributed.device_mesh import init_device_mesh
+
+        mesh_2d = init_device_mesh(self.device_type, (2, 2))
+        comm_mode = CommDebugMode()
+
+        # Part 1: [P("sum"), P("max")] vs [P("max"), P("sum")]
+        # Arg A: last non-matching = 0 (P("sum") at index 0)
+        # Arg B: last non-matching = 1 (P("sum") at index 1)
+        # Should follow Arg A (index 0 < index 1)
+        input_a = torch.ones(4, 4) * 2.0
+        input_b = torch.ones(4, 4) * 3.0
+
+        d_input_a = DTensor.from_local(
+            input_b, mesh_2d, [Partial("max"), Partial("sum")]
+        )
+        d_input_b = DTensor.from_local(
+            input_a, mesh_2d, [Partial("sum"), Partial("max")]
+        )
+
+        with comm_mode:
+            result = torch.maximum(d_input_a, d_input_b)
+
+        # Should follow Arg B's placements, redistributing only Arg B's P("sum") at index 1
+        # Result should be [Replicate(), P("max")] after redistribution
+        # Both partials in the first input will be redistributed. The second input's partial
+        # is not redistributed
+        self.assertEqual(result.placements, (Replicate(), Partial("max")))
+        self.assertEqual(comm_mode.get_total_counts(), 3)
+
+        # Part 2: [P("sum"), P("max")] vs [P("max"), P("max")]
+        # Arg A: last non-matching = 0 (P("sum") at index 0)
+        # Arg B: last non-matching = -1 (all match!)
+        # Should follow Arg B (no redistribution needed for B)
+        d_input_a2 = DTensor.from_local(
+            input_a, mesh_2d, [Partial("sum"), Partial("max")]
+        )
+        d_input_b2 = DTensor.from_local(
+            input_b, mesh_2d, [Partial("max"), Partial("max")]
+        )
+
+        with comm_mode:
+            result2 = torch.maximum(d_input_a2, d_input_b2)
+
+        # Should follow Arg B's placements [P("max"), P("max")]
+        # Result should preserve both P("max") placements
+        self.assertEqual(result2.placements, (Partial("max"), Partial("max")))
+        self.assertEqual(comm_mode.get_total_counts(), 2)
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)

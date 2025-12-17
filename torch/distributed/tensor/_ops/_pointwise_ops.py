@@ -427,22 +427,60 @@ linear_pointwise_ops = {
 # Ops that preserve specific Partial types through the operation.
 # For example, torch.maximum preserves Partial("max") because
 # max(max(a), max(b)) == max(a, b).
-partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
+partial_preserving_ops: dict[torch._ops.OpOverload, list[str]] = {
+    aten.maximum.default: ["max"],
+    aten.maximum.out: ["max"],
+    aten.minimum.default: ["min"],
+    aten.minimum.out: ["min"],
 }
+
+
+def _find_last_non_matching_partial_index(
+    arg_strategy: OpStrategy,
+    preserve_partial_types: list[str],
+) -> int:
+    """
+    Returns the minimum "last non-matching partial index" across all OpSpecs.
+
+    For each OpSpec, finds the index of the last Partial that doesn't match
+    preserve_partial_types. Takes the min across all OpSpecs (best case).
+
+    Returns -1 if all Partials match (or no non-matching Partials exist).
+    This mirrors how max_num_shards() iterates all strategies.
+    """
+    min_last_non_matching: int | float = float("inf")
+
+    for op_spec in arg_strategy.strategies:
+        last_non_matching = -1
+        for i, placement in enumerate(op_spec.output_spec.placements):
+            if (
+                isinstance(placement, Partial)
+                and placement.reduce_op not in preserve_partial_types
+            ):
+                last_non_matching = i
+        min_last_non_matching = min(min_last_non_matching, last_non_matching)
+
+    return int(min_last_non_matching)
+
+
+def _has_any_shard_placement(arg_strategy: OpStrategy) -> bool:
+    """Check if any OpSpec in the strategy has any Shard placement."""
+    for op_spec in arg_strategy.strategies:
+        for placement in op_spec.output_spec.placements:
+            if placement.is_shard():
+                return True
+    return False
 
 
 def pointwise_strategy(
     op_schema: OpSchema,
     linearity: int = -1,
-    preserve_partial: str | None = None,
+    preserve_partial: list[str] | None = None,
 ) -> OpStrategy:
     followed_strategy_index = -1
     max_shards = -1
     max_ndim = -1
+    any_arg_has_shard = False
 
     if op_schema.is_inplace_op():
         # inplace op should follow the first arg strategy
@@ -460,18 +498,41 @@ def pointwise_strategy(
         # the max shards in case operands needs reshard
         # in case of multiple operands with max shard, we take
         # the one with the max number of dimensions
+
+        partial_followed_strategy_last_non_matching_index = float("inf")
+
         for idx, arg_strategy in enumerate(op_schema.args_schema):
             if not isinstance(arg_strategy, OpStrategy):
                 continue
 
             arg_max_shards = arg_strategy.max_num_shards()
             arg_max_ndim = arg_strategy.ndim
+
+            # Track if any arg has any Shard placement
+            if _has_any_shard_placement(arg_strategy):
+                any_arg_has_shard = True
+
             if (arg_max_shards > max_shards) or (
                 arg_max_shards == max_shards and arg_max_ndim > max_ndim
             ):
                 followed_strategy_index = idx
                 max_shards = arg_max_shards
                 max_ndim = arg_max_ndim
+
+            # Only apply partial optimization when no args have any Shard placements
+            if preserve_partial is not None and not any_arg_has_shard:
+                current_arg_last_partial_index = _find_last_non_matching_partial_index(
+                    arg_strategy, preserve_partial
+                )
+
+                if (
+                    current_arg_last_partial_index
+                    < partial_followed_strategy_last_non_matching_index
+                ):
+                    followed_strategy_index = idx
+                    partial_followed_strategy_last_non_matching_index = (
+                        current_arg_last_partial_index
+                    )
 
         followed_strategy = op_schema.args_schema[followed_strategy_index]
 
@@ -523,7 +584,7 @@ def common_pointwise_strategy(
     followed_strategy_index: int,
     linearity: int = -1,
     scalar_tensor_idx: int | None = None,
-    preserve_partial: str | None = None,
+    preserve_partial: list[str] | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -587,8 +648,9 @@ def common_pointwise_strategy(
                     )
 
                 # Check if this partial type should be preserved
-                if preserve_partial is not None and placement.is_partial(
-                    preserve_partial
+                if (
+                    preserve_partial is not None
+                    and placement.reduce_op in preserve_partial
                 ):
                     out_placements.append(placement)
                 # note that only partial-sum and partial-avg are supported for linearity
