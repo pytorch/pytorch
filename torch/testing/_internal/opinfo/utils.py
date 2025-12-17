@@ -9,10 +9,6 @@ import numpy as np
 import numpy.typing as npt
 
 import torch
-from torch.testing._internal.common_utils import (
-    TEST_XPU,
-    TEST_CUDA,
-)
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes,
     all_types,
@@ -29,7 +25,11 @@ from torch.testing._internal.common_dtype import (
     integral_types,
     integral_types_and,
 )
-from torch.testing._internal.common_utils import torch_to_numpy_dtype_dict
+from torch.testing._internal.common_utils import (
+    TEST_CUDA,
+    TEST_XPU,
+    torch_to_numpy_dtype_dict,
+)
 
 
 COMPLETE_DTYPES_DISPATCH = (
@@ -52,7 +52,7 @@ EXTENSIBLE_DTYPE_DISPATCH = (
 )
 
 # Better way to acquire devices?
-DEVICES = ["cpu"] + (["cuda"] if TEST_CUDA else [])  + (["xpu"] if TEST_XPU else [])
+DEVICES = ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["xpu"] if TEST_XPU else [])
 
 
 class _dynamic_dispatch_dtypes(_dispatch_dtypes):
