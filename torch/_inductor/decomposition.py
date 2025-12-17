@@ -813,16 +813,8 @@ def grid_sampler_2d(
     return output
 
 
-@register_decomposition(aten._foreach_addcmul.Scalar)
-def _foreach_addcmul_scalar(
-    self: list[torch.Tensor],
-    left_tensors: list[torch.Tensor],
-    right_tensors: list[torch.Tensor],
-    scalar: float = 1,
-) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
-    )
+# _foreach_addcmul.Scalar is not decomposed - we use the native CUDA kernel
+# which preserves FMA semantics for better precision matching with eager
 
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
@@ -914,19 +906,12 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         return decompositions
     result = fast_random_decomps()
     if config.emulate_precision_casts:
-        # When emulating precision casts, skip decomposition of foreach addcmul/addcdiv
+        # When emulating precision casts, skip decomposition of foreach addcdiv
         # so that we use the native CUDA kernel which preserves FMA semantics.
-        # The decomposed version uses separate mul+add ops which don't match
+        # The decomposed version uses separate div+add ops which don't match
         # eager's FMA rounding behavior.
-        result = {
-            k: v
-            for k, v in result.items()
-            if k
-            not in (
-                aten._foreach_addcmul.Scalar,
-                aten._foreach_addcdiv.Scalar,
-            )
-        }
+        # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
+        result = {k: v for k, v in result.items() if k != aten._foreach_addcdiv.Scalar}
     return result
 
 
