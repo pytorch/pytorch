@@ -80,10 +80,9 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
-    TestCase,
     TEST_CUDA,
     TEST_XPU,
-    TEST_ACCELERATOR
+    TestCase,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -94,6 +93,7 @@ from torch.utils.checkpoint import (
     create_selective_checkpoint_contexts,
 )
 from torch.utils.flop_counter import FlopCounterMode
+
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
@@ -4134,20 +4134,33 @@ class TestAutograd(TestCase):
         self.assertIsInstance(x.float(), torch.FloatTensor)
         self.assertIsInstance(x.int(), torch.IntTensor)
         if torch.accelerator.is_available():
-            self.assertIsInstance(x.float().to(device_type), torch.get_device_module(device_type).FloatTensor)
-            self.assertIsInstance(x.int().to(device_type), torch.get_device_module(device_type).IntTensor)
+            self.assertIsInstance(
+                x.float().to(device_type),
+                torch.get_device_module(device_type).FloatTensor,
+            )
+            self.assertIsInstance(
+                x.int().to(device_type), torch.get_device_module(device_type).IntTensor
+            )
             self.assertIsInstance(x.int().to(device_type).cpu(), torch.IntTensor)
             if torch.accelerator.device_count() >= 2:
                 x2 = x.float().to(device_type)(1)
-                self.assertIsInstance(x2, torch.get_device_module(device_type).FloatTensor)
+                self.assertIsInstance(
+                    x2, torch.get_device_module(device_type).FloatTensor
+                )
                 self.assertIs(x2.get_device(), 1)
                 x2 = x.float().to(device_type)
-                self.assertIsInstance(x2, torch.get_device_module(device_type).FloatTensor)
+                self.assertIsInstance(
+                    x2, torch.get_device_module(device_type).FloatTensor
+                )
                 self.assertIs(x2.get_device(), 0)
                 x2 = x2.get_device_module(device_type)(1)
-                self.assertIsInstance(x2, torch.get_device_module(device_type).FloatTensor)
+                self.assertIsInstance(
+                    x2, torch.get_device_module(device_type).FloatTensor
+                )
                 self.assertIs(x2.get_device(), 1)
-                y = Variable(torch.randn(5).get_device_module(device_type)(1), requires_grad=True)
+                y = Variable(
+                    torch.randn(5).get_device_module(device_type)(1), requires_grad=True
+                )
                 y.cpu().sum().backward()
                 self.assertIs(y.grad.get_device(), 1)
                 self.assertIs(y.long().get_device(), 1)
@@ -4174,12 +4187,16 @@ class TestAutograd(TestCase):
                             x_c = x.to(device_type) if x_acc else x
                             y_c = y.to(device_type) if y_acc else y
                             _, y_type = y_c.type().rsplit(".", 1)
-                            y_typestr = (f"torch.{device_type}." if y_acc else "torch.") + y_type
+                            y_typestr = (
+                                f"torch.{device_type}." if y_acc else "torch."
+                            ) + y_type
                             self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
                             self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
                             self.assertEqual(
                                 y_c.data_ptr(),
-                                y_c.to(device_type).data_ptr() if y_acc else y_c.data_ptr(),
+                                y_c.to(device_type).data_ptr()
+                                if y_acc
+                                else y_c.data_ptr(),
                             )
 
         self._test_type_conversion_backward(lambda x: x)
@@ -4187,8 +4204,12 @@ class TestAutograd(TestCase):
             self._test_type_conversion_backward(lambda x: x.to(device_type))
             if torch.accelerator.device_count() >= 2:
                 # one of these has to be the non-default device
-                self._test_type_conversion_backward(lambda x: x.get_device_module(device_type)(0))
-                self._test_type_conversion_backward(lambda x: x.get_device_module(device_type)(1))
+                self._test_type_conversion_backward(
+                    lambda x: x.get_device_module(device_type)(0)
+                )
+                self._test_type_conversion_backward(
+                    lambda x: x.get_device_module(device_type)(1)
+                )
 
     def test_isolated_node(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -4698,9 +4719,13 @@ class TestAutograd(TestCase):
         def hook(*args, **kwargs):
             executed.append("B")
 
-        x = torch.randn((3, 3), dtype=torch.bfloat16, device=device_type, requires_grad=True)
+        x = torch.randn(
+            (3, 3), dtype=torch.bfloat16, device=device_type, requires_grad=True
+        )
         x = HookFunction.apply(x)
-        w = torch.randn((3, 3), dtype=torch.bfloat16, device=device_type, requires_grad=True)
+        w = torch.randn(
+            (3, 3), dtype=torch.bfloat16, device=device_type, requires_grad=True
+        )
         w.register_hook(hook)
         o = Matmul.apply(x, w)
         o.sum().backward()
@@ -7246,9 +7271,9 @@ for shape in [(1,), ()]:
 
                 return x
 
-        model_no_checkpoint = MyModel(
-            8, use_checkpoint=False, use_reentrant=False
-        ).to(device_type)
+        model_no_checkpoint = MyModel(8, use_checkpoint=False, use_reentrant=False).to(
+            device_type
+        )
         model_reentrant_checkpoint = MyModel(
             8, use_checkpoint=True, use_reentrant=True
         ).to(device_type)
@@ -7833,7 +7858,9 @@ for shape in [(1,), ()]:
         def hook_with_callback(*args):
             torch.autograd.Variable._execution_engine.queue_callback(callback)
 
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device(device_type))
+        t = torch.tensor(
+            [1.0, 2.0], requires_grad=True, device=torch.device(device_type)
+        )
         t.register_hook(hook_with_callback)
         output = t**2
         loss = output.sum()
@@ -10378,10 +10405,16 @@ for shape in [(1,), ()]:
 
                 self.assertEqual(actual, expected)
 
-        for is_accelerator_avaliable in [False] + ([True] if torch.accelerator.is_available() else []):
+        for is_accelerator_avaliable in [False] + (
+            [True] if torch.accelerator.is_available() else []
+        ):
             for pin_memory in [True, False]:
                 # FloatTensor
-                test(lambda: torch.randn(5, requires_grad=True), is_accelerator_avaliable, pin_memory)
+                test(
+                    lambda: torch.randn(5, requires_grad=True),
+                    is_accelerator_avaliable,
+                    pin_memory,
+                )
                 # DoubleTensor
                 test(
                     lambda: torch.randn(5, requires_grad=True, dtype=torch.double),
@@ -14298,7 +14331,9 @@ class TestMultithreadAutograd(TestCase):
                 raise RuntimeError("blah")
                 return gO
 
-        t = torch.tensor([1.0, 2.0], requires_grad=True, device=torch.device(device_type))
+        t = torch.tensor(
+            [1.0, 2.0], requires_grad=True, device=torch.device(device_type)
+        )
         out = MyFunc.apply(t).sum()
 
         with self.assertRaisesRegex(RuntimeError, "blah"):
