@@ -323,19 +323,63 @@ inline T powi_impl(T a, T b) {
 
 template <
     typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float pow(T a, U b) {
+  return ::metal::precise::pow(static_cast<float>(a), static_cast<float>(b));
+}
+
+// Complex pow - use polar form: a = r*e^(i*theta)
+// a^b = exp(b * log(a)) = exp(b * (log(r) + i*theta))
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline float2 pow(T a, U b) {
+  // Convert a to polar form
+  // Use explicit computation instead of length() due to numerical issues
+  const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
+
+  // Special case: if r is 0, return 0
+  if (r == 0.0) {
+    return float2(0.0, 0.0);
+  }
+
+  const auto theta = ::metal::precise::atan2(a.y, a.x);
+  const auto log_r = ::metal::precise::log(r);
+
+  // Calculate a^b = r^b * e^(i*theta*b)
+  // new_r = exp(b.x * log(r) - b.y * theta)
+  // new_theta = b.x * theta + b.y * log(r)
+  const auto new_r = ::metal::precise::exp(b.x * log_r - b.y * theta);
+  const auto new_theta = b.x * theta + b.y * log_r;
+
+  return float2(
+      new_r * ::metal::precise::cos(new_theta),
+      new_r * ::metal::precise::sin(new_theta));
+}
+
+// Integral pow - unsigned types
+template <
+    typename T,
+    typename U,
     ::metal::enable_if_t<
         is_scalar_integral_v<T> && !::metal::is_signed_v<T>,
         bool> = true>
-inline T powi(T a, T b) {
-  return powi_impl(a, b);
+inline T pow(T a, U b) {
+  return powi_impl(a, T(b));
 }
 
+// Integral pow - signed types
 template <
     typename T,
+    typename U,
     ::metal::enable_if_t<
         is_scalar_integral_v<T>&& ::metal::is_signed_v<T>,
         bool> = true>
-inline T powi(T a, T b) {
+inline T pow(T a, U b) {
   if (b < 0) {
     if (a == 1) {
       return 1;
@@ -346,7 +390,7 @@ inline T powi(T a, T b) {
       return 0;
     }
   }
-  return powi_impl(a, b);
+  return powi_impl(a, T(b));
 }
 
 // Based on algorithm described in

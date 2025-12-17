@@ -536,17 +536,9 @@ struct round_decimals_functor {
 };
 
 struct pow_scalar_functor {
-  template <typename T>
-  inline enable_if_t<!is_scalar_integral_v<T>, T> operator()(
-      const T x,
-      const float y) {
-    return static_cast<T>(::metal::precise::pow(static_cast<float>(x), y));
-  }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, T> operator()(
-      const T x,
-      const int y) {
-    return powi(x, T(y));
+  template <typename T, typename U>
+  inline T operator()(const T x, const U y) {
+    return static_cast<T>(::c10::metal::pow(x, y));
   }
 };
 
@@ -681,6 +673,8 @@ REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
 
+REGISTER_UNARY_ALPHA_OP(pow_scalar, float2, float2, float2);
+REGISTER_UNARY_ALPHA_OP(pow_scalar, half2, float2, half2);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, float, float, float);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, half, float, half);
 REGISTER_UNARY_ALPHA_OP(pow_scalar, bfloat, float, bfloat);

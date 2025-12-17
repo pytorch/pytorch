@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch.utils import _pytree as pytree
@@ -32,7 +31,7 @@ def _basic_validation(op, args=(), kwargs=None):
         )
 
     # Validate all distributed tensors use the same PG.
-    cur_pg: Optional[torch.distributed.ProcessGroup] = None
+    cur_pg: torch.distributed.ProcessGroup | None = None
 
     def validate_pg(e):
         nonlocal cur_pg
