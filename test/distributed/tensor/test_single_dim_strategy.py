@@ -163,7 +163,7 @@ class TestExpandPlaceholder(TestCase):
         min_cost_strategy = _select_min_cost_strategy(strategy)
         # We can shard tensor dim 1 at most twice, then we run out of values
         self.assertEqual(
-            min_cost_strategy.output_spec.placements, (Shard(1), Replicate(), Shard(1))
+            min_cost_strategy.output_spec.placements, (Shard(1), Shard(1), Replicate())
         )
         # for i, s in enumerate(strategy.strategies):
         #     print(f"{i=}, cost={s.redistribute_cost}, {s}")
