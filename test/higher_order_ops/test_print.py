@@ -261,7 +261,7 @@ x = add_1, y = add_2);  getitem = None
 
         # Compile and get the generated code
         compiled_f = torch.compile(f, backend="inductor")
-        _, (code,) = run_and_get_code(compiled_f, *inputs)
+        _, code = run_and_get_code(compiled_f, *inputs)
 
         # Verify that the generated code uses builtins.print
         # and not torch.ops.higher_order.print
