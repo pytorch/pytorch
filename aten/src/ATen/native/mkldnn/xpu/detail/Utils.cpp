@@ -19,7 +19,9 @@ dnnl::memory make_onednn_memory(
 }
 
 dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md, dnnl::engine& engine, const void* ptr) {
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr) {
   return make_onednn_memory(md, engine, (void*)ptr);
 }
 
