@@ -38,7 +38,6 @@ from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
-
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
 except ImportError:
