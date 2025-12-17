@@ -3753,7 +3753,18 @@ add_docstr_all(
     r"""
 permute(*dims) -> Tensor
 
-See :func:`torch.permute`
+Returns a view of the tensor with its dimensions permuted.
+
+Args:
+    dims (torch.Size, int..., tuple of int or list of int): a sequence of integers defining
+        the shape of the output tensor.
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
 """,
 )
 
