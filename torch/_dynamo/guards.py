@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:
@@ -3427,6 +3427,13 @@ class GuardsStatePickler(pickle.Pickler):
         assert _.__closure__ is not None
         return _.__closure__[0]
 
+    @classmethod
+    def _unpickle_named_tuple_type(
+        cls, name: str, fields: tuple[str, ...]
+    ) -> type[NamedTuple]:
+        # pyrefly: ignore [bad-return]
+        return collections.namedtuple(name, fields)
+
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
@@ -3508,6 +3515,14 @@ class GuardsStatePickler(pickle.Pickler):
             assert hasattr(obj, "_torch_unpickler")
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, tuple)
+            and hasattr(obj, "_fields")
+            and obj.__qualname__ != obj.__name__
+        ):
+            return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
+
         elif isinstance(obj, torch.SymInt):
             raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
 
@@ -3562,7 +3577,7 @@ class GuardsStatePickler(pickle.Pickler):
         if isinstance(obj, torch.nn.attention.SDPBackend):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
-        if type(obj).__qualname__ != type(obj).__name__:
+        if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
             raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
                 + "into torch.compile() package since it's defined in local scope. "
