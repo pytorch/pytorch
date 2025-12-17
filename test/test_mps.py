@@ -5922,32 +5922,6 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
-    def test_col2im_invalid_arg(self):
-        # Test parameter validation for col2im/fold on MPS
-        # Ensure MPS validation matches CPU behavior
-
-        # input.size(1) not divisible by product(kernel_size)
-        with self.assertRaisesRegex(RuntimeError, r"be divisible by the product of kernel_size"):
-            x = torch.randn(1, 5, 9, device='mps')
-            torch.nn.functional.fold(x, output_size=(4, 5), kernel_size=(2, 3))
-
-        # input.size(2) not matching the total number of sliding blocks
-        with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
-            x = torch.randn(1, 6, 10, device='mps')
-            torch.nn.functional.fold(x, output_size=(4, 5), kernel_size=(2, 3))
-
-        # calculated shape of sliding blocks is too small
-        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
-            x = torch.randn(1, 12, 12, device='mps')
-            torch.nn.functional.fold(
-                x,
-                output_size=(4, 5),
-                kernel_size=(2, 2),
-                stride=1,
-                dilation=8,
-                padding=0
-            )
-
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)

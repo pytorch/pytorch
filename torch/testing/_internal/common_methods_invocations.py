@@ -5856,6 +5856,54 @@ def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((1, 1, 5, 5)), (3, 3))
 
 
+def sample_inputs_nn_fold(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Valid test cases for fold
+    cases = (
+        # (input_shape, output_size, kernel_size, dilation, padding, stride)
+        ((1, 12, 12), (4, 5), (2, 2), 1, 0, 1),
+        ((4, 27, 1600), (40, 40), 3, 1, 1, 1),
+        ((1, 27, 1600), (40, 40), 3, 1, 1, 1),
+        ((4, 75, 1600), (40, 40), 5, 1, 2, 1),
+        ((4, 75, 441), (41, 41), 5, 2, 2, 2),
+        ((4, 12, 100), (20, 20), 2, 1, 0, 2),
+    )
+
+    for input_shape, output_size, kernel_size, dilation, padding, stride in cases:
+        input_tensor = make_arg(input_shape)
+        yield SampleInput(input_tensor, output_size=output_size, kernel_size=kernel_size,
+                         dilation=dilation, padding=padding, stride=stride)
+
+
+def error_inputs_fold(op, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
+
+    # Error case 1: input.size(1) not divisible by kernel_size product
+    yield ErrorInput(
+        make_arg((1, 5, 9)),
+        kwargs=dict(output_size=(4, 5), kernel_size=(2, 3)),
+        error_type=RuntimeError,
+        error_regex=r"be divisible by the product of kernel_size"
+    )
+
+    # Error case 2: input.size(2) not matching calculated number of sliding blocks
+    yield ErrorInput(
+        make_arg((1, 6, 10)),
+        kwargs=dict(output_size=(4, 5), kernel_size=(2, 3)),
+        error_type=RuntimeError,
+        error_regex=r"match the calculated number of sliding blocks"
+    )
+
+    # Error case 3: calculated shape of sliding blocks is too small
+    yield ErrorInput(
+        make_arg((1, 12, 12)),
+        kwargs=dict(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0),
+        error_type=RuntimeError,
+        error_regex=r"calculated shape of the array of sliding blocks as"
+    )
+
+
 def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_args = (
         ((S, 1, S, 1), ()),
@@ -15875,6 +15923,21 @@ op_db: list[OpInfo] = [
                # false INTERNAL ASSERT FAILED at "...torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185
                DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
                # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
+    OpInfo('nn.functional.fold',
+           aten_name='col2im',
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_nn_fold,
+           error_inputs_func=error_inputs_fold,
+           gradcheck_fast_mode=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           skips=(
+               DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
