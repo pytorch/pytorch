@@ -255,7 +255,7 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
             event
             for event in p.events()
             if (
-                event.device_type == DeviceType.CUDA
+                event.device_type in [DeviceType.CUDA, DeviceType.XPU]
                 and re.match(r"fused_abs_max_\d", event.name) is not None
             )
         ]
@@ -360,7 +360,8 @@ def _do_bench_using_profiling(
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+            if event.device_type in [DeviceType.CUDA, DeviceType.XPU]
+            and event.name != "Context Sync"
         ]
     )
     if len(filtered_events) % n_repeat != 0:
