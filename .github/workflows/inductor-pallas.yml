@@ -7,11 +7,6 @@ on:
       - release/*
     tags:
       - ciflow/inductor-pallas/*
-  pull_request:
-    paths:
-      - torch/_inductor/codegen/pallas.py
-      - test/inductor/test_pallas.py
-      - .github/workflows/inductor-pallas.yml
   workflow_dispatch:
 
 concurrency:
