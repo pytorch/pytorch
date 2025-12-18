@@ -92,8 +92,7 @@ jobs:
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
             dist/vllm/vllm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu129 \
-            --index-strategy unsafe-best-match
+            --extra-index-url https://download.pytorch.org/whl/cu129
 
       - name: Print some debug information
         env:
