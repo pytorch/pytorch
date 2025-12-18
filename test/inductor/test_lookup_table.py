@@ -942,7 +942,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
                 verify_choice_names, pattern="decompose_k|bmm_dtype", expected_count=1
             )
         )
-        
+
         self.run_model("mm", tensors)
 
     @fresh_cache()

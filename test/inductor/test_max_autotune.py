@@ -1315,7 +1315,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
         def f(a, b):

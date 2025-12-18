@@ -1675,9 +1675,9 @@ class triton:
     # Will be toggled on for unit tests.
     enable_decompose_k = bool(
         os.environ.get(
-            "TORCHINDUCTOR_ENABLE_DECOMPOSE_K",
-            "0" if torch.version.hip else "1"
-        ) == "1"
+            "TORCHINDUCTOR_ENABLE_DECOMPOSE_K", "0" if torch.version.hip else "1"
+        )
+        == "1"
     )
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k

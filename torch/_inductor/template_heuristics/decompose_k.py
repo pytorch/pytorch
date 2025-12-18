@@ -4,8 +4,6 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-import torch
-
 from ..ir import get_free_symbols
 from ..kernel.mm import decompose_k_subgraph_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
