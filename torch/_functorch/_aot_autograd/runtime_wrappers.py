@@ -312,13 +312,13 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             return NotImplemented
 
         res = func(*args, **kwargs)
-        # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional/c10d)
+        # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional)
         # that claim to be functional
         # Skip ops whose schema declares aliasing is allowed
         if (
             not isinstance(func, torch._ops.HigherOrderOperator)
             and not is_builtin(func)
-            and func.namespace not in ("_c10d_functional", "c10d")
+            and func.namespace != "_c10d_functional"
             and not _schema_allows_aliasing(func)
         ):
             _check_custom_op_aliasing(
