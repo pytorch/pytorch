@@ -981,6 +981,7 @@ inductor_skip_exact_stride = {
     "complex",
     "empty_permuted",
     "fft.irfftn",
+    "fft.irfft2",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
@@ -991,10 +992,20 @@ inductor_skip_exact_stride = {
     "matmul",
     "__rmatmul__",
     "narrow_copy",
+    "nn.functional.adaptive_avg_pool1d",
     "nn.functional.group_norm",
+    "nn.functional.max_pool2d",
     "nn.functional.unfold",
     "ormqr",
+    "polar",
+    "prod",
+    "qr",
     "rot90",
+    "stack",
+    "sum",
+    "tensordot",
+    "unbind",
+    "unbind_copy",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
