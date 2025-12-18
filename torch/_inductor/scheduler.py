@@ -2859,6 +2859,10 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: dict[str, str] = {}
 
+        self.seen_template_fusions: OrderedSet[
+            tuple[BaseSchedulerNode, BaseSchedulerNode]
+        ] = OrderedSet()
+
         # Must run first to correctly set dependencies, before all other passes that rely on
         # reading from .read_writes.reads or .unmet_dependencies
         self.nodes = comms.decide_global_ordering_of_comms(
@@ -4239,11 +4243,19 @@ class Scheduler:
             node1 = self.get_fused_node(node1)
             node2 = self.get_fused_node(node2)
 
+            if (
+                node1.is_template() or node2.is_template()
+                and (node1, node2) in self.seen_template_fusions
+            ):
+                continue
+
             if self.can_fuse(
                 node1, node2, is_reorder_round
             ) and not self.will_fusion_create_cycle(node1, node2):
                 speedup = self.speedup_by_fusion(node1, node2)
                 if callable(speedup):
+                    assert (node1, node2) not in self.seen_template_fusions
+                    self.seen_template_fusions.add((node1, node2))
                     pending_fusions[node1] = (speedup, node1, node2)
                     pending_fusions[node2] = (speedup, node1, node2)
                     continue
