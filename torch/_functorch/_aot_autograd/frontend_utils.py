@@ -101,18 +101,6 @@ def process_inputs(
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
 ) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
-    # First, try to get the fake mode from the tracing context.  This is the
-    # authoritative source when Dynamo is driving compilation, since it creates
-    # a fresh FakeTensorMode for the backend.  We intentionally do NOT use
-    # detect_fake_mode here because that also checks the fake modes of input
-    # tensors, which may have been created from a different (userland)
-    # FakeTensorMode.  Those tensors will be "refakified" in process_inputs.
-    if tracing_context := torch._guards.TracingContext.try_get():
-        fake_mode = tracing_context.fake_mode
-        if fake_mode is not None:
-            return (fake_mode, fake_mode.shape_env)
-
-    # Fall back to detecting from inputs if there's no tracing context
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
