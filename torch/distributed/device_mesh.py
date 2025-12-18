@@ -305,8 +305,8 @@ else:
 
         @property
         def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
             with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                """Returns the tensor representing the layout of devices."""
                 full_mesh = self._layout.remap_to_tensor(self._rank_map)
                 if full_mesh.size(0) == 1:
                     return full_mesh[0]
