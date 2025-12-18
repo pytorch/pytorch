@@ -71,7 +71,7 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
 
 
 def validate_match(match: Match) -> bool:
-    """Check if pattern match should be optimized."""
+    """Check if pattern match should be optimized for scatter."""
     output_node = match.output_node()
     if not output_node or not hasattr(output_node, "args") or len(output_node.args) < 4:
         return False
@@ -348,7 +348,7 @@ def _fit_to_memory_budget(
         return 0
 
     except Exception as e:
-        log.debug(f"Memory check failed: {e}, proceeding with {num_partitions}")
+        log.debug("Memory check failed: %s, proceeding with %s", e, num_partitions)
         return num_partitions  # Assume we have enough memory if we can't check
 
 
