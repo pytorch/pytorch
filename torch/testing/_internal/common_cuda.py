@@ -314,11 +314,20 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def _get_torch_hipblaslt_version():
-    if not TEST_WITH_ROCM or torch.version.hipblaslt is None:
-        return (0, 0)
-    hipblaslt_version = str(torch.version.hipblaslt)
-    hipblaslt_version = hipblaslt_version.split("-", maxsplit=1)[0]    # ignore git sha
-    return tuple(int(x) for x in hipblaslt_version.split("."))
+    if not TEST_WITH_ROCM:
+        return None
+    try:
+        # Access through direct C binding
+        # versionHipBLASLt returns: MAJOR * 10000 + MINOR * 100 + PATCH
+        version_int = torch._C._cuda_getHipblasltVersion()
+        if version_int is None or version_int == 0:
+            return None
+        major = version_int // 10000
+        minor = (version_int % 10000) // 100
+        patch = version_int % 100
+        return (major, minor, patch)
+    except (AttributeError, RuntimeError):
+        return None
 
 def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM

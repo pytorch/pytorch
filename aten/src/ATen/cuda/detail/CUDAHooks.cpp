@@ -30,6 +30,7 @@
 
 #if defined(USE_ROCM)
 #include <miopen/version.h>
+#include <hipblaslt/hipblaslt-version.h>
 #endif
 
 #ifndef USE_ROCM
@@ -378,6 +379,16 @@ long CUDAHooks::versionMIOpen() const {
          MIOPEN_VERSION_PATCH;
 #else
   TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
+#endif
+}
+
+long CUDAHooks::versionHipBLASLt() const {
+#if AT_ROCM_ENABLED()
+  return HIPBLASLT_VERSION_MAJOR * 10000 +
+         HIPBLASLT_VERSION_MINOR * 100 +
+         HIPBLASLT_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
 #endif
 }
 

@@ -195,21 +195,6 @@ if(HIP_FOUND)
   endif()
   find_package_and_print_version(hipblaslt REQUIRED)
 
-  # Capture hipblaslt version
-  if(hipblaslt_VERSION)
-    # Check if hipblaslt_VERSION contains a dash and strip everything after it
-    string(FIND "${hipblaslt_VERSION}" "-" DASH_POS)
-    if(NOT DASH_POS EQUAL -1)
-      string(SUBSTRING "${hipblaslt_VERSION}" 0 ${DASH_POS} HIPBLASLT_VERSION_CLEAN)
-    else()
-      set(HIPBLASLT_VERSION_CLEAN "${hipblaslt_VERSION}")
-    endif()
-    message("hipblaslt version: ${HIPBLASLT_VERSION_CLEAN}")
-  else()
-    set(HIPBLASLT_VERSION_CLEAN "")
-    message("hipblaslt version not found")
-  endif()
-
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
