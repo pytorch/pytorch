@@ -48,7 +48,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         exportable_module = MyExportableModule()
         onnx_program = exportable_module.to_onnx()
         # The model can also be supplied directly to torch.onnx.export
-        exportable_module = torch.onnx.export(exportable_module)
+        onnx_program = torch.onnx.export(exportable_module)
     """
 
     @abc.abstractmethod
