@@ -3357,7 +3357,15 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
+    if device_hint(self) == "cpu":
+        return self.new_empty((size, self.dim()), dtype=torch.long)
+    else:
+        return torch.empty_strided(
+            (size, self.dim()),
+            (1, size),
+            dtype=torch.long,
+            device=self.device,
+        )
 
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
@@ -7164,6 +7172,51 @@ def _cudnn_rnn(
     reserve = input.new_empty(reserve_shape, dtype=torch.uint8)
 
     return output, hy, cy, reserve, weight_buf
+
+
+@register_meta(aten.miopen_rnn.default)
+def miopen_rnn(
+    input,
+    weight,
+    weight_stride0,
+    # weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    # proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+    total_weight_elems = 0
+    for w in weight:
+        if w.numel() > 0:
+            total_weight_elems += w.numel()
+
+    weight_buf = input.new_empty((total_weight_elems,))
+    return _cudnn_rnn(
+        input,
+        weight,
+        weight_stride0,
+        weight_buf,
+        hx,
+        cx,
+        mode,
+        hidden_size,
+        0,
+        num_layers,
+        batch_first,
+        dropout,
+        train,
+        bidirectional,
+        batch_sizes,
+        dropout_state,
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer.default)

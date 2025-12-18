@@ -1,6 +1,6 @@
 import collections
 import ctypes
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch._utils import _dummy_type
@@ -12,6 +12,8 @@ from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 if not _is_compiled():
     # Define dummy base classes
     torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
+
+_device_t = Union[Device, str, int, None]
 
 
 def empty_cache() -> None:
@@ -27,7 +29,7 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
-def reset_peak_memory_stats(device: Device = None) -> None:
+def reset_peak_memory_stats(device: _device_t = None) -> None:
     r"""Reset the "peak" stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Peak stats correspond to the
@@ -42,7 +44,7 @@ def reset_peak_memory_stats(device: Device = None) -> None:
     return torch._C._xpu_resetPeakMemoryStats(device)
 
 
-def reset_accumulated_memory_stats(device: Device = None) -> None:
+def reset_accumulated_memory_stats(device: _device_t = None) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Accumulated stats correspond to
@@ -57,7 +59,7 @@ def reset_accumulated_memory_stats(device: Device = None) -> None:
     return torch._C._xpu_resetAccumulatedMemoryStats(device)
 
 
-def memory_stats_as_nested_dict(device: Device = None) -> dict[str, Any]:
+def memory_stats_as_nested_dict(device: _device_t = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.xpu.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -65,7 +67,7 @@ def memory_stats_as_nested_dict(device: Device = None) -> dict[str, Any]:
     return torch._C._xpu_memoryStats(device)
 
 
-def memory_stats(device: Device = None) -> dict[str, Any]:
+def memory_stats(device: _device_t = None) -> dict[str, Any]:
     r"""Return a dictionary of XPU memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -121,7 +123,7 @@ def memory_stats(device: Device = None) -> dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_allocated(device: Device = None) -> int:
+def memory_allocated(device: _device_t = None) -> int:
     r"""Return the current GPU memory occupied by tensors in bytes for a given device.
 
     Args:
@@ -137,7 +139,7 @@ def memory_allocated(device: Device = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device: Device = None) -> int:
+def max_memory_allocated(device: _device_t = None) -> int:
     r"""Return the maximum GPU memory occupied by tensors in bytes for a given device.
 
     By default, this returns the peak allocated memory since the beginning of
@@ -154,7 +156,7 @@ def max_memory_allocated(device: Device = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device: Device = None) -> int:
+def memory_reserved(device: _device_t = None) -> int:
     r"""Return the current GPU memory managed by the caching allocator in bytes for a given device.
 
     Args:
@@ -165,7 +167,7 @@ def memory_reserved(device: Device = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device: Device = None) -> int:
+def max_memory_reserved(device: _device_t = None) -> int:
     r"""Return the maximum GPU memory managed by the caching allocator in bytes for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
@@ -182,7 +184,7 @@ def max_memory_reserved(device: Device = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
-def mem_get_info(device: Device = None) -> tuple[int, int]:
+def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device.
 
     Args:
@@ -199,7 +201,7 @@ def mem_get_info(device: Device = None) -> tuple[int, int]:
     return torch._C._xpu_getMemoryInfo(device)
 
 
-def get_per_process_memory_fraction(device: Device = None) -> float:
+def get_per_process_memory_fraction(device: _device_t = None) -> float:
     r"""
     Retrieve the memory fraction currently set for a process on a given XPU device.
     This fraction represents the portion of the total device memory that
@@ -219,7 +221,7 @@ def get_per_process_memory_fraction(device: Device = None) -> float:
     return torch._C._xpu_getMemoryFraction(device)
 
 
-def set_per_process_memory_fraction(fraction: float, device: Device = None) -> None:
+def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -> None:
     r"""
     Set the memory fraction for a single process on XPU device.
     This function limits the amount of memory that the caching allocator can allocate
