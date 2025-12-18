@@ -9,7 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from enum import auto, Enum
+from enum import Enum
 from functools import lru_cache
 from typing import Any, cast, NamedTuple, Optional, Protocol, Union
 
