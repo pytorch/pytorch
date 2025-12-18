@@ -889,7 +889,7 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if torch.cuda.is_available or torch.xpu.is_available:
+        if torch.cuda.is_available() or torch.xpu.is_available():
             devices += [device_type]
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
