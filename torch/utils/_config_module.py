@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
-from unittest import mock
 
 from torch._utils_internal import justknobs_check
 
@@ -46,6 +45,7 @@ class _Config(Generic[T]):
             everything after this.
             If multiple env variables are given, the precedence order is from
             left to right.
+        tl_override: Thread local override, normally set via config.patch
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
@@ -358,14 +358,20 @@ class ConfigModule(ModuleType):
         )
 
     def __setattr__(self, name: str, value: object) -> None:
+        self._do_setattr(name, value, False)
+
+    def _do_setattr(self, name: str, value: object, set_tls: bool) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         elif self._config[name].alias is not None:
-            self._set_alias_val(self._config[name], value)
+            self._set_alias_val(self._config[name], value, set_tls=set_tls)
         else:
-            self._config[name].user_override = value
+            if set_tls:
+                setattr(self._tl_overrides, name, value)
+            else:
+                self._config[name].user_override = value
             self._is_dirty = True
             self._config[name].hide = False
 
@@ -416,6 +422,7 @@ class ConfigModule(ModuleType):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
+        setattr(self._tl_overrides, name, _UNSET_SENTINEL)
         self._config[name].hide = True
 
     def _get_alias_module_and_name(
@@ -439,37 +446,43 @@ class ConfigModule(ModuleType):
         constant_value = getattr(module, constant_name)
         return constant_value
 
-    def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
+    def _set_alias_val(
+        self, entry: _ConfigEntry, val: Any, set_tls: bool = False
+    ) -> None:
         data = self._get_alias_module_and_name(entry)
         if data is None:
             raise AssertionError(
                 "alias data should not be None when setting alias value"
             )
         module, constant_name = data
-        setattr(module, constant_name, val)
+        module._do_setattr(constant_name, val, set_tls=set_tls)
 
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
         configs overridden by the env are not considered default.
         """
-        config_val = self._config[name]
+        config_entry = self._config[name]
         # The config is not overridden by the user, and the env_value_default
         # is different from the default value (meaning user has set the env to
         # change the default value).
         not_set_env_default = (
-            config_val.env_value_default is _UNSET_SENTINEL
-            or config_val.env_value_default == config_val.default
+            config_entry.env_value_default is _UNSET_SENTINEL
+            or config_entry.env_value_default == config_entry.default
         )
         not_set_env_force = (
-            config_val.env_value_force is _UNSET_SENTINEL
-            or config_val.env_value_force == config_val.default
+            config_entry.env_value_force is _UNSET_SENTINEL
+            or config_entry.env_value_force == config_entry.default
         )
 
-        unset = config_val.user_override is _UNSET_SENTINEL
+        if getattr(self._tl_overrides, name, _UNSET_SENTINEL) is not _UNSET_SENTINEL:
+            config_val = getattr(self._tl_overrides, name)
+        else:
+            config_val = config_entry.user_override
+        unset = config_val is _UNSET_SENTINEL
         # Handle reference types specially to avoid spammy warnings
-        if isinstance(config_val.default, (list, set, dict)):
-            unset = unset or config_val.user_override == config_val.default
+        if isinstance(config_entry.default, (list, set, dict)):
+            unset = unset or config_val == config_entry.default
         return unset and not_set_env_default and not_set_env_force
 
     def _get_dict(
@@ -696,6 +709,7 @@ class ConfigModule(ModuleType):
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
         prior: dict[str, Any] = {}
+        unset_tls: set[str] = set()
         config = self
 
         class ConfigPatch(ContextDecorator):
@@ -703,20 +717,28 @@ class ConfigModule(ModuleType):
                 self.changes = changes
 
             def __enter__(self) -> None:
-                if prior:
+                if prior or unset_tls:
                     raise AssertionError(
-                        "prior should be empty when entering ConfigPatch"
+                        "prior and unset_tls should be empty when entering ConfigPatch"
                     )
                 for key in self.changes:
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
+                    if (
+                        getattr(config._tl_overrides, key, _UNSET_SENTINEL)
+                        is _UNSET_SENTINEL
+                    ):
+                        unset_tls.add(key)
                 for k, v in self.changes.items():
-                    config.__setattr__(k, v)
+                    config._do_setattr(k, v, set_tls=True)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
                 for k, v in prior.items():
-                    config.__setattr__(k, v)
+                    config._do_setattr(k, v, set_tls=True)
+                    if k in unset_tls:
+                        config._do_setattr(k, _UNSET_SENTINEL, True)
                 prior.clear()
+                unset_tls.clear()
 
         return ConfigPatch()
 
@@ -814,15 +836,6 @@ class SubConfigProxy:
 
     def __delattr__(self, name: str) -> None:
         return self._config.__delattr__(self._prefix + name)
-
-
-def patch_object(obj: object, name: str, value: object) -> object:
-    """
-    Workaround `mock.patch.object` issue with ConfigModule
-    """
-    if isinstance(obj, ConfigModule):
-        return obj.patch(name, value)
-    return mock.patch.object(obj, name, value)
 
 
 def get_tristate_env(name: str, default: Any = None) -> bool | None:
