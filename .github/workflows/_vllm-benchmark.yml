@@ -228,6 +228,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
-          # TODO: RUN FOR REAL
+          # TODO: SWITCH THIS TO FALSE BEFORE LANDING
           dry-run: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
