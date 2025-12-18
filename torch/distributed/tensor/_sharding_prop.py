@@ -26,7 +26,6 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
-    _find_lowest_cost_sharding,
     _SingleDimStrategyFunc,
 )
 from torch.distributed.tensor._utils import (
@@ -252,7 +251,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -299,7 +298,7 @@ class ShardingPropagator:
     @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
         This is a private API. Use propagate_tensor_meta instead.
@@ -308,7 +307,7 @@ class ShardingPropagator:
 
     def propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
@@ -323,7 +322,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -460,7 +459,10 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-        if op_schema.op in self.op_single_dim_strategy_funcs:
+
+        single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
+        op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        if single_dim_strategy is not None or op_strategy_func is not None:
             """
             Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
             for the operator over a single mesh dimension,
@@ -474,72 +476,20 @@ class ShardingPropagator:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
-            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-            assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
-            single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            single_dim_expand_fully = True
-            if single_dim_expand_fully:
+            if single_dim_strategy is not None:
+                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
-                # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
-                # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                     mesh, strategy_schema, single_dim_strategy
                 )
-                strategy = _expanded_strategy_fn(
+                op_strategy = _expanded_strategy_fn(
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
                 )
             else:
-                strategy = _find_lowest_cost_sharding(
-                    mesh, strategy_schema, single_dim_strategy
-                )
-            assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
-            output_strategy = _select_min_cost_strategy(strategy, op_schema)
-            # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
-            # but with a lot of special cases elided.  We'll see if this can be kept simple, or else
-            # refactor to share code.
-            assert output_strategy.input_specs is not None, (
-                "single-dim strategies always have input specs"
-            )
-            needs_redistribute = False
-            expected_input_specs: list[DTensorSpec] = []
-            for idx, input_spec in enumerate(op_schema.args_spec):
-                desired_spec = output_strategy.input_specs[idx]
-                expected_input_specs.append(
-                    desired_spec.shallow_copy_with_tensor_meta(input_spec.tensor_meta)
-                )
-                if input_spec.placements != desired_spec.placements:
-                    needs_redistribute = True
-
-            suggestion_schema = None
-            if needs_redistribute:
-                suggestion_schema = OpSchema(
-                    op_schema.op, tuple(expected_input_specs), {}
-                )
-                suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
-
-            assert op_schema.return_type_tensor(), "Other return types NYI"
-            output_specs = output_strategy.output_specs
-
-            # TODO: figure out what use_val_from_redistribute_schema is for
-            output_sharding = OutputSharding(
-                output_specs,
-                suggestion_schema,
-                needs_redistribute=needs_redistribute,
-                use_val_from_redistribute_schema=False,
-            )
-            # associate the output sharding with the output tensor metadata
-            new_output_spec = self._create_output_spec_with_new_tensor_meta(
-                op_schema.op, output_sharding.output_spec, out_tensor_meta
-            )
-            output_sharding.output_spec = new_output_spec
-            return output_sharding
-        elif op_schema.op in self.op_strategy_funcs:
-            # wrap the op_schema with op strategy for sharding strategy propagation
-            strategy_schema = self._wrap_with_op_strategy(op_schema)
-
-            # run sharding strategy propagation/generation
-            op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
+                assert op_strategy_func is not None
+                op_strategy = op_strategy_func(strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
