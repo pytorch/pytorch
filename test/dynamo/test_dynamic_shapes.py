@@ -37,6 +37,16 @@ except ImportError:
 
 test_classes = {}
 
+def test_combinations_dynamic_aot_eager():
+    import torch
+
+    def f(x):
+        return torch.combinations(x.flatten(), r=2)
+
+    x = torch.randn(5)
+    compiled = torch.compile(f, backend="aot_eager", dynamic=True)
+    compiled(x)
+
 
 def make_dynamic_cls(cls):
     suffix = "_dynamic_shapes"

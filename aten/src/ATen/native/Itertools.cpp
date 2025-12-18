@@ -63,7 +63,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   if (r == 0) {
     return at::empty({0}, self.options());
   }
-  int64_t num_elements = self.numel();
+  int64_t num_elements = self.sym_numel();
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self), "ij");
   Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
   for(Tensor &t : grids) {
