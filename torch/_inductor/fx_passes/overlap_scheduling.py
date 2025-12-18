@@ -289,6 +289,7 @@ class OverlapScheduler:
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
+        bucket_exposed_first: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
     ):
         self.gm = gm
@@ -302,6 +303,7 @@ class OverlapScheduler:
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
+        self.bucket_exposed_first = bucket_exposed_first
         self.bucket_mode = bucket_mode
 
         # Build structures
@@ -1172,16 +1174,18 @@ class OverlapScheduler:
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                # Allow if fully hidden by other nodes
-                if not info.is_exposed and curr_overlap_node not in info.hiding_nodes:
+                if (not info.is_exposed) and (
+                    curr_overlap_node not in info.hiding_nodes
+                ):
                     continue
 
                 why(
-                    "path blocked by wait node %s (exposed=%s, hiding_nodes=%s)",
+                    "path blocked by wait node %s (exposed=%s, hidden_by_curr_overlap=%s)",
                     node.name,
                     info.is_exposed,
                     curr_overlap_node in info.hiding_nodes,
                 )
+                return None
 
             # Skip c10 ops and dtensor shard ops - they should be scheduled via main loop
             target_str = str(node.target)
@@ -1315,6 +1319,7 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            bucket_exposed_first=self.bucket_exposed_first,
             bucket_mode=self.bucket_mode,
         )
         bucketer.bucket_collectives()
@@ -1371,6 +1376,7 @@ def schedule_overlap_bucketing(
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
+    bucket_exposed_first: bool = True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1407,6 +1413,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
         log_final_collectives_estimations=log_final_collectives_estimations,
+        bucket_exposed_first=bucket_exposed_first,
     ).run()
 
 
@@ -1436,6 +1443,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_in_flight_gb",
         "max_coll_distance",
         "log_final_collectives_estimations",
+        "bucket_exposed_first",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
