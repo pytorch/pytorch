@@ -13,12 +13,12 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
