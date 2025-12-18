@@ -59,7 +59,7 @@ from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
-from torch._ops import HigherOrderOperator
+from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -79,6 +79,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
@@ -186,6 +187,8 @@ from .dicts import (
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import (
@@ -813,7 +816,7 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, set):
+        elif istype(value, (set, OrderedSet)):
             if any(isinstance(x, torch.Tensor) for x in value):
                 unimplemented(
                     gb_type="Attempted to wrap a set with tensors",
@@ -831,6 +834,16 @@ class VariableBuilder:
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            set_var_cls = SetVariable
+
+            if istype(value, OrderedSet):
+                # Guard on the internal dict of OrderedSet
+                internal_dict_source = AttrSource(self.source, "_dict")
+                install_guard(
+                    internal_dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
+                )
+                self.tx.output.guard_on_key_order.add(internal_dict_source)
+                set_var_cls = OrderedSetVariable
 
             # The list gives a ordering for the set items. The ordering is based
             # on the Python hash and it is not related to object ordering inside
@@ -843,7 +856,7 @@ class VariableBuilder:
                 )
                 for i, v in enumerate(L)
             ]
-            result = SetVariable(items, source=self.source)
+            result = set_var_cls(items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
@@ -852,15 +865,18 @@ class VariableBuilder:
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
+                or
+                # For activation checkpointing, we could get a frozenset of torch ops.
+                isinstance(x, (OpOverload, OpOverloadPacket))
             )
             for x in value
         ):
             # For the limited cases of frozenset here, we know the items won't
             # change across runs, so we can safely create sourceless VTs for
-            # them and only guard on the frozenset id.
+            # them and guard on the frozenset contents via EQUALS_MATCH.
             # TODO support source for sets and remove the special logics here.
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
         elif isinstance(
             value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
@@ -1142,6 +1158,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif value is OrderedSet:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return OrderedSetClassVariable()
         elif (
             id(value) in ITERTOOLS_TYPE_IDS
             and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
@@ -1628,7 +1647,11 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            if isinstance(value, set):
+                set_vt_cls = SetVariable
+            elif isinstance(value, frozenset):
+                set_vt_cls = FrozensetVariable
+
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
@@ -3887,6 +3910,9 @@ class SourcelessBuilder:
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
         handlers[set] = lambda tx, value: SetVariable(
+            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
+        )
+        handlers[OrderedSet] = lambda tx, value: OrderedSetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(

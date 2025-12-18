@@ -282,6 +282,7 @@ class DeferredTritonCallWrapper:
                     "i32": "int32_t",
                     "i64": "int64_t",
                     "fp32": "float",
+                    "fp64": "double",
                 }
 
                 def signature_is_tma_desc(sig):
@@ -643,6 +644,7 @@ class CppWrapperGpu(CppWrapperCpu):
             "i32": "int32_t",
             "i64": "int64_t",
             "fp32": "float",
+            "fp64": "double",
         }
 
         def signature_is_tma_desc(sig):
@@ -723,7 +725,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 code.writeline(f"int {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Float, float):
-                code.writeline(f"float {var_name} = {cexpr(arg)};")
+                # Use signature type if available, otherwise default to float
+                cpp_type = signature2dtype.get(  # pyrefly: ignore[no-matching-overload]
+                    arg_signature, "float"
+                )
+                code.writeline(f"{cpp_type} {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
                 new_args.extend(
