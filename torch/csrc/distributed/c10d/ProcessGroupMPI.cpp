@@ -43,7 +43,7 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
     {at::kFloat, MPI_FLOAT},
 // FP16 is generally supported if MPIX_C_FLOAT16 exists
 // for now the NVIDIA hpc sdk is built without (OpenMPI)
-#if  defined(MPIX_C_FLOAT16)
+#if defined(MPIX_C_FLOAT16)
     {at::kHalf, MPIX_C_FLOAT16},
 #endif
 #if defined(MPIX_C_BF16)
