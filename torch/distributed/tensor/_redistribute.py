@@ -7,6 +7,7 @@ import logging
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
+from enum import auto, Enum
 from functools import cache
 from typing import cast, NamedTuple
 
@@ -14,6 +15,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     DTensorSpec,
     ShardOrder,
@@ -39,9 +41,18 @@ logger = logging.getLogger(__name__)
 # only when necessary to support strided-shard redistribution
 _FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 
+# Global configuration flag to control the cost function used by the graph-based planner.
+# When True, uses fixed cost weights that prioritize reducing memory overhead
+# (e.g., prefers all-to-all over all-gather to avoid memory spikes).
+# When False, uses communication time estimation based on actual tensor sizes and
+# mesh topology for more accurate cost modeling.
+_USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN: bool = True
+
 
 @contextlib.contextmanager
-def use_min_cost_redistribution_plan(enabled: bool = True):
+def use_min_cost_redistribution_plan(
+    enabled: bool = True, reduce_memory_overhead: bool = True
+):
     """
     Context manager to control the redistribution planning strategy for DTensor operations.
 
@@ -90,14 +101,28 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
         enabled (bool): If True, forces the use of the graph-based algorithm.
                        If False, forces the use of the greedy algorithm.
                        Default: True
+        reduce_memory_overhead (bool): Controls the cost function used by the graph-based
+                       planner. If True, uses fixed cost weights that prioritize reducing
+                       memory overhead (e.g., prefers all-to-all over all-gather).
+                       If False, uses communication time estimation based on actual tensor
+                       sizes and mesh topology. Default: True
     """
     global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
-    old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
+    global _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN
+
+    old_value = (
+        _FORCE_MIN_COST_REDISTRIBUTION_PLAN,
+        _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
+    )
     _FORCE_MIN_COST_REDISTRIBUTION_PLAN = enabled
+    _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN = reduce_memory_overhead
     try:
         yield
     finally:
-        _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
+        (
+            _FORCE_MIN_COST_REDISTRIBUTION_PLAN,
+            _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
+        ) = old_value
 
 
 class _TransformInfo(NamedTuple):
@@ -109,12 +134,15 @@ class _TransformInfo(NamedTuple):
 
 # Global cache for DTensorRedistributePlanner instances
 _planner_cache: dict[
-    tuple[weakref.ReferenceType, int], "DTensorRedistributePlanner"
+    tuple[weakref.ReferenceType[DeviceMesh], TensorMeta, Optional[bool]],
+    "DTensorRedistributePlanner",
 ] = {}
 
 
 def get_redistribute_planner(
-    device_mesh: DeviceMesh, tensor_dimension: int
+    device_mesh: DeviceMesh,
+    dtensor_meta: TensorMeta,
+    reduce_memory_overhead: Optional[bool] = True,
 ) -> "DTensorRedistributePlanner":
     """
     Factory function to get or create a DTensorRedistributePlanner instance.
@@ -123,14 +151,20 @@ def get_redistribute_planner(
     will return the same cached instance for better performance.
     Args:
         device_mesh: The device mesh for the planner
-        tensor_dimension: Number of tensor dimensions
+        dtensor_meta: TensorMeta of the DTensor to redistribute
+        reduce_memory_overhead: The objective redistribute cost function
+            focuses on reducing the memory overhead. Otherwise reducing the
+            communication time.
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
-    cache_key = (weakref.ref(device_mesh), tensor_dimension)
+    # Use the underlying shape (torch.Size) from TensorMeta for the cache key
+    cache_key = (weakref.ref(device_mesh), dtensor_meta, reduce_memory_overhead)
 
     if cache_key not in _planner_cache:
-        planner = DTensorRedistributePlanner(device_mesh, tensor_dimension)
+        planner = DTensorRedistributePlanner(
+            device_mesh, dtensor_meta, reduce_memory_overhead
+        )
         _planner_cache[cache_key] = planner
 
     return _planner_cache[cache_key]
@@ -150,6 +184,14 @@ class DTensorRedistributePlanner:
     Note: Use get_redistribute_planner() factory function instead of direct
     instantiation for automatic caching.
     """
+
+    class TransitionType(Enum):
+        SHARD_TO_SHARD = auto()
+        SHARD_TO_REPLICATE = auto()
+        PARTIAL_TO_REPLICATE = auto()
+        REPLICATE_TO_SHARD = auto()
+        PARTIAL_TO_SHARD = auto()
+        REPLICATE_TO_PARTIAL = auto()
 
     @dataclasses.dataclass(frozen=True, slots=True)
     class DistState:
@@ -283,44 +325,92 @@ class DTensorRedistributePlanner:
     def __init__(
         self,
         device_mesh: DeviceMesh,
-        tensor_dimension: int,
+        dtensor_meta: TensorMeta,
+        reduce_memory_overhead: Optional[bool] = True,
     ) -> None:
         """
         Initialize DTensorRedistributePlanner.
 
         Args:
             device_mesh: The device mesh for this planner
-            tensor_dimension: Number of tensor dimensions
+            dtensor_meta: TensorMeta of the DTensor to redistribute
+            reduce_memory_overhead: The objective redistribute cost function
+            focuses on reducing the memory overhead. Otherwise reducing the
+            communication time.
         """
         self.device_mesh = device_mesh
         self.coordinate = device_mesh.get_coordinate()
         assert self.coordinate is not None
-        self.tensor_dimension = tensor_dimension
-        self.setup_collective_cost()
+        assert dtensor_meta is not None
+        self.dtensor_meta = dtensor_meta
+        self.tensor_dimension = len(dtensor_meta.shape)
+        self.reduce_memory_overhead = reduce_memory_overhead
+        self.setup_cost_callbacks()
 
-    def setup_collective_cost(
+    def setup_cost_callbacks(
         self,
-        all_reduce_cost: int = 4,
-        all_to_all_cost: int = 1,
-        all_gather_cost: int = 2,
-        reduce_scatter_cost: int = 2,
-        chunk_cost: int = 0,
     ) -> None:
         """
         Set up the cost weights for different collective operations.
         """
-        # those can be turned in a handler considering the tensor dim size
-        self.all_reduce_cost = all_reduce_cost
-        self.all_to_all_cost = all_to_all_cost
-        self.all_gather_cost = all_gather_cost
-        self.reduce_scatter = reduce_scatter_cost
-        self.chunk_cost = chunk_cost
+        if self.reduce_memory_overhead:
+            all_reduce_cost: float = 4.0
+            all_to_all_cost: float = 1.0
+            all_gather_cost: float = 2.0
+            reduce_scatter_cost: float = 2.0
+            chunk_cost: float = 0.0
+
+            def cost_function(
+                src_state,
+                dst_state,
+                transition_type: DTensorRedistributePlanner.TransitionType,
+            ):
+                match transition_type:
+                    case DTensorRedistributePlanner.TransitionType.REPLICATE_TO_SHARD:
+                        return chunk_cost
+                    case DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD:
+                        return all_to_all_cost
+                    case DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE:
+                        return all_gather_cost
+                    case DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE:
+                        return all_reduce_cost
+                    case DTensorRedistributePlanner.TransitionType.REPLICATE_TO_PARTIAL:
+                        # replicate to partial is a no-op (just marks tensor as partial)
+                        return chunk_cost
+                    case DTensorRedistributePlanner.TransitionType.PARTIAL_TO_SHARD:
+                        return reduce_scatter_cost
+                    case _:
+                        raise ValueError(
+                            f"unsupported cost for TransitionType {transition_type}"
+                        )
+        else:
+
+            def state_to_spec(
+                state: DTensorRedistributePlanner.DistState,
+            ) -> DTensorSpec:
+                return DTensorSpec(
+                    mesh=self.device_mesh,
+                    placements=state.placements,
+                    tensor_meta=self.dtensor_meta,
+                    shard_order=state.tensor_dim_to_mesh_dim,
+                )
+
+            def cost_function(
+                src_state,
+                dst_state,
+                transition_type: DTensorRedistributePlanner.TransitionType,
+            ):
+                return one_step_redistribute_cost(
+                    state_to_spec(src_state), state_to_spec(dst_state)
+                )
+
+        self.cost_function = cost_function
 
     def get_next_state(
         self,
         placements: tuple[Placement, ...],
         tensor_mesh_dim_tuple: ShardOrder,
-    ) -> dict["DTensorRedistributePlanner.DistState", int]:
+    ) -> dict["DTensorRedistributePlanner.DistState", float]:
         # We map tensor dimensions to device mesh axes, similar to JAX-style
         # sharding representation. Notation:
         # S(<tensor_dim>)[<list_of_device_dims>] means tensor dimension
@@ -364,10 +454,14 @@ class DTensorRedistributePlanner:
         # to operate on any Partial mesh dim.
 
         # list of [DistState, cost]
-        all_next_state: dict[DTensorRedistributePlanner.DistState, int] = {}
+        all_next_state: dict[DTensorRedistributePlanner.DistState, float] = {}
 
         tensor_mesh_dim_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             tensor_mesh_dim_tuple
+        )
+        cur_dist_state = self.DistState(
+            self._to_tuple(placements),
+            tensor_mesh_dim_tuple,
         )
         ######################################################################
         # handle case 1: Shard(a) -> Shard(b)
@@ -392,7 +486,11 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.all_to_all_cost
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                    DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD,
+                )
                 # reset content for next iteration
                 tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
@@ -411,7 +509,11 @@ class DTensorRedistributePlanner:
                 DTensorRedistributePlanner._dict_to_ShardOrder(tensor_mesh_dim_dict),
             )
             tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
-            all_next_state[dist_state] = self.all_gather_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+                DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE,
+            )
 
         ######################################################################
         # handle case 3: Partial() -> Replicate()
@@ -423,7 +525,11 @@ class DTensorRedistributePlanner:
             dist_state = self.DistState(
                 self._to_tuple(new_placements), tensor_mesh_dim_tuple
             )
-            all_next_state[dist_state] = self.all_reduce_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+                DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE,
+            )
 
         ######################################################################
         # handle case 4: Replicate() -> Shard()
@@ -441,7 +547,11 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.chunk_cost
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                    DTensorRedistributePlanner.TransitionType.REPLICATE_TO_SHARD,
+                )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
@@ -460,7 +570,11 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.reduce_scatter
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                    DTensorRedistributePlanner.TransitionType.PARTIAL_TO_SHARD,
+                )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
@@ -473,7 +587,11 @@ class DTensorRedistributePlanner:
             dist_state = self.DistState(
                 self._to_tuple(new_placements), tensor_mesh_dim_tuple
             )
-            all_next_state[dist_state] = self.chunk_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+                DTensorRedistributePlanner.TransitionType.REPLICATE_TO_PARTIAL,
+            )
 
         return all_next_state
 
@@ -501,7 +619,7 @@ class DTensorRedistributePlanner:
         counter = 0
         pq: list[
             tuple[
-                int,
+                float,
                 int,
                 DTensorRedistributePlanner.DistState,
                 list[DTensorRedistributePlanner.DistState],
@@ -765,7 +883,12 @@ def _gen_transform_infos_non_cached(
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     elif use_graph_based_transform is None:
         use_graph_based_transform = False
-    drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
+    assert src_spec.tensor_meta is not None
+    drp = get_redistribute_planner(
+        device_mesh,
+        src_spec.tensor_meta,
+        _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
+    )
     if use_graph_based_transform:
         transform_infos = drp.generate_graph_based_transform_infos(
             src_spec, dst_spec, src_spec.shape
