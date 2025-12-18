@@ -303,7 +303,7 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
   // In case there are fewer threads than previous block aggregates to be read, add more aggregates (should be at most 2-3 aggregates per thread)
-  for (int i=threadIdx.x + blockDim.x; i<blockIdx.x; i+=blockDim.x) {
+  for (unsigned int i=threadIdx.x + blockDim.x; i<blockIdx.x; i+=blockDim.x) {
     agg_data += agg[i];
   }
 
