@@ -1002,6 +1002,7 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
             libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
+    @skipIfWindows(msg="ValueError: vector too long")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my__foreach_mul_vec(self, device):
         """Test my__foreach_mul_vec which uses const std::vector<Tensor>& parameters."""
