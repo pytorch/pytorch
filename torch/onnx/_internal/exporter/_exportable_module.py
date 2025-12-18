@@ -17,15 +17,11 @@ class ExportableModule(torch.nn.Module, abc.ABC):
     to create a module that can be exported to ONNX format.
 
     Example::
-        import torch
-
-
         class Model(torch.nn.Module):
             def forward(self, x):
                 return x * 2
 
-
-        class MyExportableModule(ExportableModule):
+        class MyExportableModule(torch.onnx.ExportableModule):
             def __init__(self):
                 super().__init__()
                 self.model = Model()
@@ -44,7 +40,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
             def dynamic_shapes(self):
                 return ({0: "batch_size"},)
-
 
         exportable_module = MyExportableModule()
         onnx_program = exportable_module.to_onnx()
