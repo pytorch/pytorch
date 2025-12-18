@@ -994,6 +994,26 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         y += float("1.2")
         return torch.add(x, y)
 
+    def test_float_or_complex_from_number(self):
+        @make_test
+        def _float_from_number_impl(x):
+            y = float.from_number(10)
+            return torch.add(x, y)
+
+        @make_test
+        def _complex_from_number_impl(x):
+            y = complex.from_number(10)
+            return torch.add(x, y)
+
+        if sys.version_info < (3, 14):
+            with self.assertRaises(AttributeError):
+                _float_from_number_impl(self)
+            with self.assertRaises(AttributeError):
+                _complex_from_number_impl(self)
+        else:
+            _float_from_number_impl(self)
+            _complex_from_number_impl(self)
+
     @make_test
     def test_is_floating_point(x):
         y = x + 1

@@ -58,8 +58,8 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.opaque_object import is_opaque_type
-from torch._ops import HigherOrderOperator
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -79,6 +79,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
@@ -186,6 +187,8 @@ from .dicts import (
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import (
@@ -232,20 +235,20 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    ConstantLikeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
+    IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
     NumpyDTypeVariable,
-    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
@@ -257,7 +260,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
-from .script_object import TorchScriptObjectVariable
+from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
@@ -564,7 +567,7 @@ class VariableBuilder:
     def wrap_regex_pattern(self, value: re.Pattern):
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
-        return RegexPatternVariable(value)
+        return ConstantLikeVariable(value)
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -813,7 +816,7 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, set):
+        elif istype(value, (set, OrderedSet)):
             if any(isinstance(x, torch.Tensor) for x in value):
                 unimplemented(
                     gb_type="Attempted to wrap a set with tensors",
@@ -831,6 +834,16 @@ class VariableBuilder:
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            set_var_cls = SetVariable
+
+            if istype(value, OrderedSet):
+                # Guard on the internal dict of OrderedSet
+                internal_dict_source = AttrSource(self.source, "_dict")
+                install_guard(
+                    internal_dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
+                )
+                self.tx.output.guard_on_key_order.add(internal_dict_source)
+                set_var_cls = OrderedSetVariable
 
             # The list gives a ordering for the set items. The ordering is based
             # on the Python hash and it is not related to object ordering inside
@@ -843,7 +856,7 @@ class VariableBuilder:
                 )
                 for i, v in enumerate(L)
             ]
-            result = SetVariable(items, source=self.source)
+            result = set_var_cls(items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
@@ -852,15 +865,18 @@ class VariableBuilder:
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
+                or
+                # For activation checkpointing, we could get a frozenset of torch ops.
+                isinstance(x, (OpOverload, OpOverloadPacket))
             )
             for x in value
         ):
             # For the limited cases of frozenset here, we know the items won't
             # change across runs, so we can safely create sourceless VTs for
-            # them and only guard on the frozenset id.
+            # them and guard on the frozenset contents via EQUALS_MATCH.
             # TODO support source for sets and remove the special logics here.
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
         elif isinstance(
             value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
@@ -872,6 +888,12 @@ class VariableBuilder:
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
+        elif callable(value) and any(
+            value is fn for fn in torch._dynamo.config.ignore_logging_functions
+        ):
+            # Treat ignored functions as full no-ops
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return IgnoredFunctionVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return LoggingLoggerVariable(value, source=self.source)
@@ -911,7 +933,11 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+            # Preserve cache_hash for SAC context_fn caching
+            original_cache_hash = getattr(value, "cache_hash", None)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original_cache_hash=original_cache_hash
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -951,7 +977,7 @@ class VariableBuilder:
                 install_guard(dt_source.make_guard(GuardBuilder.ID_MATCH))
             else:
                 self.install_guards(GuardBuilder.ID_MATCH)
-            return NumpyTypeInfoVariable(value, source=self.source)
+            return ConstantLikeVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
@@ -1132,6 +1158,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif value is OrderedSet:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return OrderedSetClassVariable()
         elif (
             id(value) in ITERTOOLS_TYPE_IDS
             and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
@@ -1423,6 +1452,12 @@ class VariableBuilder:
                 # ID_MATCH even if its a global variable.
                 self.install_guards(GuardBuilder.CLASS_MATCH)
 
+            if is_opaque_type(value):
+                return OpaqueObjectClassVariable(
+                    value,
+                    source=self.source,
+                )
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1454,7 +1489,18 @@ class VariableBuilder:
                 )
 
             if is_opaque_type(type(value)):
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+                # Check if this is a value-type opaque object (registered as both opaque type and constant)
+                if is_opaque_value_type(type(value)):
+                    # Value-type: guard on equality (will use __eq__)
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return TorchScriptObjectVariable.create(
+                        value,
+                        value,
+                        source=self.source,
+                    )
+                else:
+                    # Reference-type: guard only on type/identity
+                    self.install_guards(GuardBuilder.TYPE_MATCH)
 
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
@@ -1601,7 +1647,11 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            if isinstance(value, set):
+                set_vt_cls = SetVariable
+            elif isinstance(value, frozenset):
+                set_vt_cls = FrozensetVariable
+
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
@@ -2703,9 +2753,9 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
             fake_tensor_value = None
-            if isinstance(unspec_var, ConstantVariable):
+            if unspec_var.is_python_constant():
                 # TODO: when can this happen?
-                example_value = unspec_var.value
+                example_value = unspec_var.as_python_constant()
             else:
                 example_value = unspec_var.proxy.node.meta["example_value"]
             assert is_fake(example_value)
@@ -3820,7 +3870,7 @@ class SourcelessBuilder:
         elif value is functools.wraps:
             return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
-            return RegexPatternVariable(value)
+            return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
         elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
@@ -3860,6 +3910,9 @@ class SourcelessBuilder:
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
         handlers[set] = lambda tx, value: SetVariable(
+            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
+        )
+        handlers[OrderedSet] = lambda tx, value: OrderedSetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(

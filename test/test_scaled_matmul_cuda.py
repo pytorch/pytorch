@@ -731,7 +731,6 @@ class TestFP8Matmul(TestCase):
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
-
     def test_float8_scale(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
@@ -1791,7 +1790,7 @@ class TestFP8Matmul(TestCase):
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
-                if capability in {(10, 0), (10, 3), (12, 0), (12, 1)}:
+                if capability in {(10, 0), (10, 3), (11, 0), (12, 0), (12, 1)}:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)

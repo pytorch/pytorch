@@ -8,6 +8,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -299,8 +300,16 @@ class CustomConstantType:
         # custom hash ignores b
         return hash(self.a)
 
+    def __repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
-pytree.register_constant(CustomConstantType)
+    def __fx_repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})", {
+            "CustomConstantType": CustomConstantType
+        }
+
+
+torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -547,6 +556,33 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+        # Check verbose_code_parts from leaf guards (they include hints)
+        def check_leaf_guards(mgr):
+            for guard in mgr.get_leaf_guards():
+                verbose_parts = guard.verbose_code_parts()
+                verbose_str = " ".join(verbose_parts)
+                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                    self.assertIn(
+                        "HINT: type",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include 'HINT: type' "
+                            f"annotation.\nGuard: {verbose_str}"
+                        ),
+                    )
+                    self.assertIn(
+                        "GlobalModule",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include type name "
+                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                        ),
+                    )
+            for child_mgr in mgr.get_child_managers():
+                check_leaf_guards(child_mgr)
+
+        check_leaf_guards(ref.root)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -1476,7 +1512,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self.skipTest("Torch distributed is not available")
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1501,6 +1537,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}
@@ -1526,7 +1563,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         if not dist.is_available():
             self.skipTest("Torch distributed is not available")
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa:SIM115
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
@@ -1558,6 +1595,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_function_with_wrong_fqn(self):
         def foo(inputs):
@@ -1645,7 +1683,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def foo(inputs):
             return inputs.x + 1
 
-        tmpfile = tempfile.NamedTemporaryFile()
+        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
         dist.init_process_group(
             backend="gloo",
             init_method=f"file://{tmpfile.name}",
@@ -1660,6 +1698,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"inputs": Inputs(x, pg)}, True)
         finally:
             dist.destroy_process_group()
+            tmpfile.close()
 
     def test_unserializable_submodule(self):
         def foo(mod, x):
@@ -1746,6 +1785,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
 
+    def test_nested_named_tuple(self):
+        class NestedTuple(NamedTuple):
+            a: int
+            b: int
+            c: torch.Tensor
+
+        def fn(x: NestedTuple):
+            return x.a + x.b + x.c
+
+        x = NestedTuple(1, 2, torch.randn(3, 2))
+
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+
     def test_sdp_backend_serialization(self):
         def fn(x, backend):
             # Use the backend enum in a guard-producing way
@@ -1802,7 +1854,7 @@ class SimpleModule(torch.nn.Module):
         return z
 
 
-if not IS_MACOS:
+if torch.distributed.is_available() and not IS_MACOS:
     from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 
     @torch._dynamo.config.patch({"strict_precompile": True})

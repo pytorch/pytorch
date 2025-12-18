@@ -947,6 +947,29 @@ class TestMatmulCuda(InductorTestCase):
         self.assertGreater(t1 - t0, t3 - t2)
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_graphs(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.set_context()
+        partial_res = torch.matmul(a, a)
+        ctx.pop_context()
+        full_res = torch.matmul(a, a)
+        full_res.zero_()
+        partial_res.zero_()
+        torch.cuda.synchronize()
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            ctx.set_context()
+            partial_res = torch.matmul(a, a)
+            ctx.pop_context()
+            full_res = torch.matmul(a, a)
+        g.replay()
+        self.assertEqual(partial_res, full_res)
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
