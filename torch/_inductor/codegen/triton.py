@@ -5319,9 +5319,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
         two_d_red = len(self.tiling) == 2
-        # Compute reduction hint earlier using tiling_scores if available
-        # This reuses the same logic that computes tiling_scores to determine the hint
-        reduction_hint_override = None
         if looped_red and two_d_red:
             memory_stats = self.features.memory_stats(self.tiling)
             dim_stats = memory_stats.persistent.memory.dim[0]
@@ -5337,10 +5334,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
                 contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
 
-                # Fix reduction hint earlier using tiling_scores and reusing
-                # the same logic of if ratio >= threshold, it's an inner reduction
-                if r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD:
-                    reduction_hint_override = ReductionHint.INNER
+                # Make get_reduction_hint() return the correct value by setting its cache
+                # This ensures get_reduction_hint() returns INNER instead of DEFAULT for inner reductions
+                if contiguous_red:
+                    # Set the cache so get_reduction_hint() returns INNER when called later
+                    # If cache already exists, clear it first, then set to correct value
+                    if hasattr(self.features, "__get_reduction_hint_cache"):
+                        self.features.get_reduction_hint.clear_cache(self.features)
+                    object.__setattr__(
+                        self.features, "__get_reduction_hint_cache", ReductionHint.INNER
+                    )
             else:
                 contiguous_red = (
                     self.features.get_reduction_hint() == ReductionHint.INNER
@@ -5428,14 +5431,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            # Use reduction hint computed earlier from tiling_scores if available,
-            # otherwise fall back to get_reduction_hint(),
-            # ensures we use the correct hint based on tiling_scores when available
-            reduction_hint = (
-                reduction_hint_override
-                if reduction_hint_override is not None
-                else self.features.get_reduction_hint()
-            )
+            reduction_hint = self.features.get_reduction_hint()
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
