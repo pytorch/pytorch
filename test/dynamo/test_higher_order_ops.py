@@ -6399,9 +6399,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
