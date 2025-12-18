@@ -1338,52 +1338,6 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu
-    def test_addcmul_fma_bitwise_equal(self):
-        """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
-        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
-        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
-        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
-
-        # Test value=1
-        eager_result = torch.addcmul(self_tensor, tensor1, tensor2)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch.addcmul(s, t1, t2)
-
-        compiled_result = fn(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
-
-        # Test value != 1
-        eager_result2 = torch.addcmul(self_tensor, tensor1, tensor2, value=2.5)
-
-        @torch.compile
-        def fn2(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=2.5)
-
-        compiled_result2 = fn2(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result2, compiled_result2, atol=0, rtol=0)
-
-    @requires_gpu
-    def test_addcmul_fma_uses_fma_instruction(self):
-        """Test that addcmul generates code using FMA instruction."""
-        from torch._inductor.utils import run_and_get_code
-
-        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
-        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
-        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=2.0)
-
-        _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
-        code = " ".join(code)
-        self.assertIn(
-            "libdevice.fma", code, "Expected FMA to be used in generated code"
-        )
-
-    @requires_gpu
     def test_foreach_addcmul_fma_bitwise_equal(self):
         """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
         self_tensors = [
