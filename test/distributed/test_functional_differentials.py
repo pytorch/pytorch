@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 
 import torch
 import torch.distributed as dist
 from torch.distributed import _functional_collectives as fcols
-from torch.testing._internal.common_distributed import MultiThreadedTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    MultiThreadedTestCase,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -569,12 +574,43 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             test_utils=test_utils,
         )
 
+
+@instantiate_parametrized_tests
+class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
     # ============================================================
-    # Phase 4: torch.compile Integration Tests
+    # torch.compile Integration Tests
     # ============================================================
 
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _init_pg(self):
+        # Set the device explicitly before initializing the process group
+        torch.cuda.set_device(self.rank % self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        self.device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+
+    @skip_if_lt_x_gpu(2)
     def test_all_reduce_compile(self):
         """Test that all_reduce backward works with torch.compile."""
+        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -582,7 +618,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             output = fcols.all_reduce(tensor, "sum", group=group_name)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, requires_grad=True)
+        input_tensor = torch.randn(3, 3, device=self.device, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -592,8 +628,10 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
+    @skip_if_lt_x_gpu(2)
     def test_all_gather_tensor_compile(self):
         """Test that all_gather_tensor backward works with torch.compile."""
+        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -601,7 +639,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             output = fcols.all_gather_tensor(tensor, gather_dim=0, group=group_name)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, 3, requires_grad=True)
+        input_tensor = torch.randn(3, 3, 3, device=self.device, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -611,8 +649,10 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected_grad = torch.full((3, 3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
+    @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_compile(self):
         """Test that reduce_scatter_tensor backward works with torch.compile."""
+        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -623,7 +663,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             return output.sum()
 
         # Input should be divisible by world_size
-        input_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, device=self.device, requires_grad=True
+        )
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -633,8 +675,10 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
+    @skip_if_lt_x_gpu(2)
     def test_all_to_all_single_compile(self):
         """Test that all_to_all_single backward works with torch.compile."""
+        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -648,7 +692,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             return output.sum()
 
         # Input should be divisible by world_size
-        input_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, device=self.device, requires_grad=True
+        )
 
         loss = compiled_fn(input_tensor)
         loss.backward()
