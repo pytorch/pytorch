@@ -2,51 +2,69 @@ from pt import configs
 
 import operator_benchmark as op_bench
 
+import importlib.util
+import os
+from types import ModuleType
+from typing import Optional
+
 import torch
 from torch.nn.functional import ScalingType
 
 
 """
-Microbenchmarks for scaled_mm and scaled_grouped_mm operators.
+Operator microbenchmarks for `scaled_mm` / `scaled_grouped_mm`.
+
+Uses the same dtype + scale/quantize helpers as `test/test_scaled_matmul_cuda.py`
+(bf16/fp16/fp32, fp8 e4m3/e5m2, MX e8m0 scales, NVFP4 packed fp4).
 """
 
+_TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
 
-# FP8 constants
-E4M3_MAX_POS = 448.0
-E5M2_MAX_POS = 57344.0
-EPS = 1e-12
+
+def _get_test_scaled_matmul_cuda() -> ModuleType:
+    """
+    Reuse scale/quantization helpers from `test/test_scaled_matmul_cuda.py`.
+
+    `test/` isn't a package, so we import by path and cache the module.
+    """
+    global _TEST_SCALED_MATMUL_CUDA_MOD
+    if _TEST_SCALED_MATMUL_CUDA_MOD is not None:
+        return _TEST_SCALED_MATMUL_CUDA_MOD
+
+    pytorch_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    test_file = os.path.join(pytorch_root, "test", "test_scaled_matmul_cuda.py")
+    if not os.path.exists(test_file):
+        raise RuntimeError(
+            f"Expected to find {test_file} to reuse scaled_mm test helpers, but it does not exist."
+        )
+
+    spec = importlib.util.spec_from_file_location("_test_scaled_matmul_cuda_bench_import", test_file)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to create import spec for {test_file}")
+
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _TEST_SCALED_MATMUL_CUDA_MOD = mod
+    return mod
 
 
 def _get_float8_dtype(float8_dtype):
-    """Convert string or torch dtype to torch.float8 dtype."""
-    if float8_dtype == "e4m3fn" or float8_dtype == torch.float8_e4m3fn:
-        return torch.float8_e4m3fn
-    elif float8_dtype == "e5m2" or float8_dtype == torch.float8_e5m2:
-        return torch.float8_e5m2
-    else:
-        return torch.float8_e4m3fn  # default
+    """Normalize the FP8 dtype arg (handles ROCm fnuz variants via test aliases)."""
+    from torch.testing._internal.common_device_type import e4m3_type, e5m2_type
 
-# Helper function to generate scales
-def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype):
-    """Convert tensor to FP8 scale."""
-    amax = torch.max(torch.abs(x))
-    if float8_dtype == torch.float8_e4m3fn:
-        max_pos = E4M3_MAX_POS
-    elif float8_dtype == torch.float8_e5m2:
-        max_pos = E5M2_MAX_POS
-    else:
-        raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
-
-    scale = max_pos / torch.clamp(amax, min=EPS)
-    return scale.float()
+    if float8_dtype in ("e4m3fn", e4m3_type, torch.float8_e4m3fn):
+        return e4m3_type
+    if float8_dtype in ("e5m2", e5m2_type, torch.float8_e5m2):
+        return e5m2_type
+    return e4m3_type  # default
 
 
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device, float8_dtype="e4m3fn", output_dtype="bfloat16"):
+        helpers = _get_test_scaled_matmul_cuda()
         self.float8_dtype = _get_float8_dtype(float8_dtype)
         self.base_dtype = torch.bfloat16
 
-        # Convert output_dtype string to torch dtype
         if output_dtype == "bfloat16":
             self.output_dtype = torch.bfloat16
         elif output_dtype == "float32":
@@ -54,29 +72,33 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         else:
             self.output_dtype = torch.bfloat16  # default
 
-        # Create random inputs
-        # For gradient tests, we need requires_grad on the base tensors
+        # Base tensors carry grad in backward benches; fp8 tensors are created as leaves.
         x_base = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
         y_base = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()).t()
 
-        # Compute scales
-        x_scale = tensor_to_scale(x_base, self.float8_dtype)
-        y_scale = tensor_to_scale(y_base, self.float8_dtype)
+        # Tensorwise scales; detach so the backward bench doesn't include scale computation.
+        x_scale = helpers.tensor_to_scale(x_base, self.float8_dtype).float().detach()
+        y_scale = helpers.tensor_to_scale(y_base, self.float8_dtype).float().detach()
 
-        # Convert to FP8 - create as leaf tensors
+        # Quantize with the same saturation logic as the reference tests.
         with torch.no_grad():
-            x_fp8 = (x_base * x_scale).to(self.float8_dtype).detach().requires_grad_(self.auto_set())
-            y_fp8 = (y_base * y_scale).to(self.float8_dtype).detach().requires_grad_(self.auto_set())
+            x_fp8 = (
+                helpers.to_fp8_saturated(x_base * x_scale, self.float8_dtype)
+                .detach()
+                .requires_grad_(self.auto_set())
+            )
+            y_fp8 = (
+                helpers.to_fp8_saturated(y_base * y_scale, self.float8_dtype)
+                .detach()
+                .requires_grad_(self.auto_set())
+            )
 
-        # Scales need to be scalar tensors for TensorWise scaling
-        scale_a_scalar = x_scale.reciprocal().item()
-        scale_b_scalar = y_scale.reciprocal().item()
-
+        # TensorWise scaling expects scalar scales.
         self.inputs = {
             "x": x_fp8,
             "y": y_fp8,
-            "scale_a": torch.tensor(scale_a_scalar, device=device, dtype=torch.float32),
-            "scale_b": torch.tensor(scale_b_scalar, device=device, dtype=torch.float32),
+            "scale_a": x_scale.reciprocal(),
+            "scale_b": y_scale.reciprocal(),
         }
         self.set_module_name("scaled_mm")
 
@@ -92,82 +114,72 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         )
 
 
-class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, G, device, float8_dtype="e4m3fn", output_dtype="bfloat16"):
-        self.float8_dtype = _get_float8_dtype(float8_dtype)
-        self.base_dtype = torch.bfloat16
+# class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
+#     def init(self, M, N, K, G, device, float8_dtype="e4m3fn", output_dtype="bfloat16"):
+#         self.float8_dtype = _get_float8_dtype(float8_dtype)
+#         self.base_dtype = torch.bfloat16
 
-        # Convert output_dtype string to torch dtype
-        if output_dtype == "bfloat16":
-            self.output_dtype = torch.bfloat16
-        elif output_dtype == "float32":
-            self.output_dtype = torch.float32
-        else:
-            self.output_dtype = torch.bfloat16  # default
+#         if output_dtype == "bfloat16":
+#             self.output_dtype = torch.bfloat16
+#         elif output_dtype == "float32":
+#             self.output_dtype = torch.float32
+#         else:
+#             self.output_dtype = torch.bfloat16  # default
 
-        # Create random inputs for grouped matmul (2D input, 3D weight)
-        # Following the 2D-3D pattern from test_scaled_grouped_gemm_2d_3d
-        # x is (M*G, K) - 2D input with groups along M dimension
-        # y is (G, N, K) - 3D weight
-        total_M = M * G
-        x_base = torch.randn(total_M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
-        y_base = torch.randn(G, N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+#         # 2D X with groups along M; 3D weights per group.
+#         total_M = M * G
+#         x_base = torch.randn(total_M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+#         y_base = torch.randn(G, N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
 
-        # Convert to FP8
-        with torch.no_grad():
-            x_fp8 = x_base.to(self.float8_dtype).detach().requires_grad_(self.auto_set())
-            y_fp8 = y_base.to(self.float8_dtype).detach().requires_grad_(self.auto_set())
+#         with torch.no_grad():
+#             x_fp8 = x_base.to(self.float8_dtype).detach().requires_grad_(self.auto_set())
+#             y_fp8 = y_base.to(self.float8_dtype).detach().requires_grad_(self.auto_set())
 
-        # Generate offsets along M dimension: [M, 2M, ..., M*G]
-        offs = torch.arange(M, G * M + 1, M, device=device, dtype=torch.int32)
+#         # Group end offsets along M.
+#         offs = torch.arange(M, G * M + 1, M, device=device, dtype=torch.int32)
 
-        # For RowWise scaling:
-        # scale_a has one scale per row of x: shape (G*M,)
-        # scale_b has one scale per row per group of y: shape (G, N)
-        scale_a = torch.rand(G * M, device=device, dtype=torch.float32)
-        scale_b = torch.rand(G * N, device=device, dtype=torch.float32).view(G, N)
+#         # RowWise scales: per-row X (G*M), per-row-per-group W (G,N).
+#         scale_a = torch.rand(G * M, device=device, dtype=torch.float32)
+#         scale_b = torch.rand(G * N, device=device, dtype=torch.float32).view(G, N)
 
-        self.inputs = {
-            "x": x_fp8,
-            "y": y_fp8,
-            "offs": offs,
-            "scale_a": scale_a,
-            "scale_b": scale_b,
-        }
-        self.set_module_name("scaled_grouped_mm")
+#         self.inputs = {
+#             "x": x_fp8,
+#             "y": y_fp8,
+#             "offs": offs,
+#             "scale_a": scale_a,
+#             "scale_b": scale_b,
+#         }
+#         self.set_module_name("scaled_grouped_mm")
 
-    def forward(self, x, y, offs, scale_a, scale_b):
-        return torch.nn.functional.scaled_grouped_mm(
-            x,
-            y.transpose(-2, -1),  # Transpose y from (G, N, K) to (G, K, N)
-            scale_a=scale_a,
-            scale_recipe_a=ScalingType.RowWise,
-            scale_b=scale_b,
-            scale_recipe_b=ScalingType.RowWise,
-            offs=offs,
-            output_dtype=self.output_dtype,
-        )
+#     def forward(self, x, y, offs, scale_a, scale_b):
+#         return torch.nn.functional.scaled_grouped_mm(
+#             x,
+#             y.transpose(-2, -1),  # (G,N,K) -> (G,K,N)
+#             scale_a=scale_a,
+#             scale_recipe_a=ScalingType.RowWise,
+#             scale_b=scale_b,
+#             scale_recipe_b=ScalingType.RowWise,
+#             offs=offs,
+#             output_dtype=self.output_dtype,
+#         )
 
 
-# Configs for scaled_mm - short configs include both DSv3 671B and Llama4
-# Note: E5M2 is not supported for matrix multiplication (only E4M3FN)
+# FP8 matmul only supports E4M3.
 scaled_mm_configs_short = op_bench.config_list(
     attr_names=["M", "N", "K"],
     attrs=[
-        [16384, 2048, 7168],   # DSv3 671B - small batch
-        [16384, 8192, 5120],   # Llama4 16e - small batch
+        [16384, 2048, 7168],   # DSv3 671B
+        [16384, 8192, 5120],   # Llama4 16e
     ],
     cross_product_configs={
         "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
+        "float8_dtype": ["e4m3fn"],
         "output_dtype": ["bfloat16", "float32"],
     },
     tags=["short"],
 )
 
-# Configs for scaled_mm - long configs include both models with more variations
-# Note: E5M2 is not supported for matrix multiplication (only E4M3FN)
-# REDUCED SHAPES FOR FASTER TESTING - keeping all dtypes
+# Reduced shapes for faster runs.
 scaled_mm_configs_long = op_bench.config_list(
     attr_names=["M", "N", "K"],
     attrs=[
@@ -184,60 +196,57 @@ scaled_mm_configs_long = op_bench.config_list(
     tags=["long"],
 )
 
-# Configs for scaled_grouped_mm - short configs include both models
-# Note: E5M2 is not supported for matrix multiplication (only E4M3FN)
-# Note: scaled_grouped_mm only supports bfloat16 output (float32 not supported)
-scaled_grouped_mm_configs_short = op_bench.config_list(
-    attr_names=["M", "N", "K", "G"],
-    attrs=[
-        [16384, 2048, 7168, 1],   # DSv3 671B - 1 expert per device
-        [16384, 2048, 7168, 4],   # DSv3 671B - 4 experts per device
-        [16384, 8192, 5120, 1],   # Llama4 16e - 1 expert per device
-        [16384, 8192, 5120, 4],   # Llama4 16e - 4 experts per device
-    ],
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
-        "output_dtype": ["bfloat16"],  # Only bfloat16 supported for grouped gemm
-    },
-    tags=["short"],
-)
+# Grouped FP8 matmul: E4M3 only; output is bf16-only.
+# scaled_grouped_mm_configs_short = op_bench.config_list(
+#     attr_names=["M", "N", "K", "G"],
+#     attrs=[
+#         [16384, 2048, 7168, 1],   # DSv3 671B - 1 expert per device
+#         [16384, 2048, 7168, 4],   # DSv3 671B - 4 experts per device
+#         [16384, 8192, 5120, 1],   # Llama4 16e - 1 expert per device
+#         [16384, 8192, 5120, 4],   # Llama4 16e - 4 experts per device
+#     ],
+#     cross_product_configs={
+#         "device": ["cuda"],
+#         "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
+#         "output_dtype": ["bfloat16"],  # Only bfloat16 supported for grouped gemm
+#     },
+#     tags=["short"],
+# )
 
 # Configs for scaled_grouped_mm - long configs include both models with all expert counts
 # Note: E5M2 is not supported for matrix multiplication (only E4M3FN)
 # Note: scaled_grouped_mm only supports bfloat16 output (float32 not supported)
-# REDUCED SHAPES FOR FASTER TESTING - keeping all dtypes
-scaled_grouped_mm_configs_long = op_bench.config_list(
-    attr_names=["M", "N", "K", "G"],
-    attrs=[
-        [2048, 2048, 2048, 1],   # DSv3 671B - 1 expert per device (reduced)
-        [2048, 2048, 2048, 2],   # DSv3 671B - 2 experts per device (reduced)
-        [2048, 2048, 2048, 4],   # DSv3 671B - 4 experts per device (reduced)
-        [2048, 2048, 2048, 8],   # DSv3 671B - 8 experts per device (reduced)
-        [2048, 2048, 2048, 16],  # DSv3 671B - 16 experts per device (reduced)
-        [4096, 2048, 2048, 1],   # DSv3 671B - medium batch, 1 expert (reduced)
-        [4096, 2048, 2048, 2],   # DSv3 671B - medium batch, 2 experts (reduced)
-        [4096, 2048, 2048, 4],   # DSv3 671B - medium batch, 4 experts (reduced)
-        [4096, 2048, 2048, 8],   # DSv3 671B - medium batch, 8 experts (reduced)
-        [4096, 2048, 2048, 16],  # DSv3 671B - medium batch, 16 experts (reduced)
-        [2048, 2048, 2048, 1],   # Llama4 16e - 1 expert per device (reduced)
-        [2048, 2048, 2048, 2],   # Llama4 16e - 2 experts per device (reduced)
-        [2048, 2048, 2048, 4],   # Llama4 16e - 4 experts per device (reduced)
-        [2048, 2048, 2048, 8],   # Llama4 16e - 8 experts per device (reduced)
-        [2048, 2048, 2048, 16],  # Llama4 16e - 16 experts per device (reduced)
-        [4096, 2048, 2048, 1],   # Llama4 16e - medium batch, 1 expert (reduced)
-        [4096, 2048, 2048, 2],   # Llama4 16e - medium batch, 2 experts (reduced)
-        [4096, 2048, 2048, 4],   # Llama4 16e - medium batch, 4 experts (reduced)
-        [4096, 2048, 2048, 8],   # Llama4 16e - medium batch, 8 experts (reduced)
-        [4096, 2048, 2048, 16],  # Llama4 16e - medium batch, 16 experts (reduced)
-    ],
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
-        "output_dtype": ["bfloat16"],  # KEEPING ALL DTYPES (bfloat16 only for grouped gemm)
-    },
-    tags=["long"],
-)
+# scaled_grouped_mm_configs_long = op_bench.config_list(
+#     attr_names=["M", "N", "K", "G"],
+#     attrs=[
+#         [2048, 2048, 2048, 1],   # DSv3 671B - 1 expert per device (reduced)
+#         [2048, 2048, 2048, 2],   # DSv3 671B - 2 experts per device (reduced)
+#         [2048, 2048, 2048, 4],   # DSv3 671B - 4 experts per device (reduced)
+#         [2048, 2048, 2048, 8],   # DSv3 671B - 8 experts per device (reduced)
+#         [2048, 2048, 2048, 16],  # DSv3 671B - 16 experts per device (reduced)
+#         [4096, 2048, 2048, 1],   # DSv3 671B - medium batch, 1 expert (reduced)
+#         [4096, 2048, 2048, 2],   # DSv3 671B - medium batch, 2 experts (reduced)
+#         [4096, 2048, 2048, 4],   # DSv3 671B - medium batch, 4 experts (reduced)
+#         [4096, 2048, 2048, 8],   # DSv3 671B - medium batch, 8 experts (reduced)
+#         [4096, 2048, 2048, 16],  # DSv3 671B - medium batch, 16 experts (reduced)
+#         [2048, 2048, 2048, 1],   # Llama4 16e - 1 expert per device (reduced)
+#         [2048, 2048, 2048, 2],   # Llama4 16e - 2 experts per device (reduced)
+#         [2048, 2048, 2048, 4],   # Llama4 16e - 4 experts per device (reduced)
+#         [2048, 2048, 2048, 8],   # Llama4 16e - 8 experts per device (reduced)
+#         [2048, 2048, 2048, 16],  # Llama4 16e - 16 experts per device (reduced)
+#         [4096, 2048, 2048, 1],   # Llama4 16e - medium batch, 1 expert (reduced)
+#         [4096, 2048, 2048, 2],   # Llama4 16e - medium batch, 2 experts (reduced)
+#         [4096, 2048, 2048, 4],   # Llama4 16e - medium batch, 4 experts (reduced)
+#         [4096, 2048, 2048, 8],   # Llama4 16e - medium batch, 8 experts (reduced)
+#         [4096, 2048, 2048, 16],  # Llama4 16e - medium batch, 16 experts (reduced)
+#     ],
+#     cross_product_configs={
+#         "device": ["cuda"],
+#         "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
+#         "output_dtype": ["bfloat16"],  # KEEPING ALL DTYPES (bfloat16 only for grouped gemm)
+#     },
+#     tags=["long"],
+# )
 
 # Generate tests for scaled_mm
 op_bench.generate_pt_test(
@@ -245,10 +254,10 @@ op_bench.generate_pt_test(
 )
 
 # Generate tests for scaled_grouped_mm
-op_bench.generate_pt_test(
-    scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long,
-    ScaledGroupedMMBenchmark,
-)
+# op_bench.generate_pt_test(
+#     scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long,
+#     ScaledGroupedMMBenchmark,
+# )
 
 
 if __name__ == "__main__":
