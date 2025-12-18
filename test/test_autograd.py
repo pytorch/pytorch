@@ -13426,9 +13426,6 @@ def _set_device_index(target_device):
 def _sleep_if_gpu(cycles):
     if "cuda" == torch.accelerator.current_accelerator().type:
         return torch.cuda._sleep(cycles)
-    elif "xpu" == torch.accelerator.current_accelerator().type:
-        # XPU is not supported _sleep yet.
-        return
     else:
         # Update this if non-cuda accelerators support something like sleep
         return
