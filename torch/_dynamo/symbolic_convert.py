@@ -1386,7 +1386,7 @@ class InstructionTranslatorBase(
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
                 "then skipping the rest of the function. "
-                f"Graph break encountered:\n{str(e)}"
+                f"Graph break encountered:\n\n{str(e)}"
             )
             self.log_graph_break(
                 self.code_options,
@@ -5036,7 +5036,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # instructions are for the top most Instruction translator).  Also, we
         # have to be careful about not using _cached_cleaned_instructions here
         # because that function is global, while we want the cache to be
-        # alive only during a compmilation.
+        # alive only during a compilation.
         tracing_ctx = parent.output.tracing_context
         instructions = None
         if tracing_ctx:

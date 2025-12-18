@@ -467,7 +467,7 @@ class OpDispatcher:
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema} "
+                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema or suggested_input_schema.op} "
                         "while ExplicitRedistributionContext was active",
                     )
                     with redistribute_context:

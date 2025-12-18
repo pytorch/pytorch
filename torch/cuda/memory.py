@@ -53,7 +53,6 @@ class _Block(TypedDict):
     address: int
     state: str
     frames: list[_Frame]
-    forward_frames: NotRequired[list[str]]
 
 
 class _Segment(TypedDict):
@@ -74,7 +73,6 @@ class _TraceEntry(TypedDict):
     action: str
     addr: NotRequired[int]
     frames: list[_Frame]
-    forward_frames: NotRequired[list[str]]
     size: int
     stream: int
     device_free: NotRequired[int]
@@ -921,6 +919,7 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
@@ -1036,6 +1035,7 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
