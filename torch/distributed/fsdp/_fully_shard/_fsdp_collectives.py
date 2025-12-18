@@ -185,6 +185,11 @@ def all_gather_copy_in_cuda(
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+    # Clone to respect the op schema which returns fresh tensors (not views).
+    # We need to synchronize before cloning because the source tensors
+    # (all_gather_inputs) may have pending writes from different CUDA streams.
+    if all_gather_output.is_cuda:
+        torch.cuda.current_stream().synchronize()
     return all_gather_input.clone(), all_gather_output.clone()
 
 
