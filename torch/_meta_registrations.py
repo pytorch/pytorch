@@ -149,7 +149,8 @@ def meta_linspace_logspace(
             )
     else:
         dtype = dtype or torch.get_default_dtype()
-    assert isinstance(dtype, torch.dtype)
+    if not isinstance(dtype, torch.dtype):
+        raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
     # steps does not participate in the computation of the dtype
     torch._check_type(
@@ -157,7 +158,8 @@ def meta_linspace_logspace(
         lambda: f"received an invalid combination of arguments - got \
 ({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
-    assert isinstance(steps, IntLike)  # for mypy
+    if not isinstance(steps, IntLike):
+        raise AssertionError(f"steps must be IntLike, got {type(steps)}")
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     return torch.empty(
@@ -1663,7 +1665,8 @@ def linalg_solve_triangular_meta(
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
-    assert isinstance(out, TensorLike)
+    if not isinstance(out, TensorLike):
+        raise AssertionError(f"out must be TensorLike, got {type(out)}")
     checkInputsSolver(A, B, left, "linalg.solve_triangular")
     B_, A_ = _linalg_broadcast_batch_dims_name(B, A, None)
     avoid_copy_A = A_.transpose(-2, -1).is_contiguous() and A_.is_conj()
@@ -2635,17 +2638,21 @@ if torch._C._has_mkldnn:
         )
         if output_dtype is None:
             output_dtype = x.dtype
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.uint8,
             torch.int8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, uint8, int8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(shape_out, dtype=output_dtype)
-        assert len(shape_out) in [3, 4, 5], (
-            "Expect output to be 3d/4d/5d for conv1d/2d/3d"
-        )
+        if len(shape_out) not in [3, 4, 5]:
+            raise AssertionError(
+                f"Expect output to be 3d/4d/5d for conv1d/2d/3d, got {len(shape_out)}d"
+            )
         format = {
             3: torch.contiguous_format,
             4: torch.channels_last,
@@ -2680,7 +2687,10 @@ if torch._C._has_mkldnn:
         unary_op_args,
         unary_op_algorithm,
     ):
-        assert binary_op_name == "sum"
+        if binary_op_name != "sum":
+            raise AssertionError(
+                f"binary_op_name must be 'sum', got '{binary_op_name}'"
+            )
         return accum
 
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
@@ -2703,13 +2713,16 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.int8,
             torch.uint8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, int8, uint8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2740,13 +2753,16 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.uint8,
             torch.int8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, uint8, int8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -3394,8 +3410,10 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 @register_meta([aten.complex.default, aten.complex.out])
 @out_wrapper()
 def meta_complex(real, imag):
-    assert real.dtype.is_floating_point
-    assert imag.dtype.is_floating_point
+    if not real.dtype.is_floating_point:
+        raise AssertionError(f"real must be floating point, got {real.dtype}")
+    if not imag.dtype.is_floating_point:
+        raise AssertionError(f"imag must be floating point, got {imag.dtype}")
     result = elementwise_meta(
         real.to(corresponding_complex_dtype(real.dtype)),
         imag.to(corresponding_complex_dtype(imag.dtype)),
@@ -3826,7 +3844,8 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             ):
                 k_internal = kai_k_roundedup(k, kr, sr)
 
-                assert (k_internal % 2) == 0, "k_internal must be even"
+                if (k_internal % 2) != 0:
+                    raise AssertionError(f"k_internal must be even, got {k_internal}")
 
                 return nr * (
                     (k_internal // 2)
@@ -3862,9 +3881,16 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
                 n, k, nr, kr, sr, bl
             ):
-                assert (bl % kr) == 0
-                assert (nr % kai_nr_multiple_of) == 0
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kr) != 0:
+                    raise AssertionError(f"bl ({bl}) must be divisible by kr ({kr})")
+                if (nr % kai_nr_multiple_of) != 0:
+                    raise AssertionError(
+                        f"nr ({nr}) must be divisible by kai_nr_multiple_of ({kai_nr_multiple_of})"
+                    )
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
 
                 num_rows = kai_roundup(n, nr) // nr
 
@@ -3878,9 +3904,16 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
                 k, nr, kr, sr, bl
             ):
-                assert (bl % kr) == 0
-                assert (nr % kai_nr_multiple_of) == 0
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kr) != 0:
+                    raise AssertionError(f"bl ({bl}) must be divisible by kr ({kr})")
+                if (nr % kai_nr_multiple_of) != 0:
+                    raise AssertionError(
+                        f"nr ({nr}) must be divisible by kai_nr_multiple_of ({kai_nr_multiple_of})"
+                    )
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
 
                 # kr and sr are unused in the calculation
                 num_bytes_multiplier_rhs = kai_get_bf16_datatype_size_in_bytes()
@@ -3901,11 +3934,17 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
                 return 2  # 2 bytes
 
             def kai_num_blocks_per_row(k, bl):
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
                 return kai_roundup(k, bl) // bl
 
             def kai_num_bytes_per_block(bl, num_bytes_multiplier_rhs):
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
                 return (bl // 2) + num_bytes_multiplier_rhs
 
             return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
@@ -5504,11 +5543,15 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
 # TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
-        assert wrap_scalar
+        if not wrap_scalar:
+            raise AssertionError(
+                f"dim_post_expr={dim_post_expr} <= 0 but wrap_scalar is False"
+            )
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
+    if dim < min or dim > max:
+        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -6304,7 +6347,10 @@ def meta__efficient_attention_forward(
     logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
     actual_max_seqlen_q = M
     if cu_seqlens_q is not None:
-        assert max_seqlen_q is not None
+        if max_seqlen_q is None:
+            raise AssertionError(
+                "max_seqlen_q must not be None when cu_seqlens_q is provided"
+            )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
     logsumexp_dim = (
@@ -7109,8 +7155,10 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
 def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
     v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
     if values is not None and indices is not None:
-        assert isinstance(values, TensorLike)
-        assert isinstance(indices, TensorLike)
+        if not isinstance(values, TensorLike):
+            raise AssertionError(f"values must be TensorLike, got {type(values)}")
+        if not isinstance(indices, TensorLike):
+            raise AssertionError(f"indices must be TensorLike, got {type(indices)}")
         # Makes sure values and indices have the same strides. For cases where
         # these have different shapes, like (5, 10, 5) and (0) in msort.
         out_shape = v.shape
@@ -7385,9 +7433,10 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 def meta__segment_reduce_backward(
     grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None
 ):
-    assert lengths is not None or offsets is not None, (
-        "segment_reduce(): Either lengths or offsets must be defined"
-    )
+    if lengths is None and offsets is None:
+        raise AssertionError(
+            "segment_reduce(): Either lengths or offsets must be defined"
+        )
     data_contig = data.contiguous()
     grad_contig = grad.contiguous()
     return torch.empty_like(
@@ -7464,11 +7513,12 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    assert (
+    if not (
         len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ), (
-        f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-    )
+    ):
+        raise AssertionError(
+            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
+        )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
@@ -7659,14 +7709,15 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
 
 @register_meta(torch.ops.aten.transpose_)
 def transpose_(self, dim0, dim1):
-    assert self.layout not in {
+    if self.layout in {
         torch.sparse_csr,
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
-    }, (
-        f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
-    )
+    }:
+        raise AssertionError(
+            f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+        )
 
     ndims = self.ndim
 
@@ -7693,14 +7744,16 @@ def t_(self):
     if self.is_sparse:
         sparse_dim = self.sparse_dim()
         dense_dim = self.dense_dim()
-        assert sparse_dim <= 2 and dense_dim == 0, (
-            f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
-            f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
-        )
+        if not (sparse_dim <= 2 and dense_dim == 0):
+            raise AssertionError(
+                f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
+                f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
+            )
     else:
-        assert self.dim() <= 2, (
-            f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
-        )
+        if self.dim() > 2:
+            raise AssertionError(
+                f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+            )
 
     return transpose_(self, 0, 0 if ndims < 2 else 1)
 
@@ -8220,7 +8273,10 @@ def meta_scaled_grouped_mm(
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
-        assert x.dtype in [torch.half, torch.bfloat16]
+        if x.dtype not in [torch.half, torch.bfloat16]:
+            raise AssertionError(
+                f"half_to_float is True but x.dtype is {x.dtype}, expected half or bfloat16"
+            )
 
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -8296,7 +8352,8 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    assert weight.dim() == 2, "'weight' must be 2-D"
+    if weight.dim() != 2:
+        raise AssertionError(f"'weight' must be 2-D, got {weight.dim()}-D")
     weight_shape = weight.shape
     indices_shape = indices.shape
 
@@ -8319,8 +8376,14 @@ def meta__jagged_to_padded_dense_forward(
     padding_value: float = 0.0,
 ):
     # only one jagged dim is supported for now
-    assert len(offsets) == 1
-    assert len(max_lengths) == 1
+    if len(offsets) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(offsets)} offsets"
+        )
+    if len(max_lengths) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(max_lengths)} max_lengths"
+        )
 
     B = offsets[0].shape[0] - 1
     S = max_lengths[0]
@@ -8508,8 +8571,8 @@ def activate_meta():
 
     # For a given op, we pick the most specific decomp function from
     # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
-    for type in ["meta", "post_autograd", "pre_autograd"]:
-        registry = global_decomposition_table[type]
+    for typ in ["meta", "post_autograd", "pre_autograd"]:
+        registry = global_decomposition_table[typ]
 
         for opo in registry:
             if opo not in activate_meta_table:
@@ -8522,7 +8585,10 @@ def activate_meta():
         # OpOverload.
         if isinstance(op_overload, torch._ops.HigherOrderOperator):
             continue
-        assert isinstance(op_overload, OpOverload)
+        if not isinstance(op_overload, OpOverload):
+            raise AssertionError(
+                f"op_overload must be OpOverload, got {type(op_overload)}"
+            )
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
