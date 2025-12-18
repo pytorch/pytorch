@@ -19,7 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -3538,7 +3538,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
                 needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, int(storage_offset)
+                    sizes, strides, cast(int, storage_offset)
                 )
                 current_size = base.storage().size()
 
