@@ -795,13 +795,21 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # Note if we dont do this then sv.statically_known_multiple_of(remaining[i], expr)
                 # will fail, for example u0 is not multiple of 64*u0.
                 elif current_group + 1 < len(remaining) and (
-                    sv.statically_known_gt(size, remaining[current_group])
-                    or (
-                        sv.statically_known_multiple_of(size, remaining[current_group])
-                        and not sv.statically_known_equals(
-                            size, remaining[current_group]
-                        )
-                    )
+                    sv.statically_known_gt(size, remaining[current_group]) 
+                    or
+                    # statically_known_gt(size, remaining) may return False for symbolic
+                    # expressions like 64*u0 vs u0, because both could be 0. Similarly for
+                    # backed expressions like s25*(((s70 - 5)//4)) - s25 and
+                    # (s25*(((s70 - 5)//4)) - s25)*64.
+                    # We want to assume tensor sizes are not 0 and pass the gt
+                    # using the following logic.
+                    #
+                    # if A//B = C and C >= 1
+                    # then A = B * C + R
+                    # and assuming A!=0
+                    # A must be > B .
+                    #
+                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
