@@ -132,7 +132,12 @@ def _unpack_fp8_with_scale_wrap(x):
     return y.to(dtype)
 
 
-def _subprocess_test_cache_hit(queue):
+def _subprocess_test_cache_hit(queue, cache_dir_path, bundled_autograd_cache=False):
+    import os
+
+    # Set the cache directory BEFORE importing torch so it uses the same cache
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_path
+
     import torch
     import torch._dynamo
     from torch._dynamo.utils import counters
@@ -144,7 +149,12 @@ def _subprocess_test_cache_hit(queue):
     torch._dynamo.reset()
 
     # Must apply same config patches as the main process
-    with functorch_config.patch({"enable_autograd_cache": True}):
+    with functorch_config.patch(
+        {
+            "enable_autograd_cache": True,
+            "bundled_autograd_cache": bundled_autograd_cache,
+        }
+    ):
         with inductor_config.patch(
             {"fx_graph_cache": True, "fx_graph_remote_cache": False}
         ):
@@ -415,13 +425,20 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+        # Get the current cache directory to pass to subprocess
+        # The test uses fresh_cache which sets TORCHINDUCTOR_CACHE_DIR
+        current_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR", cache_dir())
+
+        # Check if bundled_autograd_cache is enabled (set by AOTAutogradCacheBundledTests)
+        bundled_autograd_cache = functorch_config.bundled_autograd_cache
+
         # Run in a subprocess to verify cache hit from a different process
         # The subprocess needs its own torch.compile call to test cross-process cache consistency
         ctx = multiprocessing.get_context("spawn")
         queue = ctx.Queue()
         p = ctx.Process(
             target=_subprocess_test_cache_hit,
-            args=(queue,),
+            args=(queue, current_cache_dir, bundled_autograd_cache),
         )
         p.start()
         p.join()
@@ -432,11 +449,9 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         miss, hit, saved = queue.get()
         # The subprocess should have a cache hit (not miss)
-        self.assertEqual(miss, 0, "Expected no cache miss in subprocess")
-        self.assertEqual(hit, 1, "Expected cache hit in subprocess")
-        self.assertEqual(
-            saved, 0, "Expected no cache save in subprocess (already cached)"
-        )
+        self.assertEqual(miss, 0)
+        self.assertEqual(hit, 1)
+        self.assertEqual(saved, 0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
