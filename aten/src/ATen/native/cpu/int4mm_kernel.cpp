@@ -950,7 +950,7 @@ void dyn_quant_pack_4bit_weight_kernel(
     const int64_t K,
     const int64_t block_size) {
 #if AT_KLEIDIAI_ENABLED()
-  if (can_use_kleidiai(scales_zeros, K, block_size)) {
+  if (cpuinfo_has_arm_bf16() && can_use_kleidiai(scales_zeros, K, block_size)) {
     const int64_t weight_packed_size =
         kleidiai::kai_pack_rhs_int4_size(N, K, block_size, weights.scalar_type());
     packed_weights.resize_({weight_packed_size});
@@ -1310,7 +1310,10 @@ void dyn_quant_matmul_4bit_kernel(
 #if AT_KLEIDIAI_ENABLED()
   const int64_t weight_packed_size =
       kleidiai::kai_pack_rhs_int4_size(N, K, block_size, inp.scalar_type());
-  if (weight_packed_size == packed_weights.numel()) {
+  const bool has_bf16_support = cpuinfo_has_arm_bf16();
+
+  // Only use KleidiAI when BF16 hardware support is present
+  if (weight_packed_size == packed_weights.numel() && has_bf16_support) {
     // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(output, inp, packed_weights, M, N, K, block_size);
