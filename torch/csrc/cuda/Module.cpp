@@ -1064,7 +1064,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
       .def_readonly(
-      "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_property_readonly(
           "clock_rate",
           [](const cudaDeviceProp&) {
