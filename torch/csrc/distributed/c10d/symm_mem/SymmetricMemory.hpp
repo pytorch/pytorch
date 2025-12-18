@@ -95,6 +95,10 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual bool world_within_direct_access() {
     TORCH_CHECK(false, "NYI");
   }
+
+  virtual void* get_window() {
+    TORCH_CHECK(false, "NYI");
+  }
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {

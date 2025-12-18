@@ -1186,6 +1186,7 @@ This class does not support ``__members__`` property.)");
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
+      .def_property_readonly("window", &SymmetricMemory::get_window)
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,

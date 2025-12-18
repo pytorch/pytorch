@@ -82,7 +82,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
-        buffer_handle_(buffer_handle),
+        buffer_win_(buffer_handle),
         signal_handle_(signal_handle)
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
         , devComm_(devComm)
@@ -208,8 +208,9 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return nullptr;
   };
 
-  ncclWindow_t get_buffer_handle() {
-    return buffer_handle_;
+  void* get_window() override {
+    // ncclWindow_t is a vidmem pointer, so we can cast it to void*
+    return reinterpret_cast<void*>(buffer_win_);
   }
 
   ncclWindow_t get_signal_pad_handle() {
@@ -232,7 +233,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   void** buffers_dev_;
   void** signal_pads_dev_;
   std::string group_name_;
-  ncclWindow_t buffer_handle_;
+  ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   ncclDevComm devComm_;
