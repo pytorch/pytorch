@@ -554,21 +554,31 @@ def meta_sparse_structured_linear(
 ):
     output_sizes = list(input.shape)
     if bias is not None:
-        assert weight.size(0) == bias.size(0), "output size mismatch"
-    assert weight.size(1) == input.size(-1) / 2
+        if weight.size(0) != bias.size(0):
+            raise AssertionError(
+                f"output size mismatch: weight.size(0)={weight.size(0)} != bias.size(0)={bias.size(0)}"
+            )
+    if weight.size(1) != input.size(-1) / 2:
+        raise AssertionError(
+            f"weight.size(1)={weight.size(1)} != input.size(-1)/2={input.size(-1) / 2}"
+        )
     output_sizes[-1] = weight.size(0)
 
     # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
     # We assume that we have already squashed the inputs into a 2-D tensor
     # Then, as the output is transposed, we need to propagate the transposed
     # stride information to the output tensor
-    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    if len(input.shape) != 2:
+        raise AssertionError(
+            f"we can only handle the squashed input case, got {len(input.shape)}D input"
+        )
     transposed_strides = (1, input.size(0))
 
     if out_dtype is not None:
-        assert input.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (input.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got input.dtype={input.dtype}, out_dtype={out_dtype}"
+            )
     output = input.new_empty(
         output_sizes,
         dtype=input.dtype if out_dtype is None else out_dtype,
@@ -584,16 +594,23 @@ def meta_sparse_structured_mm(
     mat2: Tensor,
     out_dtype: torch.dtype | None = None,
 ):
-    assert len(mat1.shape) == 2
-    assert len(mat1_meta.shape) == 2
-    assert len(mat2.shape) == 2
-    assert mat1.size(1) == mat2.size(0) / 2
+    if len(mat1.shape) != 2:
+        raise AssertionError(f"mat1 must be 2D, got {len(mat1.shape)}D")
+    if len(mat1_meta.shape) != 2:
+        raise AssertionError(f"mat1_meta must be 2D, got {len(mat1_meta.shape)}D")
+    if len(mat2.shape) != 2:
+        raise AssertionError(f"mat2 must be 2D, got {len(mat2.shape)}D")
+    if mat1.size(1) != mat2.size(0) / 2:
+        raise AssertionError(
+            f"mat1.size(1)={mat1.size(1)} != mat2.size(0)/2={mat2.size(0) / 2}"
+        )
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (mat2.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got mat2.dtype={mat2.dtype}, out_dtype={out_dtype}"
+            )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -613,22 +630,32 @@ def meta_sparse_structured_addmm(
     beta=1,
     out_dtype: torch.dtype | None = None,
 ):
-    assert len(input.shape) == 1, (
-        "only input broadcasted to columns of mat1 * mat2 product is supported"
-    )
-    assert len(mat1.shape) == 2
-    assert len(mat1_meta.shape) == 2
-    assert len(mat2.shape) == 2
-    assert input.size(0) == mat1.size(0), (
-        "only input broadcasted to columns of mat1 * mat2 product is supported"
-    )
-    assert mat1.size(1) == mat2.size(0) / 2
+    if len(input.shape) != 1:
+        raise AssertionError(
+            f"only input broadcasted to columns of mat1 * mat2 product is supported, got {len(input.shape)}D input"
+        )
+    if len(mat1.shape) != 2:
+        raise AssertionError(f"mat1 must be 2D, got {len(mat1.shape)}D")
+    if len(mat1_meta.shape) != 2:
+        raise AssertionError(f"mat1_meta must be 2D, got {len(mat1_meta.shape)}D")
+    if len(mat2.shape) != 2:
+        raise AssertionError(f"mat2 must be 2D, got {len(mat2.shape)}D")
+    if input.size(0) != mat1.size(0):
+        raise AssertionError(
+            f"only input broadcasted to columns of mat1 * mat2 product is supported, "
+            f"input.size(0)={input.size(0)} != mat1.size(0)={mat1.size(0)}"
+        )
+    if mat1.size(1) != mat2.size(0) / 2:
+        raise AssertionError(
+            f"mat1.size(1)={mat1.size(1)} != mat2.size(0)/2={mat2.size(0) / 2}"
+        )
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (mat2.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got mat2.dtype={mat2.dtype}, out_dtype={out_dtype}"
+            )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -649,37 +676,53 @@ def meta__cslt_sparse_mm(
     split_k: int = 1,
     split_k_mode: int = -1,
 ):
-    assert dense_B.dtype in {
+    if dense_B.dtype not in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
-    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
-    assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
-    assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
+    }:
+        raise AssertionError(
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+        )
+    if compressed_A.dtype != dense_B.dtype:
+        raise AssertionError(
+            f"inputs must have the same dtype, got {compressed_A.dtype} and {dense_B.dtype}"
+        )
+    if len(dense_B.shape) != 2:
+        raise AssertionError(
+            f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
+        )
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
 
     if is_8bit_input_type:
-        assert not dense_B.is_contiguous(), (
-            "dense input must be transposed for 8bit dtypes"
-        )
+        if dense_B.is_contiguous():
+            raise AssertionError("dense input must be transposed for 8bit dtypes")
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
-        assert m == bias.size(0)
+        if m != bias.size(0):
+            raise AssertionError(
+                f"bias size mismatch: m={m} != bias.size(0)={bias.size(0)}"
+            )
 
     if out_dtype is not None:
-        assert is_8bit_input_type and out_dtype in {
-            torch.float16,
-            torch.bfloat16,
-            torch.int32,
-            torch.float8_e4m3fn,
-        }, (
-            f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
-        )
+        if not (
+            is_8bit_input_type
+            and out_dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+                torch.int32,
+                torch.float8_e4m3fn,
+            }
+        ):
+            raise AssertionError(
+                f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+            )
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -882,12 +925,14 @@ def functional_assert_async_meta(val, assert_msg, dep_token):
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
-    assert self.dim() >= 2, (
-        f"{f_name}: The input tensor must have at least 2 dimensions."
-    )
-    assert self.size(-1) == self.size(-2), (
-        f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-    )
+    if self.dim() < 2:
+        raise AssertionError(
+            f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
+        )
+    if self.size(-1) != self.size(-2):
+        raise AssertionError(
+            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+        )
 
 
 # Validates input shapes and devices
@@ -2120,8 +2165,12 @@ def meta_replication_pad3d(input, padding):
 @out_wrapper("grad_input")
 def meta_pad3d_backward(grad_output, input, padding):
     torch._check(len(padding) == 6, lambda: "padding size is expected to be 6")
-    assert input.ndim > 3
-    assert grad_output.ndim == input.ndim
+    if input.ndim <= 3:
+        raise AssertionError(f"input.ndim must be > 3, got {input.ndim}")
+    if grad_output.ndim != input.ndim:
+        raise AssertionError(
+            f"grad_output.ndim must equal input.ndim, got {grad_output.ndim} != {input.ndim}"
+        )
 
     dim_w = 3
     dim_h = 2
