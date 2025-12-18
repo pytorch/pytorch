@@ -92,7 +92,9 @@ int64_t minimum_gemm_alignment(sdp::sdp_params const& params) {
   return matmul_alignment_mn;
 }
 
-bool check_head_dim_size_mem_efficient(sdp::sdp_params const& params, bool debug) {
+bool check_head_dim_size_mem_efficient(
+    sdp::sdp_params const& params,
+    bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
@@ -117,23 +119,26 @@ bool check_head_dim_size_mem_efficient(sdp::sdp_params const& params, bool debug
   return true;
 }
 
-bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(
+    sdp::sdp_params const& params,
+    bool debug) {
   // Define gate functions that determine if a mem efficient can be run
-  constexpr auto general_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-      sdp::check_runtime_disabled_mem_efficient,
-      sdp::check_tensor_shapes,
-      check_head_dim_size_mem_efficient
-  );
+  constexpr auto general_constraints =
+      c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+          sdp::check_runtime_disabled_mem_efficient,
+          sdp::check_tensor_shapes,
+          check_head_dim_size_mem_efficient);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
   if (has_for_nested_inputs(params)) {
-    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-        sdp::check_requires_grad_and_nested,
-        sdp::check_batch_size_nested,
-        sdp::check_for_seq_len_0_nested_tensor);
+    constexpr auto nested_constraints =
+        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+            sdp::check_requires_grad_and_nested,
+            sdp::check_batch_size_nested,
+            sdp::check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -141,10 +146,11 @@ bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) 
     }
   }
   if (has_only_dense_inputs(params)) {
-    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
-        sdp::check_nonzero_sequence_lengths_dense,
-        sdp::check_last_dim_stride_equals_1_dense<false>,
-        sdp::check_batch_size_and_num_heads_dense<false>);
+    constexpr auto dense_constraints =
+        c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+            sdp::check_nonzero_sequence_lengths_dense,
+            sdp::check_last_dim_stride_equals_1_dense<false>,
+            sdp::check_batch_size_and_num_heads_dense<false>);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
