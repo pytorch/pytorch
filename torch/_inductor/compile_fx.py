@@ -1073,7 +1073,7 @@ def _compile_fx_inner(
         )
         # Add event data about cache hits/miss
         # TODO: add remote cache get/put timings here too
-        CompileEventLogger.pt2_compile(
+        CompileEventLogger.try_add_pt2_compile(
             "inductor_compile",
             cache_state=cache_state,
             cache_event_time=start_time,
