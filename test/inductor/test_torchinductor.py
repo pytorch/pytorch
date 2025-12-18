@@ -3625,6 +3625,8 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
+    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)

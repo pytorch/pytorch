@@ -872,6 +872,10 @@ class PallasKernel(SIMDKernel):
         # Prepare and simplify the index
         prepared_index = self.prepare_indexing(index)
 
+        # Note: Block variable detection (im2col patterns) is handled in load()/store()
+        # where we have access to buffer dimensions. We check the buffer size
+        # against iteration variables there to detect gather patterns.
+
         # For simple single-symbol access (contiguous case), we can use [...]
         # which is more efficient as it operates on the entire array at once
         if isinstance(prepared_index, sympy.Symbol):
@@ -964,14 +968,14 @@ class PallasKernel(SIMDKernel):
                 if stride != 1:
                     all_unit_stride = False
                     break
-
             if all_unit_stride:
                 # Contiguous multi-dimensional access
                 return "..."
             else:
                 # Strided multi-dimensional access
-                # Since we call .contiguous() on inputs before passing to JAX,
-                # strided tensors become contiguous and we can just use [...]
+                # For most cases, inputs are made contiguous before passing to JAX,
+                # so strided tensors become contiguous and we can use [...]
+                # The buffer size check in load() handles im2col-like patterns
                 return "..."
 
         # For complex cases, use [...] since inputs are made contiguous
@@ -1213,6 +1217,12 @@ class PallasKernel(SIMDKernel):
             # Check if index contains ModularIndexing - this requires flattened access
             # ModularIndexing is used for roll/wrap-around operations
             needs_flatten = index.has(ModularIndexing) and index_str != "..."
+            # If index_str is an actual expression (not "..." or a slice pattern),
+            # we need flattened access because it uses block variables
+            if not needs_flatten and index_str != "...":
+                # Check if it's a simple slice pattern (::N or M::N)
+                if not ("::" in index_str or index_str.lstrip("-").isdigit()):
+                    needs_flatten = True
             return index_str, needs_flatten
 
     def _determine_masked_ops_for_kernel(self) -> bool:
@@ -1337,15 +1347,109 @@ class PallasKernel(SIMDKernel):
                 for l in used_range_lengths:
                     output_numel *= l
 
+                # Check if index has gather-pattern strides (im2col-like)
+                # For expression like 4*x3 + 224*x4 + y0 + 56*y1 + 3136*y2:
+                # - If buffer is contiguous and index coefficients don't match buffer strides,
+                #   this is a gather pattern that needs explicit indexing
+                # - If index coefficients match buffer strides (like 1 + 10*x for 10xN buffer),
+                #   it's standard strided access and [...] is correct after .contiguous()
+                has_non_unit_strides = False
+                try:
+                    buf_stride = buf_obj.get_layout().stride
+                    # Check if original buffer is contiguous (stride matches size)
+                    is_originally_contiguous = True
+                    expected_strides = [1]  # 1D buffers have stride 1
+                    if len(buf_size) > 1:
+                        expected_stride = 1
+                        expected_strides = []  # Reset for multi-dim
+                        for i in range(len(buf_size) - 1, -1, -1):
+                            expected_strides.insert(0, expected_stride)
+                            actual_stride = (
+                                int(buf_stride[i])
+                                if hasattr(buf_stride[i], "__int__")
+                                else None
+                            )
+                            if (
+                                actual_stride is None
+                                or actual_stride != expected_stride
+                            ):
+                                is_originally_contiguous = False
+                                break
+                            dim_size = (
+                                int(buf_size[i])
+                                if hasattr(buf_size[i], "__int__")
+                                else None
+                            )
+                            if dim_size is None:
+                                is_originally_contiguous = False
+                                break
+                            expected_stride *= dim_size
+
+                    if is_originally_contiguous:
+                        # Buffer is contiguous - check if access coefficients match buffer strides
+                        # Coefficients should be a subset of expected strides for normal access
+                        coefficients = OrderedSet()
+                        for var in used_vars:
+                            var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
+                                index, var
+                            )
+                            stride = BlockPatternMatcher.match_affine_block_expr(
+                                var_expr, var
+                            )
+                            if stride is None:
+                                stride = 1  # Variable without explicit coefficient has stride 1
+                            coefficients.add(
+                                int(stride) if hasattr(stride, "__int__") else stride
+                            )
+
+                        # If any coefficient is not in expected strides, it's a gather
+                        expected_stride_set = OrderedSet(expected_strides)
+                        for coef in coefficients:
+                            if coef not in expected_stride_set:
+                                has_non_unit_strides = True
+                                break
+                except Exception:
+                    pass
+
                 # Use strided indexing if:
                 # 1. Buffer size differs from expected output size AND
                 # 2. There are iteration variables in the index (meaning we're accessing a subset)
+                # OR
+                # 3. Not all iteration variables are used (im2col-like patterns)
+                #    This handles cases like im2col where load uses 5 vars but store uses 2
+                #    The element counts may match but broadcast shapes won't align
+                # OR
+                # 4. Buffer is contiguous but index has non-unit strides (gather pattern)
                 # Note: inputs are made contiguous before passing to JAX, so we don't need
                 # to worry about transposed tensors here - the index expression directly
                 # corresponds to which elements to load from the contiguous buffer.
+                # Only consider "not all vars used" for truly multi-dim buffers.
+                # For 1D buffers or 2D broadcast buffers (with a dimension of size 1),
+                # using a subset of iteration vars is normal.
+                # Also check that the buffer has more dimensions than used vars,
+                # which indicates a gather pattern rather than simple broadcast.
+                buf_effective_dims = sum(
+                    1
+                    for s in buf_size
+                    if (int(s) if hasattr(s, "__int__") else None) != 1
+                )
+                # For im2col patterns: the index uses MORE vars than buffer has dims
+                # This means multiple iteration vars map to fewer buffer dimensions
+                # which is a gather pattern. For normal access (including broadcast),
+                # used_vars <= buf_dims.
+                not_all_vars_used = (
+                    len(used_vars) < len(iter_vars)
+                    and len(used_vars) > 0
+                    and buf_effective_dims > 1
+                    and len(used_vars) > len(buf_size)  # More vars than dims = gather
+                )
                 if (
                     output_numel > 0
-                    and buf_numel != output_numel
+                    and (
+                        buf_numel != output_numel
+                        or not_all_vars_used
+                        or has_non_unit_strides
+                    )
                     and len(used_vars) > 0
                 ):
                     index_str = self._generate_strided_index(index)
@@ -1709,6 +1813,59 @@ class PallasKernel(SIMDKernel):
             else:
                 index_str, needs_flatten = self._get_index_expr(index)
 
+                # Check for im2col-like patterns where store uses block variables
+                # but load doesn't. For cat/expand:
+                # - Load uses x0, store uses x0+128*x1 → x2
+                # - Both load and store prepared indices share the same block vars
+                # - OR: Load has no vars (broadcasts), store has block vars
+                # For im2col:
+                # - Load uses 4*x3+224*x4+... (NOT compressed, coefficients irregular)
+                # - Store uses x3+14*x4+... → x6+196*y5 (compressed, coefficients form products)
+                # - Store prepared uses block vars, load prepared doesn't
+                if index_str == "..." and not needs_flatten:
+                    try:
+                        prepared_index = self.prepare_indexing(index)
+                        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+                        store_orig_vars = index.free_symbols & iter_vars
+                        store_prep_vars = (
+                            prepared_index.free_symbols
+                            if hasattr(prepared_index, "free_symbols")
+                            else OrderedSet()
+                        ) & iter_vars
+                        new_vars = store_prep_vars - store_orig_vars
+                        # Only trigger if store introduces new block vars
+                        if new_vars and len(store_orig_vars) > 1:
+                            # Check if loads are compatible with broadcast or cat pattern
+                            # cat: load orig vars ⊂ store orig vars (load uses subset)
+                            # im2col: load orig vars = store orig vars but load doesn't compress
+                            has_im2col_pattern = False
+                            for load_index in self.load_index_exprs.values():
+                                load_orig_vars = load_index.free_symbols & iter_vars
+                                if load_orig_vars:
+                                    # Load has iteration variables
+                                    # cat: load vars are strict subset of store vars
+                                    # im2col: load vars equal store vars but load doesn't compress
+                                    if load_orig_vars == store_orig_vars:
+                                        # Same vars - check if load gets compressed too
+                                        prep_load = self.prepare_indexing(load_index)
+                                        load_prep_vars = (
+                                            prep_load.free_symbols
+                                            if hasattr(prep_load, "free_symbols")
+                                            else OrderedSet()
+                                        ) & iter_vars
+                                        # If store compresses but load doesn't, it's im2col
+                                        if (
+                                            load_orig_vars == load_prep_vars
+                                            and store_prep_vars != store_orig_vars
+                                        ):
+                                            has_im2col_pattern = True
+                                            break
+                            if has_im2col_pattern:
+                                index_str = self._generate_strided_index(prepared_index)
+                                needs_flatten = True
+                    except Exception:
+                        pass
+
                 # Build store expression using string concatenation
                 use_masked = (
                     index_str == "..." and not needs_flatten and self.use_masked_ops
@@ -1819,6 +1976,14 @@ class PallasKernel(SIMDKernel):
                             f"if jnp.asarray({value}).size != {out}.size "
                             f"else jnp.asarray({value}).reshape({out}.shape)))"
                         )
+                elif needs_flatten:
+                    # Block variable indexing (e.g., im2col) - use flattened scatter
+                    # The index_str contains an expression like "x6 + 196*y5" which computes
+                    # flat indices. Both the index and value need to be flattened.
+                    store_expr = (
+                        f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].set("
+                        f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
+                    )
                 else:
                     # Direct indexed assignment
                     # Check if we need special handling for constant indices on multi-dim outputs

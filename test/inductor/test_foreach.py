@@ -1082,6 +1082,164 @@ class ForeachTests(TestCase):
                 _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
     @requires_gpu
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize(
+        "value",
+        [
+            0.123456789,
+            -1.987654321,
+            0.0,
+            1e-8,
+            1e8,
+            3.141592653589793,  # pi - more precision than fp32
+            -2.718281828459045,  # -e - more precision than fp32
+            0.000000001234567890123456,
+            # Values that expose fp32/fp64 casting issues:
+            1.0000001192092896,  # 1 + 2^-23 (smallest diff from 1.0 in fp32)
+            1.00000001,  # Between fp32 representable values
+            1e-38,  # Very small but not subnormal
+            1.1754944e-38,  # Near fp32 min normal
+            0.333333333333333333,  # 1/3 with full fp64 precision
+            0.1,  # Cannot be exactly represented in binary
+            1.0000000000000002,  # 1 + eps in fp64, rounds to 1.0 in fp32
+            0.30000000000000004,  # 0.1 + 0.2 in fp64 (famous precision issue)
+        ],
+    )
+    def test_addcmul_scalar_value_vs_tensor_value(self, value):
+        """Test that torch._foreach_addcmul with unbacked float scalar from .item()
+        matches tensor scalar value in compiled mode.
+
+        Uses .item() to create an unbacked float symbol that gets passed as a
+        kernel argument, exercising the fp64 signature fix in triton_utils.py."""
+
+        def fn_item_scalar(a0, a1, b0, b1, c0, c1, scalar_tensor):
+            # .item() creates an unbacked float symbol - passed as kernel arg
+            val = scalar_tensor.item()
+            return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - val)
+
+        def fn_tensor_scalar(a0, a1, b0, b1, c0, c1, val):
+            return torch._foreach_addcmul([a0, a1], [b0, b1], [c0, c1], value=1 - val)
+
+        # Use specific values that are sensitive to fp32/fp64 precision differences
+        inputs = (
+            torch.tensor(
+                [[1.0000001192092896, 0.333333333333333333], [1e-7, 3.4028235e30]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[0.5, 0.5], [0.5, 0.5]], device=GPU_TYPE, dtype=torch.float32
+            ),
+            torch.tensor(
+                [[1.0, 1.0], [1.0, 1.0]], device=GPU_TYPE, dtype=torch.float32
+            ),
+            torch.tensor(
+                [[2.0, 2.0], [2.0, 2.0]], device=GPU_TYPE, dtype=torch.float32
+            ),
+            torch.tensor(
+                [[0.25, 0.25], [0.25, 0.25]], device=GPU_TYPE, dtype=torch.float32
+            ),
+        )
+        scalar_tensor = torch.tensor(value, device=GPU_TYPE, dtype=torch.float64)
+
+        # Compiled mode comparison - assert bitwise equality
+        # The .item() path should preserve fp64 precision just like tensor scalar path
+        compiled_item_scalar = torch.compile(fn_item_scalar, fullgraph=True)(
+            *inputs, scalar_tensor
+        )
+        compiled_tensor_scalar = torch.compile(fn_tensor_scalar, fullgraph=True)(
+            *inputs, scalar_tensor
+        )
+        for a, b in zip(compiled_item_scalar, compiled_tensor_scalar):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+    @requires_gpu
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize(
+        "op",
+        [
+            torch._foreach_add,
+            torch._foreach_mul,
+            torch._foreach_sub,
+            # Note: _foreach_div excluded due to pre-existing eager precision
+            # mismatch between python scalar and tensor scalar arguments
+        ],
+        name_fn=lambda op: op.__name__,
+    )
+    @parametrize(
+        "value",
+        [
+            0.123456789,
+            -1.987654321,
+            1e-8,
+            1e8,
+            3.141592653589793,  # pi - more precision than fp32
+            -2.718281828459045,  # -e - more precision than fp32
+            0.000000001234567890123456,
+            # Values that expose fp32/fp64 casting issues:
+            1.0000001192092896,  # 1 + 2^-23 (smallest diff from 1.0 in fp32)
+            1.00000001,  # Between fp32 representable values
+            1e-38,  # Very small but not subnormal
+            1.1754944e-38,  # Near fp32 min normal
+            0.333333333333333333,  # 1/3 with full fp64 precision
+            0.1,  # Cannot be exactly represented in binary
+            1.0000000000000002,  # 1 + eps in fp64, rounds to 1.0 in fp32
+            0.30000000000000004,  # 0.1 + 0.2 in fp64 (famous precision issue)
+        ],
+    )
+    def test_foreach_scalar_vs_scalar_tensor(self, op, value):
+        """Test that foreach binary ops with python scalar second argument
+        match tensor scalar second argument in both eager and compiled modes."""
+
+        def fn_python_scalar(a0, a1):
+            return op([a0, a1], value)
+
+        def fn_tensor_scalar(a0, a1, val):
+            return op([a0, a1], val)
+
+        # Use specific values that are sensitive to fp32/fp64 precision differences
+        inputs = (
+            torch.tensor(
+                [[1.0000001192092896, 0.333333333333333333], [1e-7, 3.4028235e30]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+        )
+        scalar_tensor = torch.tensor(value, device=GPU_TYPE, dtype=torch.float64)
+
+        # Eager mode comparison - assert bitwise equality
+        eager_python_scalar = fn_python_scalar(*inputs)
+        eager_tensor_scalar = fn_tensor_scalar(*inputs, scalar_tensor)
+        for a, b in zip(eager_python_scalar, eager_tensor_scalar):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+        # Compiled mode comparison - assert bitwise equality
+        compiled_python_scalar = torch.compile(fn_python_scalar, fullgraph=True)(
+            *inputs
+        )
+        compiled_tensor_scalar = torch.compile(fn_tensor_scalar, fullgraph=True)(
+            *inputs, scalar_tensor
+        )
+        for a, b in zip(compiled_python_scalar, compiled_tensor_scalar):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+        # Cross comparison: eager vs compiled - assert bitwise equality
+        for a, b in zip(eager_python_scalar, compiled_python_scalar):
+            self.assertEqual(a, b, atol=0, rtol=0)
+        for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+    @requires_gpu
     @foreach_map_un_ops
     def test_foreach_map_backward_unary(self, op):
         from torch._dynamo.polyfills import foreach_map_fn
