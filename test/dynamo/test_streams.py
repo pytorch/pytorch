@@ -13,6 +13,10 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._inductor.fx_passes.control_dependencies import (
+    _create_subgraph_for_node,
+    get_subgraph_name,
+)
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
 
@@ -974,6 +978,50 @@ class GraphModule(torch.nn.Module):
             ),
             """1""",
         )
+
+    def test_control_deps_wrapping(self) -> None:
+        def fn(x) -> None:
+            e = torch.Event()
+            e.record()
+            x.add_(1)
+            return x
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+        gm = fw_graphs[0]
+        graph = gm.graph
+        record_node = next(
+            iter(
+                graph.find_nodes(
+                    op="call_function", target=torch.ops.streams.record_event.default
+                )
+            )
+        )
+        arg0_1 = next(iter(n for n in graph.nodes if n.name == "arg0_1"))
+        subgraph_module = _create_subgraph_for_node(graph, record_node, [arg0_1])
+        subgraph_attr_name = get_subgraph_name(gm, record_node.name)
+        print(subgraph_module)
+        setattr(gm, subgraph_attr_name, subgraph_module)
 
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
