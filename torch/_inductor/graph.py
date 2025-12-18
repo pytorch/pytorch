@@ -987,6 +987,12 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def run(self, *args: Any) -> Any:  # type: ignore[override]
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        # Capture graph info for lowering bisection if in capture mode
+        CompilerBisector.set_lowering_graph_info(
+            self.module, list(self.example_inputs) if self.example_inputs else []
+        )
         with dynamo_timed("GraphLowering.run"):
             return super().run(*args)
 
@@ -1661,7 +1667,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
-                        "inductor", "lowerings", lambda: repr(n)
+                        "inductor", "lowerings", lambda: (n.name, repr(n))
                     )
                 )
             ):

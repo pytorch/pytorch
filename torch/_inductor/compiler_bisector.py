@@ -75,15 +75,182 @@ BACKENDS: dict[str, list[Subsystem]] = {
 subsystem_call_counter: dict[str, int] = collections.Counter()
 call_counter_debug_info: dict[int, str] = {}
 
+# For range bisection (minimizing both start and end for lowerings)
+# Stores: (start_min, end_max) - the range of nodes to enable for inductor
+lowering_range_bisect_state: dict[str, tuple[int, int]] = {}
+# Stores all node info during final capture: list of (index, repr)
+lowering_all_nodes_info: list[tuple[int, str]] = []
+# The current FX graph module being lowered (for capture)
+lowering_fx_graph: Optional["torch.fx.GraphModule"] = None
+# Example inputs (for capture)
+lowering_example_inputs: Optional[list] = None
+
 
 def reset_counters() -> None:
     subsystem_call_counter.clear()
     call_counter_debug_info.clear()
+    lowering_all_nodes_info.clear()
 
 
 @functools.cache
 def get_env_val(env_str: str) -> Optional[str]:
     return os.environ.get(env_str, None)
+
+
+@dataclasses.dataclass
+class LoweringBisectInfo:
+    """
+    Information about a minimal range of lowerings that trigger a failure.
+    This is populated when bisect_lowerings_range=True and subsystem='lowerings'.
+    """
+
+    # Start and end indices of the minimal range of nodes that need inductor lowering
+    start_index: int
+    end_index: int
+    # List of (index, node_name, node_repr) for all nodes in the minimal range
+    nodes_in_range: list[tuple[int, str, str]]
+    # The FX graph module being lowered (if captured)
+    fx_graph: Optional["torch.fx.GraphModule"] = None
+    # Example inputs for the subgraph (if captured)
+    example_inputs: Optional[list] = None
+
+    def print_graph(self) -> str:
+        """Print the minimal subgraph of nodes that trigger the issue."""
+        lines = [
+            f"Minimal lowering range: [{self.start_index}, {self.end_index}]",
+            f"Number of nodes in range: {len(self.nodes_in_range)}",
+            "",
+            "Nodes in range:",
+        ]
+        for idx, node_name, node_repr in self.nodes_in_range:
+            lines.append(f"  [{idx}] {node_name}: {node_repr}")
+        return "\n".join(lines)
+
+    def get_pruned_graph(self) -> Optional["torch.fx.GraphModule"]:
+        """
+        Extract a pruned FX graph containing only the offending nodes.
+        Inputs from outside the range become placeholder inputs.
+        """
+        if self.fx_graph is None:
+            return None
+
+        import copy
+
+        import torch.fx
+
+        # Get the node names in our minimal range
+        node_names_in_range = {name for _, name, _ in self.nodes_in_range}
+
+        # Find the actual FX nodes
+        original_graph = self.fx_graph.graph
+        nodes_to_include = []
+        for node in original_graph.nodes:
+            if node.op == "call_function" and node.name in node_names_in_range:
+                nodes_to_include.append(node)
+
+        if not nodes_to_include:
+            return None
+
+        # Create a new graph
+        new_graph = torch.fx.Graph()
+        env: dict = {}  # Maps old nodes to new nodes
+        new_placeholders: dict = {}  # Maps input nodes to their new placeholders
+
+        def get_new_node(old_node):
+            """Get or create the corresponding node in the new graph."""
+            if old_node in env:
+                return env[old_node]
+
+            # If it's not in our range, create a placeholder for it
+            if old_node not in new_placeholders:
+                # Create a placeholder with metadata from the original node
+                placeholder_name = f"input_{old_node.name}"
+                new_placeholder = new_graph.placeholder(placeholder_name)
+                if "val" in old_node.meta:
+                    new_placeholder.meta["val"] = old_node.meta["val"]
+                if "tensor_meta" in old_node.meta:
+                    new_placeholder.meta["tensor_meta"] = old_node.meta["tensor_meta"]
+                new_placeholders[old_node] = new_placeholder
+            return new_placeholders[old_node]
+
+        # Copy the nodes in range to the new graph
+        for node in nodes_to_include:
+            # Map arguments to new graph
+            new_args = []
+            for arg in node.args:
+                if isinstance(arg, torch.fx.Node):
+                    if arg.name in node_names_in_range and arg in env:
+                        new_args.append(env[arg])
+                    else:
+                        new_args.append(get_new_node(arg))
+                else:
+                    new_args.append(arg)
+
+            new_kwargs = {}
+            for k, v in node.kwargs.items():
+                if isinstance(v, torch.fx.Node):
+                    if v.name in node_names_in_range and v in env:
+                        new_kwargs[k] = env[v]
+                    else:
+                        new_kwargs[k] = get_new_node(v)
+                else:
+                    new_kwargs[k] = v
+
+            # Create the new node
+            new_node = new_graph.call_function(node.target, tuple(new_args), new_kwargs)
+            new_node.meta = copy.copy(node.meta)
+            env[node] = new_node
+
+        # Add output node (output the last node in range)
+        if nodes_to_include:
+            last_node = nodes_to_include[-1]
+            if last_node in env:
+                new_graph.output(env[last_node])
+
+        # Create a new GraphModule
+        new_graph.lint()
+        new_gm = torch.fx.GraphModule(self.fx_graph, new_graph)
+        return new_gm
+
+    def dump_repro(self, path: str) -> None:
+        """Dump a reproduction script with the minimal graph and inputs."""
+        import pickle
+
+        os.makedirs(path, exist_ok=True)
+
+        # Dump the graph info
+        graph_info_path = os.path.join(path, "graph_info.txt")
+        with open(graph_info_path, "w") as f:
+            f.write(self.print_graph())
+        print(f"Graph info written to {graph_info_path}")
+
+        # Dump the FX graph if available
+        if self.fx_graph is not None:
+            graph_path = os.path.join(path, "fx_graph.py")
+            with open(graph_path, "w") as f:
+                f.write(self.fx_graph.print_readable(print_output=False))
+            print(f"FX graph written to {graph_path}")
+
+        # Dump example inputs if available
+        if self.example_inputs is not None:
+            inputs_path = os.path.join(path, "example_inputs.pkl")
+            try:
+                with open(inputs_path, "wb") as f:
+                    pickle.dump(self.example_inputs, f)
+                print(f"Example inputs written to {inputs_path}")
+            except Exception as e:
+                print(f"Failed to pickle example inputs: {e}")
+                # Try to save tensor metadata instead
+                metadata_path = os.path.join(path, "inputs_metadata.txt")
+                with open(metadata_path, "w") as f:
+                    for i, inp in enumerate(self.example_inputs):
+                        if hasattr(inp, "shape"):
+                            f.write(
+                                f"Input {i}: shape={inp.shape}, dtype={inp.dtype}, device={inp.device}\n"
+                            )
+                        else:
+                            f.write(f"Input {i}: {type(inp)} = {inp}\n")
+                print(f"Input metadata written to {metadata_path}")
 
 
 @dataclasses.dataclass
@@ -93,12 +260,14 @@ class BisectionResult:
     subsystem: optional, registered component identified for failure
     bisect_number: optional, number of times the subsystem needed to be applied to trigger failure
     debug_info: associated info of the triggering bisect application of subsystem
+    lowering_info: optional, detailed info about minimal lowering range (for lowerings subsystem)
     """
 
     backend: str
     subsystem: Optional[str] = None
     bisect_number: Optional[int] = None
     debug_info: Optional[str] = None
+    lowering_info: Optional[LoweringBisectInfo] = None
 
 
 class CompilerBisector:
@@ -183,6 +352,45 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
+    def update_start_bisect_range(
+        cls, backend_name: str, subsystem_name: str, low: int, high: int
+    ) -> None:
+        """Update the bisect range for minimizing from the start."""
+        assert isinstance(subsystem_name, str)
+        file_path = os.path.join(
+            cls.get_dir(), backend_name, f"{subsystem_name}_start_bisect_range.txt"
+        )
+        lines = [f"low={low}\n", f"high={high}\n"]
+        cls.write_lines_to_file(file_path, lines)
+
+    @classmethod
+    def get_start_bisect_range(
+        cls, backend_name: str, subsystem_name: str
+    ) -> tuple[int, int]:
+        """Get the bisect range for minimizing from the start."""
+        file_path = os.path.join(
+            cls.get_dir(), backend_name, f"{subsystem_name}_start_bisect_range.txt"
+        )
+        lines = cls.read_lines_from_file(file_path)
+        low = None
+        high = None
+        for line in reversed(lines):
+            if line.startswith("low="):
+                low = int(line.strip().split("=")[1])
+            elif line.startswith("high="):
+                high = int(line.strip().split("=")[1])
+
+            if low is not None and high is not None:
+                break
+
+        if low is None or high is None:
+            raise RuntimeError(
+                f"Trying to get start bisect range when it is not set: subsystem {subsystem_name}"
+            )
+
+        return low, high
+
+    @classmethod
     def get_backend(cls) -> Optional[str]:
         """
         Returns the active backend, if any
@@ -221,7 +429,13 @@ class CompilerBisector:
     @classmethod
     def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
         """
-        Returns the current stage of bisecting, if Any
+        Returns the current stage of bisecting, if Any.
+        States:
+          - test_disable: Disable subsystem completely to see if issue is fixed
+          - find_max_bounds: Find upper bound of node count
+          - bisect: Bisect to find the problematic node (from start)
+          - bisect_start: (lowerings only) Bisect from start to minimize range
+          - capture: (lowerings only) Final run to capture node info for reporting
         """
 
         file_path = os.path.join(
@@ -230,7 +444,13 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         if lines:
             out = lines[0].strip()
-            assert out in ("test_disable", "find_max_bounds", "bisect")
+            assert out in (
+                "test_disable",
+                "find_max_bounds",
+                "bisect",
+                "bisect_start",
+                "capture",
+            )
             return out
         return None
 
@@ -311,6 +531,26 @@ class CompilerBisector:
         return curr
 
     @classmethod
+    def set_lowering_graph_info(
+        cls,
+        fx_graph: "torch.fx.GraphModule",
+        example_inputs: list,
+    ) -> None:
+        """
+        Set the FX graph and example inputs for lowering bisection.
+        Called from GraphLowering to capture the graph being lowered.
+        """
+        global lowering_fx_graph, lowering_example_inputs
+        if not cls.bisection_enabled:
+            return
+        if cls.get_backend() != "inductor" or cls.get_subsystem() != "lowerings":
+            return
+        run_state = cls.get_run_state("inductor", "lowerings")
+        if run_state == "capture":
+            lowering_fx_graph = fx_graph
+            lowering_example_inputs = example_inputs
+
+    @classmethod
     def disable_subsystem(
         cls,
         backend: str,
@@ -343,23 +583,63 @@ class CompilerBisector:
                 cls.get_system_counter(subsystem, increment=True),
             )
             return False
-        else:
-            assert run_state == "bisect"
-            # If the environment variable is not set, use the bisection range midpoint
+        elif run_state == "bisect":
+            # Bisect to find the minimal end index (standard bisection)
             low, high = cls.get_bisect_range(backend, subsystem)
-            # if high - low <= 2:
             midpoint = (low + high) // 2
             call_counter = cls.get_system_counter(subsystem)
 
             if (
                 call_counter >= low
                 and call_counter <= high
-                and (low - high) <= 2
+                and (high - low) <= 2
                 and debug_info is not None
             ):
                 call_counter_debug_info[call_counter] = debug_info()
 
             return call_counter > midpoint
+        elif run_state == "bisect_start":
+            # Bisect from the start to find the minimal start index
+            # end_index is already known (stored in bisect_range as 'low' after bisect phase)
+            end_index, _ = cls.get_bisect_range(backend, subsystem)
+            start_low, start_high = cls.get_start_bisect_range(backend, subsystem)
+            start_midpoint = (start_low + start_high) // 2
+            call_counter = cls.get_system_counter(subsystem)
+
+            if (
+                call_counter >= start_low
+                and call_counter <= end_index
+                and (start_high - start_low) <= 2
+                and debug_info is not None
+            ):
+                call_counter_debug_info[call_counter] = debug_info()
+
+            # Disable node if it's before start_midpoint OR after end_index
+            return call_counter < start_midpoint or call_counter > end_index
+        elif run_state == "capture":
+            # Final capture run: enable only nodes in the minimal range and record info
+            end_index, _ = cls.get_bisect_range(backend, subsystem)
+            start_index, _ = cls.get_start_bisect_range(backend, subsystem)
+            call_counter = cls.get_system_counter(subsystem)
+
+            # Record node info for all nodes in range
+            if (
+                call_counter >= start_index
+                and call_counter <= end_index
+                and debug_info is not None
+            ):
+                info = debug_info()
+                # Handle both tuple (name, repr) and plain string formats
+                if isinstance(info, tuple):
+                    node_name, node_repr = info
+                    lowering_all_nodes_info.append((call_counter, node_name, node_repr))
+                else:
+                    lowering_all_nodes_info.append((call_counter, str(call_counter), info))
+
+            # Disable node if it's outside the minimal range
+            return call_counter < start_index or call_counter > end_index
+        else:
+            raise RuntimeError(f"Unexpected run_state: {run_state}")
 
     @classmethod
     def advance_subsystem(
@@ -454,7 +734,7 @@ class CompilerBisector:
                 low, high = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                 midpoint = (low + high) // 2
                 print(
-                    f"Bisecting {curr_backend} - {curr_subsystem.name} (Range: [{low}, {high}], Midpoint: {midpoint})"
+                    f"Bisecting {curr_backend} - {curr_subsystem.name} end (Range: [{low}, {high}], Midpoint: {midpoint})"
                 )
                 if fn():
                     cls.update_bisect_range(
@@ -466,11 +746,68 @@ class CompilerBisector:
                     )
                 low, high = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                 if low == high:
-                    print(
-                        f"Binary search completed for {curr_backend} - {curr_subsystem.name}. The bisect number is {low}. "
-                        f"Debug info: {call_counter_debug_info.get(low, 'not found')}"
+                    # For lowerings subsystem, proceed to bisect from start
+                    if curr_subsystem.name == "lowerings":
+                        print(
+                            f"Found minimal end index: {low}. Now bisecting from start..."
+                        )
+                        # Initialize start bisect range: [0, low]
+                        cls.update_start_bisect_range(
+                            curr_backend, curr_subsystem.name, 0, low
+                        )
+                        cls.update_run_state(curr_backend, curr_subsystem, "bisect_start")
+                    else:
+                        print(
+                            f"Binary search completed for {curr_backend} - {curr_subsystem.name}. The bisect number is {low}. "
+                            f"Debug info: {call_counter_debug_info.get(low, 'not found')}"
+                        )
+                        return True
+            elif run_state == "bisect_start":
+                # Bisect from start to find minimal start index (highest start that still triggers bug)
+                end_index, _ = cls.get_bisect_range(curr_backend, curr_subsystem.name)
+                start_low, start_high = cls.get_start_bisect_range(
+                    curr_backend, curr_subsystem.name
+                )
+                start_midpoint = (start_low + start_high) // 2
+                print(
+                    f"Bisecting {curr_backend} - {curr_subsystem.name} start "
+                    f"(Start range: [{start_low}, {start_high}], End: {end_index}, Midpoint: {start_midpoint})"
+                )
+                if fn():
+                    # Test passed (no bug) = start is too high, need more nodes
+                    cls.update_start_bisect_range(
+                        curr_backend, curr_subsystem.name, start_low, start_midpoint
                     )
-                    return True
+                else:
+                    # Bug still reproduces, can try higher start (fewer nodes)
+                    cls.update_start_bisect_range(
+                        curr_backend, curr_subsystem.name, start_midpoint + 1, start_high
+                    )
+                start_low, start_high = cls.get_start_bisect_range(
+                    curr_backend, curr_subsystem.name
+                )
+                if start_low == start_high:
+                    print(
+                        f"Found minimal range: [{start_low}, {end_index}] "
+                        f"({end_index - start_low + 1} nodes)"
+                    )
+                    # Proceed to capture phase to record all node info
+                    cls.update_run_state(curr_backend, curr_subsystem, "capture")
+            elif run_state == "capture":
+                # Final capture run to record node info
+                end_index, _ = cls.get_bisect_range(curr_backend, curr_subsystem.name)
+                start_index, _ = cls.get_start_bisect_range(
+                    curr_backend, curr_subsystem.name
+                )
+                print(
+                    f"Capturing node info for range [{start_index}, {end_index}]..."
+                )
+                fn()  # Run to capture node info
+                print(
+                    f"Binary search completed for {curr_backend} - {curr_subsystem.name}. "
+                    f"Minimal range: [{start_index}, {end_index}] ({end_index - start_index + 1} nodes)"
+                )
+                return True
             else:
                 raise RuntimeError(f"Unexpected run_state {run_state}")
 
@@ -558,11 +895,40 @@ class CompilerBisector:
                         )
 
                     low, _ = cls.get_bisect_range(curr_backend, curr_subsystem.name)
+
+                    # For lowerings, include the LoweringBisectInfo
+                    lowering_info = None
+                    debug_info = call_counter_debug_info.get(low)
+                    if curr_subsystem.name == "lowerings":
+                        try:
+                            start_index, _ = cls.get_start_bisect_range(
+                                curr_backend, curr_subsystem.name
+                            )
+                            lowering_info = LoweringBisectInfo(
+                                start_index=start_index,
+                                end_index=low,
+                                nodes_in_range=list(lowering_all_nodes_info),
+                                fx_graph=lowering_fx_graph,
+                                example_inputs=lowering_example_inputs,
+                            )
+                            # Set debug_info from the captured nodes if not already set
+                            if debug_info is None and lowering_all_nodes_info:
+                                # Use the node names as debug info
+                                node_names = [
+                                    node_name
+                                    for _, node_name, _ in lowering_all_nodes_info
+                                ]
+                                debug_info = ", ".join(node_names)
+                        except RuntimeError:
+                            # start_bisect_range not set (old behavior fallback)
+                            pass
+
                     return BisectionResult(
                         curr_backend,
                         curr_subsystem.name,
                         low,
-                        call_counter_debug_info.get(low),
+                        debug_info,
+                        lowering_info=lowering_info,
                     )
 
                 next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)
