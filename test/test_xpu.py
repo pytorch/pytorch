@@ -145,13 +145,13 @@ class TestXpu(TestCase):
         device_capability = torch.xpu.get_device_capability()
         acc_capability = torch.accelerator.get_device_capability()
         supported_dtypes = acc_capability["supported_dtypes"]
+        self.assertIn(torch.bool, supported_dtypes)
+        self.assertIn(torch.int, supported_dtypes)
+        self.assertIn(torch.float, supported_dtypes)
         if device_capability["has_fp16"]:
             self.assertIn(torch.float16, supported_dtypes)
         if device_capability["has_fp64"]:
             self.assertIn(torch.double, supported_dtypes)
-        self.assertIn(torch.bool, supported_dtypes)
-        self.assertIn(torch.int, supported_dtypes)
-        self.assertIn(torch.float, supported_dtypes)
         if torch.xpu.is_bf16_supported(including_emulation=True):
             self.assertIn(torch.bfloat16, supported_dtypes)
 
