@@ -238,6 +238,7 @@ class OpDispatcher:
     ) -> object:
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
+        assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
@@ -466,7 +467,7 @@ class OpDispatcher:
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema} "
+                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema or suggested_input_schema.op} "
                         "while ExplicitRedistributionContext was active",
                     )
                     with redistribute_context:
