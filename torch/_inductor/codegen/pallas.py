@@ -1614,11 +1614,23 @@ class PallasKernel(SIMDKernel):
         # Check if multiple indirect vars should be paired element-wise.
         # In PyTorch, when multiple advanced indices have the same shape, they pair up.
         # The paired dimension goes to the FRONT of the output.
-        # Detect this by checking if we have multiple indirect vars.
-        paired_indirect = len(indirect_vars) > 1
+        # However, if indirect vars have different shapes (e.g., (1,4) and (4,1)),
+        # they form an outer product instead.
+        # We detect element-wise pairing when:
+        # 1. Multiple indirect vars exist
+        # 2. There's exactly ONE unused iteration variable (for the shared paired dim)
+        # For outer product, there are MULTIPLE unused iter vars (one per indirect dim)
+        paired_indirect = False
+        if len(indirect_vars) > 1:
+            # Count unused iteration variables (defined but not in index expression)
+            all_iter_vars = OrderedSet(self.range_tree_nodes.keys())
+            unused_iter_vars = all_iter_vars - used_iter_vars_set
+            # Element-wise pairing: one unused iter var for the shared paired dimension
+            # Outer product: multiple unused iter vars (one for each indirect var dimension)
+            paired_indirect = len(unused_iter_vars) == 1
 
         if paired_indirect:
-            # Multiple indirect vars: they should pair element-wise
+            # Multiple indirect vars with element-wise pairing
             # Output order: (paired_indirect_dim, iter_var_dims...)
             # All indirect vars get the same shape: (N, 1, 1, ...) for first dim
             # Iter vars come after: second dim onwards
