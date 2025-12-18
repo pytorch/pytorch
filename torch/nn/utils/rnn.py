@@ -317,6 +317,7 @@ def pack_padded_sequence(
     Returns:
         a :class:`PackedSequence` object
     """
+
     if not isinstance(lengths, torch.Tensor):
         if torch._C._get_tracing_state():
             warnings.warn(
@@ -397,6 +398,10 @@ def pad_packed_sequence(
         Batch elements will be re-ordered as they were ordered originally when
         the batch was passed to ``pack_padded_sequence`` or ``pack_sequence``.
     """
+
+    if sequence.batch_sizes[1:].gt(sequence.batch_sizes[:-1]).any():
+        raise ValueError("batch_sizes in PackedSequence must be non-increasing")
+
     max_seq_length = sequence.batch_sizes.size(0)
     if total_length is not None:
         if total_length < max_seq_length:

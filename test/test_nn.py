@@ -7555,6 +7555,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
 
+    def test_pad_packed_sequence_validate_batch_sizes(self):
+        # Regression test for gh-169213
+        # Ensure that non-monotonic batch_sizes raise a ValueError
+        import torch.nn.utils.rnn as rnn_utils
+        
+        # Construct invalid batch_sizes (increasing at index 2->3)
+        batch_sizes = torch.tensor([4, 4, 1, 3, 1], dtype=torch.long)
+        data = torch.randn(batch_sizes.sum(), 3)
+        
+        packed = rnn_utils.PackedSequence(
+            data=data,
+            batch_sizes=batch_sizes,
+            sorted_indices=None,
+            unsorted_indices=None
+        )
+
+        with self.assertRaisesRegex(ValueError, "batch_sizes.*must be non-increasing"):
+            rnn_utils.pad_packed_sequence(packed)
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
