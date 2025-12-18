@@ -3625,6 +3625,8 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
+    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -4591,6 +4593,20 @@ class CommonTemplate:
             fn2,
             (torch.randn([2, 2, 10]),),
         )
+
+    def test_unsafe_chunk_empty_tensor(self):
+        def fn(x, chunks):
+            return torch.unsafe_chunk(x, chunks=chunks, dim=0)
+
+        x = torch.zeros(0)
+        result = torch.compile(fn)(x, 4)
+        self.assertEqual(len(result), 4)
+        for chunk in result:
+            self.assertEqual(chunk.shape, torch.Size([0]))
+
+        self.common(fn, (torch.zeros(0), 4))
+        self.common(fn, (torch.zeros(0), 2))
+        self.common(fn, (torch.zeros(0, dtype=torch.float32), 3))
 
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (subtest(2), subtest(3)))
@@ -7410,7 +7426,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps_unimplemented
     @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfXpu
-    @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -7455,24 +7470,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 b14,
                 b15,
             ]
-            return aten._cudnn_rnn(
-                a0,
-                a1,
-                4,
-                a3,
-                a4,
-                a5,
-                2,
-                2048,
-                0,
-                2,
-                False,
-                0.0,
-                False,
-                True,
-                [],
-                None,
-            )
+
+            if torch.version.cuda:
+                return aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
 
         self.common(
             fn,
