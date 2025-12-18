@@ -103,10 +103,10 @@ class _Action(NamedTuple):
         if self.sub_actions is not None:
             # Use recursive repr for sub_actions
             sub_action_reprs = [repr(sub_action) for sub_action in self.sub_actions]
-            return f"({';'.join(sub_action_reprs)}){self.computation_type}"
+            return f"({';'.join(sub_action_reprs)}){self.computation_type.value}"
         else:
             repr_str = str(self.stage_index)
-            repr_str += str(self.computation_type)
+            repr_str += self.computation_type.value
             if self.microbatch_index is not None:
                 repr_str += str(self.microbatch_index)
             return repr_str
