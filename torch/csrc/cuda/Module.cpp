@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -266,7 +266,8 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 PyObject* THCPModule_getHipblasltVersion(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_ROCM)
-  return THPUtils_packInt64((int64_t)at::detail::getCUDAHooks().versionHipBLASLt());
+  return THPUtils_packInt64(
+      (int64_t)at::detail::getCUDAHooks().versionHipBLASLt());
 #else
   Py_RETURN_NONE;
 #endif
