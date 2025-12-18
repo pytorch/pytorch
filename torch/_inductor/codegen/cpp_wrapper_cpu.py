@@ -2360,6 +2360,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             elif op_overload == torch.ops.higher_order.print:
                 # We dont need to add schema to cpp print - no return value
                 return_schema = []
+            else:
+                raise NotImplementedError(
+                    f"HigherOrderOperator {op_overload} does not have schema handling implemented. "
+                    "Please implement schema handling for this operator."
+                )
         else:
             return_schema = op_overload._schema.returns
 
