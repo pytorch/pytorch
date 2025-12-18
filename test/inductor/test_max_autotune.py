@@ -1305,7 +1305,6 @@ class TestMaxAutotune(TestCase):
             bf16_red_setting
         )
 
-    @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1354,7 +1353,6 @@ class TestMaxAutotune(TestCase):
                 rtol=1e-2,
             )
 
-    @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1405,7 +1403,6 @@ class TestMaxAutotune(TestCase):
                 code[1]
             )
 
-    @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
