@@ -993,6 +993,7 @@ if True:
             expected = torch.cuda.current_blas_handle()
             self.assertEqual(res, expected)
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op(self, device):
             import libtorch_agn_2_10 as libtorch_agnostic
@@ -1078,6 +1079,7 @@ if True:
             self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "view2"])
             self.assertEqual(result_stride, t.stride(0))
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_string_ref(self, device):
             """Test my_string_op_string_ref which uses std::string& (non-const) parameters."""
