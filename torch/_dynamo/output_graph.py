@@ -145,7 +145,7 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import VariableTracker
+from .variables.base import ClosureConversionError, VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -1695,22 +1695,19 @@ class OutputGraph(OutputGraphCommon):
                             )
                     try:
                         self.export_metadata.out_spec = out_spec.as_python_constant()
-                    except NotImplementedError as e:
-                        if e.args and e.args[0] == "get_function":
-                            unimplemented(
-                                gb_type="nested function with closure in output",
-                                context="as_python_constant for out_spec",
-                                explanation=(
-                                    "Cannot return a nested function with closure from a compiled function. "
-                                    "Dynamo cannot reconstruct the function."
-                                ),
-                                hints=[
-                                    "Define the function at module scope instead of inside another function"
-                                ],
-                                from_exc=e,
-                            )
-                        else:
-                            raise
+                    except ClosureConversionError as e:
+                        unimplemented(
+                            gb_type="nested function with closure in output",
+                            context="as_python_constant for out_spec",
+                            explanation=(
+                                "Cannot return a nested function with closure from a compiled function. "
+                                "Dynamo cannot reconstruct the function."
+                            ),
+                            hints=[
+                                "Define the function at module scope instead of inside another function"
+                            ],
+                            from_exc=e,
+                        )
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:

@@ -218,6 +218,11 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
         self.vt = vt
 
 
+# Raised when get_function() cannot convert a nested function to a Python function.
+class ClosureConversionError(NotImplementedError):
+    pass
+
+
 class VariableTrackerMeta(type):
     all_subclasses: list[type] = []
 

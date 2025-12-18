@@ -1576,6 +1576,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
+        # Used to detect cycles in mutually recursive closures
+        self._converting = False
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -1590,6 +1592,21 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return types.FunctionType
 
     def get_function(self) -> types.FunctionType:
+        from .base import AsPythonConstantNotImplementedError, ClosureConversionError
+
+        if self._converting:
+            raise ClosureConversionError(
+                "cycle detected in mutually recursive closures"
+            )
+        self._converting = True
+        try:
+            return self._get_function_impl()
+        except AsPythonConstantNotImplementedError as e:
+            raise ClosureConversionError(str(e)) from e
+        finally:
+            self._converting = False
+
+    def _get_function_impl(self) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1603,7 +1620,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 cell_contents = tx.output.side_effects.load_cell(cell_var)
 
                 # Check for self-referential closure (function capturing itself for recursion)
-                # This manifests in pytree.
                 # For example:
                 # def outer():
                 #     def helper(n):
@@ -1612,9 +1628,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 #         return n + helper(n - 1)  # helper calls itself
                 #     return helper
                 if cell_contents is self:
-                    raise NotImplementedError(
-                        "Cannot convert self-referential nested function to Python constant"
-                    )
+                    from .base import ClosureConversionError
+
+                    raise ClosureConversionError("self-referential nested function")
 
                 value = cell_contents.as_python_constant()
                 cells.append(make_cell(value))
