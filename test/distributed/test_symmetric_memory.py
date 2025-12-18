@@ -1376,6 +1376,9 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         self._init_process()
@@ -1398,6 +1401,9 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         )
         self.assertEqual(tensor, expected)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @skip_if_lt_x_gpu(2)
     def test_mempool_compute_ops(self):
         self._init_process()

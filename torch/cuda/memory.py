@@ -919,6 +919,7 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
@@ -1034,6 +1035,7 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
