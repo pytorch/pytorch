@@ -110,18 +110,18 @@ def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
     Wrap a template choice's kernel render to apply CuteDSL indexer patching.
 
     See Note [CuteDSL indexer patch]:
-    This wrapper allows the template to construct its closures normally, then
-    scopes the indexer patch to the actual render call that emits the kernel.
-    This ensures CuteDSL templates see colexicographic indexing while preserving
-    the template's setup logic.
+    CuteDSL handles tensor strides internally, so template rendering must use
+    colexicographic indexing.
     """
     original_make_kernel_render = choice.make_kernel_render
 
     def make_kernel_render_with_patch(*args, **kwargs):
         render_kernel, render = original_make_kernel_render(*args, **kwargs)
-        # Let the template construct its closures, then scope the indexer patch
-        # to the actual render call that emits the kernel
-        render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
+
+        def render_with_patch():
+            with patch_fixed_layout_indexer_for_cutedsl():
+                return render()
+
         return render_kernel, render_with_patch
 
     choice.make_kernel_render = make_kernel_render_with_patch
@@ -315,15 +315,16 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    error = flash_attention_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[lse],
-        subgraphs=[subgraph_buffer, mask_graph_buffer],
-        SM_SCALE=scale,
-        NEEDS_BLOCK_MASK=needs_block_mask,
-    )
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[lse],
+            subgraphs=[subgraph_buffer, mask_graph_buffer],
+            SM_SCALE=scale,
+            NEEDS_BLOCK_MASK=needs_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
@@ -517,16 +518,17 @@ def create_flex_flash_attention_backward_kernel(
     if has_block_mask:
         subgraphs.append(mask_graph_buffer)
 
-    error = flash_attention_backward_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[grad_key, grad_value],
-        subgraphs=subgraphs if subgraphs else None,
-        SM_SCALE=scale,
-        HAS_SCORE_MOD=has_score_mod,
-        HAS_BLOCK_MASK=has_block_mask,
-    )
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_backward_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[grad_key, grad_value],
+            subgraphs=subgraphs if subgraphs else None,
+            SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
+            HAS_BLOCK_MASK=has_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)

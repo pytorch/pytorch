@@ -525,6 +525,7 @@ MASK_MOD_CASES = [
         lambda dtype, device: create_mask_mod_view_buffer(
             num_heads=4, dtype=dtype, device=device
         ),
+        requires_grad=True,
     ),
     MaskModCase(
         "mask_mod_dual_buffers",
