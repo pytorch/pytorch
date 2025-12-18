@@ -880,6 +880,30 @@ test_inductor_pallas() {
   assert_git_not_dirty
 }
 
+test_inductor_pallas_strided_benchmark() {
+  # Benchmark strided vs contiguous tensor performance in Pallas
+  # This measures the overhead of forcing non-contiguous tensors to contiguous
+  echo ""
+  echo "========================================================================================================"
+  echo "PALLAS STRIDED TENSOR BENCHMARK"
+  echo "========================================================================================================"
+  echo ""
+
+  # Set TPU target for TPU tests
+  if [[ "${TEST_CONFIG}" == *tpu* ]]; then
+    export PALLAS_TARGET_TPU=1
+    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
+  fi
+
+  # Run the benchmark with clear output formatting
+  python benchmarks/pallas/benchmark_strided.py --warmup 10 --iters 50 --sizes 512,1024,2048
+
+  echo ""
+  echo "========================================================================================================"
+  echo "END PALLAS STRIDED TENSOR BENCHMARK"
+  echo "========================================================================================================"
+}
+
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
@@ -1907,6 +1931,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-pallas-strided-benchmark* ]]; then
+  test_inductor_pallas_strided_benchmark
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
