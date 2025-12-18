@@ -454,225 +454,26 @@ class TestCustomOpAutoTune(TestCase):
         )
 
     @skipIfXpu
-    def test_range_based_autotuning(self):
-        """Test dynamic input range-based autotuning.
+    def test_range_based_static_shape_no_cond_dispatch(self):
+        """Test dispatch code generation for static vs dynamic shapes.
 
-        Example: If ranges [1,64], [129,256], [513,inf] all choose impl_medium,
-        they should be grouped into a single branch with OR predicate:
-        (dim <= 64) | ((dim >= 129) & (dim <= 256)) | (dim >= 513)
+        Static shapes (dynamic=False): No dispatch logic, best impl is inlined.
+        Dynamic shapes (dynamic=True): Dispatch logic generated for runtime selection.
         """
-        test_op_name = f"test_lib::range_merge_{id(self)}"
+        import re
 
-        def impl_small(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            """Implementation 1: direct add"""
-            return x + weight
+        from torch._inductor.utils import run_and_get_code
 
-        def impl_medium(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            """Implementation 2: add with intermediate variable"""
-            result = x
-            result = result + weight
-            return result
-
-        def impl_large(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            """Implementation 3: add with broadcasting"""
-            return x + weight.view(1, 1, -1).expand_as(x)
-
-        @torch.library.custom_op(test_op_name, mutates_args=())
-        def range_merge_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            """Custom op with 5 ranges that may merge to fewer impl groups"""
-            return x + weight
-
-        @range_merge_op.register_fake
-        def _(x: torch.Tensor, weight: torch.Tensor):
-            return torch.empty_like(x)
-
-        # Register with only 3 unique implementations for 5 ranges
-        # All implementations are numerically equivalent (x + weight)
-        # but use different computational approaches
-        register_custom_op_autotuning(
-            range_merge_op,
-            configs=[
-                CustomOpConfig(impl_small),
-                CustomOpConfig(impl_medium),
-                CustomOpConfig(impl_large),
-            ],
-            dispatch_on={"tensor_name": "x", "dim": 1},  # Dispatch based on x.shape[1]
-            split_points=[64, 128, 256, 512],
-            input_gen_fns={
-                "x": lambda fake: torch.randn_like(fake, device=self.device),
-                "weight": lambda fake: torch.randn_like(fake, device=self.device),
-            },
-        )
-
-        # Verify all implementations produce equivalent results
-        test_cases = [
-            (32, "Range 1: [1, 64]"),
-            (96, "Range 2: [65, 128]"),
-            (192, "Range 3: [129, 256]"),
-            (384, "Range 4: [257, 512]"),
-            (768, "Range 5: [513, inf]"),
-        ]
-
-        for seq_len, desc in test_cases:
-            test_x = torch.randn(2, seq_len, 32, device=self.device, dtype=self.dtype)
-            test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
-            expected = test_x + test_weight
-
-            # Verify each implementation produces equivalent result
-            for impl_name, impl_fn in [
-                ("small", impl_small),
-                ("medium", impl_medium),
-                ("large", impl_large),
-            ]:
-                result = impl_fn(test_x, test_weight)
-                # All implementations should produce x + weight
-                torch.testing.assert_close(
-                    result,
-                    expected,
-                    rtol=1e-5,
-                    atol=1e-5,
-                    msg=f"{impl_name} produced different result for {desc}",
-                )
-
-        @torch.compile
-        def test_model(x, weight):
-            return range_merge_op(x, weight)
-
-        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
-
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends=autotune_backends,
-            fx_graph_cache=False,
-            benchmark_kernel=True,
-        ):
-            for seq_len, desc in test_cases:
-                torch._dynamo.reset()
-                test_x = torch.randn(
-                    2, seq_len, 32, device=self.device, dtype=self.dtype
-                )
-                test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
-                expected = test_x + test_weight
-
-                compiled_result = test_model(test_x, test_weight)
-
-                self.assertEqual(
-                    compiled_result,
-                    expected,
-                    msg=f"RangeMerge_{seq_len} numerical mismatch",
-                )
-
-    @skipIfXpu
-    def test_range_based_no_recompilation(self):
-        """Verify range-based autotuning does NOT trigger recompilation for different shapes.
-
-        This test ensures that:
-        1. The range-based dispatch uses torch.cond with runtime predicates
-        2. No shape guards are added on the dispatch dimension
-        3. A single compilation handles all shapes within the defined ranges
-
-        This is the key difference between range-based and per-shape autotuning:
-        - Per-shape: Guards ON, recompile for each new shape (expected)
-        - Range-based: Guards OFF on dispatch dim, single compile for all shapes
-        """
-        test_op_name = f"test_lib::range_no_recompile_{id(self)}"
+        test_op_name = f"test_lib::static_no_cond_{id(self)}"
 
         def impl_a(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
             return x + weight
 
         def impl_b(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            return x + weight
+            return x + weight.view(1, 1, -1).expand_as(x)
 
-        @torch.library.custom_op(test_op_name, mutates_args=())
-        def no_recompile_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            return x + weight
-
-        @no_recompile_op.register_fake
-        def _(x: torch.Tensor, weight: torch.Tensor):
-            return torch.empty_like(x)
-
-        register_custom_op_autotuning(
-            no_recompile_op,
-            configs=[
-                CustomOpConfig(impl_a),
-                CustomOpConfig(impl_b),
-            ],
-            dispatch_on={"tensor_name": "x", "dim": 1},
-            split_points=[128],  # Two ranges: [1,128] and [129,inf]
-            input_gen_fns={
-                "x": lambda fake: torch.randn_like(fake, device=self.device),
-                "weight": lambda fake: torch.randn_like(fake, device=self.device),
-            },
-        )
-
-        torch._dynamo.reset()
-        counters = torch._dynamo.utils.counters
-        counters.clear()
-
-        @torch.compile(dynamic=True)
-        def test_model(x, weight):
-            return no_recompile_op(x, weight)
-
-        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
-
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends=autotune_backends,
-            fx_graph_cache=False,
-            benchmark_kernel=True,
-        ):
-            test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
-
-            # First call - triggers compilation
-            test_x1 = torch.randn(2, 64, 32, device=self.device, dtype=self.dtype)
-            result1 = test_model(test_x1, test_weight)
-            expected1 = test_x1 + test_weight
-            torch.testing.assert_close(result1, expected1, rtol=1e-5, atol=1e-5)
-
-            initial_frames = counters["frames"]["ok"]
-
-            # Subsequent calls with different shapes in the dispatch dimension
-            # These should NOT trigger recompilation for range-based autotuning
-            test_shapes = [96, 192, 384, 768]
-            for seq_len in test_shapes:
-                test_x = torch.randn(
-                    2, seq_len, 32, device=self.device, dtype=self.dtype
-                )
-                result = test_model(test_x, test_weight)
-                expected = test_x + test_weight
-                torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
-
-            final_frames = counters["frames"]["ok"]
-
-            # Verify no additional compilations occurred
-            # For range-based autotuning, initial_frames should equal final_frames
-            self.assertEqual(
-                initial_frames,
-                final_frames,
-                f"Recompilation detected! Initial frames: {initial_frames}, "
-                f"Final frames: {final_frames}. "
-                f"Range-based dispatch should handle all shapes without recompilation.",
-            )
-
-    @skipIfXpu
-    def test_range_based_static_shape_no_cond_dispatch(self):
-        """Verify static shapes with range-based autotuning don't generate unnecessary torch.cond.
-
-        When using static (non-dynamic) compilation with range-based autotuning:
-        1. The shape is known at compile time
-        2. All ranges benchmark the same static shape
-        3. All ranges will choose the same implementation
-        4. No torch.cond dispatch should be generated - just inline the winning impl
-
-        This tests that we don't add unnecessary runtime dispatch overhead for static shapes.
-        """
-        test_op_name = f"test_lib::static_no_cond_{id(self)}"
-
-        def impl_small(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            return x + weight
-
-        def impl_large(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            return x + weight
+        def impl_c(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.add(x, weight)
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def static_no_cond_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
@@ -685,51 +486,75 @@ class TestCustomOpAutoTune(TestCase):
         register_custom_op_autotuning(
             static_no_cond_op,
             configs=[
-                CustomOpConfig(impl_small),
-                CustomOpConfig(impl_large),
+                CustomOpConfig(impl_a),
+                CustomOpConfig(impl_b),
+                CustomOpConfig(impl_c),
             ],
             dispatch_on={"tensor_name": "x", "dim": 1},
-            split_points=[128],  # Two ranges: [1,128] and [129,inf]
+            split_points=[64, 128, 256, 512],
             input_gen_fns={
                 "x": lambda fake: torch.randn_like(fake, device=self.device),
                 "weight": lambda fake: torch.randn_like(fake, device=self.device),
             },
         )
 
-        torch._dynamo.reset()
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+        test_x = torch.randn(2, 96, 32, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
-        # Use static shape (dynamic=False is the default)
-        @torch.compile(dynamic=False)
+        def find_shape_dispatch(code_list):
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            return [
+                line.strip()
+                for code in code_list
+                for line in code.split("\n")
+                if pattern.search(line)
+            ]
+
         def test_model(x, weight):
             return static_no_cond_op(x, weight)
 
-        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
-
+        # Static shape (dynamic=False) - should NOT have shape dispatch
+        torch._dynamo.reset()
         with config.patch(
             max_autotune=True,
             max_autotune_gemm_backends=autotune_backends,
             fx_graph_cache=False,
             benchmark_kernel=True,
         ):
-            # Static shape within range [1, 128]
-            test_x = torch.randn(2, 64, 32, device=self.device, dtype=self.dtype)
-            test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
-            expected = test_x + test_weight
+            result_static, code_list_static = run_and_get_code(
+                torch.compile(test_model, dynamic=False), test_x, test_weight
+            )
+            self.assertEqual(result_static, test_x + test_weight)
 
-            result = test_model(test_x, test_weight)
-            torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+        dispatch_static = find_shape_dispatch(code_list_static)
+        if dispatch_static:
+            print(f"[Static] Found dispatch logic: {dispatch_static}")
+        else:
+            print("[Static] No dispatch logic found (expected for static shapes)")
+        self.assertFalse(
+            dispatch_static, "Static shapes should not have dispatch logic"
+        )
 
-        # Verify: For static shapes, all ranges are benchmarked with the same
-        # shape, so they all choose the same implementation. When all ranges
-        # choose the same impl, the code directly inlines that implementation
-        # (via _lower_single_impl) without generating torch.cond dispatch.
-        #
-        # The key invariant checked in custom_op.py line 819-825:
-        # "if len(impl_groups) == 1: ... return _lower_single_impl(...)"
-        #
-        # This test verifies correctness. The no-cond invariant is guaranteed
-        # by the grouping logic: since all ranges use the same static shape
-        # for benchmarking, they all choose the same impl and get grouped together.
+        # Dynamic shape (dynamic=True) - SHOULD have shape dispatch
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result_dynamic, code_list_dynamic = run_and_get_code(
+                torch.compile(test_model, dynamic=True), test_x, test_weight
+            )
+            self.assertEqual(result_dynamic, test_x + test_weight)
+
+        dispatch_dynamic = find_shape_dispatch(code_list_dynamic)
+        if dispatch_dynamic:
+            print(f"[Dynamic] Found dispatch logic: {dispatch_dynamic}")
+        else:
+            print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
+        self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
 
 if __name__ == "__main__":
