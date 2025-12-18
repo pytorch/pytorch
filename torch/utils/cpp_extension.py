@@ -1070,6 +1070,8 @@ class BuildExtension(build_ext):
                     "cannot have both SYCL and CUDA files in the same extension"
                 )
 
+            # oneAPI 2025.3+ changed include path ordering to match MSVC behavior.
+            # Filter out MSVC headers to avoid conflicting declarations with oneAPI's std headers.
             if with_sycl:
                 icpx_version = int(_get_icpx_version())
                 if icpx_version >= 20250300:
