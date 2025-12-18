@@ -152,8 +152,10 @@ struct Workspace {
         data(std::exchange(other.data, nullptr)) {}
   Workspace& operator=(const Workspace& other) = delete;
   Workspace& operator=(Workspace&& other) noexcept {
-    size = std::exchange(other.size, 0);
-    data = std::exchange(other.data, nullptr);
+    if (this != &other) {
+      std::swap(size, other.size);
+      std::swap(data, other.data);
+    }
     return *this;
   }
   ~Workspace() {
