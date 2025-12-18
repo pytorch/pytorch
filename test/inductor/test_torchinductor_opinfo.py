@@ -1004,6 +1004,8 @@ inductor_skip_exact_stride = {
     "stack",
     "sum",
     "tensordot",
+    "tril_indices",
+    "triu_indices",
     "unbind",
     "unbind_copy",
 }
