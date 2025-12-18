@@ -492,7 +492,7 @@ scaled_mm_configs_short = op_bench.config_list(
     cross_product_configs={
         "device": ["cuda"],
         "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16", "float32"],
+        "output_dtype": ["bfloat16"],
     },
     tags=["short"],
 )
@@ -516,14 +516,14 @@ scaled_mm_configs_long += op_bench.config_list(
     cross_product_configs={
         "device": ["cuda"],
         "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16", "float32"],
+        "output_dtype": ["bfloat16"],
         "scaling": ["fp8_tensorwise"],
     },
     tags=["long"],
 )
 
-# FP8 rowwise: fp32 output is SM90-only (CUDA 12.9+).
-rowwise_output_dtypes = ["bfloat16"] + (["float32"] if _supports_fp8_rowwise_fp32_output() else [])
+# FP8 rowwise: keep bf16-only for now.
+rowwise_output_dtypes = ["bfloat16"]
 scaled_mm_configs_long += op_bench.config_list(
     attr_names=["M", "N", "K"],
     attrs=_scaled_mm_long_shapes,
@@ -536,14 +536,14 @@ scaled_mm_configs_long += op_bench.config_list(
     tags=["long"],
 )
 
-# MX + NVFP4 support bf16 and fp32 output on CUDA.
+# MX + NVFP4: keep bf16-only for now.
 scaled_mm_configs_long += op_bench.config_list(
     attr_names=["M", "N", "K"],
     attrs=_scaled_mm_long_shapes,
     cross_product_configs={
         "device": ["cuda"],
         "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16", "float32"],
+        "output_dtype": ["bfloat16"],
         "scaling": ["mxfp8", "mxfp4", "nvfp4"],
     },
     tags=["long"],
@@ -557,7 +557,7 @@ if _supports_fp8_deepseek_blockwise_scaling():
         cross_product_configs={
             "device": ["cuda"],
             "float8_dtype": ["e4m3fn"],
-            "output_dtype": ["bfloat16", "float32"],
+            "output_dtype": ["bfloat16"],
             "scaling": ["fp8_blockwise_1x128", "fp8_blockwise_128x128"],
         },
         tags=["long"],
