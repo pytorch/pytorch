@@ -3839,7 +3839,7 @@ def run(runner, args, original_dir=None):
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
         # TODO - Go through the failures for batch size = 2
-        if args.batch_size is None:
+        if False and args.batch_size is None:
             if runner.suite_name == "huggingface":
                 args.batch_size = 1
             elif runner.suite_name == "torchbench":
