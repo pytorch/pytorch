@@ -38,7 +38,7 @@ ElectraForCausalLM,pass,4
 
 
 
-GPT2ForSequenceClassification,eager_fail_to_run,0
+GPT2ForSequenceClassification,pass,6
 
 
 
