@@ -5989,7 +5989,8 @@ scaled_dot_product_attention = _add_docstr(
                     return F.scaled_dot_product_attention(...,
                         dropout_p=(self.p if self.training else 0.0))
 
-    .. warning::
+    Note:
+    
         The boolean mask semantics for ``attn_mask`` are the inverse of
         :class:`~torch.nn.MultiheadAttention`'s ``key_padding_mask``.
 
