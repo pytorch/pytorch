@@ -7427,9 +7427,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     device=x.device,
                     _compile=False,
                 )
-                q = processed.view(batch_size, 1, seq_len, self.dim)
-                k = processed.view(batch_size, 1, seq_len, self.dim)
-                v = processed.view(batch_size, 1, seq_len, self.dim)
+                q = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                k = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                v = processed.view(batch_size, 1, seq_len, self.dim).detach()
 
                 out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
                 out = flex_attention(q, k, v, block_mask=block_mask)
@@ -7662,6 +7662,47 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             self.assertEqual(cnt.frame_count, 1)
         finally:
             trace_rules.FORCE_SKIP_FILES = old_force_skip_files
+
+    @parametrize("set_type", [set, frozenset], name_fn=lambda t: t.__name__)
+    def test_set_doesnt_recompile_with_ac(self, set_type):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -8395,6 +8436,47 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(result, expected))
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_ordered_set_doesnt_recompile_with_ac(self):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils._ordered_set import OrderedSet
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
 
     def test_pytree_tree_is_leaf_with_namedtuple(self):
         # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
