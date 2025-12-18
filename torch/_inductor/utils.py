@@ -64,9 +64,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -82,11 +79,13 @@ from torch.fx.experimental.symbolic_shapes import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
+    from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -492,6 +491,18 @@ def convert_shape_to_inductor(
     sympy.Expr.
     """
     return [sympy.sympify(i) for i in lst]
+
+
+def convert_symint_to_expr(val: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
+    """
+    Convert SymInt to sympy.Expr, leave int as is.
+
+    Unlike sympy.sympify() which converts int to sympy.Integer,
+    this function preserves int as int and only converts SymInt to Expr.
+    """
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    return val
 
 
 def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
@@ -1953,6 +1964,14 @@ def use_triton_blackwell_tma_template(
 
     # Blackwell template require the tensor descriptor API, not the experimental API.
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
+
+
+def use_triton_scaling_template(
+    scale_option_a: ScalingType,
+    scale_option_b: ScalingType,
+    scaling_types: list[ScalingType],
+) -> bool:
+    return scale_option_a in scaling_types and scale_option_b in scaling_types
 
 
 @functools.lru_cache(maxsize=1)
