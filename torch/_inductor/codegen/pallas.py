@@ -1553,6 +1553,10 @@ class PallasKernel(SIMDKernel):
         Special case: For gather operations where a single iteration variable
         and single indirect variable have the same extent, they should be
         element-wise aligned, not broadcast into an outer product.
+
+        PyTorch advanced indexing semantics: When multiple indirect indices have
+        the same shape, they are paired element-wise (not outer product), and
+        the combined result dimension appears at the FRONT of the output.
         """
         # Get iteration variables
         iter_vars = OrderedSet(self.range_tree_nodes.keys())
@@ -1607,6 +1611,50 @@ class PallasKernel(SIMDKernel):
                 return index_str
             # For pointwise vars, fall through to the complex reshape code
 
+        # Check if multiple indirect vars should be paired element-wise.
+        # In PyTorch, when multiple advanced indices have the same shape, they pair up.
+        # The paired dimension goes to the FRONT of the output.
+        # Detect this by checking if we have multiple indirect vars.
+        paired_indirect = len(indirect_vars) > 1
+
+        if paired_indirect:
+            # Multiple indirect vars: they should pair element-wise
+            # Output order: (paired_indirect_dim, iter_var_dims...)
+            # All indirect vars get the same shape: (N, 1, 1, ...) for first dim
+            # Iter vars come after: second dim onwards
+
+            # Count total output dims: 1 (paired) + len(iter_vars) for non-newaxis
+            # But some iter vars may be for newaxis dimensions (size 1)
+            n_output_dims = 1 + len(used_iter_vars)
+
+            # Reshape indirect vars to occupy the first dimension
+            for indirect_var in indirect_vars:
+                trailing_ones = ", 1" * len(used_iter_vars)
+                reshape_expr = f"{indirect_var}.reshape(-1{trailing_ones})"
+                index_str = index_str.replace(indirect_var, reshape_expr)
+
+            # Reshape iteration variables to occupy subsequent dimensions
+            # Sort by coefficient (descending) to determine order
+            for i, var in enumerate(used_iter_vars):
+                var_name = str(var)
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+
+                    # Shape: (1, ..., N, ..., 1) where N is at position i+1
+                    # Position 0 is for paired indirect vars
+                    shape_parts = ["1"] * n_output_dims
+                    shape_parts[i + 1] = self.kexpr(range_size)
+                    shape_str = ", ".join(shape_parts)
+                    arange_expr = (
+                        f"jnp.arange({self.kexpr(range_size)}).reshape({shape_str})"
+                    )
+
+                    index_str = index_str.replace(var_name, arange_expr)
+
+            return index_str
+
+        # Single indirect var case (or no indirect vars handled above)
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
         all_components = []
