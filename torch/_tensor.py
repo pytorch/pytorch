@@ -1800,9 +1800,12 @@ class Tensor(torch._C.TensorBase):
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (
-                    is_rocm and stream not in (1, 2)
-                ), f"unsupported stream on {device_str}: {stream}."
+                if not (
+                    (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2))
+                ):
+                    raise AssertionError(
+                        f"unsupported stream on {device_str}: {stream}."
+                    )
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1813,7 +1816,8 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None or stream == -1, "stream should be None on cpu."
+            if stream is not None and stream != -1:
+                raise AssertionError("stream should be None on cpu.")
 
         if self.device.type == "xla":
             import torch_xla
