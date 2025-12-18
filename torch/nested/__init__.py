@@ -103,15 +103,31 @@ def as_nested_tensor(
         layout = torch.strided
     if layout == torch.strided:
         if isinstance(ts, Tensor):
-            # contiguous() might be necessary to get flattened view.
-            # we could probably be more precise about when to do this as an optimization
-            buffer = ts.contiguous().view(-1).to(device=device, dtype=dtype)
-            nested_sizes = torch.tensor([t.shape for t in ts])
-            return torch._nested_view_from_buffer(
-                buffer,
-                nested_sizes,
-                *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
+            # Use Python subclass in torch.compile context (tracing/FakeTensor mode)
+            # In pure eager mode, use C++ _nested_view_from_buffer for full feature support
+            # See https://github.com/pytorch/pytorch/issues/168307
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            use_python_subclass = torch.compiler.is_dynamo_compiling() or isinstance(
+                ts, FakeTensor
             )
+
+            if use_python_subclass:
+                from torch.nested._internal.strided_nested_tensor import (
+                    strided_nested_tensor_from_tensor,
+                )
+
+                return strided_nested_tensor_from_tensor(ts, dtype=dtype, device=device)
+            else:
+                # Eager mode: use original C++ implementation
+                # contiguous() might be necessary to get flattened view
+                buffer = ts.contiguous().view(-1).to(device=device, dtype=dtype)
+                nested_sizes = torch.tensor([t.shape for t in ts])
+                return torch._nested_view_from_buffer(
+                    buffer,
+                    nested_sizes,
+                    *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
+                )
         else:
             assert isinstance(ts, list)
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)

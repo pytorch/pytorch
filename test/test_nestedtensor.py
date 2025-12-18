@@ -9004,6 +9004,172 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 from torch.nested._internal.nested_int import NestedIntNode
 
 
+class TestStridedNestedTensorCompile(NestedTensorTestCase):
+    """
+    Tests for torch.compile support of strided nested tensors.
+
+    These tests verify that torch.nested.as_nested_tensor(tensor) works
+    correctly with torch.compile when using the default strided layout.
+
+    See https://github.com/pytorch/pytorch/issues/168307
+    """
+
+    def test_as_nested_tensor_basic(self):
+        """Test basic creation of strided nested tensor."""
+        x = torch.randn(4, 8, 16)
+        nt = torch.nested.as_nested_tensor(x)
+
+        # Check it's a nested tensor
+        self.assertTrue(nt.is_nested)
+        self.assertEqual(nt.dim(), 3)
+
+        # Check we can convert back to padded tensor
+        result = nt.to_padded_tensor(0)
+        self.assertEqual(result, x)
+
+    def test_as_nested_tensor_compile_basic(self):
+        """Test torch.compile with strided nested tensor creation."""
+
+        def fn(x):
+            nt = torch.nested.as_nested_tensor(x)
+            return nt.to_padded_tensor(0)
+
+        x = torch.randn(4, 8, 16)
+
+        # Eager mode
+        eager_result = fn(x)
+
+        # Compiled mode
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(compiled_result, x)
+
+    @skipIfTorchDynamo("compiles internally")
+    def test_as_nested_tensor_compile_dynamic_batch(self):
+        """Test torch.compile with dynamic batch sizes."""
+
+        def fn(x):
+            nt = torch.nested.as_nested_tensor(x)
+            return nt.to_padded_tensor(0)
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=compile_counter, dynamic=True)
+
+        # Test with different batch sizes
+        for batch_size in [2, 4, 8]:
+            x = torch.randn(batch_size, 8, 16)
+            result = compiled_fn(x)
+            self.assertEqual(result, x)
+
+        # Should not recompile for each batch size with dynamic=True
+        # (may compile once or twice initially for specialization)
+        self.assertLessEqual(compile_counter.frame_count, 2)
+
+    def test_as_nested_tensor_compile_with_clone(self):
+        """Test torch.compile with clone operation on strided nested tensor."""
+
+        def fn(x):
+            nt = torch.nested.as_nested_tensor(x)
+            nt_clone = nt.clone()
+            return nt_clone.to_padded_tensor(0)
+
+        x = torch.randn(4, 8, 16)
+
+        eager_result = fn(x)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(compiled_result, x)
+
+    def test_as_nested_tensor_compile_with_detach(self):
+        """Test torch.compile with detach operation on strided nested tensor."""
+
+        def fn(x):
+            nt = torch.nested.as_nested_tensor(x)
+            nt_detached = nt.detach()
+            return nt_detached.to_padded_tensor(0)
+
+        x = torch.randn(4, 8, 16, requires_grad=True)
+
+        eager_result = fn(x)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertFalse(compiled_result.requires_grad)
+
+    def test_as_nested_tensor_compile_dtype_conversion(self):
+        """Test torch.compile with dtype conversion."""
+
+        def fn(x):
+            nt = torch.nested.as_nested_tensor(x, dtype=torch.float32)
+            return nt.to_padded_tensor(0)
+
+        x = torch.randn(4, 8, 16, dtype=torch.float64)
+
+        eager_result = fn(x)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result.dtype, torch.float32)
+        self.assertEqual(compiled_result.dtype, torch.float32)
+        self.assertEqual(eager_result, compiled_result)
+
+    def test_as_nested_tensor_metadata_accessors(self):
+        """Test metadata accessor methods on strided nested tensor."""
+        x = torch.randn(4, 8, 16)
+        nt = torch.nested.as_nested_tensor(x)
+
+        # Test _nested_tensor_size
+        sizes = nt._nested_tensor_size()
+        self.assertEqual(sizes.shape, (4, 2))  # 4 batch elements, 2 dims (8, 16)
+        self.assertTrue(torch.all(sizes == torch.tensor([8, 16])))
+
+        # Test _nested_tensor_strides
+        strides = nt._nested_tensor_strides()
+        self.assertEqual(strides.shape, (4, 2))
+        # Contiguous strides for (8, 16) should be (16, 1)
+        self.assertTrue(torch.all(strides == torch.tensor([16, 1])))
+
+        # Test _nested_tensor_storage_offsets
+        offsets = nt._nested_tensor_storage_offsets()
+        self.assertEqual(offsets.shape, (4,))
+        expected_offsets = torch.tensor([0, 128, 256, 384])  # 8*16 = 128
+        self.assertEqual(offsets, expected_offsets)
+
+    def test_strided_nested_tensor_repr(self):
+        """Test string representation of strided nested tensor."""
+        x = torch.randn(4, 8, 16)
+        nt = torch.nested.as_nested_tensor(x)
+
+        repr_str = repr(nt)
+        # In eager mode, uses C++ NestedTensorImpl which shows "nested_tensor"
+        self.assertIn("nested_tensor", repr_str)
+
+    def test_as_nested_tensor_view_uniform_batch(self):
+        """Test view operation on uniform batch strided nested tensor."""
+        x = torch.randn(4, 8, 16)
+        nt = torch.nested.as_nested_tensor(x)
+
+        # View to different element shape
+        nt_viewed = nt.view(4, 4, 32)
+        result = nt_viewed.to_padded_tensor(0)
+
+        expected = x.view(4, 4, 32)
+        self.assertEqual(result, expected)
+
+    def test_as_nested_tensor_is_contiguous(self):
+        """Test is_contiguous on strided nested tensor."""
+        x = torch.randn(4, 8, 16)
+        nt = torch.nested.as_nested_tensor(x)
+
+        # Should be contiguous since input was contiguous
+        self.assertTrue(nt.is_contiguous())
+
+
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
         a = torch.SymInt(NestedIntNode(1, 1))

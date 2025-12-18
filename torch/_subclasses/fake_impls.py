@@ -1084,12 +1084,18 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten._nested_tensor_from_tensor_list.default)
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
-@register_op_impl(aten._nested_view_from_buffer.default)
-@register_op_impl(aten._nested_view_from_buffer_copy.default)
-def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
+def nested_tensor_from_list_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
-        "torch.compile does not support strided NestedTensor"
+        "torch.compile does not support creating strided NestedTensor from a list of tensors. "
+        "Use a single tensor input with torch.nested.as_nested_tensor(tensor) or "
+        "use layout=torch.jagged for better torch.compile support."
     )
+
+
+# Note: _nested_view_from_buffer is no longer blocked here because
+# as_nested_tensor(tensor) now uses a Python subclass (StridedNestedTensor)
+# that implements __tensor_flatten__/__tensor_unflatten__ for torch.compile support.
+# See https://github.com/pytorch/pytorch/issues/168307
 
 
 @register_op_impl(
