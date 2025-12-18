@@ -157,7 +157,8 @@ def check_stable_only_symbols(install_root: Path) -> None:
     import tempfile
 
     include_dir = install_root / "include"
-    assert include_dir.exists(), f"Expected {include_dir} to be present"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
 
     test_cpp_content = """
 // Main torch C++ API headers
@@ -195,9 +196,8 @@ int main() { return 0; }
     # to produce symbols
     num_symbols_without = len(symbols_without)
     print(f"Found {num_symbols_without} symbols without any macros defined")
-    assert num_symbols_without != 0, (
-        "Expected a non-zero number of symbols without any macros"
-    )
+    if num_symbols_without == 0:
+        raise AssertionError("Expected a non-zero number of symbols without any macros")
 
     # Helper to verify compilation fails with expected error
     def _expect_compilation_failure(compile_flags: list[str], macro_name: str) -> None:
@@ -257,10 +257,12 @@ def check_stable_api_symbols(install_root: Path) -> None:
     The torch/csrc/stable/c/shim.h header is tested in check_stable_c_shim_symbols
     """
     include_dir = install_root / "include"
-    assert include_dir.exists(), f"Expected {include_dir} to be present"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
 
     stable_dir = include_dir / "torch" / "csrc" / "stable"
-    assert stable_dir.exists(), f"Expected {stable_dir} to be present"
+    if not stable_dir.exists():
+        raise AssertionError(f"Expected {stable_dir} to be present")
 
     stable_headers = list(stable_dir.rglob("*.h"))
     if not stable_headers:
@@ -292,10 +294,11 @@ int main() {{ return 0; }}
     )
     num_symbols_stable = len(symbols_stable)
     print(f"Found {num_symbols_stable} symbols in torch/csrc/stable")
-    assert num_symbols_stable > 0, (
-        f"Expected stable headers to expose symbols with TORCH_STABLE_ONLY, "
-        f"but found {num_symbols_stable} symbols"
-    )
+    if num_symbols_stable <= 0:
+        raise AssertionError(
+            f"Expected stable headers to expose symbols with TORCH_STABLE_ONLY, "
+            f"but found {num_symbols_stable} symbols"
+        )
 
 
 def check_headeronly_symbols(install_root: Path) -> None:
@@ -303,11 +306,13 @@ def check_headeronly_symbols(install_root: Path) -> None:
     Test that header-only utility headers still expose symbols with TORCH_STABLE_ONLY.
     """
     include_dir = install_root / "include"
-    assert include_dir.exists(), f"Expected {include_dir} to be present"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
 
     # Find all headers in torch/headeronly
     headeronly_dir = include_dir / "torch" / "headeronly"
-    assert headeronly_dir.exists(), f"Expected {headeronly_dir} to be present"
+    if not headeronly_dir.exists():
+        raise AssertionError(f"Expected {headeronly_dir} to be present")
     headeronly_headers = list(headeronly_dir.rglob("*.h"))
     if not headeronly_headers:
         raise RuntimeError("Could not find any headeronly headers")
@@ -351,10 +356,11 @@ int main() {{ return 0; }}
     )
     num_symbols_headeronly = len(symbols_headeronly)
     print(f"Found {num_symbols_headeronly} symbols in torch/headeronly")
-    assert num_symbols_headeronly > 0, (
-        f"Expected headeronly headers to expose symbols with TORCH_STABLE_ONLY, "
-        f"but found {num_symbols_headeronly} symbols"
-    )
+    if num_symbols_headeronly <= 0:
+        raise AssertionError(
+            f"Expected headeronly headers to expose symbols with TORCH_STABLE_ONLY, "
+            f"but found {num_symbols_headeronly} symbols"
+        )
 
 
 def check_aoti_shim_symbols(install_root: Path) -> None:
@@ -362,7 +368,8 @@ def check_aoti_shim_symbols(install_root: Path) -> None:
     Test that AOTI shim headers still expose symbols with TORCH_STABLE_ONLY.
     """
     include_dir = install_root / "include"
-    assert include_dir.exists(), f"Expected {include_dir} to be present"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
 
     # There are no constexpr symbols etc., so we need to actually use functions
     # so that some symbols are found.
@@ -390,10 +397,11 @@ int main() {
         compile_flags=compile_flags,
     )
     num_symbols_shim = len(symbols_shim)
-    assert num_symbols_shim > 0, (
-        f"Expected shim headers to expose symbols with TORCH_STABLE_ONLY, "
-        f"but found {num_symbols_shim} symbols"
-    )
+    if num_symbols_shim <= 0:
+        raise AssertionError(
+            f"Expected shim headers to expose symbols with TORCH_STABLE_ONLY, "
+            f"but found {num_symbols_shim} symbols"
+        )
 
 
 def check_stable_c_shim_symbols(install_root: Path) -> None:
@@ -401,7 +409,8 @@ def check_stable_c_shim_symbols(install_root: Path) -> None:
     Test that stable C shim headers still expose symbols with TORCH_STABLE_ONLY.
     """
     include_dir = install_root / "include"
-    assert include_dir.exists(), f"Expected {include_dir} to be present"
+    if not include_dir.exists():
+        raise AssertionError(f"Expected {include_dir} to be present")
 
     # Check if the stable C shim exists
     stable_shim = include_dir / "torch" / "csrc" / "stable" / "c" / "shim.h"
@@ -435,10 +444,11 @@ int main() {
         compile_flags=compile_flags,
     )
     num_symbols_stable_shim = len(symbols_stable_shim)
-    assert num_symbols_stable_shim > 0, (
-        f"Expected stable C shim headers to expose symbols with TORCH_STABLE_ONLY, "
-        f"but found {num_symbols_stable_shim} symbols"
-    )
+    if num_symbols_stable_shim <= 0:
+        raise AssertionError(
+            f"Expected stable C shim headers to expose symbols with TORCH_STABLE_ONLY, "
+            f"but found {num_symbols_stable_shim} symbols"
+        )
 
 
 def check_lib_symbols_for_abi_correctness(lib: str) -> None:
