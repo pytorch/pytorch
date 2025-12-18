@@ -141,19 +141,14 @@ class CutlassAPIGemmCaller(ChoiceCaller):
 
 def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
     """
-    Create a dummy tensor from an Inductor Layout for kernel filtering.
+    Create a FakeTensor from a Layout for kernel filtering.
 
-    cutlass_api needs tensors with correct shape/stride/dtype for its supports() checks.
-    Returns None if the layout has symbolic dimensions.
+    Uses Layout.get_example() which creates FakeTensors within V.fake_mode,
+    avoiding real CUDA memory allocation. cutlass_api only needs shape/stride/dtype
+    metadata for its supports() checks.
     """
-    from torch._inductor.virtualized import V
-
     try:
-        size = tuple(V.graph.sizevars.size_hint(s) for s in layout.size)
-        stride = tuple(V.graph.sizevars.size_hint(s) for s in layout.stride)
-        return torch.empty_strided(
-            size, stride, dtype=layout.dtype, device=layout.device
-        )
+        return layout.get_example()
     except Exception:
         return None
 
