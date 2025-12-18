@@ -1878,7 +1878,17 @@ class SkipFunctionVariable(VariableTracker):
                 )
             )
         elif self.value is torch._dynamo.step_unsupported:
-            raise StepUnsupported
+            try:
+                unimplemented(
+                    gb_type="Call to `torch._dynamo.step_unsupported()`",
+                    context="",
+                    explanation="User-inserted step_unsupported.",
+                    hints=[
+                        "Remove the `torch._dynamo.step_unsupported()` call.",
+                    ],
+                )
+            except Unsupported as e:
+                raise StepUnsupported(e.msg) from None
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder

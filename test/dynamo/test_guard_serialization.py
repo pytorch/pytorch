@@ -8,6 +8,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -1783,6 +1784,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Check global guards are gone.
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
+
+    def test_nested_named_tuple(self):
+        class NestedTuple(NamedTuple):
+            a: int
+            b: int
+            c: torch.Tensor
+
+        def fn(x: NestedTuple):
+            return x.a + x.b + x.c
+
+        x = NestedTuple(1, 2, torch.randn(3, 2))
+
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
 
     def test_sdp_backend_serialization(self):
         def fn(x, backend):
