@@ -205,6 +205,13 @@ class OpDispatcher:
         # don't have to throw an exception even in "fastpath".
         try_cache: bool,
     ) -> object:
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
+        # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in sharding propagation. "
+            "This function should only be called after unwrap_to_op_info."
+        )
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
@@ -227,7 +234,7 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"{e}\n\nSharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema or op_call}"
             ) from e
 
     def _dispatch_get_local_results_slow_path(
