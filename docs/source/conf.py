@@ -89,7 +89,6 @@ tippy_props = {
 
 # Skip all URLs except glossary term links (glossary.html#term-*)
 tippy_skip_urls = (r"^(?!.*glossary\.html#term-).*$",)
-tippy_enable_mathjax = True
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
