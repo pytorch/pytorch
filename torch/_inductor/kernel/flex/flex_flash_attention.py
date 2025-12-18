@@ -256,7 +256,7 @@ def create_flex_flash_attention_kernel(
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
+) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")

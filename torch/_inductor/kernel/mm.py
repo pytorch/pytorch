@@ -50,6 +50,7 @@ from ..utils import (
     use_cutlass_template,
     use_decompose_k_choice,
     use_triton_blackwell_tma_template,
+    use_triton_scaling_template,
     use_triton_template,
     use_triton_tma_template,
 )
@@ -128,7 +129,7 @@ def lazy_register_extern_choice(fn):
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_dtype_out_cuda",
+    "at::_mm_dtype_out_xpu" if torch.xpu.is_available() else "at::_mm_dtype_out_cuda",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
@@ -311,8 +312,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "input dtypes must be the same",
         )
         torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
+            mat1.get_device().type in ("cuda", "xpu"),
+            lambda: "out_dtype is only supported for CUDA or XPU",
         )
         torch._check(
             out_dtype == input_dtype
@@ -921,28 +922,27 @@ def tuned_scaled_mm(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
+        scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
+
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
-            scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
-
-            scale_option_a, scale_option_b = get_scaling_options(
-                mat_a, mat_b, scale_a_size, scale_b_size
-            )
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
-            if (
-                scale_option_a in epilogue_scaling_types
-                and scale_option_b in epilogue_scaling_types
+            if use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
                     overriders
                 )
-            elif (
-                scale_option_a in main_loop_scaling_types
-                and scale_option_b in main_loop_scaling_types
+            elif use_triton_scaling_template(
+                scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
@@ -966,8 +966,11 @@ def tuned_scaled_mm(
                 overriders
             )
 
-        templates_to_use.append(mm_template)
-        kwarg_overrides[mm_template.uid] = overriders
+        if use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        ):
+            templates_to_use.append(mm_template)
+            kwarg_overrides[mm_template.uid] = overriders
 
     # Single unified call for all templates
     choices.extend(
