@@ -1070,6 +1070,16 @@ class BuildExtension(build_ext):
                     "cannot have both SYCL and CUDA files in the same extension"
                 )
 
+            if with_sycl:
+                icpx_version = int(_get_icpx_version())
+                if icpx_version >= 20250300:
+                    vc_tools_dir = os.path.normcase(os.environ.get('VCToolsInstallDir', ''))
+                    if vc_tools_dir:
+                        pp_opts = [
+                            path for path in pp_opts
+                            if vc_tools_dir not in os.path.normcase(path)
+                        ]
+
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
             # - a list of extra flags.
