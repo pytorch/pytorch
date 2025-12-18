@@ -187,7 +187,9 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
         if len(index_node.shape) > 1:
             flat_index = index_node.reshape(num_operations)
             values_ndim = len(index_node.shape)
-            flat_values = values.reshape([num_operations] + list(values.shape[values_ndim:]))
+            flat_values = values.reshape(
+                [num_operations] + list(values.shape[values_ndim:])
+            )
         else:
             flat_index = index_node
             flat_values = values
@@ -201,7 +203,9 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
             device=flat_index.device,
             requires_grad=False,
         )
-        partition_ids = torch.ops.aten.bitwise_and.Scalar(operation_ids, num_partitions - 1)
+        partition_ids = torch.ops.aten.bitwise_and.Scalar(
+            operation_ids, num_partitions - 1
+        )
 
         # Create expanded buffer
         expanded_shape = list(input_tensor.shape)
@@ -241,7 +245,9 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
 
         # Sum across partitions (preserve dtype for int types)
         if flat_values.dtype in [torch.int8, torch.int16, torch.int32, torch.uint8]:
-            reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim], dtype=flat_values.dtype)
+            reduced = torch.ops.aten.sum.dim_IntList(
+                reshaped, [scatter_dim], dtype=flat_values.dtype
+            )
         else:
             reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim])
 
