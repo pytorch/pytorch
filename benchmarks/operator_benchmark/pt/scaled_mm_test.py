@@ -59,9 +59,18 @@ def _get_float8_dtype(float8_dtype):
     return e4m3_type  # default
 
 
+def _supports_fp8_deepseek_blockwise_scaling() -> bool:
+    # PyTorch currently gates "DeepSeek style" FP8 blockwise scaling (1x128/128x128)
+    # to SM90 (H100) only. On SM100 (B200) this errors with NotImplementedError.
+    if not torch.cuda.is_available() or torch.version.cuda is None:
+        return False
+    return torch.cuda.get_device_capability(0) == (9, 0)
+
+
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     _MX_BLOCK_SIZE: int = 32
     _NVFP4_BLOCK_SIZE: int = 16
+    _FP8_BLOCK_K: int = 128
 
     def _set_output_dtype(self, output_dtype: str) -> None:
         if output_dtype == "bfloat16":
@@ -130,6 +139,137 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         self._set_scaled_mm_call_config(
             scale_recipe_a=ScalingType.TensorWise,
             scale_recipe_b=ScalingType.TensorWise,
+        )
+
+    def _init_fp8_rowwise(self, M: int, N: int, K: int, device: str, helpers: ModuleType) -> None:
+        # Row-wise scaling (per-row A scales and per-column B scales).
+        # Mirrors `test_scaled_mm_vs_emulated_row_wise` in test_scaled_matmul_cuda.py.
+        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+
+        x_base = torch.randn(
+            M,
+            K,
+            device=device,
+            dtype=self.base_dtype,
+            requires_grad=self.auto_set(),
+        )
+        # Start from (N, K) and transpose so mat_b is (K, N), matching scaled_mm signature.
+        y_base = torch.randn(
+            N,
+            K,
+            device=device,
+            dtype=self.base_dtype,
+            requires_grad=self.auto_set(),
+        ).t()
+
+        x_scales = helpers.tensor_to_scale(x_base, self.float8_dtype, dim=1).float().detach()  # (M, 1)
+        y_scales = helpers.tensor_to_scale(y_base, self.float8_dtype, dim=0).float().detach()  # (1, N)
+
+        with torch.no_grad():
+            x_lp = (
+                helpers.to_fp8_saturated(x_base * x_scales, self.float8_dtype)
+                .detach()
+                .requires_grad_(self.auto_set())
+            )
+            y_lp = (
+                helpers.to_fp8_saturated(y_base * y_scales, self.float8_dtype)
+                .detach()
+                .requires_grad_(self.auto_set())
+            )
+
+        self.inputs = {
+            "x": x_lp,
+            "y": y_lp,
+            "scale_a": x_scales.reciprocal(),
+            "scale_b": y_scales.reciprocal(),
+        }
+        self._set_scaled_mm_call_config(
+            scale_recipe_a=ScalingType.RowWise,
+            scale_recipe_b=ScalingType.RowWise,
+        )
+
+    def _init_fp8_blockwise_1x128(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
+        # FP8 blockwise scaling with 1x128 blocks.
+        # Scale layout mirrors `test_scaled_mm_block_wise_numerics` for the 1x128 case.
+        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+        if device == "cuda" and torch.cuda.get_device_capability(0) != (9, 0):
+            raise RuntimeError(
+                "FP8 BlockWise1x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
+            )
+        if K % self._FP8_BLOCK_K != 0:
+            raise RuntimeError(f"FP8 BlockWise1x128 requires K divisible by {self._FP8_BLOCK_K}, got K={K}")
+
+        x_hp = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+        y_hp = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+
+        with torch.no_grad():
+            x_lp, x_scales = helpers.tensor_to_scale_block(x_hp, self.float8_dtype, 1, self._FP8_BLOCK_K)
+            y_lp, y_scales = helpers.tensor_to_scale_block(y_hp, self.float8_dtype, 1, self._FP8_BLOCK_K)
+
+            x_lp = x_lp.detach().requires_grad_(self.auto_set())
+            y_lp = y_lp.detach().requires_grad_(self.auto_set())
+
+        # 1x128 requires "outer-dim-major" scales: (M, K//128) with stride ~ (1, M).
+        x_scales = x_scales.t().contiguous().t().detach()
+        y_scales = y_scales.t().contiguous().t().detach()
+
+        self.inputs = {
+            "x": x_lp,
+            "y": y_lp.t(),  # mat_b is (K, N)
+            "scale_a": x_scales.reciprocal(),
+            "scale_b": y_scales.reciprocal(),
+        }
+        self._set_scaled_mm_call_config(
+            scale_recipe_a=ScalingType.BlockWise1x128,
+            scale_recipe_b=ScalingType.BlockWise1x128,
+        )
+
+    def _init_fp8_blockwise_128x128(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
+        # FP8 blockwise scaling with 128x128 blocks.
+        # Scale layout mirrors `test_scaled_mm_block_wise_numerics` for the 128x128 case.
+        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+        if device == "cuda" and torch.cuda.get_device_capability(0) != (9, 0):
+            raise RuntimeError(
+                "FP8 BlockWise128x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
+            )
+        if (M % self._FP8_BLOCK_K) != 0 or (N % self._FP8_BLOCK_K) != 0 or (K % self._FP8_BLOCK_K) != 0:
+            raise RuntimeError(
+                f"FP8 BlockWise128x128 requires M,N,K divisible by {self._FP8_BLOCK_K}, got M={M}, N={N}, K={K}"
+            )
+
+        x_hp = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+        y_hp = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+
+        with torch.no_grad():
+            x_lp, x_scales = helpers.tensor_to_scale_block(
+                x_hp, self.float8_dtype, self._FP8_BLOCK_K, self._FP8_BLOCK_K
+            )
+            y_lp, y_scales = helpers.tensor_to_scale_block(
+                y_hp, self.float8_dtype, self._FP8_BLOCK_K, self._FP8_BLOCK_K
+            )
+            x_lp = x_lp.detach().requires_grad_(self.auto_set())
+            y_lp = y_lp.detach().requires_grad_(self.auto_set())
+
+        # For 128x128, scales need L padded to L4 (multiple of 4), then transposed:
+        #   scales: [M//128, L] -> pad -> [M//128, L4] -> transpose -> [L4, M//128]
+        x_scales, _ = helpers._pad_128x128_scales(x_scales.detach())
+        y_scales, _ = helpers._pad_128x128_scales(y_scales.detach())
+        x_scales = x_scales.t()
+        y_scales = y_scales.t()
+
+        self.inputs = {
+            "x": x_lp,
+            "y": y_lp.t(),  # mat_b is (K, N)
+            "scale_a": x_scales.reciprocal(),
+            "scale_b": y_scales.reciprocal(),
+        }
+        self._set_scaled_mm_call_config(
+            scale_recipe_a=ScalingType.BlockWise128x128,
+            scale_recipe_b=ScalingType.BlockWise128x128,
         )
 
     def _init_mx_blockwise(self, M: int, N: int, K: int, device: str, *, mx_format: str) -> None:
@@ -233,6 +373,12 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
 
         if scaling == "fp8_tensorwise":
             self._init_fp8_tensorwise(M, N, K, device, helpers)
+        elif scaling == "fp8_rowwise":
+            self._init_fp8_rowwise(M, N, K, device, helpers)
+        elif scaling == "fp8_blockwise_1x128":
+            self._init_fp8_blockwise_1x128(M, N, K, device, helpers)
+        elif scaling == "fp8_blockwise_128x128":
+            self._init_fp8_blockwise_128x128(M, N, K, device, helpers)
         elif scaling == "mxfp8":
             self._init_mx_blockwise(M, N, K, device, mx_format="mxfp8")
         elif scaling == "mxfp4":
@@ -339,7 +485,18 @@ scaled_mm_configs_long = op_bench.config_list(
         "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
         "output_dtype": ["bfloat16", "float32"],  # KEEPING ALL DTYPES
         # Scale/quantization technique: add MX configs under tag long.
-        "scaling": ["fp8_tensorwise", "mxfp8", "mxfp4", "nvfp4"],
+        "scaling": [
+            "fp8_tensorwise",
+            "fp8_rowwise",
+            "mxfp8",
+            "mxfp4",
+            "nvfp4",
+            *(
+                ["fp8_blockwise_1x128", "fp8_blockwise_128x128"]
+                if _supports_fp8_deepseek_blockwise_scaling()
+                else []
+            ),
+        ],
     },
     tags=["long"],
 )
