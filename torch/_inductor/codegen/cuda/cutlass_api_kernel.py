@@ -179,6 +179,7 @@ class CutlassAPITemplateKernel(Kernel):
 
         return code.getvalue()
 
+    # TODO(nikhilap) Do this like cutedsl
     def _get_reinterpret_view(self, node: Buffer) -> Optional[ReinterpretView]:
         """Check if node is a ReinterpretView and return it."""
         if isinstance(node, ReinterpretView):
