@@ -2755,18 +2755,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_mixed_dtypes_eager(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(torch.float8_e4m3fn)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(torch.float8_e4m3fn)
         out = flex_attention(query, key, value, _identity)
         self.assertEqual(out.shape, query.shape)
         self.assertEqual(out.dtype, query.dtype)
 
     @supported_platform
     def test_mixed_dtypes_compiled(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(torch.float8_e4m3fn)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(torch.float8_e4m3fn)
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         if device == "cpu":
             with self.assertRaisesRegex(
@@ -2778,6 +2778,28 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out = compiled_fn(query, key, value, _identity)
             self.assertEqual(out.shape, query.shape)
             self.assertEqual(out.dtype, query.dtype)
+
+    @skip_on_cpu
+    @supported_platform
+    def test_mixed_dtypes_sqnr(self, device):
+        def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            Ps = torch.norm(x)
+            Pn = torch.norm(x - y)
+            return 20 * torch.log10(Ps / Pn)
+
+        query_ref = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        key_ref = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        value_ref = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+
+        key_fp8 = key_ref.to(torch.float8_e4m3fn)
+        value_fp8 = value_ref.to(torch.float8_e4m3fn)
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_fn(query_ref, key_fp8, value_fp8, _identity)
+        out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
+        sqnr = compute_error(out_ref, out)
+        print(f"SQNR: {sqnr}")
+        self.assertGreater(sqnr, 25)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)

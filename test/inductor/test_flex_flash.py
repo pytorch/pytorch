@@ -368,9 +368,9 @@ class TestFlexFlash(InductorTestCase):
         """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
         B, H, S, D = 2, 8, 512, 64
 
-        query = torch.randn(B, H, S, D, dtype=torch.float32, device=device)
-        key = torch.randn(B, H, S, D, dtype=dtype, device=device)
-        value = torch.randn(B, H, S, D, dtype=dtype, device=device)
+        query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
+        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(torch.float8_e4m3fn)
+        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(torch.float8_e4m3fn)
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
