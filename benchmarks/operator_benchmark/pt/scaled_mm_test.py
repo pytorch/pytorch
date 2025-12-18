@@ -168,12 +168,12 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             swizzle_b=SwizzleType.SWIZZLE_32_4_4,
         )
 
-    def _init_nvfp4_blockwise_with_global_scale(
+    def _init_nvfp4_blockwise_and_tensorwise(
         self, M: int, N: int, K: int, device: str, helpers: ModuleType
     ) -> None:
         # NVFP4 uses packed fp4 inputs and two-level scaling:
         # - blockwise (1x16) decode scales (swizzled for CUDA)
-        # - tensorwise global decode scale (NO_SWIZZLE)
+        # - tensorwise (global) decode scale (NO_SWIZZLE)
         #
         # scaled_mm expects these as LISTS for both `scale_*` and `scale_recipe_*`.
         if device != "cuda":
@@ -238,7 +238,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         elif scaling == "mxfp4":
             self._init_mx_blockwise(M, N, K, device, mx_format="mxfp4")
         elif scaling == "nvfp4":
-            self._init_nvfp4_blockwise_with_global_scale(M, N, K, device, helpers)
+            self._init_nvfp4_blockwise_and_tensorwise(M, N, K, device, helpers)
         else:
             raise ValueError(f"Unsupported scaling mode: {scaling}")
 
