@@ -524,8 +524,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         res = dt + 1
-        expected = sum(i for i in range(self.world_size)) + 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res, 7)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial - scalar -> replicate
@@ -536,13 +535,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         res = dt - 1
-        expected = sum(i for i in range(self.world_size)) - 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res, 5)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         res = 7 - dt
-        expected = 7 - sum(i for i in range(self.world_size))
-        self.assertEqual(res, expected)
+        self.assertEqual(res, 1)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial + regular partial -> partial
@@ -550,8 +547,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res.to_local(), rank + rank)
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        expected = sum(i * 2 for i in range(self.world_size))
-        self.assertEqual(res, expected)
+        self.assertEqual(res, 12)
 
         # regular partial - regular partial -> partial
         res = dt - dt
