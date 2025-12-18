@@ -107,15 +107,6 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
-# Expand HIDDEN_NAMESPACE macros so Doxygen can see the torch::stable namespace
-# These macros can take 1, 2, or 3 arguments
-PREDEFINED            += "HIDDEN_NAMESPACE_BEGIN(a)=namespace a {"
-PREDEFINED            += "HIDDEN_NAMESPACE_BEGIN(a, b)=namespace a { namespace b {"
-PREDEFINED            += "HIDDEN_NAMESPACE_BEGIN(a, b, c)=namespace a { namespace b { namespace c {"
-PREDEFINED            += "HIDDEN_NAMESPACE_END()=}"
-PREDEFINED            += "HIDDEN_NAMESPACE_END(a)=}"
-PREDEFINED            += "HIDDEN_NAMESPACE_END(a, b)=} }"
-PREDEFINED            += "HIDDEN_NAMESPACE_END(a, b, c)=} } }"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
