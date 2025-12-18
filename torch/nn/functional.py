@@ -3512,6 +3512,169 @@ def cross_entropy(
     )
 
 
+def _linear_cross_entropy_naive(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    linear_bias: Optional[Tensor],
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+) -> Tensor:
+    logits = linear(input, linear_weight, linear_bias)
+    logits_flat = logits.reshape(-1, logits.size(-1))
+    target_flat = target.reshape(-1)
+    loss = cross_entropy(
+        logits_flat,
+        target_flat,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+    )
+    if reduction == "none":
+        loss = loss.reshape(target.shape)
+    return loss
+
+
+_DEFAULT_VOCAB_CHUNK_SIZE = 4096
+_DEFAULT_BATCH_CHUNK_SIZE = 1024
+
+
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    *,
+    linear_bias: Optional[Tensor] = None,
+    reduction: str = "mean",
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    chunking_strategy: str = "none",
+    vocab_chunk_size: Optional[int] = None,
+    batch_chunk_size: Optional[int] = None,
+) -> Tensor:
+    r"""
+    Computes a fused cross entropy loss given input features and a weight matrix,
+    optionally adding a bias and applying chunked vocab or batch processing to
+    reduce memory usage.
+
+    Args:
+        input (Tensor): Input features of shape ``(..., in_features)``.
+        linear_weight (Tensor): Weight matrix of shape ``(vocab_size, in_features)``.
+        target (Tensor): Target indices of shape matching ``input`` without the last dimension.
+        linear_bias (Tensor, optional): Bias of shape ``(vocab_size,)``.
+        reduction (str, optional): ``"none"``, ``"mean"``, or ``"sum"``. Default: ``"mean"``.
+        ignore_index (int, optional): Target value that is ignored. Default: -100.
+        label_smoothing (float, optional): Smoothing factor in ``[0.0, 1.0]``. Default: 0.0.
+        chunking_strategy (str, optional): ``"none"`` (unfused), ``"vocab"`` (chunk over vocabulary),
+            or ``"batch"`` (chunk over batch). Default: ``"none"``.
+        vocab_chunk_size (int, optional): Chunk size for vocab chunking. Defaults to 4096 when unset.
+        batch_chunk_size (int, optional): Chunk size for batch chunking. Defaults to 1024 when unset.
+
+    Returns:
+        Tensor: The computed loss. If ``reduction="none"``, the shape matches ``target``.
+    """
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias):
+        return handle_torch_function(
+            linear_cross_entropy,
+            (input, linear_weight, target, linear_bias),
+            input,
+            linear_weight,
+            target,
+            linear_bias=linear_bias,
+            reduction=reduction,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            chunking_strategy=chunking_strategy,
+            vocab_chunk_size=vocab_chunk_size,
+            batch_chunk_size=batch_chunk_size,
+        )
+
+    if not isinstance(reduction, str):
+        if hasattr(reduction, "node"):
+            from torch.fx.proxy import TraceError
+
+            raise TraceError(
+                "symbolically traced variables cannot be used as inputs to control flow"
+            )
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
+
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
+
+    if not (0.0 <= label_smoothing <= 1.0):
+        raise ValueError(
+            f"label_smoothing must be between 0.0 and 1.0, got {label_smoothing}"
+        )
+
+    if chunking_strategy not in ("vocab", "batch", "none"):
+        raise ValueError(
+            "chunking_strategy must be one of ('vocab', 'batch', 'none'), "
+            f"got '{chunking_strategy}'"
+        )
+
+    if vocab_chunk_size is not None and vocab_chunk_size <= 0:
+        raise ValueError(
+            f"vocab_chunk_size must be positive when provided, got {vocab_chunk_size}"
+        )
+
+    if batch_chunk_size is not None and batch_chunk_size <= 0:
+        raise ValueError(
+            f"batch_chunk_size must be positive when provided, got {batch_chunk_size}"
+        )
+
+    reduction_enum = _Reduction.get_enum(reduction)
+    vocab_chunk = (
+        vocab_chunk_size if vocab_chunk_size is not None else _DEFAULT_VOCAB_CHUNK_SIZE
+    )
+    batch_chunk = (
+        batch_chunk_size if batch_chunk_size is not None else _DEFAULT_BATCH_CHUNK_SIZE
+    )
+
+    if chunking_strategy == "vocab":
+        loss, _logsumexp = torch.ops.aten._linear_cross_entropy_vocab_chunking(
+            input,
+            linear_weight,
+            target,
+            linear_bias=linear_bias,
+            reduction=reduction_enum,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            chunk_size=vocab_chunk,
+        )
+        result = loss
+    elif chunking_strategy == "batch":
+        loss, *_templates = torch.ops.aten._linear_cross_entropy_batch_chunking(
+            input,
+            linear_weight,
+            target,
+            linear_bias=linear_bias,
+            reduction=reduction_enum,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            chunk_size=batch_chunk,
+        )
+        result = loss
+    else:
+        result = _linear_cross_entropy_naive(
+            input,
+            linear_weight,
+            target,
+            linear_bias,
+            reduction,
+            ignore_index,
+            label_smoothing,
+        )
+
+    if reduction == "none":
+        return result.reshape(target.shape)
+    return result
+
+
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
