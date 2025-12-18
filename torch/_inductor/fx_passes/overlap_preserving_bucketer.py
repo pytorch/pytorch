@@ -969,6 +969,7 @@ def finalize_overlap_scheduling(
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
     region_of: dict[fx.Node, Any] | None = None,
+    bucket_exposed_first: bool = True,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -998,5 +999,6 @@ def finalize_overlap_scheduling(
         insert_overlap_deps=insert_overlap_deps,
         collective_bucketing=collective_bucketing,
         region_of=region_of,
+        bucket_exposed_first=bucket_exposed_first,
     )
     bucketer.bucket_collectives()

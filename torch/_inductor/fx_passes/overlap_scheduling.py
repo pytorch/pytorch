@@ -788,6 +788,7 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,
             max_coll_distance=self.max_node_distance,
             region_of=self.region_of,
+            bucket_exposed_first=self.bucket_exposed_first,
         )
 
         if self.log_final_collectives_estimations:
