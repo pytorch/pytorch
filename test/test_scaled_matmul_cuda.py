@@ -497,6 +497,7 @@ def data_to_nvfp4_scale(x, block_size):
 
 def data_to_nvfp4_with_global_scale(x, block_size):
     # Simple (slow) reference implementation of NVFP4 two-level-scaling
+    assert block_size == 32 or block_size == 16, "block_size must be 16 or 32"
     orig_shape = x.shape
     x = x.reshape(-1, block_size)
 
@@ -508,27 +509,33 @@ def data_to_nvfp4_with_global_scale(x, block_size):
 
     # Constants
     # Global encoding scale for block-scales
-    S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
+    if block_size == 16:
+        S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
+        scaling_dtype = torch.float8_e4m3fn
+    else:
+        S_enc = FP4_MAX_VAL * 240.0 / global_max
+        scaling_dtype = torch.float8_e8m0fnu
     S_dec = 1. / S_enc
 
     # Per-block decode-scale
     S_dec_b = block_max / FP4_MAX_VAL
 
-    # Stored scaled-e4m3 per-block decode scales
-    S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
+    # For block_size 16, Stored scaled-e4m3 per-block decode scales
+    # For block_size 32, Stored scaled-e8m0fnu per-block decode scales
+    S_dec_b_scaled = (S_dec_b * S_enc).to(scaling_dtype)
 
     # Actual per-block encoding scale
-    S_enc_b = S_enc / S_dec_b_e4m3.float()
+    S_enc_b = S_enc / S_dec_b_scaled.float()
 
     # scale & reshape input, reshape scales
     x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
-    S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
+    S_dec_b_scaled = S_dec_b_scaled.reshape(orig_shape[0], -1)
 
     # cast input
     x_fp4 = _bfloat16_to_float4_e2m1fn_x2(x)
 
-    # fp4x2, fp8_e4m3, float respectively
-    return x_fp4, S_dec_b_e4m3, S_dec.float()
+    # fp4x2, fp8_e4m3 or fp8_e8m0fnu, float respectively
+    return x_fp4, S_dec_b_scaled, S_dec.float()
 
 
 def unpack_uint4(uint8_data) -> torch.Tensor:
@@ -1815,7 +1822,6 @@ class TestFP8Matmul(TestCase):
         lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
-    @skipIfRocm
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
@@ -1836,12 +1842,15 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    def test_blockwise_nvfp4_with_global_scale(self, mkn) -> None:
+    def test_blockwise_nvfp4_mxfp4_with_global_scale(self, mkn) -> None:
         device = 'cuda'
         M, K, N = mkn
-        BLOCK_SIZE = 16
+        if torch.version.hip:
+            if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
+        BLOCK_SIZE = 32 if torch.version.hip else 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
-        approx_match_sqnr_target = 15.8
+        approx_match_sqnr_target = 14.9 if torch.version.hip else 15.8
 
         A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
         B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
@@ -1853,8 +1862,12 @@ class TestFP8Matmul(TestCase):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
             swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+            scale_recipe_a = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
+            scale_recipe_b = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
         else:
             swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.NO_SWIZZLE]
+            scale_recipe_a = [ScalingType.BlockWise1x32, ScalingType.TensorWise]
+            scale_recipe_b = [ScalingType.BlockWise1x32, ScalingType.TensorWise]
 
         C_ref = A_ref @ B_ref.t()
 
@@ -1862,9 +1875,9 @@ class TestFP8Matmul(TestCase):
             A,
             B.t(),
             scale_a=[A_scale, A_global_scale],
-            scale_recipe_a=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            scale_recipe_a=scale_recipe_a,
             scale_b=[B_scale, B_global_scale],
-            scale_recipe_b=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            scale_recipe_b=scale_recipe_b,
             swizzle_a=swizzle,
             swizzle_b=swizzle,
             output_dtype=torch.bfloat16,

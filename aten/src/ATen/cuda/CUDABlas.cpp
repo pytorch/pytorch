@@ -2087,7 +2087,11 @@ void scaled_gemm(
       user_alpha.copy_(a);
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
+      // On ROCm, HIPBLASLT_MATMUL_DESC_POINTER_MODE is not working as expected.
+      // Till the issue is fixed, comment the code
+#ifndef USE_ROCM
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
+#endif
       alpha_ptr = user_alpha.data_ptr<float>();
       beta_ptr = at::cuda::detail::get_cublas_device_zero();
     } else {

@@ -666,7 +666,7 @@ namespace scaled_blas = at::cuda::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 10> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
@@ -678,7 +678,8 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> 
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
   { "nvfp4_nvfp4_single_scale", scaled_blas::check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
-  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4}}};
+  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
+  { "mxfp4_mxfp4_single_scale", scaled_blas::check_mxfp4_recipe_single_scale, ScaledGemmImplementation::MXFP4_MXFP4_SINGLE_SCALE }}};
 
 Tensor&
 _scaled_tensorwise_tensorwise(
@@ -1103,7 +1104,9 @@ _scaled_mxfp4_mxfp4(
           const Tensor& scale_b, const SwizzleType swizzle_b,
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
-          Tensor& out) {
+          Tensor& out,
+          const std::optional<Tensor>& global_scale_a = std::nullopt,
+          const std::optional<Tensor>& global_scale_b = std::nullopt) {
 #if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
 #else
@@ -1113,6 +1116,17 @@ _scaled_mxfp4_mxfp4(
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
 
+  std::optional<Tensor> alpha = std::nullopt;
+  // Note: "Or" here means that if only one scale is passed, we check for the other. Otherwise,
+  //       if this is "And" we would silently do nothing in the case where one global scale is
+  //       passed and not the other.
+  if (global_scale_a.has_value() || global_scale_b.has_value()) {
+    TORCH_CHECK_VALUE(global_scale_a.has_value(),
+        "For two-level-scaled NVFP4, global_scale_a must have a value");
+    TORCH_CHECK_VALUE(global_scale_b.has_value(),
+        "For two-level-scaled NVFP4, global_scale_b must have a value");
+    alpha = global_scale_a.value().mul(global_scale_b.value());
+  }
   // Packed FP4 format means actual-K = 2 * reported-K -- adjust
   auto K_multiplier = 2;
 #ifdef USE_ROCM
@@ -1162,7 +1176,7 @@ _scaled_mxfp4_mxfp4(
               "Block-wise scaling only supports BFloat16 or Half output types");
 #endif
 
-  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
+  return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
 #else
   // NVIDIA
   fbgemm_gpu::f4f4bf16(
@@ -1437,6 +1451,8 @@ _scaled_mm_cuda_v2_out(
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
     return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
+    return _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out, scale_a[1], scale_b[1]);
+  } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4_SINGLE_SCALE) {
     return _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else {
     TORCH_CHECK_VALUE(false, "Invalid state - found an implementation, but not really");

@@ -239,9 +239,39 @@ bool check_mxfp8_recipe(c10::ScalarType type_a,
 
 /**
  * Both inputs must be fp4
- * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
+ * A, B must have 2 scale each, {Blockwise_1x32, e8m0}
  */
 bool check_mxfp4_recipe(c10::ScalarType type_a,
+                        std::vector<ScalingType>& recipe_a,
+                        ArrayRef<Tensor>& scales_a,
+                        c10::ScalarType type_b,
+                        std::vector<ScalingType>& recipe_b,
+                        ArrayRef<Tensor>& scales_b) {
+  // both types must be fp4
+  if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
+    return false;
+  }
+
+  // 2 scales, 2 recipes for each input
+  if (scales_a.size() != 2 || recipe_a.size() != 2 || scales_b.size() != 2 || recipe_b.size() != 2) {
+    return false;
+  }
+
+  // Need {Blockwise_1x32, e8m0} for A & B
+  if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
+  if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
+
+  return true;
+}
+
+
+/**
+ * Both inputs must be fp4
+ * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
+ */
+bool check_mxfp4_recipe_single_scale(c10::ScalarType type_a,
                         std::vector<ScalingType>& recipe_a,
                         ArrayRef<Tensor>& scales_a,
                         c10::ScalarType type_b,
