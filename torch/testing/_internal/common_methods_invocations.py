@@ -50,6 +50,7 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
+import torch.nn.functional as F
 from torch.utils import _pytree as pytree
 
 
@@ -6765,6 +6766,133 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
+
+
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+
+    # Force vocabulary chunking with a large vocab size.
+    vocab_hidden = 16
+    vocab_size = 4097
+    input_vocab = make_input((2, vocab_hidden))
+    weight_vocab = make_weight((vocab_size, vocab_hidden))
+    target_vocab = make_target((2,), low=0, high=vocab_size)
+    yield SampleInput(
+        input_vocab,
+        args=(weight_vocab, target_vocab),
+        kwargs={"chunking_strategy": "vocab"},
+    )
+
+    # Explicit vocab chunk size override to exercise schema kwargs.
+    vocab_chunk_override = 512
+    input_vocab_override = make_input((2, vocab_hidden))
+    weight_vocab_override = make_weight((vocab_size, vocab_hidden))
+    target_vocab_override = make_target((2,), low=0, high=vocab_size)
+    yield SampleInput(
+        input_vocab_override,
+        args=(weight_vocab_override, target_vocab_override),
+        kwargs={
+            "chunking_strategy": "vocab",
+            "vocab_chunk_size": vocab_chunk_override,
+        },
+    )
+
+    # 3D input to trigger flattening logic (batch, sequence, hidden).
+    seq_len = 5
+    input_seq = make_input((3, seq_len, vocab_hidden))
+    target_seq = make_target((3, seq_len), low=0, high=vocab_size)
+    yield SampleInput(
+        input_seq,
+        args=(weight_vocab, target_seq),
+        kwargs={"chunking_strategy": "vocab"},
+    )
+
+    # Force batch chunking with a large flattened batch.
+    batch_hidden = 8
+    batch_size = 1500
+    input_batch = make_input((batch_size, batch_hidden))
+    weight_batch = make_weight((64, batch_hidden))
+    target_batch = make_target((batch_size,), low=0, high=64)
+    yield SampleInput(
+        input_batch,
+        args=(weight_batch, target_batch),
+        kwargs={"chunking_strategy": "batch"},
+    )
+
+    # Explicit batch chunk size override.
+    batch_chunk_override = 256
+    input_batch_override = make_input((batch_size, batch_hidden))
+    weight_batch_override = make_weight((64, batch_hidden))
+    target_batch_override = make_target((batch_size,), low=0, high=64)
+    yield SampleInput(
+        input_batch_override,
+        args=(weight_batch_override, target_batch_override),
+        kwargs={
+            "chunking_strategy": "batch",
+            "batch_chunk_size": batch_chunk_override,
+        },
+    )
+
+    # 3D batch chunking (batch, seq, hidden) to exercise large flattened rows.
+    seq_len_batch = 4
+    batch_batch = 200
+    input_batch_seq = make_input((batch_batch, seq_len_batch, batch_hidden))
+    target_batch_seq = make_target((batch_batch, seq_len_batch), low=0, high=64)
+    yield SampleInput(
+        input_batch_seq,
+        args=(weight_batch, target_batch_seq),
+        kwargs={"chunking_strategy": "batch"},
+    )
+
+    # Non-contiguous input (transpose) to exercise view handling.
+    base = make_tensor(
+        (3, 2, vocab_hidden),
+        device=device,
+        dtype=dtype,
+        requires_grad=False,
+    )
+    input_nc = base.transpose(0, 1)
+    target_nc = make_target((2, 3), low=0, high=vocab_size)
+    yield SampleInput(
+        input_nc,
+        args=(weight_vocab, target_nc),
+        kwargs={"chunking_strategy": "vocab"},
+    )
+
+    # High-rank input (5D) to ensure arbitrary dimensional flattening.
+    input_high = make_input((2, 3, 4, 5, vocab_hidden))
+    target_high = make_target((2, 3, 4, 5), low=0, high=vocab_size)
+    yield SampleInput(
+        input_high,
+        args=(weight_vocab, target_high),
+        kwargs={"chunking_strategy": "batch"},
+    )
+
+
+def reference_linear_cross_entropy(
+    input,
+    linear_weight,
+    target,
+    *,
+    linear_bias=None,
+    reduction="mean",
+    ignore_index=-100,
+    label_smoothing=0.0,
+    chunking_strategy="none",
+    vocab_chunk_size=None,
+    batch_chunk_size=None,
+):
+    return F._linear_cross_entropy_naive(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        reduction,
+        ignore_index,
+        label_smoothing,
+    )
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -14979,6 +15107,114 @@ op_db: list[OpInfo] = [
                          dtypes=(torch.half,), device_type="mps"),
 
         )
+    ),
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        aten_name="linear_cross_entropy",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy,
+        ref=reference_linear_cross_entropy,
+        supports_out=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_gradgrad=False,
+        supports_cow_input_no_materialize_forward=False,
+        supports_cow_input_no_materialize_backward=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        decorators=(onlyCPU,),
+        skips=(
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestVmapOperatorsOpInfo",
+                         "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestVmapOperatorsOpInfoCPU",
+                         "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestVmapOperatorsOpInfo",
+                         "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestVmapOperatorsOpInfoCPU",
+                         "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperators",
+                         "test_vjpvmap"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperatorsCPU",
+                         "test_vjpvmap"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestFwdGradients",
+                         "test_fn_fwgrad_bwgrad"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestFwdGradientsCPU",
+                         "test_fn_fwgrad_bwgrad"),
+            DecorateInfo(unittest.skip("linear_cross_entropy JIT compliance pending"),
+                         "TestJit",
+                         "test_variant_consistency_jit"),
+            DecorateInfo(unittest.skip("linear_cross_entropy JIT compliance pending"),
+                         "TestJitCPU",
+                         "test_variant_consistency_jit"),
+            DecorateInfo(unittest.skip("linear_cross_entropy DTensor support pending"),
+                         "TestDTensorOps",
+                         "test_dtensor_op_db"),
+            DecorateInfo(unittest.skip("linear_cross_entropy DTensor support pending"),
+                         "TestDTensorOpsCPU",
+                         "test_dtensor_op_db"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestOperators",
+                         "test_vmapjvpvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestOperatorsCPU",
+                         "test_vmapjvpvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestOperators",
+                         "test_jvpvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy forward-mode AD pending"),
+                         "TestOperatorsCPU",
+                         "test_jvpvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperators",
+                         "test_vmapvjp_has_batch_rule"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperatorsCPU",
+                         "test_vmapvjp_has_batch_rule"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperators",
+                         "test_vmapvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperatorsCPU",
+                         "test_vmapvjp"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperators",
+                         "test_vmap_autograd_grad"),
+            DecorateInfo(unittest.skip("linear_cross_entropy vmap support pending"),
+                         "TestOperatorsCPU",
+                         "test_vmap_autograd_grad"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfo",
+                         "test_aot_autograd_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfoCPU",
+                         "test_aot_autograd_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfo",
+                         "test_aot_autograd_disable_functionalization_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfoCPU",
+                         "test_aot_autograd_disable_functionalization_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfo",
+                         "test_aot_autograd_disable_functionalization_symbolic_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfoCPU",
+                         "test_aot_autograd_disable_functionalization_symbolic_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfo",
+                         "test_aot_autograd_symbolic_exhaustive"),
+            DecorateInfo(unittest.skip("linear_cross_entropy AOTAutograd support pending"),
+                         "TestEagerFusionOpInfoCPU",
+                         "test_aot_autograd_symbolic_exhaustive"),
+        ),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),

@@ -21,7 +21,8 @@ all_operators_with_namedtuple_return = {
     'frexp', 'lu_unpack', 'histogram', 'histogramdd',
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
-    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex'
+    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', 'linalg_solve_ex', '_linalg_solve_ex',
+    '_linear_cross_entropy_vocab_chunking', '_linear_cross_entropy_batch_chunking'
 }
 
 all_operators_with_namedtuple_return_skip_list = {
@@ -172,6 +173,61 @@ class TestNamedTupleAPI(TestCase):
                     check_namedtuple(ret3, op.names)
 
         all_covered_operators = {x for y in operators for x in y.operators}
+
+        vocab_input = torch.randn(2, 4)
+        vocab_weight = torch.randn(5, 4)
+        vocab_target = torch.randint(0, 5, (2,), dtype=torch.long)
+        vocab_tuple = torch.ops.aten._linear_cross_entropy_vocab_chunking(
+            vocab_input,
+            vocab_weight,
+            vocab_target,
+            chunk_size=4,
+        )
+        vocab_named = torch.return_types._linear_cross_entropy_vocab_chunking(vocab_tuple)
+        check_namedtuple(vocab_named, ("loss", "logsumexp"))
+        check_torch_return_type(
+            "_linear_cross_entropy_vocab_chunking", ("loss", "logsumexp")
+        )
+
+        batch_input = torch.randn(3, 4)
+        batch_weight = torch.randn(7, 4)
+        batch_target = torch.randint(0, 7, (3,), dtype=torch.long)
+        batch_tuple = torch.ops.aten._linear_cross_entropy_batch_chunking(
+            batch_input,
+            batch_weight,
+            batch_target,
+            chunk_size=2,
+        )
+        batch_named = torch.return_types._linear_cross_entropy_batch_chunking(batch_tuple)
+        check_namedtuple(
+            batch_named,
+            (
+                "loss",
+                "grad_input_template",
+                "grad_weight_template",
+                "grad_bias_template",
+                "grad_weight_valid",
+                "grad_bias_valid",
+            ),
+        )
+        check_torch_return_type(
+            "_linear_cross_entropy_batch_chunking",
+            (
+                "loss",
+                "grad_input_template",
+                "grad_weight_template",
+                "grad_bias_template",
+                "grad_weight_valid",
+                "grad_bias_valid",
+            ),
+        )
+
+        all_covered_operators.update(
+            {
+                "_linear_cross_entropy_vocab_chunking",
+                "_linear_cross_entropy_batch_chunking",
+            }
+        )
 
         self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of

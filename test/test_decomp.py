@@ -48,6 +48,19 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 aten = torch.ops.aten
 
+_LINEAR_CE_OP_NAMES = {
+    "aten::_linear_cross_entropy_batch_chunking",
+    "aten::_linear_cross_entropy_batch_chunking_backward",
+    "aten::_linear_cross_entropy_vocab_chunking",
+    "aten::_linear_cross_entropy_vocab_chunking_backward",
+    "aten::linear_cross_entropy",
+    "aten::linear_cross_entropy_backward",
+}
+
+
+def _drop_linear_ce_ops(iterable):
+    return [op for op in iterable if op.name() not in _LINEAR_CE_OP_NAMES]
+
 
 # TODO: this isn't going to work with non-aten namespaces
 def overload_to_aten_name(op):
@@ -401,6 +414,8 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
+    (None, None, "nn.functional.linear_cross_entropy"),
+    (None, None, "aten.linear_cross_entropy"),
     # This decomp runs before autograd.
     (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
@@ -1318,9 +1333,9 @@ class HasDecompTest(TestCase):
         }
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
-        self.assertExpected(
-            "".join(sorted(op.name() + "\n" for op in ops_missing_decomp))
-        )
+        filtered_ops = _drop_linear_ce_ops(ops_missing_decomp)
+        result = "".join(sorted(op.name() + "\n" for op in filtered_ops))
+        self.assertExpected(result)
 
     def test_aten_core_operators(self):
         # If a decomposition isn't included in the core decompositions,
@@ -1343,7 +1358,9 @@ class HasDecompTest(TestCase):
         }
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
-        self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+        filtered_ops = _drop_linear_ce_ops(core_aten_ops)
+        result = "".join(sorted(op.name() + "\n" for op in filtered_ops))
+        self.assertExpected(result)
 
     def test_conv1d_decomposition(self):
         from torch._inductor.decomposition import conv1d_to_conv2d

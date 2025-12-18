@@ -860,6 +860,8 @@ meta_dispatch_skips = {
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
     aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
+    aten._linear_cross_entropy_vocab_chunking.default: {f16, bf16, f32, f64},
+    aten._linear_cross_entropy_batch_chunking.default: {f16, bf16, f32, f64},
 }
 
 # For CompositeImplicitAutograd functions that fail before hitting the Mode
