@@ -1954,6 +1954,9 @@ void xsyevd<c10::complex<double>, double>(
       info));
 }
 
+// cuSOLVER Xgeev bindings (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
 template <>
 void xgeev_bufferSize<float>(
     cusolverDnHandle_t handle,
@@ -2276,7 +2279,7 @@ void xgeev<c10::complex<double>>(
 }
 
 
-
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 
 
 #endif // USE_CUSOLVER_64_BIT
