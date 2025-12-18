@@ -363,9 +363,13 @@ class UniformValueConstantFolder(ConstantFolder):
         # scalar_tensor constructor - create on CPU to avoid CUDA syncs
         if node.target is torch.ops.aten.scalar_tensor.default:
             args, kwargs = self.fetch_args_kwargs_from_env(node)
+            value = args[0]
+            # Don't specialize symbolic value.
+            if isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                return self.unknown_value
             cpu_kwargs = dict(kwargs)
             cpu_kwargs["device"] = "cpu"
-            return node.target(*args, **cpu_kwargs)
+            return node.target(value, **cpu_kwargs)
 
         # pointwise ops - inputs are already on CPU from earlier folding
         if isinstance(node.target, torch._ops.OpOverload) and (
