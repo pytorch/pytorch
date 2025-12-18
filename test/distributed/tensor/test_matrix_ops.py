@@ -155,7 +155,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         mesh = self.build_device_mesh()
         batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7
         global_inps_viewed = torch.arange(batch_size * seq_len * contract_dim, device="cuda").float().view(batch_size * seq_len, contract_dim)
-        inps_viewed = distribute_tensor(global_inps_viewed, mesh, (Replicate(),)).redistribute(mesh, (_StridedShard(dim=0, split_factor=2),))
+        inps_viewed = distribute_tensor(global_inps_viewed, mesh, (_StridedShard(dim=0, split_factor=2),), src_data_rank=None)
         global_weight = torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
         weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
         out = torch.mm(inps_viewed, weight)
