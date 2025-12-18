@@ -36,6 +36,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
+    _get_dummy_allocator,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
@@ -5619,69 +5620,6 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    def get_dummy_allocator(self, check_vars):
-        dummy_allocator_source_vars = """
-        #include <torch/extension.h>
-        #include <ATen/cuda/Exceptions.h>
-        #include <cuda_runtime_api.h>
-
-        extern "C" {
-            C10_EXPORT int called_dummy_alloc = 0;
-            C10_EXPORT int called_dummy_free = 0;
-
-            // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-            C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            called_dummy_alloc = 123;
-            void* ptr;
-            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
-            return ptr;
-            }
-
-            C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            called_dummy_free = 321;
-            C10_CUDA_CHECK(cudaFree(ptr));
-            }
-        }
-        """
-        dummy_allocator_source_no_vars = """
-        #include <torch/extension.h>
-        #include <ATen/cuda/Exceptions.h>
-        #include <cuda_runtime_api.h>
-
-        extern "C" {
-          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            void* ptr;
-            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
-            return ptr;
-          }
-
-          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            C10_CUDA_CHECK(cudaFree(ptr));
-          }
-        }
-        """
-
-        from torch.utils.cpp_extension import load_inline
-
-        dummy_allocator_libname = "dummy_allocator"
-        dummy_allocator = load_inline(
-            name=dummy_allocator_libname,
-            cpp_sources=dummy_allocator_source_vars
-            if check_vars
-            else dummy_allocator_source_no_vars,
-            is_python_module=False,
-            keep_intermediates=False,
-            verbose=True,
-            with_cuda=True,
-        )
-        allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            dummy_allocator,
-            "dummy_alloc",
-            "dummy_free",
-        )
-        return allocator, dummy_allocator
-
     def test_mempool_empty_cache(self):
         torch.cuda.empty_cache()
         pool = torch.cuda.MemPool()
@@ -5699,7 +5637,7 @@ class TestMemPool(TestCase):
     @serialTest()
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
-        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        allocator, dummy_allocator = _get_dummy_allocator(check_vars=True)
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
         called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
@@ -5729,7 +5667,7 @@ class TestMemPool(TestCase):
 
         # MemPool doesn't have an allocator by default
         self.assertEqual(pool.allocator, None)
-        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        allocator, dummy_allocator = _get_dummy_allocator(check_vars=True)
 
         pool = torch.cuda.MemPool(allocator.allocator())
 
@@ -5797,7 +5735,7 @@ class TestMemPool(TestCase):
 
     @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
-        allocator, _ = self.get_dummy_allocator(check_vars=False)
+        allocator, _ = _get_dummy_allocator(check_vars=False)
         pool_do_not_use = torch.cuda.MemPool(allocator.allocator())
         pool_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
 
@@ -5929,7 +5867,7 @@ class TestMemPool(TestCase):
         """
         Test that a deleted mempool with use_on_oom=True is properly removed from use_on_oom_pools.
         """
-        allocator, _ = self.get_dummy_allocator(check_vars=False)
+        allocator, _ = _get_dummy_allocator(check_vars=False)
 
         nelem_1mb = 1024 * 1024 // 4
 
@@ -6184,32 +6122,48 @@ class TestMemPool(TestCase):
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
-        torch.cuda.empty_cache()
-        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        allocator, _ = self.get_dummy_allocator(check_vars=False)
-        pool = torch.cuda.MemPool(allocator.allocator())
+        script = """
+try:
+    import torch
+    from torch.testing._internal.common_cuda import _get_dummy_allocator
+    torch.cuda.empty_cache()
+    torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+    allocator, _ = _get_dummy_allocator(check_vars=False)
+    pool = torch.cuda.MemPool(allocator.allocator())
 
-        data = []
-        nelem = 1024 * 1024 // 4
-        with torch.cuda.use_mem_pool(pool):
-            data.append(torch.empty(nelem, device="cuda"))
-
-        # the second allocation should be in expandable segment
+    data = []
+    nelem = 1024 * 1024 // 4
+    with torch.cuda.use_mem_pool(pool):
         data.append(torch.empty(nelem, device="cuda"))
 
-        segments = torch.cuda.memory.memory_snapshot()
+    # the second allocation should be in expandable segment
+    data.append(torch.empty(nelem, device="cuda"))
 
-        num_expandable_segments = 0
-        for segment in segments:
-            if segment["is_expandable"]:
-                num_expandable_segments += 1
+    segments = torch.cuda.memory.memory_snapshot()
 
-        self.assertEqual(len(segments), 2, "Expected to have 2 segment")
-        self.assertEqual(
-            num_expandable_segments, 1, "Expected to have 1 expandable segment only"
-        )
+    num_expandable_segments = 0
+    for segment in segments:
+        if segment["is_expandable"]:
+            num_expandable_segments += 1
 
-        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+    assert len(segments) == 2
+    assert num_expandable_segments == 1
+except AssertionError as e:
+    exit(2)
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 2:
+                self.assertTrue(False, "Number of expandable segments incorrect in subprocess")
+            else:
+                self.assertTrue(False, f"Expandable segments + mempool failed in subprocess {str(e)}")
 
     @serialTest()
     def test_mempool_ctx_multithread(self):
