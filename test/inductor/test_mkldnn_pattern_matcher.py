@@ -749,9 +749,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             s = torch.randn(s_shape, dtype=torch.bfloat16).to(device)
 
             def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
-                )
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
             self._test_common(
                 mod,
