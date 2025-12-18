@@ -418,13 +418,13 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS, Meta: view_as_real
-    SparseCPU, SparseCUDA: view_as_real_sparse
+    SparseCPU, SparseCUDA, SparseMPS: view_as_real_sparse
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
     CPU, CUDA, MPS, Meta: view_as_complex
-    SparseCPU, SparseCUDA: view_as_complex_sparse
+    SparseCPU, SparseCUDA, SparseMPS: view_as_complex_sparse
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
