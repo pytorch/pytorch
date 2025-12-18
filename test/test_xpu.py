@@ -141,6 +141,16 @@ class TestXpu(TestCase):
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
 
+    def test_get_device_capability(self):
+        device_capability = torch.xpu.get_device_capability()
+        acc_capability = torch.accelerator.get_device_capability()
+        supported_dtypes = acc_capability["supported_dtypes"]
+        if device_capability["has_fp16"]:
+            self.assertIn(torch.float16, supported_dtypes)
+        if device_capability["has_fp64"]:
+            self.assertIn(torch.double, supported_dtypes)
+        self.assertIn(torch.int, supported_dtypes)
+
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
