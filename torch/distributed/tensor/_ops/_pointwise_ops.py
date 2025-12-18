@@ -16,10 +16,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    _ShardingPlaceholder,
-    register_single_dim_strategy,
-)
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -801,12 +798,12 @@ for op in partial_preserving_ops:
     )
 
 for op in pointwise_ops:
-    # register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-    #     pointwise_strategy
-    # )
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(single_mesh_dim_pointwise_strategy)
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_strategy
+    )
+    # register_single_dim_strategy(
+    #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    # )(single_mesh_dim_pointwise_strategy)
 
 # TODO: add all for_each ops
 for_each_ops = [
