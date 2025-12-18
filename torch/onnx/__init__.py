@@ -51,10 +51,6 @@ if TYPE_CHECKING:
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 
-# TODO(justinchuby): Remove these two properties
-producer_name = "pytorch"
-producer_version = _C_onnx.PRODUCER_VERSION
-
 
 def export(
     model: torch.nn.Module
