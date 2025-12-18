@@ -2815,6 +2815,33 @@ class CPUReproTests(TestCase):
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
 
+    def test_two_step_variance(self):
+        M=64
+        N=25600
+        class L(torch.nn.Module):
+            def __init__(self, normalized_shape=N, eps=1e-5):
+                super(L, self).__init__()
+                self.layernorm = torch.nn.LayerNorm(
+                    normalized_shape, eps=eps)
+
+            def forward(self, x):
+                return self.layernorm(x)
+        mod = L().eval()
+        for mean in [0, 1e10]:
+            for std in [10, 1e10]:
+                x=torch.randn(M, N)
+                row_means = x.mean(dim=1, keepdim=True)
+                row_stds = x.std(dim=1, keepdim=True,unbiased=True)
+                x_norm = (x - row_means) / (row_stds + 1e-5)
+                x = x_norm*std+mean
+                input = (x,)
+                output_eager = mod(*input)
+                with torch.no_grad():
+                    m = torch.compile(mod)
+                    output_compiled = m(*input)
+                self.assertTrue(torch.allclose(output_eager, output_compiled, atol=1, rtol=1e-4))
+
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)

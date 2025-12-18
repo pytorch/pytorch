@@ -834,7 +834,8 @@ force_pointwise_cat = False
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
-chunk_size = 4096
+# use two step variance in small sizes, disable two step variance with `= 0`
+two_step_variance_threshold = 25600
 
 # Add extra comments to output code (causes compile cache misses)
 comment_origin = False
