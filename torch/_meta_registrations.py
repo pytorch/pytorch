@@ -7477,6 +7477,14 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     )
 
 
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(self, boundaries, *, out_int32=False, right=False):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
+    )
+
+
 @register_meta([aten.histc])
 @out_wrapper()
 def meta_histc(input, bins=100, min=0, max=0):
