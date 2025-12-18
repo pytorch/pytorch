@@ -2107,7 +2107,11 @@ class InstructionTranslatorBase(
         )  # make pyrefly happy
         new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
         exc.call_method(
-            self, "__setattr__", [ConstantVariable("__traceback__"), new_tb], {}
+            # pyrefly: ignore [bad-argument-type]
+            self,
+            "__setattr__",
+            [ConstantVariable("__traceback__"), new_tb],
+            {},
         )
 
     def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
