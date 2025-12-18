@@ -9,6 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from typing import Any, cast, NamedTuple, Optional, Protocol, Union
@@ -1808,20 +1809,15 @@ at time_step %s when running action %s",
         self._update_losses(self._stages, losses)
 
 
+@dataclass
 class _PipelineContext:
-    def __init__(
-        self,
-        schedule_ref: _PipelineSchedule,
-        arg_mbs: Optional[list[tuple]] = None,
-        kwarg_mbs: Optional[list[dict]] = None,
-        target_mbs: Optional[list] = None,
-        losses: Optional[list] = None,
-    ):
-        self.schedule_ref = schedule_ref
-        self.arg_mbs = arg_mbs
-        self.kwarg_mbs = kwarg_mbs
-        self.target_mbs = target_mbs
-        self.losses = losses
+    """Context passed to custom functions during pipeline execution."""
+
+    schedule_ref: _PipelineSchedule
+    arg_mbs: Optional[list[tuple]] = None
+    kwarg_mbs: Optional[list[dict]] = None
+    target_mbs: Optional[list] = None
+    losses: Optional[list] = None
 
 
 class _CustomFunctionProtocol(Protocol):
@@ -2457,6 +2453,25 @@ def _get_1f1b_rank_ops(
     return rank_ops
 
 
+def _get_warmup_ops(
+    rank: int,
+    n_local_stages: int,
+    microbatches_per_round: int,
+    pp_group_size: int,
+    n_microbatches: int,
+    multiply_factor: int = 2,
+) -> int:
+    """
+    Calculate the number of warmup operations for interleaved schedules.
+    """
+    # Warmup operations for last stage
+    warmups_ops_last_stage = (n_local_stages - 1) * microbatches_per_round
+    # Increment warmup operations by multiply_factor for each hop away from the last stage
+    warmup_ops = warmups_ops_last_stage + multiply_factor * ((pp_group_size - 1) - rank)
+    # We cannot have more warmup operations than there are number of microbatches, so cap it there
+    return min(warmup_ops, n_microbatches * n_local_stages)
+
+
 class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     """
     The Interleaved 1F1B schedule.
@@ -2519,21 +2534,14 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 2
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
-
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=2,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
@@ -2642,21 +2650,14 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 1
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
-
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=1,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
