@@ -35,8 +35,8 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
-    _get_torch_cuda_version,
     _get_dummy_allocator,
+    _get_torch_cuda_version,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
@@ -6161,9 +6161,14 @@ except AssertionError as e:
             )
         except subprocess.CalledProcessError as e:
             if e.returncode == 2:
-                self.assertTrue(False, "Number of expandable segments incorrect in subprocess")
+                self.assertTrue(
+                    False, "Number of expandable segments incorrect in subprocess"
+                )
             else:
-                self.assertTrue(False, f"Expandable segments + mempool failed in subprocess {str(e)}")
+                self.assertTrue(
+                    False,
+                    f"Expandable segments + mempool failed in subprocess {str(e)}",
+                )
 
     @serialTest()
     def test_mempool_ctx_multithread(self):
