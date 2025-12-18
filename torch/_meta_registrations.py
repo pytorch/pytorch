@@ -3357,7 +3357,8 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    if device_hint(self) == "cpu":
+    # The impl of xpu nonzero_static is different with cuda but same with cpu
+    if device_hint(self) in ("cpu", "xpu"):
         return self.new_empty((size, self.dim()), dtype=torch.long)
     else:
         return torch.empty_strided(
