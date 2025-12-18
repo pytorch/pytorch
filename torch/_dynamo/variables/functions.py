@@ -1582,6 +1582,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        # _converting shouldn't be included
+        args = dict(self.__dict__)
+        args.pop("_converting", None)
+        args.update(kwargs)
+        return self.__class__(**args)
+
     def as_python_constant(self):
         return self.get_function()
 
