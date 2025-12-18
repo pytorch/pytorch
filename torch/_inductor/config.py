@@ -995,7 +995,7 @@ class aten_distributed_optimizations:
     log_final_collectives_estimations: bool = False
 
     # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    bucket_exposed_first: Literal["True", "False", "auto"] = "auto"
 
 
 def parallel_compile_enabled_internally() -> bool:
