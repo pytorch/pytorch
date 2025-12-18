@@ -560,7 +560,7 @@ static void init_multicast_for_block(
       mc_exported_handle = invalidator;
       LOG(WARNING)
           << "SymmetricMemory: fail to export multicast handle.\n"
-                   << e.what();
+          << e.what();
     }
   }
 
@@ -588,8 +588,8 @@ static void init_multicast_for_block(
     if constexpr (!use_fabric_handle) {
       // Convert back to a handle from the broadcasted POSIX file descriptor.
       C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
-              &mc_handle,
-              (void*)(uintptr_t)recv_handle,
+          &mc_handle,
+          (void*)(uintptr_t)recv_handle,
           CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
     } else {
       C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
@@ -781,7 +781,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-            buffers[r], handles[r], block->block_size, block->device_idx));
+        buffers[r], handles[r], block->block_size, block->device_idx));
   }
 
   auto pai = c10::make_intrusive<CUDAPeerAllocInfo>(
@@ -810,8 +810,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto block = find_block_covering(ptr, offset);
   if (block == nullptr) {
     TORCH_WARN(
-        "Pointer not within any SymmetricMemory allocation, "
-        "is the tensor allocated from SymmetricMemory?");
+      "Pointer not within any SymmetricMemory allocation, "
+      "is the tensor allocated from SymmetricMemory?");
     return nullptr;
   }
   // The group_name passed to rendezvous() takes precedence over
@@ -882,12 +882,12 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
   // testing if the former is within an allocation's range.
   auto alloc_it = std::find_if(ptr_to_block_.begin(), ptr_to_block_.end(),
                              [&](const auto& pair){
-        auto& block = pair.second;
-        auto& allocation = block->alloc_ref;
-        auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-        auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
-        // Modify offset so that it is returned
-        offset = ptr_int - base_ptr;
+                                auto& block = pair.second;
+                                auto& allocation = block->alloc_ref;
+                                auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                // Modify offset so that it is returned
+                                offset = ptr_int - base_ptr;
                                 return ptr_int >= base_ptr && offset < block->buffer_size; });
 
   if (alloc_it == ptr_to_block_.end()) {
