@@ -786,7 +786,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # Two-dimensional tiling: split size across current_group and next group.
                 #
                 # statically_known_gt(size, remaining) may return False for symbolic
-                # expressions like 64*u0 vs u0, because both could be 0. Similary for
+                # expressions like 64*u0 vs u0, because both could be 0. Similarly for
                 # backed expressions like s25*(((s70 - 5)//4)) - s25 and
                 # (s25*(((s70 - 5)//4)) - s25)*64.
                 #
@@ -795,7 +795,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # Note if we dont do this then sv.statically_known_multiple_of(remaining[i], expr)
                 # will fail, for example u0 is not multiple of 64*u0.
                 elif current_group + 1 < len(remaining) and (
-                    sv.statically_known_gt(size, remaining[current_group]) 
+                    sv.statically_known_gt(size, remaining[current_group])
                     or
                     # statically_known_gt(size, remaining) may return False for symbolic
                     # expressions like 64*u0 vs u0, because both could be 0. Similarly for
