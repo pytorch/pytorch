@@ -499,10 +499,10 @@ scaled_mm_configs_short = op_bench.config_list(
 
 # Reduced shapes for faster runs.
 _scaled_mm_long_shapes = [
-    [2048, 2048, 2048],   # DSv3 671B - small batch (reduced)
-    [4096, 2048, 2048],   # DSv3 671B - medium batch (reduced)
-    [2048, 2048, 2048],   # Llama4 16e - small batch (reduced)
-    [4096, 2048, 2048],   # Llama4 16e - medium batch (reduced)
+    [2048, 2048, 2048],
+    [4096, 2048, 2048],
+    [16384, 2048, 7168],
+    [16384, 8192, 5120],
 ]
 
 # Build long configs in groups so we can gate unsupported (scaling, output_dtype)
