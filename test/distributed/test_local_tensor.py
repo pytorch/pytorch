@@ -53,17 +53,17 @@ class LocalTensorTestBase(TestCase):
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh("cpu", (self.world_size,))
-        
+
 
 class LocalTensorRankTest(LocalTensorTestBase):
     def setUp(self):
         super().setUp()
-    
+
     def tearDown(self):
         super().tearDown()
         if dist.is_initialized():
             dist.destroy_process_group()
-    
+
     def run(self, result=None):
         # save the original test method
         test_name = self.id().split(".")[-1]
@@ -75,14 +75,13 @@ class LocalTensorRankTest(LocalTensorTestBase):
                 if dist.is_initialized():
                     dist.destroy_process_group()
                 torch.distributed.init_process_group(
-                    "fake",
-                    rank=rank,
-                    world_size=self.world_size
+                    "fake", rank=rank, world_size=self.world_size
                 )
             original_test()
+
         setattr(self, test_name, rank_loop_wrapper)
         return super().run(result)
-    
+
     @property
     def rank(self):
         assert dist.is_initialized(), "Process group is not initialized!"
@@ -110,19 +109,19 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
     world_size = 2
 
     def test_local_tensor_dtype_consistency(self):
-            """Test that LocalTensor enforces dtype consistency."""
-            device = torch.device("cpu")
-            shape = (2, 3)
+        """Test that LocalTensor enforces dtype consistency."""
+        device = torch.device("cpu")
+        shape = (2, 3)
 
-            inconsistent_tensors = {
-                0: torch.randn(shape, dtype=torch.float32, device=device),
-                1: torch.randn(
-                    shape, dtype=torch.float64, device=device
-                ),  # Different dtype
-            }
+        inconsistent_tensors = {
+            0: torch.randn(shape, dtype=torch.float32, device=device),
+            1: torch.randn(
+                shape, dtype=torch.float64, device=device
+            ),  # Different dtype
+        }
 
-            with self.assertRaises(AssertionError):
-                LocalTensor(inconsistent_tensors)
+        with self.assertRaises(AssertionError):
+            LocalTensor(inconsistent_tensors)
 
     def test_local_tensor_creation_fails_with_grad_tensors(self):
         """Test that LocalTensor creation fails when local tensors have requires_grad=True."""
@@ -270,7 +269,9 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
         self.assertEqual(len(result_add._local_tensors), 2)
 
         # Verify the operation was applied to each local tensor
-        expected = identical_local_tensors[self.rank] + identical_local_tensors[self.rank]
+        expected = (
+            identical_local_tensors[self.rank] + identical_local_tensors[self.rank]
+        )
         self.assertEqual(result_add._local_tensors[self.rank], expected)
 
         # Test multiplication
@@ -331,7 +332,9 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
             for _rank in test_tensors:
                 if _rank == self.rank:
                     continue
-                self.assertEqual(lt_broadcast._local_tensors[_rank], test_tensors[self.rank])
+                self.assertEqual(
+                    lt_broadcast._local_tensors[_rank], test_tensors[self.rank]
+                )
 
             # Test that regular operations still work
             result = lt + 1.0
