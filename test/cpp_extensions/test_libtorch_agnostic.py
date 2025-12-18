@@ -1054,6 +1054,7 @@ if True:
             self.assertEqual(size_vec, ["size", str(t.size(0)), "test2"])
             self.assertEqual(result_size, t.size(0))
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_const_string_view_ref(self, device):
             """Test my_string_op_const_string_view_ref which uses const std::string_view& parameters."""
