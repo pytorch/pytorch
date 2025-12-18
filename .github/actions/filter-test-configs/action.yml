@@ -57,6 +57,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Setup uv
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
+
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       env:
@@ -68,9 +73,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          # PyYAML 6.0 doesn't work with MacOS x86 anymore
-          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
-          python3 -m pip install requests==2.27.1 pyyaml==6.0.2
+          # Pre-fetch dependencies to cache them for later uv run calls
+          uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python -c "import requests, yaml; print('Dependencies ready')"
 
     - name: Parse ref
       id: parse-ref
@@ -80,7 +84,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
@@ -133,7 +137,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+        uv run --no-project --with requests==2.27.1 --with pyyaml==6.0.2 python "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \

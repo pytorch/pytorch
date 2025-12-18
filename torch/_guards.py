@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 
 
 if sys.version_info >= (3, 11):
@@ -31,6 +31,7 @@ else:
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -94,14 +95,22 @@ class CompileId:
     def __str__(self) -> str:
         # NOTE: Keep this in sync with both from_string and the tlparse repo
         if self.compiled_autograd_id is not None:
-            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            if (self.frame_id is None) != (self.frame_compile_id is None):
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must both be None or both be set, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             frame_str = ""
             if self.frame_id is not None:
                 frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
 
             return f"!{self.compiled_autograd_id}{frame_str}"
         else:
-            assert self.frame_id is not None and self.frame_compile_id is not None
+            if self.frame_id is None or self.frame_compile_id is None:
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must not be None, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
@@ -401,10 +410,11 @@ class Guard:
 
         self.guard_types.append(guard_type)
 
-        assert self.guarded_class_weakref in (
-            guarded_class,
-            None,
-        ), "Guarded class id must be identical, or None"
+        if self.guarded_class_weakref not in (guarded_class, None):
+            raise AssertionError(
+                f"Guarded class id must be identical, or None, "
+                f"got {self.guarded_class_weakref} vs {guarded_class}"
+            )
         self.guarded_class_weakref = guarded_class
 
         if not self.code_list:
@@ -416,11 +426,16 @@ class Guard:
         # multiple guards on the same object, the weakref can die between the
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
-        assert (
+        is_valid = (
             self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
-        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
+        )
+        if not is_valid:
+            raise AssertionError(
+                f"Guarded object must be identical, None or ephemeral (dead weakref), "
+                f"got {self.obj_weakref} vs {obj_weakref}"
+            )
         self.obj_weakref = obj_weakref
 
 
@@ -451,7 +466,11 @@ class DuplicateInputs(GuardEnvExpr):
     input_source_b: Source
 
     def __post_init__(self) -> None:
-        assert self.input_source_a != self.input_source_b
+        if self.input_source_a == self.input_source_b:
+            raise AssertionError(
+                f"input_source_a and input_source_b must be different, "
+                f"got {self.input_source_a}"
+            )
 
 
 """
@@ -500,16 +519,16 @@ class GuardsCheckpointState:
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
 
-    dynamo_guards: set[Guard] = set()
+    dynamo_guards: OrderedSet[Guard]
 
-    def __init__(self, dynamo_guards: set[Guard]) -> None:
+    def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> set[Guard] | None:
+    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
         """
         Produces a delta against another GuardsCheckpointState.
 
-        Returns None if no delta is found, otherwise, return a set() of mismatched
+        Returns None if no delta is found, otherwise, return an OrderedSet() of mismatched
         Guard type objects.
         """
         r = self.dynamo_guards.difference(other.dynamo_guards)
@@ -555,7 +574,10 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
         return ModuleContextCheckpointState(dict(self.nn_modules))
 
     def restore_graphstate(self, state: ModuleContextCheckpointState) -> None:
-        assert isinstance(state, ModuleContextCheckpointState)
+        if not isinstance(state, ModuleContextCheckpointState):
+            raise AssertionError(
+                f"expected ModuleContextCheckpointState, got {type(state)}"
+            )
         self.nn_modules = state.nn_modules
 
 
@@ -605,12 +627,19 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         return GlobalContextCheckpointState(self.global_state)
 
     def restore_graphstate(self, state: GlobalContextCheckpointState) -> None:
-        assert isinstance(state, GlobalContextCheckpointState)
+        if not isinstance(state, GlobalContextCheckpointState):
+            raise AssertionError(
+                f"expected GlobalContextCheckpointState, got {type(state)}"
+            )
         self.global_state = state.global_state
-        assert (
+        if not (
             len(self.global_state) == len(self._supported_global_states)
             and set(self.global_state.keys()) == self._supported_global_states
-        ), "Global state mismatch"
+        ):
+            raise AssertionError(
+                f"Global state mismatch: got keys {set(self.global_state.keys())}, "
+                f"expected {self._supported_global_states}"
+            )
         for func, args in self.global_state.values():
             func(args)
 
@@ -618,10 +647,11 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: set[Guard] | None = None) -> None:
+    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
         if inner is None:
-            inner = set()
-        self.inner = inner
+            self.inner: OrderedSet[Guard] = OrderedSet()
+        else:
+            self.inner = inner
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -658,9 +688,9 @@ class GuardsSet:
         """Delete all guards that contains a given source"""
         from ._dynamo.source import is_from_source
 
-        self.inner = {
+        self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
-        }
+        )
 
 
 """
@@ -677,11 +707,12 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self) -> GuardsCheckpointState:
-        return GuardsCheckpointState(set(self.dynamo_guards.inner))
+        return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
         # NB: "steals" the passed in state
-        assert isinstance(state, GuardsCheckpointState)
+        if not isinstance(state, GuardsCheckpointState):
+            raise AssertionError(f"expected GuardsCheckpointState, got {type(state)}")
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
@@ -770,12 +801,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def add_effects(self, identifier: str, effects: set) -> None:
         """Store the effect types for a given invoke_subgraph identifier."""
         if prev_effects := self.effects_cache.get(identifier, None):
-            assert effects == prev_effects, (
-                "Different number of effects were found for invoke_subgraph "
-                f"call with identifier {identifier}. \n"
-                f"Previously we had the following effects: {prev_effects}.\n"
-                f"But now we have: {effects}."
-            )
+            if effects != prev_effects:
+                raise AssertionError(
+                    "Different number of effects were found for invoke_subgraph "
+                    f"call with identifier {identifier}. \n"
+                    f"Previously we had the following effects: {prev_effects}.\n"
+                    f"But now we have: {effects}."
+                )
         self.effects_cache[identifier] = effects
 
     def get_effects(self, identifier: str) -> set | None:
@@ -820,7 +852,8 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 class CompileContext:
     @staticmethod
     def get() -> CompileContext:
-        assert _TLS.compile_context is not None
+        if _TLS.compile_context is None:
+            raise AssertionError("compile_context is not set")
         return _TLS.compile_context
 
     @staticmethod
@@ -828,7 +861,10 @@ class CompileContext:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id: CompileId | None) -> None:
-        assert compile_id is None or isinstance(compile_id, CompileId)
+        if compile_id is not None and not isinstance(compile_id, CompileId):
+            raise AssertionError(
+                f"compile_id must be None or CompileId, got {type(compile_id)}"
+            )
         self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
@@ -957,7 +993,8 @@ class TracingContext:
         return traceback.StackSummary.from_list(stack)
 
     def _populate_loc_in_frame_summary(self) -> traceback.FrameSummary:
-        assert self.loc_in_frame is not None
+        if self.loc_in_frame is None:
+            raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
         return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
@@ -1280,13 +1317,14 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert fake_mode is m, (
-                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
-            )
+            if fake_mode is not m:
+                raise AssertionError(
+                    f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                    # pyrefly: ignore [missing-attribute]
+                    f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                    # pyrefly: ignore [missing-attribute]
+                    f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+                )
         # pyrefly: ignore [bad-return]
         return fake_mode
     else:
