@@ -311,8 +311,7 @@ class _MeshLayout(Layout):
 
         complement_layout = self.complement(rank_map.numel())
 
-        with torch._subclasses.fake_tensor.unset_fake_temporarily():
-            return rank_map.as_strided(
-                flatten(complement_layout.sizes) + flatten(self.sizes),
-                flatten(complement_layout.strides) + flatten(self.strides),
-            ).reshape(-1, *self.top_level_sizes)
+        return rank_map.as_strided(
+            flatten(complement_layout.sizes) + flatten(self.sizes),
+            flatten(complement_layout.strides) + flatten(self.strides),
+        ).reshape(-1, *self.top_level_sizes)
