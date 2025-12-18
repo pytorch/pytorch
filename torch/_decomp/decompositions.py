@@ -2836,7 +2836,6 @@ def _index_add(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
-    torch.ops.aten._assert_async.msg((index >= 0).all(), "index out of range")
     index_size = index.size(0) if index.ndim == 1 else 1
     tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(

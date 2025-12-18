@@ -16620,3 +16620,16 @@ if __name__ == "__main__":
         opt_fn = torch.compile(fn, backend="inductor", dynamic=True)
         with self.assertRaisesRegex(RuntimeError, "index out of range"):
             opt_fn(x, indices)
+
+
+class InductorIndexSelectTests(TestCase):
+    def test_index_select_negative_index(self):
+        def fn(x, indices):
+            return torch.index_select(x, 0, indices)
+
+        x = torch.randn(5, 10, device="cpu")
+        indices = torch.tensor([-1], dtype=torch.int64, device="cpu")
+
+        opt_fn = torch.compile(fn, backend="inductor", dynamic=True)
+        with self.assertRaisesRegex(RuntimeError, "index out of range"):
+            opt_fn(x, indices)
