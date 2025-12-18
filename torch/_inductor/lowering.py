@@ -460,7 +460,6 @@ def _register_foreach_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -738,37 +737,47 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        outputs = [None] * len(a_list_input)
-        for (device, use_foreach), group in groups.items():
-            operation_list: list[str] = []
-            for (
-                output_ind,
-                args,
-            ) in group:
-                if allow_alpha:
-                    output = pw_fn(*args, alpha=alpha)
-                else:
-                    output = pw_fn(*args)
+        def apply_fn(args):
+            if allow_alpha:
+                return pw_fn(*args, alpha=alpha)
+            else:
+                return pw_fn(*args)
 
-                outputs[output_ind] = output
-
-                if (
-                    # pyrefly: ignore [unbound-name]
-                    V.graph.has_feature(device, BackendFeature.FOREACH)
-                    and use_foreach
-                    and realize_outputs
-                ):
-                    output.realize()
-                    operation_list.append(output.get_operation_name())
-
-            if operation_list:
-                # pyrefly: ignore [unbound-name]
-                V.graph.register_operation_list(operation_list)
-
-        assert all(x is not None for x in outputs)
-        return outputs
+        return foreach_group_loop(groups, len(a_list_input), apply_fn, realize_outputs)
 
     return inner
+
+
+def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
+    """
+    Common loop over grouped foreach arguments.
+
+    Args:
+        groups: Result of group_foreach_args - dict mapping (device, use_foreach) to groups
+        num_outputs: Number of outputs to produce
+        apply_fn: Function to apply to each set of args, returns the output
+        realize_outputs: Whether to realize outputs for foreach fusion
+    """
+    outputs = [None] * num_outputs
+    for (device, use_foreach), group in groups.items():
+        operation_list: list[str] = []
+        for output_ind, args in group:
+            output = apply_fn(args)
+            outputs[output_ind] = output
+
+            if (
+                V.graph.has_feature(device, BackendFeature.FOREACH)
+                and use_foreach
+                and realize_outputs
+            ):
+                output.realize()
+                operation_list.append(output.get_operation_name())
+
+        if operation_list:
+            V.graph.register_operation_list(operation_list)
+
+    assert all(x is not None for x in outputs)
+    return outputs
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
@@ -6877,7 +6886,7 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
 
-@register_lowering(aten.addcmul, type_promotion_kind=None)
+@register_lowering(aten.addcmul, broadcast=True)
 def addcmul(self, tensor1, tensor2, *, value=1):
     """
     Computes self + value * tensor1 * tensor2 using FMA for better precision.
@@ -6885,7 +6894,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
     """
-    self, tensor1, tensor2 = broadcast_tensors(self, tensor1, tensor2)
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -6906,8 +6914,12 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         # Compute tensor1 * tensor2 first, then fma(value, result, self)
         t1_times_t2 = ops.mul(t1_val, t2_val)
         # Always use fma for consistency with eager CUDA kernel
-        value_const = ops.constant(value, dtype)
-        return ops.fma(value_const, t1_times_t2, self_val)
+        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
+        if isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+        return ops.fma(value_expr, t1_times_t2, self_val)
 
     return Pointwise.create(
         device=self.get_device(),
@@ -6917,14 +6929,10 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     )
 
 
-foreach_ops.add(aten._foreach_addcmul.Scalar)
-
-
-@register_lowering(aten._foreach_addcmul.Scalar, type_promotion_kind=None)
-def _foreach_addcmul_scalar(self_tensors, tensor1_list, tensor2_list, value=1):
+def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
-    Foreach version of addcmul using FMA for better precision.
-    Computes self + value * tensor1 * tensor2 for each tensor in the lists.
+    Foreach version of addcmul with scalar value parameter.
+    Uses foreach_group_loop for consistent grouping behavior.
     """
     realize_outputs = (
         len(V.graph.current_node.users) == 0
@@ -6932,28 +6940,15 @@ def _foreach_addcmul_scalar(self_tensors, tensor1_list, tensor2_list, value=1):
         or cur_node_has_non_foreach_users()
     )
 
-    groups = group_foreach_args(zip(self_tensors, tensor1_list, tensor2_list))
+    groups = group_foreach_args(zip(self, tensor1, tensor2))
 
-    outputs = [None] * len(self_tensors)
-    for (device, use_foreach), group in groups.items():
-        operation_list: list[str] = []
-        for output_ind, (self_tensor, t1, t2) in group:
-            output = addcmul(self_tensor, t1, t2, value=value)
-            outputs[output_ind] = output
+    def apply_fn(args):
+        return addcmul(*args, value=value)
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
-                output.realize()
-                operation_list.append(output.get_operation_name())
+    return foreach_group_loop(groups, len(self), apply_fn, realize_outputs)
 
-        if operation_list:
-            V.graph.register_operation_list(operation_list)
 
-    assert all(x is not None for x in outputs)
-    return outputs
+_register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
 
 
 register_pointwise_numeric_ldf64(aten.cos)
