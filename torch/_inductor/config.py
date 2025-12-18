@@ -1272,7 +1272,7 @@ torchinductor_worker_logpath: str = Config(
 
 
 class auto_chunker:
-    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
 
     # Don't chunk from a node if the output size is not large enough
     output_size_threshold = 1024 * 1024
