@@ -59,6 +59,30 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
+  DeviceCapability getDeviceCapability(Device d) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_Double) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_ComplexDouble) | (1ULL << kIndex_Bool);
+#ifdef USE_ROCM
+    cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
+    cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
+    cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
+#else
+    cudaDeviceProp device_prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, d.index()));
+    if (device_prop.major >= 5 && device_prop.minor >= 3) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
+      cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
+    }
+    if (device_prop.major >= 8) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
+    }
+#endif
+    return cap;
+  }
   Stream getStream(Device d) const override {
     return getCurrentCUDAStream(d.index()).unwrap();
   }
