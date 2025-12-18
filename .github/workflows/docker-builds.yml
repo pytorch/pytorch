@@ -133,7 +133,7 @@ jobs:
           echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: contains(matrix.docker-image-name, 'rocm')
         with:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}

@@ -425,13 +425,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -541,13 +541,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -657,13 +657,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1092,13 +1092,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1208,13 +1208,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1324,13 +1324,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1759,13 +1759,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1875,13 +1875,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1991,13 +1991,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2426,13 +2426,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2542,13 +2542,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2658,13 +2658,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3093,13 +3093,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3209,13 +3209,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3325,13 +3325,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3760,13 +3760,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3876,13 +3876,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3992,13 +3992,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4427,13 +4427,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_0
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4543,13 +4543,13 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4659,13 +4659,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v6
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive

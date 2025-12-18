@@ -111,7 +111,7 @@ jobs:
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
 {%- endif %}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: !{{ config["build_name"] }}
