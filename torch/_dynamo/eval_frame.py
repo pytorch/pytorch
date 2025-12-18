@@ -876,6 +876,17 @@ class _TorchDynamoContext:
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
+        # NOTE [Top-level TorchInGraph functions]
+        # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
+        # when traced inside a frame. When such a function is passed directly to
+        # torch.compile, we detect it here so we can force it through wrap_inline.
+        from .variables import TorchInGraphFunctionVariable
+
+        rule = trace_rules.lookup(fn)
+        top_level_in_graph = isinstance(rule, type) and issubclass(
+            rule, TorchInGraphFunctionVariable
+        )
+
         try:
             filename = inspect.getsourcefile(fn)
         except TypeError:
@@ -883,7 +894,7 @@ class _TorchDynamoContext:
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
-            (filename is None or trace_rules.check(fn))
+            (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
@@ -1422,7 +1433,8 @@ def _optimize(
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
