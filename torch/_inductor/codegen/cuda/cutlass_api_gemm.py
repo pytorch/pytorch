@@ -214,11 +214,10 @@ def add_cutlass_api_gemm_choices(
 
     # Limit kernels to profile if configured
     if config.cuda.cutlass_api_max_profiling_configs:
-        # kernels = random.sample(
-        #     kernels,
-        #     min(len(kernels), config.cuda.cutlass_api_max_profiling_configs),
-        # )
-        kernels = kernels[70:73]
+        kernels = random.sample(
+            kernels,
+            min(len(kernels), config.cuda.cutlass_api_max_profiling_configs),
+        )
 
     num_added = 0
     for kernel in kernels:
