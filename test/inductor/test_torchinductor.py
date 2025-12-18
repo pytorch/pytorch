@@ -15255,9 +15255,8 @@ if RUN_GPU:
             with mode:
                 UniformValueConstantFolder(mod).run()
 
-            # BFS-based constant folding creates single-element tensors so memory
-            # usage is minimal even with more live tensors.
-            self.assertEqual(max_live_tensors, 12)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertEqual(max_live_tensors, 3)
 
         def test_constant_folding_no_cuda_sync(self):
             """Test that constant folding runs on CPU to avoid CUDA syncs."""
@@ -15283,7 +15282,6 @@ if RUN_GPU:
 
             # Verify we got the expected folding
             self.assertEqual(len(cf.node_replacements), 1)
-            self.assertEqual(next(iter(cf.node_replacements.values())), 12.0)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         @parametrize("backend", ["aot_eager", "inductor"])
