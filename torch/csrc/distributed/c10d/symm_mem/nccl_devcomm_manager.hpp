@@ -10,9 +10,9 @@
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 namespace c10d::symmetric_memory {
-// Maximum number of barriers for NCCL device communicator.
-// Each CTA will need a separate barrier.
-constexpr int NCCL_DEVCOMM_BARRIER_COUNT = 32;
+// Maximum number of memory barriers for NCCL device communicator.
+// Each CTA will need a separate memory barrier.
+constexpr int NCCL_LSA_BARRIER_COUNT = 32;
 
 // Manage all the NCCL device communicator business. Singleton.
 class NCCLDevCommManager {
@@ -67,11 +67,14 @@ class NCCLDevCommManager {
     // See example in
     // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
     memset(&reqs, 0, sizeof(ncclDevCommRequirements));
-    // Specifies the number for both the memory and network barriers.
-    reqs.barrierCount = NCCL_DEVCOMM_BARRIER_COUNT;
+    // Specifies the number of memory barriers to allocate.
+    reqs.lsaBarrierCount = NCCL_LSA_BARRIER_COUNT;
+    // TODO (kwen2501): Add network barrier count.
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
     // Cache the device communicator for future reuse
+    // TODO (kwen2501):
+    // Cache devComm not just based on group name, but also on requirements.
     group_to_comms_.emplace(group_name, std::make_pair(comm, devComm));
   }
 
