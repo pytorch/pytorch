@@ -607,9 +607,8 @@ def _get_output_act_obs_or_fq(
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
 
-    assert "quantization_annotation" not in arg.meta, (
-        "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
-    )
+    if "quantization_annotation" in arg.meta:
+        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
 
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
     # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
@@ -631,9 +630,9 @@ def _get_output_act_obs_or_fq(
         observed_arg = arg.args[0]
         if not isinstance(observed_arg, Node):
             raise AssertionError("Currently we only support observing Node")
-        assert "quantization_annotation" not in observed_arg.meta, (
-            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
-        )
+
+        if "quantization_annotation" in observed_arg.meta:
+            raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
 
         if "target_dtype_info" not in observed_arg.meta:
             raise AssertionError("expected 'target_dtype_info' in observed_arg.meta")
@@ -685,9 +684,8 @@ def _get_arg_as_input_act_obs_or_fq(
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
 
-    assert "quantization_annotation" not in node.meta, (
-        "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
-    )
+    if "quantization_annotation" in node.meta:
+        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
 
     # we can remove the following path in the future if fx graph mode quantization is
     # no longer used
@@ -766,9 +764,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # node.meta now
         # regular flow for most nodes, except standalone modules
 
-        assert "quantization_annotation" not in node.meta, (
-            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
-        )
+        if "quantization_annotation" in node.meta:
+            raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
 
         if "target_dtype_info" not in node.meta:
             raise AssertionError("expected 'target_dtype_info' in node.meta")
@@ -1023,9 +1020,8 @@ def _maybe_insert_output_observer_for_node(
         raise AssertionError("observer insertion for outputs is handled elsewhere")
 
     is_standalone_module = False
-    assert "quantization_annotation" not in node.meta, (
-        "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
-    )
+    if "quantization_annotation" in node.meta:
+        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
 
     if "target_dtype_info" not in node.meta:
         raise AssertionError("expected 'target_dtype_info' in node.meta")
