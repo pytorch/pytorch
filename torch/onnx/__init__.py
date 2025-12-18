@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-
 __all__ = [
     # Modules
     "errors",
@@ -12,6 +11,7 @@ __all__ = [
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
+    "ExportableModule",
 ]
 
 from typing import Any, TYPE_CHECKING
@@ -26,6 +26,7 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 
 from . import errors, ops
 from ._internal.exporter._onnx_program import ONNXProgram
+from ._internal.exporter._exportable_module import ExportableModule
 from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
     symbolic_helper,
     symbolic_opset10,
@@ -278,7 +279,9 @@ def export(
     .. versionchanged:: 2.9
         *dynamo* is now True by default.
     """
-    if dynamo is True or isinstance(model, torch.export.ExportedProgram):
+    if dynamo is True or isinstance(
+        model, (torch.export.ExportedProgram, ExportableModule)
+    ):
         from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
