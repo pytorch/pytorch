@@ -61,6 +61,7 @@ def _get_float8_dtype(float8_dtype):
 
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     _MX_BLOCK_SIZE: int = 32
+    _NVFP4_BLOCK_SIZE: int = 16
 
     def _set_output_dtype(self, output_dtype: str) -> None:
         if output_dtype == "bfloat16":
@@ -73,10 +74,10 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     def _set_scaled_mm_call_config(
         self,
         *,
-        scale_recipe_a: ScalingType,
-        scale_recipe_b: ScalingType,
-        swizzle_a: SwizzleType | None = None,
-        swizzle_b: SwizzleType | None = None,
+        scale_recipe_a: ScalingType | list[ScalingType],
+        scale_recipe_b: ScalingType | list[ScalingType],
+        swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+        swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     ) -> None:
         # Store call-time config so forward() is a single straight-line call.
         self._scale_recipe_a = scale_recipe_a
@@ -167,6 +168,51 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             swizzle_b=SwizzleType.SWIZZLE_32_4_4,
         )
 
+    def _init_nvfp4_blockwise_with_global_scale(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
+        # NVFP4 uses packed fp4 inputs and two-level scaling:
+        # - blockwise (1x16) decode scales (swizzled for CUDA)
+        # - tensorwise global decode scale (NO_SWIZZLE)
+        #
+        # scaled_mm expects these as LISTS for both `scale_*` and `scale_recipe_*`.
+        if device != "cuda":
+            raise RuntimeError(f"NVFP4 scaling requires CUDA device, got: {device}")
+        if torch.version.hip is not None:
+            raise RuntimeError("NVFP4 benchmarks are only wired for CUDA (non-HIP).")
+        if K % 32 != 0:
+            raise RuntimeError(f"NVFP4 requires K divisible by 32, got K={K}")
+
+        # NOTE: We reuse the same reference implementation as test/test_scaled_matmul_cuda.py.
+        from torch.testing._internal.common_quantized import to_blocked
+
+        # Use nontrivial distribution so scaling isn't degenerate.
+        a_ref = torch.randn((M, K), device=device, dtype=self.base_dtype) * 1000
+        b_ref = torch.randn((N, K), device=device, dtype=self.base_dtype) * 1000
+
+        a_lp, a_scale, a_global_scale = helpers.data_to_nvfp4_with_global_scale(
+            a_ref, self._NVFP4_BLOCK_SIZE
+        )
+        b_lp, b_scale, b_global_scale = helpers.data_to_nvfp4_with_global_scale(
+            b_ref, self._NVFP4_BLOCK_SIZE
+        )
+
+        a_scale = to_blocked(a_scale)
+        b_scale = to_blocked(b_scale)
+
+        self.inputs = {
+            "x": a_lp,
+            "y": b_lp.t(),
+            "scale_a": [a_scale, a_global_scale],
+            "scale_b": [b_scale, b_global_scale],
+        }
+        self._set_scaled_mm_call_config(
+            scale_recipe_a=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            scale_recipe_b=[ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+            swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+        )
+
     def init(
         self,
         M,
@@ -191,6 +237,8 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             self._init_mx_blockwise(M, N, K, device, mx_format="mxfp8")
         elif scaling == "mxfp4":
             self._init_mx_blockwise(M, N, K, device, mx_format="mxfp4")
+        elif scaling == "nvfp4":
+            self._init_nvfp4_blockwise_with_global_scale(M, N, K, device, helpers)
         else:
             raise ValueError(f"Unsupported scaling mode: {scaling}")
 
@@ -291,7 +339,7 @@ scaled_mm_configs_long = op_bench.config_list(
         "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
         "output_dtype": ["bfloat16", "float32"],  # KEEPING ALL DTYPES
         # Scale/quantization technique: add MX configs under tag long.
-        "scaling": ["fp8_tensorwise", "mxfp8", "mxfp4"],
+        "scaling": ["fp8_tensorwise", "mxfp8", "mxfp4", "nvfp4"],
     },
     tags=["long"],
 )
