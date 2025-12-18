@@ -754,6 +754,7 @@ class TestCommon(TestCase):
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         from copy import copy
+
         from torch._prims.executor import make_traced
 
         op = copy(op)
