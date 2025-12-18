@@ -19,8 +19,8 @@ import torch
 from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
-    _get_torch_rocm_version,
     _get_torch_hipblaslt_version,
+    _get_torch_rocm_version,
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
@@ -1901,9 +1901,7 @@ def skipCUDAIfRocmHipBlasltVersionLessThan(version=None):
                     or version is None
                     or hipblaslt_version_tuple < tuple(version)
                 ):
-                    reason = (
-                        f"hipBLASLt {hipblaslt_version_tuple} is available but {version} required"
-                    )
+                    reason = f"hipBLASLt {hipblaslt_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
 
             return fn(self, *args, **kwargs)
