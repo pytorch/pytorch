@@ -3780,6 +3780,9 @@ def setup_determinism_for_accuracy_test(args):
         if args.devices == ["xpu"]:
             torch.use_deterministic_algorithms(True, warn_only=True)
 
+    if args.devices == ["rocm"]:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.mkldnn.deterministic = True
