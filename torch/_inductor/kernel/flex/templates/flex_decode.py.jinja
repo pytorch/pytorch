@@ -91,6 +91,9 @@
     offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    # Map from BLOCK_M-based grid index to block mask row index
+    # Each block_m processes BLOCK_M_PER_HQ queries, which map to one block mask row
+    # if BLOCK_M_PER_HQ fits within SPARSE_Q_BLOCK_SIZE
     sparse_idx_m = off_block_m * BLOCK_M_PER_HQ // SPARSE_Q_BLOCK_SIZE
     stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
     sparse_block_zhm_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h + sparse_idx_m * stride_block_row

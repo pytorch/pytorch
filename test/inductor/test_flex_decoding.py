@@ -1949,6 +1949,76 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
+    def test_flex_decoding_multi_block_m_gqa(self, device):
+        """Test flex_decoding with multi-BLOCK_M and GQA.
+
+        When seq_len_q * gqa_shared_heads > BLOCK_M, the kernel must handle
+        multiple BLOCK_M blocks correctly. This tests a scenario where
+        seq_len_q=23, G=4, BLOCK_M=16, resulting in 23*4=92 > 16.
+        """
+        dtype = torch.float16
+        B, Hq, Hkv = 2, 32, 8
+        G = Hq // Hkv
+        seq_len_q = 23
+        seq_len_kv = 1024
+        head_dim = 128
+
+        kernel_options = {"BLOCK_M": 16}
+
+        q = torch.randn(B, Hq, seq_len_q, head_dim, device=device, dtype=dtype)
+        k = torch.randn(B, Hkv, seq_len_kv, head_dim, device=device, dtype=dtype)
+        v = torch.randn(B, Hkv, seq_len_kv, head_dim, device=device, dtype=dtype)
+
+        block_mask = create_block_mask(
+            noop_mask, B, Hq, seq_len_q, seq_len_kv, device=device, _compile=True
+        )
+
+        out = torch.compile(flex_attention)(
+            q, k, v, block_mask=block_mask, kernel_options=kernel_options, enable_gqa=True
+        )
+
+        ref = flex_attention(q, k, v, block_mask=block_mask, enable_gqa=True)
+        torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
+
+    @supported_platform
+    @common_utils.parametrize("gqa_config", [(32, 8), (16, 4), (8, 2), (16, 16)])
+    @common_utils.parametrize("q_seq_len", [1, 4, 8, 12, 16, 20, 23, 32, 64, 127])
+    def test_multi_block_m_comprehensive(self, device, gqa_config, q_seq_len):
+        """Comprehensive test for multi-BLOCK_M with various GQA configurations.
+
+        Tests flex_decoding across different combinations of:
+        - GQA ratios: 4, 4, 4, 1 (from head configs)
+        - Query sequence lengths: 1 to 127
+        - BLOCK_M values: 16, 32, 64
+
+        Ensures multi-BLOCK_M works correctly for all edge cases.
+        """
+        dtype = torch.float16
+        Hq, Hkv = gqa_config
+        G = Hq // Hkv
+
+        for block_m in [16, 32, 64]:
+            if block_m % G != 0:
+                continue
+
+            kernel_options = {"BLOCK_M": block_m}
+
+            q = torch.randn(2, Hq, q_seq_len, 128, device=device, dtype=dtype)
+            k = torch.randn(2, Hkv, 1024, 128, device=device, dtype=dtype)
+            v = torch.randn(2, Hkv, 1024, 128, device=device, dtype=dtype)
+
+            block_mask = create_block_mask(
+                noop_mask, 2, Hq, q_seq_len, 1024, device=device, _compile=True
+            )
+
+            out = torch.compile(flex_attention)(
+                q, k, v, block_mask=block_mask, kernel_options=kernel_options, enable_gqa=True
+            )
+
+            ref = flex_attention(q, k, v, block_mask=block_mask, enable_gqa=True)
+            torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):

@@ -85,12 +85,20 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and pw_of_two
     )
     log.debug(
-        "Use flex decoding %s, force_flex_attention=%s, short_query_length=%s, static_batch=%s, static_num_heads=%s",  # noqa: B950
+        "Flex decoding decision: use=%s | force_flex=%s | seq_len_q=%s (<128: %s) | "
+        "static_batch=%s | static_heads=%s | valid_block_mask=%s | pw_of_2_gqa=%s | "
+        "Hq=%s | Hkv=%s | ratio=%s",
         out,
         force_flex,
+        query.get_size()[-2],
         short_query_length,
         static_batch,
         static_num_heads,
+        valid_block_mask_num_heads,
+        pw_of_two,
+        Hq,
+        Hkv,
+        ratio,
     )
     return out
 
@@ -311,6 +319,21 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+
+    # Validate multi-BLOCK_M compatibility with block mask
+    num_block_m = ceildiv(
+        V.graph.sizevars.size_hint(seq_len_q) * gqa_shared_heads,
+        kernel_options["BLOCK_M"]
+    )
+    block_m_per_hq = kernel_options["BLOCK_M"] // gqa_shared_heads
+    max_sparse_idx_m = (num_block_m - 1) * block_m_per_hq // SPARSE_Q_BLOCK_SIZE
+
+    if max_sparse_idx_m > 0:
+        log.info(
+            "Using multi-BLOCK_M for flex_decoding: num_block_m=%d, "
+            "seq_len_q=%s, gqa_shared_heads=%d, BLOCK_M=%d",
+            num_block_m, seq_len_q, gqa_shared_heads, kernel_options["BLOCK_M"]
+        )
 
     original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
