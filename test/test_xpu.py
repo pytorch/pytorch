@@ -149,7 +149,11 @@ class TestXpu(TestCase):
             self.assertIn(torch.float16, supported_dtypes)
         if device_capability["has_fp64"]:
             self.assertIn(torch.double, supported_dtypes)
+        self.assertIn(torch.bool, supported_dtypes)
         self.assertIn(torch.int, supported_dtypes)
+        self.assertIn(torch.float, supported_dtypes)
+        if torch.xpu.is_bf16_supported(including_emulation=True):
+            self.assertIn(torch.bfloat16, supported_dtypes)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
