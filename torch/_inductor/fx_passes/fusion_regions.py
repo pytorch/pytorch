@@ -324,7 +324,9 @@ def expand_fusion_regions(
         # so dependencies are only satisfied after all outputs are computed
         if isinstance(output_arg, (list, tuple)):
             if output_arg:
-                result[module_node] = subgraph_to_new[output_arg[-1]]
+                last_arg = output_arg[-1]
+                assert isinstance(last_arg, fx.Node)
+                result[module_node] = subgraph_to_new[last_arg]
         elif isinstance(output_arg, fx.Node) and output_arg in subgraph_to_new:
             result[module_node] = subgraph_to_new[output_arg]
 
