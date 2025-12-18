@@ -2059,7 +2059,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
                 self._unshard_event = self._unshard_stream.record_event()
             self._handle._prefetched = True
-        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        unshard_handle = UnshardHandle(self._handle, self._unshard_event)
         if async_op:
             return unshard_handle
         unshard_handle.wait()
