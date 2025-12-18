@@ -65,10 +65,17 @@ inline torch::stable::Tensor narrow(
 }
 
 #if TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
-// We expect this to be a stable version of the new_empty op that takes in
-// only dtype information.
-// This is gated to < 2.10 to avoid ambiguity with the full new_empty overload
-// in the 2.10+ block, which has the same first three parameters with defaults.
+/// Stable version of the new_empty op (2.9 version).
+///
+/// Creates a new uninitialized tensor with the specified size, inheriting
+/// device and layout from the input tensor. This version only supports the
+/// dtype kwarg. For the full kwargs version, use PyTorch 2.10+.
+///
+/// \param self The input tensor whose device and layout will be inherited.
+/// \param size The desired size of the output tensor.
+/// \param dtype Optional scalar type for the tensor elements. If not provided,
+///              inherits from self.
+/// \return A new uninitialized tensor with the specified properties.
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
@@ -556,11 +563,20 @@ inline torch::stable::Tensor contiguous(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-// We expect this to be the stable version of the new_empty op with all kwargs.
-// This function is only available in 2.10 because it uses the stableivalue
-// conversion for Device, HeaderOnlyArrayRef, Layout which are only available
-// in 2.10. In versions < 2.10, a simpler new_empty overload that only takes
-// dtype is available instead.
+/// Stable version of the new_empty op (2.10 version with full kwargs).
+///
+/// Creates a new uninitialized tensor with the specified size and options.
+/// This version supports all tensor creation kwargs. For versions < 2.10,
+/// a simpler overload that only takes dtype is available.
+///
+/// \param self The input tensor whose properties may be inherited if kwargs are
+/// not provided.
+/// \param size The desired size of the output tensor.
+/// \param dtype Optional scalar type for the tensor elements.
+/// \param layout Optional memory layout (e.g., strided, sparse).
+/// \param device Optional device to place the tensor on.
+/// \param pin_memory Optional flag to use pinned memory (for CUDA tensors).
+/// \return A new uninitialized tensor with the specified properties.
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
