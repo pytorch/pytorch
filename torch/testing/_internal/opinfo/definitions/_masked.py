@@ -582,6 +582,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         "masked.cumsum",
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         method_variant=None,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -606,6 +607,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         "masked.cumprod",
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         method_variant=None,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -1062,6 +1064,14 @@ op_db: list[OpInfo] = [
         "masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
+        dtypesIfMPS=floating_types_and(
+            torch.half,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int32,
+            torch.int16,
+            torch.int8,
+        ),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1119,6 +1129,7 @@ op_db: list[OpInfo] = [
         "masked.normalize",
         method_variant=None,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfMPS=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
         decorators=[
             DecorateInfo(
