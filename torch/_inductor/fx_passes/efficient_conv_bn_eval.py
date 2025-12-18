@@ -151,7 +151,8 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
     bn_node = match.nodes[0]
     graph = match.graph
     # assert len(bn_node.args) == 8
-    assert callable(bn_node.target)
+    if not callable(bn_node.target):
+        return
     sig = inspect.signature(bn_node.target)
     bound = sig.bind(*bn_node.args, **bn_node.kwargs)
     bound.apply_defaults()
