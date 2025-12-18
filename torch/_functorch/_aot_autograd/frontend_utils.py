@@ -54,15 +54,17 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                assert x.fake_mode is fake_mode
-                return x
+                if x.fake_mode is fake_mode:
+                    return x
+                # FakeTensor from a different mode (e.g., userland FakeTensorMode).
+                # Refakify it to our mode. Fall through to the from_tensor path.
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    assert all(
-                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                    )
-                    return x
+                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
+                        return x
+                    # FakeTensor subclass from a different mode.
+                    # Fall through to refakify.
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
@@ -99,6 +101,18 @@ def process_inputs(
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
 ) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+    # First, try to get the fake mode from the tracing context.  This is the
+    # authoritative source when Dynamo is driving compilation, since it creates
+    # a fresh FakeTensorMode for the backend.  We intentionally do NOT use
+    # detect_fake_mode here because that also checks the fake modes of input
+    # tensors, which may have been created from a different (userland)
+    # FakeTensorMode.  Those tensors will be "refakified" in process_inputs.
+    if tracing_context := torch._guards.TracingContext.try_get():
+        fake_mode = tracing_context.fake_mode
+        if fake_mode is not None:
+            return (fake_mode, fake_mode.shape_env)
+
+    # Fall back to detecting from inputs if there's no tracing context
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
