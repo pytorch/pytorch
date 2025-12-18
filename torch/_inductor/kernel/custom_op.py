@@ -21,6 +21,8 @@ from torch.utils._ordered_set import OrderedSet
 
 log = logging.getLogger(__name__)
 
+DEFAULT_RANGE_UPPER_BOUND = 65536
+
 
 @dataclass(frozen=True)
 class RangeBounds:
@@ -181,7 +183,7 @@ __all__ = [
 def _extract_tensor_inputs(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    op_overload: Optional[torch._ops.OpOverload] = None,
+    op_overload: torch._ops.OpOverload,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract tensor inputs from mixed args/kwargs.
     Separates tensors (for autotuning input_nodes) from non-tensor parameters.
@@ -189,9 +191,7 @@ def _extract_tensor_inputs(
     Args:
         args: Positional arguments (mix of tensors and scalars)
         kwargs: Keyword arguments (mix of tensors and scalars)
-        op_overload: Optional op overload to get parameter names from schema.
-                     If provided, non-tensor args will preserve their original
-                     parameter names instead of using generic "arg_N" names.
+        op_overload: Custom Op overload to get parameter names from schema.
 
     Returns:
         Tuple of (tensor_inputs_list, non_tensor_kwargs)
@@ -199,26 +199,17 @@ def _extract_tensor_inputs(
     tensor_inputs = []
     non_tensor_kwargs = {}
 
-    # Get parameter names from op schema if available
-    param_names: Optional[list[str]] = None
-    if op_overload is not None:
-        try:
-            schema = op_overload._schema
-            param_names = [arg.name for arg in schema.arguments]
-        except (AttributeError, TypeError):
-            param_names = None
+    # Get schema names and extend with fallback names for any extra args
+    schema_names = [arg.name for arg in op_overload._schema.arguments]
+    param_names = schema_names + [
+        f"arg_{i}" for i in range(len(schema_names), len(args))
+    ]
 
-    # Process args and kwargs: separate tensor inputs and non tensor args
     for i, arg in enumerate(args):
         if isinstance(arg, (TensorBox, Buffer)):
             tensor_inputs.append(arg)
         else:
-            # Use the real parameter name from schema if available
-            if param_names is not None and i < len(param_names):
-                name = param_names[i]
-            else:
-                name = f"arg_{i}"
-            non_tensor_kwargs[name] = arg
+            non_tensor_kwargs[param_names[i]] = arg
 
     for key, value in kwargs.items():
         if isinstance(value, (TensorBox, Buffer)):
@@ -368,14 +359,16 @@ def _create_range_input_gen_fn(
     dim_index: int,
     range_start: int,
     range_end: Union[int, float],
+    range_upper_bound: int,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
-    """Create input generator that modifies target dimension to top of range."""
+    """Create input generator that modifies target dimension to top of range.
+    range_upper_bound: Size to use for benchmarking when range_end is unbounded.
+    Default is DEFAULT_RANGE_UPPER_BOUND = 65536
+    """
     from torch._inductor.ir import get_fill_order
     from torch._inductor.kernel.flex.common import construct_strides
 
-    target_dim = (
-        int(range_start + 1024) if range_end == float("inf") else int(range_end)
-    )
+    target_dim = range_upper_bound if range_end == float("inf") else int(range_end)
 
     def constrained_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
         result = base_gen_fn(fake_tensor)
@@ -723,6 +716,7 @@ def _range_based_lowering_fn(
     ranges: list[tuple[int, Union[int, float]]],
     tensor_inputs: list[Any],
     runtime_kwargs: dict[str, Any],
+    range_upper_bound: int,
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
@@ -755,7 +749,7 @@ def _range_based_lowering_fn(
             base_gen_fn = _default_input_gen_fn
 
         range_gen_fn = _create_range_input_gen_fn(
-            base_gen_fn, dim_index, range_start, range_end
+            base_gen_fn, dim_index, range_start, range_end, range_upper_bound
         )
         range_input_gen_fns = {**(input_gen_fns or {}), tensor_name: range_gen_fn}
 
@@ -912,6 +906,7 @@ def _create_autotuning_lowering(
     name: str,
     op_overload: torch._ops.OpOverload,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
+    range_upper_bound: int,
     is_range_based: bool = False,
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
@@ -962,6 +957,7 @@ def _create_autotuning_lowering(
             ranges=ranges,
             tensor_inputs=tensor_inputs,
             runtime_kwargs=runtime_kwargs,
+            range_upper_bound=range_upper_bound,
             config_generator=config_generator,
         )
 
@@ -992,7 +988,12 @@ def register_custom_op_autotuning(
                           based on input tensor properties. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
-        dispatch_on: Dict with 'tensor_name' and 'dim' keys for range-based dispatch
+        dispatch_on: Dict for range-based dispatch with keys:
+            - 'tensor_name': Name of tensor parameter to dispatch on
+            - 'dim': Dimension index to check size
+            - 'unbounded_size' (optional): Benchmark size for the unbounded (last) range, such
+                as [2048, inf] -> [2048, unbounded_size]. Set based on your expected workload size.
+                Default is DEFAULT_RANGE_UPPER_BOUND=65536.
         split_points: List of range endpoints in ascending order for range-based autotuning
 
     Examples:
@@ -1033,8 +1034,16 @@ def register_custom_op_autotuning(
         register_custom_op_autotuning(
             my_op,
             configs=[CustomOpConfig(impl1), CustomOpConfig(impl2), CustomOpConfig(impl3)],
-            dispatch_on={"tensor_name": "x", "dim": 1},  # Dispatch based on x.shape[1]
-            split_points=[512, 2048],  # Creates ranges: [1,512], [513,2048], [2049,inf]
+            dispatch_on={
+                # Dispatch based on x.shape[1]
+                "tensor_name": "x",
+                "dim": 1,
+                # Optional Benchmark size used for the unbounded range [2049, inf].
+                # Since inf is not a concrete value, we use range_upper_bound as the benchmark size.
+                # Default value is 65536 (DEFAULT_RANGE_UPPER_BOUND) if not provided.
+                "range_upper_bound": 8192,
+            },
+            split_points=[512, 2048],  # Creates ranges: [1,512], [513,2048], [2049, 8192]
         )
     """
     from torch._library.custom_ops import CustomOpDef
@@ -1082,6 +1091,7 @@ def register_custom_op_autotuning(
     # Validate range-based parameters
     is_range_based = dispatch_on is not None or split_points is not None
     dispatch_on_tuple: Optional[tuple[str, int]] = None
+    range_upper_bound = DEFAULT_RANGE_UPPER_BOUND
     if is_range_based:
         if dispatch_on is None or split_points is None:
             raise ValueError(
@@ -1108,6 +1118,14 @@ def register_custom_op_autotuning(
                 f"got {type(dispatch_on['dim'])}"
             )
         dispatch_on_tuple = (dispatch_on["tensor_name"], dispatch_on["dim"])
+        range_upper_bound = dispatch_on.get(
+            "range_upper_bound", DEFAULT_RANGE_UPPER_BOUND
+        )
+        if not isinstance(range_upper_bound, int) or range_upper_bound <= 0:
+            raise ValueError(
+                f"dispatch_on['range_upper_bound'] must be a positive integer, "
+                f"got {range_upper_bound}"
+            )
         if not isinstance(split_points, list) or len(split_points) == 0:
             raise ValueError("split_points must be a non-empty list of integers")
         if sorted(split_points) != split_points:
@@ -1125,6 +1143,7 @@ def register_custom_op_autotuning(
         config_generator=config_generator,
         dispatch_on=dispatch_on_tuple,
         split_points=split_points,
+        range_upper_bound=range_upper_bound,
     )
 
     lowerings[op_overload] = lowering_fn
