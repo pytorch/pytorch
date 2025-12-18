@@ -1417,13 +1417,16 @@ except RuntimeError as e:
         expected_messages = [
             "device-side assert triggered",  # CUDA
             "Assertion",  # CUDA
-            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm
-            "Device-side assertion",  # ROCm
+            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+            "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+            # ROCm without TORCH_USE_HIP_DSA returns a launch failure instead
+            # of a proper device-side assertion, but still catches the error
+            "hipErrorLaunchFailure",
+            "unspecified launch failure",
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
