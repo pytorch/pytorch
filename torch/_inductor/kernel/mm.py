@@ -754,6 +754,7 @@ scaling_pairs = [
     (ScalingType.RowWise, ScalingType.RowWise),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise1x128),
+    (ScalingType.BlockWise128x128, ScalingType.BlockWise1x128),
 ]
 
 
