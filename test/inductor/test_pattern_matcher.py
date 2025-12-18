@@ -2084,6 +2084,59 @@ class TestPatternMatcherLogging(LoggingTestCase):
             specific_record.getMessage(),
         )
 
+    def test_list_tensor_pattern_replacement(self):
+        @torch.library.custom_op("custom::list_op_check", mutates_args=())
+        def list_op_check(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [x + 1 for x in xs]
+
+        @list_op_check.register_fake
+        def list_op_check_fake(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return xs
+
+        def register_pattern(custom_pass: PatternMatcherPass):
+            def src_pattern(xs: list[torch.Tensor]):
+                return torch.ops.custom.list_op_check.default(xs)
+
+            def target_pattern(xs: list[torch.Tensor]):
+                return xs
+
+            register_replacement(
+                src_pattern,
+                target_pattern,
+                [[torch.empty((5, 3)), torch.empty((5, 3))]],
+                fwd_only,
+                custom_pass,
+            )
+
+        class Backend:
+            def __init__(self):
+                self.pm = PatternMatcherPass()
+                register_pattern(self.pm)
+
+            def __call__(
+                self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+            ):
+                return gm.forward
+
+        backend_instance = Backend()
+
+        def test_function():
+            xs = [torch.randn(5, 3), torch.randn(5, 3)]
+            return torch.ops.custom.list_op_check.default(xs)
+
+        test_function()
+
+        fn = torch.compile(test_function, backend=Backend())
+
+        result = fn()
+
+        self.assertGreater(
+            len(backend_instance.pm.patterns), 0, "Pattern should be registered"
+        )
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].shape, torch.Size([5, 3]))
+        self.assertEqual(result[1].shape, torch.Size([5, 3]))
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
