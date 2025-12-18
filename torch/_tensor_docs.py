@@ -3756,8 +3756,7 @@ permute(*dims) -> Tensor
 Returns a view of the tensor with its dimensions permuted.
 
 Args:
-    dims (torch.Size, int..., tuple of int or list of int): a sequence of integers defining
-        the shape of the output tensor.
+    dims (torch.Size, int..., tuple of int or list of int): the desired ordering of dimensions.
 
 Example:
     >>> x = torch.randn(2, 3, 5)
