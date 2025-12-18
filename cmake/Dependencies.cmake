@@ -1034,6 +1034,12 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
+    # Pass device library path for theRock nightly builds
+    if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=$ENV{HIP_DEVICE_LIB_PATH})
+    elseif(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode)
+    endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
       list(APPEND HIP_CXX_FLAGS -fms-extensions)
@@ -1169,6 +1175,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
+    # But are used only once during shutdown
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
+    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)

@@ -368,13 +368,26 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-test_h100_symm_mem() {
+_run_symm_mem_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
+}
+
+test_h100_symm_mem() {
+  # Configure NVSHMEM to use smaller heap and work without NVSwitch
+  # Default heap is 128GB which fails cuMemMap on AWS H100 instances
+  export NVSHMEM_SYMMETRIC_SIZE=4G
+  # Disable NVLink Switch features (not available on AWS H100 instances)
+  export NVSHMEM_DISABLE_NVLS=1
+  _run_symm_mem_tests
+}
+
+test_b200_symm_mem() {
+  _run_symm_mem_tests
 }
 
 test_h100_cutlass_backend() {
@@ -783,17 +796,6 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
-        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
-        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
-        # to fill the dashboard.
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
-          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv" || true
-        # Copy cudagraph results as mock data, easiest choice?
-        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv" \
-          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv"
-      fi
     done
   done
 }
@@ -868,6 +870,12 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
+  # Set TPU target for TPU tests
+  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
+    export PALLAS_TARGET_TPU=1
+    # Check if TPU backend is available
+    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
+  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
@@ -1288,7 +1296,7 @@ test_libtorch_agnostic_targetting() {
 
     # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
     echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
+    pushd test/cpp_extensions/libtorch_agn_2_9_extension
     time python setup.py bdist_wheel
 
     # Save the wheel
@@ -1802,6 +1810,7 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
+  # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
   for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
@@ -1899,8 +1908,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
-  # NS: Remove me later, but pallas tests are pretty small
-  unset PYTORCH_TESTING_DEVICE_ONLY_FOR
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
@@ -2014,7 +2021,7 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
-  test_h100_symm_mem
+  test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then

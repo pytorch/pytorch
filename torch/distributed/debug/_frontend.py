@@ -57,6 +57,7 @@ def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
 
 def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
     # late import for optional dependency
+    # pyrefly: ignore [missing-import]
     import aiohttp
 
     async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
