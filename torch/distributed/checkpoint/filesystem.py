@@ -130,7 +130,7 @@ class _SerialCpuLoader(_TensorLoader):
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
-            if tensor.untyped_storage().size() != tensor.numel() * tensor.element_size():
+            if tensor.untyped_storage().size() != tensor.nbytes:
                 tensor = tensor.clone()
             yield (
                 tensor,
