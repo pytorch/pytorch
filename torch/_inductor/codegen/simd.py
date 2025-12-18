@@ -787,7 +787,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 #
 
                 elif current_group + 1 < len(remaining) and (
-                    sv.statically_known_gt(size, remaining[current_group]) or
+                    sv.statically_known_gt(size, remaining[current_group]) 
+                    or
                     # statically_known_gt(size, remaining) may return False for symbolic
                     # expressions like 64*u0 vs u0, because both could be 0. Similarly for
                     # backed expressions like s25*(((s70 - 5)//4)) - s25 and
