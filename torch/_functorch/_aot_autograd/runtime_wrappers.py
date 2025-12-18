@@ -14,6 +14,7 @@ import copy
 import functools
 import itertools
 import pprint
+import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -39,11 +40,17 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.utils import is_builtin
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
+from torch.utils._pytree import tree_flatten
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -248,6 +255,106 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
+def _schema_allows_aliasing(func) -> bool:
+    schema = func._schema
+    # View ops have non-write aliases declared in arguments
+    if schema._is_view_op():
+        return True
+    # Handles cases like mkldnn::_convolution_pointwise_.binary
+    # where the schema is Tensor(a!) other -> Tensor(a!) Y
+    for ret in schema.returns:
+        if ret.alias_info is not None:
+            return True
+    return False
+
+
+def _check_custom_op_aliasing(name, args, kwargs, result):
+    """
+    Check if custom op outputs alias inputs or other outputs.
+    If config.error_on_custom_op_aliasing is True, raises RuntimeError.
+    Otherwise, emits a warning.
+    """
+    try:
+        torch._library.utils._c_check_aliasing_constraint(
+            name,
+            args,
+            kwargs,
+            result,
+        )
+    except RuntimeError as e:
+        if config.error_on_custom_op_aliasing:
+            raise
+        else:
+            warnings.warn(str(e), UserWarning, stacklevel=3)
+
+
+class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
+    """
+    Checks if inp/out of custom ops alias each other.
+    If config.error_on_custom_op_aliasing is True, violations raise errors.
+    Otherwise, violations emit warnings.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.supports_higher_order_operators = True
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        flat_tensor_args = filter(
+            lambda x: isinstance(x, torch.Tensor), tree_flatten((args, kwargs))[0]
+        )
+
+        # Defer this to subclass torchdispatch modes (probably shouldn't have fake tensor here tho)
+        if not all(type(x) in HANDLED_TYPES for x in flat_tensor_args):
+            return NotImplemented
+
+        res = func(*args, **kwargs)
+        # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional/c10d)
+        # that claim to be functional
+        # Skip ops whose schema declares aliasing is allowed
+        if (
+            not isinstance(func, torch._ops.HigherOrderOperator)
+            and not is_builtin(func)
+            and func.namespace not in ("_c10d_functional", "c10d")
+            and not _schema_allows_aliasing(func)
+        ):
+            _check_custom_op_aliasing(
+                func.name(),
+                args,
+                kwargs,
+                res,
+            )
+        return res
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
+
+class _FirstInvocationContext:
+    """
+    Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
+    This is useful when we have a custom op where we want to analyze its' input
+    and output during cold start.
+    """
+
+    def __init__(self):
+        self._is_first = True
+
+    def __call__(self):
+        """
+        Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
+        Automatically updates state after first use.
+        """
+        if self._is_first and config.check_custom_op_aliasing:
+            self._is_first = False
+            return _AnalyzeCustomOpInputOutputMode()
+        return nullcontext()
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -259,6 +366,11 @@ def _create_runtime_wrapper(
 ):
     if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
+
+    # We only want to run debugmode on custom ops at the first invocation of
+    # runtime wrapper. For all subsequent uses, we should no-op for performance
+    # See: https://github.com/pytorch/pytorch/issues/165349
+    first_invocation_ctx = _FirstInvocationContext()
 
     # Note [Inputs needed in runtime epilogue after list clearing]
     # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
@@ -325,41 +437,44 @@ def _create_runtime_wrapper(
             )
             torch.autograd.graph.increment_version(mutated_args)
 
-        if trace_joint:
-            args_ = list(args)
-            # See Note [Detaching inputs that never need gradients]
-            for idx in indices_of_inps_to_detach:
-                if isinstance(args_[idx], torch.Tensor):
-                    args_[idx] = args_[idx].detach()
+        # Enable _AnalyzeCustomOpInputOutputMode on first invocation to check aliasing constraints for custom ops
+        with first_invocation_ctx():
+            if trace_joint:
+                args_ = list(args)
+                # See Note [Detaching inputs that never need gradients]
+                for idx in indices_of_inps_to_detach:
+                    if isinstance(args_[idx], torch.Tensor):
+                        args_[idx] = args_[idx].detach()
 
-            # It's possible to have trace_joint inside user specified with no_grad() region,
-            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with (
-                torch.autograd._force_original_view_tracking(True),
-                torch.enable_grad(),
-            ):
-                record_runtime_wrapper_prologue_exit(cm)
-                all_outs = call_func_at_runtime_with_args(
-                    compiled_fn, args_, disable_amp=disable_amp, steal_args=True
-                )
-        else:
-            # When we have an inference graph, we run with grad disabled.
-            # It's possible to get an inference graph with inputs that require grad,
-            # in which case we want to make sure autograd is disabled
-            # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
-            grad_enabled = torch.is_grad_enabled()
-            try:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(False)
-                record_runtime_wrapper_prologue_exit(cm)
-                all_outs = call_func_at_runtime_with_args(
-                    compiled_fn, args, disable_amp=disable_amp, steal_args=True
-                )
-            finally:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(True)
+                # It's possible to have trace_joint inside user specified with no_grad() region,
+                # if there is a nested with enable_grad(), that forces some outputs to require gradients.
+                # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
+                with (
+                    torch.autograd._force_original_view_tracking(True),
+                    torch.enable_grad(),
+                ):
+                    record_runtime_wrapper_prologue_exit(cm)
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn, args_, disable_amp=disable_amp, steal_args=True
+                    )
+            else:
+                # When we have an inference graph, we run with grad disabled.
+                # It's possible to get an inference graph with inputs that require grad,
+                # in which case we want to make sure autograd is disabled
+                # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
+                # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
+                grad_enabled = torch.is_grad_enabled()
+                try:
+                    if grad_enabled:
+                        torch._C._set_grad_enabled(False)
+                    record_runtime_wrapper_prologue_exit(cm)
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
+                    )
+                finally:
+                    if grad_enabled:
+                        torch._C._set_grad_enabled(True)
+
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
