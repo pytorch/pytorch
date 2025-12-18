@@ -1246,7 +1246,8 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
-        return self.compiler_fn(gm, example_inputs)
+        output_code = self.compiler_fn(gm, example_inputs)
+        return output_code
 
 
 class FlatFn(Protocol):
