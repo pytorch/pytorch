@@ -245,7 +245,6 @@ class TestFusionRegionDetection(InductorTestCase):
         for i, (exp, res) in enumerate(zip(expected, result_after_expand)):
             self.assertEqual(exp, res, f"Output {i} mismatch after expand")
 
-        # test
         # Verify graph string is identical after round-trip
         # Note: Multi-output regions may add getitem nodes, so we run DCE first
         traced.graph.eliminate_dead_code()
