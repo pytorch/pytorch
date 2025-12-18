@@ -2130,6 +2130,7 @@ def use_cutlass_api_gemm_template(
     if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
         return False
 
+    # TODO(nikhilap) There is a bug in the Cutlass API, their compatibility check does not catch these failure cases
     if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
         return False
     if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
