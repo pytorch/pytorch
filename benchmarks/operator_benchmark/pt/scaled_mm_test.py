@@ -67,6 +67,32 @@ def _supports_fp8_deepseek_blockwise_scaling() -> bool:
     return torch.cuda.get_device_capability(0) == (9, 0)
 
 
+def _cuda_version_tuple() -> tuple[int, int]:
+    v = torch.version.cuda
+    if v is None:
+        return (0, 0)
+    # torch.version.cuda is typically like "12.9"
+    parts = v.split(".")
+    try:
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        return (major, minor)
+    except Exception:
+        return (0, 0)
+
+
+def _supports_fp8_rowwise_fp32_output() -> bool:
+    # Mirrors test_scaled_mm_vs_emulated_row_wise gating:
+    # fp32 rowwise kernels are cuBLAS-only, CUDA 12.9+, and SM90-only.
+    if torch.version.hip is not None:
+        return False
+    if not torch.cuda.is_available() or torch.version.cuda is None:
+        return False
+    if _cuda_version_tuple() < (12, 9):
+        return False
+    return torch.cuda.get_device_capability(0) == (9, 0)
+
+
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     _MX_BLOCK_SIZE: int = 32
     _NVFP4_BLOCK_SIZE: int = 16
@@ -472,34 +498,70 @@ scaled_mm_configs_short = op_bench.config_list(
 )
 
 # Reduced shapes for faster runs.
-scaled_mm_configs_long = op_bench.config_list(
+_scaled_mm_long_shapes = [
+    [2048, 2048, 2048],   # DSv3 671B - small batch (reduced)
+    [4096, 2048, 2048],   # DSv3 671B - medium batch (reduced)
+    [2048, 2048, 2048],   # Llama4 16e - small batch (reduced)
+    [4096, 2048, 2048],   # Llama4 16e - medium batch (reduced)
+]
+
+# Build long configs in groups so we can gate unsupported (scaling, output_dtype)
+# combinations based on the running platform.
+scaled_mm_configs_long = []
+
+# FP8 tensorwise supports bf16 and fp32 output.
+scaled_mm_configs_long += op_bench.config_list(
     attr_names=["M", "N", "K"],
-    attrs=[
-        [2048, 2048, 2048],   # DSv3 671B - small batch (reduced)
-        [4096, 2048, 2048],   # DSv3 671B - medium batch (reduced)
-        [2048, 2048, 2048],   # Llama4 16e - small batch (reduced)
-        [4096, 2048, 2048],   # Llama4 16e - medium batch (reduced)
-    ],
+    attrs=_scaled_mm_long_shapes,
     cross_product_configs={
         "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],  # Only E4M3FN supported for matmul
-        "output_dtype": ["bfloat16", "float32"],  # KEEPING ALL DTYPES
-        # Scale/quantization technique: add MX configs under tag long.
-        "scaling": [
-            "fp8_tensorwise",
-            "fp8_rowwise",
-            "mxfp8",
-            "mxfp4",
-            "nvfp4",
-            *(
-                ["fp8_blockwise_1x128", "fp8_blockwise_128x128"]
-                if _supports_fp8_deepseek_blockwise_scaling()
-                else []
-            ),
-        ],
+        "float8_dtype": ["e4m3fn"],
+        "output_dtype": ["bfloat16", "float32"],
+        "scaling": ["fp8_tensorwise"],
     },
     tags=["long"],
 )
+
+# FP8 rowwise: fp32 output is SM90-only (CUDA 12.9+).
+rowwise_output_dtypes = ["bfloat16"] + (["float32"] if _supports_fp8_rowwise_fp32_output() else [])
+scaled_mm_configs_long += op_bench.config_list(
+    attr_names=["M", "N", "K"],
+    attrs=_scaled_mm_long_shapes,
+    cross_product_configs={
+        "device": ["cuda"],
+        "float8_dtype": ["e4m3fn"],
+        "output_dtype": rowwise_output_dtypes,
+        "scaling": ["fp8_rowwise"],
+    },
+    tags=["long"],
+)
+
+# MX + NVFP4 support bf16 and fp32 output on CUDA.
+scaled_mm_configs_long += op_bench.config_list(
+    attr_names=["M", "N", "K"],
+    attrs=_scaled_mm_long_shapes,
+    cross_product_configs={
+        "device": ["cuda"],
+        "float8_dtype": ["e4m3fn"],
+        "output_dtype": ["bfloat16", "float32"],
+        "scaling": ["mxfp8", "mxfp4", "nvfp4"],
+    },
+    tags=["long"],
+)
+
+# DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
+if _supports_fp8_deepseek_blockwise_scaling():
+    scaled_mm_configs_long += op_bench.config_list(
+        attr_names=["M", "N", "K"],
+        attrs=_scaled_mm_long_shapes,
+        cross_product_configs={
+            "device": ["cuda"],
+            "float8_dtype": ["e4m3fn"],
+            "output_dtype": ["bfloat16", "float32"],
+            "scaling": ["fp8_blockwise_1x128", "fp8_blockwise_128x128"],
+        },
+        tags=["long"],
+    )
 
 # Grouped FP8 matmul: E4M3 only; output is bf16-only.
 # scaled_grouped_mm_configs_short = op_bench.config_list(
