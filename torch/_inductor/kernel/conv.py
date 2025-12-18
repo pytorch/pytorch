@@ -1128,9 +1128,9 @@ def convolution_backward_lowering(
     """
     Lowering function for backward convolution operator.
 
-    TRITON kernels are only registered for supported configurations (currently 2D convolutions). 
-    For unsupported dimensions or configurations, the choices list remains empty, 
-    triggering an automatic fallback to the ATen reference implementation. 
+    TRITON kernels are only registered for supported configurations (currently 2D convolutions).
+    For unsupported dimensions or configurations, the choices list remains empty,
+    triggering an automatic fallback to the ATen reference implementation.
     This ensures correctness for all cases while enabling TRITON optimizations only where implemented.
     """
     stride = tuple(stride)
