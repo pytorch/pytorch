@@ -4,8 +4,9 @@ import itertools
 import logging
 import operator
 import typing
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Sequence
+from heapq import heappush, heappop
 from typing import Any
 
 import torch
@@ -311,7 +312,6 @@ class UniformValueConstantFolder(ConstantFolder):
         # otherwise, stop deduce value and return unknown value
 
         # TODO: cat, more indexing
-        # TODO - do on cpu to avoid syncs
 
         # single-elem attrs
         if node.op == "get_attr" or (
@@ -320,13 +320,15 @@ class UniformValueConstantFolder(ConstantFolder):
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
-                return out
+                # Move to CPU to avoid CUDA syncs during constant folding
+                return out.to("cpu")
 
-        # handle device_put op
+        # handle device_put op - just return the input since we're folding on CPU
         if node.target == prims.device_put.default:
-            return super(ConstantFolder, self).run_node(node)
+            assert isinstance(node.args[0], torch.fx.Node)
+            return self.env[node.args[0]]
 
-        # constructors ops
+        # constructors ops - always create on CPU to avoid CUDA syncs
         if (
             node.op == "call_function"
             and node.target is aten.full.default
@@ -337,11 +339,17 @@ class UniformValueConstantFolder(ConstantFolder):
             # Don't specialize symbolic value.
             if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 new_args = [[1], value]
-                return aten.full.default(*new_args, **node.kwargs)
+                # Override device to CPU
+                cpu_kwargs = dict(node.kwargs)
+                cpu_kwargs["device"] = "cpu"
+                return aten.full.default(*new_args, **cpu_kwargs)
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
-            return super(ConstantFolder, self).run_node(node)
+            out = super(ConstantFolder, self).run_node(node)
+            if isinstance(out, torch.Tensor):
+                return out.to("cpu")
+            return out
 
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
@@ -358,7 +366,7 @@ class UniformValueConstantFolder(ConstantFolder):
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
             return node.meta["val"]
 
-        # pointwise ops
+        # pointwise ops - run on CPU to avoid CUDA syncs
         if isinstance(node.target, torch._ops.OpOverload) and (
             torch.Tag.pointwise in node.target.tags
             or node.target is torch.ops.aten.scalar_tensor.default
@@ -376,6 +384,97 @@ class UniformValueConstantFolder(ConstantFolder):
             return node.target(*args, **kwargs)
 
         return self.unknown_value
+
+    def _is_seed_node(self, node: torch.fx.Node) -> bool:
+        """Check if this node can be a starting point for constant folding."""
+        # get_attr nodes (graph attributes/constants)
+        if node.op == "get_attr":
+            return True
+
+        # lift_fresh_copy on constants
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.aten.lift_fresh_copy.default
+        ):
+            return True
+
+        # Constructor ops like aten.full
+        if node.op == "call_function" and node.target is aten.full.default:
+            return True
+
+        # SymInt nodes - we need these to flow through the graph
+        if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
+            return True
+
+        # Nodes already identified by peephole patterns
+        if node in self.node_replacements:
+            return True
+
+        return False
+
+    def run(self) -> Any:
+        """
+        Constant folding that only visits nodes reachable from constant sources,
+        processing them in topological order to ensure dependencies are met.
+        """
+        env = self.env
+        self.insert_placerholder_values(env)
+
+        # Build topo index for priority ordering. We process nodes in topo order
+        # to ensure that when we visit a node, all its constant-producing inputs
+        # have already been processed and are available in env.
+        topo_index: dict[torch.fx.Node, int] = {}
+        for i, node in enumerate(self.module.graph.nodes):
+            topo_index[node] = i
+
+        # Priority queue ordered by topo index (min-heap)
+        # Elements are (topo_index, node)
+        heap: list[tuple[int, torch.fx.Node]] = []
+        visited: set[torch.fx.Node] = set()
+
+        # Track remaining uses for each node to know when to deallocate
+        remaining_uses: dict[torch.fx.Node, int] = {}
+
+        # Seed with nodes that can produce constant values
+        for node in self.module.graph.nodes:
+            if self._is_seed_node(node):
+                heappush(heap, (topo_index[node], node))
+
+        while heap:
+            _, node = heappop(heap)
+            if node in visited:
+                continue
+            visited.add(node)
+
+            # Skip output node
+            if node.target == "output":
+                continue
+
+            # Ensure all input nodes are in env (as unknown_value if not visited)
+            for arg in node.all_input_nodes:
+                if arg not in env:
+                    env[arg] = self.unknown_value
+
+            # Run the node to determine its value
+            out = self.run_node(node)
+            env[node] = out
+
+            # If this node produced a known value, add its users to the heap
+            if out is not self.unknown_value:
+                for user in node.users:
+                    if user not in visited:
+                        heappush(heap, (topo_index[user], user))
+
+            # Decrement use counts for inputs and deallocate if no longer needed
+            for arg in node.all_input_nodes:
+                if arg in env:
+                    if arg not in remaining_uses:
+                        remaining_uses[arg] = len(arg.users)
+                    remaining_uses[arg] -= 1
+                    if remaining_uses[arg] == 0 and arg not in self.node_replacements:
+                        del env[arg]
+
+        return None
 
 
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
