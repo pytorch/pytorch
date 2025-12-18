@@ -5876,6 +5876,7 @@ def _uniform_helper(
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
     *,
+    stride: ShapeType,
     dtype: torch.dtype,
     device: DeviceLikeType,
 ) -> TensorLikeType:
@@ -5889,7 +5890,9 @@ def _uniform_helper(
     assert isinstance(dtype, torch.dtype)
     device = utils.canonicalize_device(device)
 
-    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(
+        shape, low=low, high=high, dtype=dtype, device=device, stride=stride
+    )
 
 
 @register_decomposition(aten.masked_fill)
