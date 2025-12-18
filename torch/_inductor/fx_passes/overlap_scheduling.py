@@ -27,7 +27,7 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
 
-from ..pattern_matcher import stable_topological_sort
+from torch._inductor.pattern_matcher import stable_topological_sort
 
 
 def estimate_runtime_analytical(n: torch.fx.Node) -> float:
@@ -289,7 +289,8 @@ class OverlapScheduler:
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
-        bucket_exposed_first: bool = True,
+        bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+        bucket_only_fsdp_groups: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
         max_off_bucket_gb: float | None = 0.5,
     ):
@@ -305,6 +306,7 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
+        self.bucket_only_fsdp_groups = bucket_only_fsdp_groups
         self.bucket_mode = bucket_mode
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
@@ -1392,6 +1394,7 @@ class OverlapScheduler:
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
             bucket_exposed_first=self.bucket_exposed_first,
+            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
             bucket_mode=self.bucket_mode,
         )
         bucketer.bucket_collectives()
@@ -1448,7 +1451,8 @@ def schedule_overlap_bucketing(
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
-    bucket_exposed_first: bool = True,
+    bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+    bucket_only_fsdp_groups=True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
