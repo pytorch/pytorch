@@ -34,7 +34,6 @@ from torch.ao.quantization.utils import (
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 from torch.fx.node import Argument
-
 from ._equalize import is_equalization_observer, node_supports_equalization
 from .custom_config import PrepareCustomConfig, StandaloneModuleConfigEntry
 from .match_utils import _find_matches, _MatchResultWithQConfig
@@ -608,7 +607,9 @@ def _get_output_act_obs_or_fq(
         raise AssertionError("arg must be a Node")
 
     if "quantization_annotation" in arg.meta:
-        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
     # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
@@ -632,7 +633,9 @@ def _get_output_act_obs_or_fq(
             raise AssertionError("Currently we only support observing Node")
 
         if "quantization_annotation" in observed_arg.meta:
-            raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
+            raise NotImplementedError(
+                "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+            )
 
         if "target_dtype_info" not in observed_arg.meta:
             raise AssertionError("expected 'target_dtype_info' in observed_arg.meta")
@@ -685,7 +688,9 @@ def _get_arg_as_input_act_obs_or_fq(
         raise AssertionError("arg must be a Node")
 
     if "quantization_annotation" in node.meta:
-        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
     # we can remove the following path in the future if fx graph mode quantization is
     # no longer used
@@ -765,7 +770,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
 
         if "quantization_annotation" in node.meta:
-            raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
+            raise NotImplementedError(
+                "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+            )
 
         if "target_dtype_info" not in node.meta:
             raise AssertionError("expected 'target_dtype_info' in node.meta")
@@ -1021,7 +1028,9 @@ def _maybe_insert_output_observer_for_node(
 
     is_standalone_module = False
     if "quantization_annotation" in node.meta:
-        raise NotImplementedError("Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow")
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
     if "target_dtype_info" not in node.meta:
         raise AssertionError("expected 'target_dtype_info' in node.meta")
