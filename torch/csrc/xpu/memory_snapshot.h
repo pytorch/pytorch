@@ -12,6 +12,6 @@ TORCH_PYTHON_API void _record_memory_history(
     std::optional<std::string> context = "all",
     const std::string& stacks = "all",
     size_t max_entries = SIZE_MAX,
-    bool clearHistory = false);
+    bool clear_history = false);
 
 } // namespace torch::xpu
