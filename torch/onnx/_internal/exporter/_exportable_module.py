@@ -54,18 +54,139 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
     @abc.abstractmethod
     def example_arguments(self) -> tuple[tuple[Any], dict[str, Any] | None]:
+        """Return example arguments for the model's forward method.
+
+        This method must be implemented by subclasses to provide sample inputs
+        that can be used for tracing, testing, and ONNX export. The returned
+        arguments should be representative of the expected input shapes and types
+        during inference.
+
+        Returns:
+            A tuple containing:
+                - A tuple of positional arguments to pass to the forward method
+                - A dictionary of keyword arguments (or None if no kwargs are needed)
+
+        Example::
+
+            def example_arguments(self):
+                # For a model expecting a single tensor input
+                return (torch.randn(1, 3, 224, 224),), None
+
+
+            def example_arguments(self):
+                # For a model with multiple inputs and keyword arguments
+                return (torch.randn(1, 3, 224, 224), torch.randn(1, 512)), {
+                    "temperature": 1.0
+                }
+        """
         raise NotImplementedError
 
     def dynamic_shapes(self) -> Any:
+        """Return dynamic shape specifications for the model's inputs.
+
+        Override this method to specify which dimensions of the input tensors
+        should be treated as dynamic during ONNX export. This allows the exported
+        model to accept inputs with varying sizes along the specified dimensions.
+
+        Returns:
+            Dynamic shape specification compatible with ``torch.export.export``.
+            Return None if all input dimensions should be static. The format can be:
+                - A dictionary mapping input names to dimension specifications
+                - A tuple/list of dimension specifications corresponding to inputs
+                - Any format accepted by the ``dynamic_shapes`` parameter of ``torch.export.export``
+
+        Example::
+
+            def dynamic_shapes(self):
+                # Specify batch dimension as dynamic for input named 'x'
+                return {"x": {0: "batch_size"}}
+
+
+            def dynamic_shapes(self):
+                # Multiple dynamic dimensions
+                return {
+                    "input": {0: "batch_size", 2: "height", 3: "width"},
+                    "mask": {0: "batch_size"},
+                }
+
+        Note:
+            The default implementation returns None, indicating all dimensions are static.
+        """
         return None
 
     def input_names(self) -> Sequence[str] | None:
+        """Return names for the model's input tensors.
+
+        Override this method to provide custom names for the input tensors in the
+        exported ONNX model. These names will be used as identifiers in the ONNX
+        graph and can be useful for debugging and model inspection.
+
+        Returns:
+            A sequence of strings representing input names, or None to use default names.
+            The number of names should match the number of positional arguments in the
+            forward method.
+
+        Example::
+
+            def input_names(self):
+                return ["image", "mask"]
+
+
+            def input_names(self):
+                # For a single input
+                return ["input_tensor"]
+
+        Note:
+            The default implementation returns None, which results in auto-generated names.
+        """
         return None
 
     def output_names(self) -> Sequence[str] | None:
+        """Return names for the model's output tensors.
+
+        Override this method to provide custom names for the output tensors in the
+        exported ONNX model. These names will be used as identifiers in the ONNX
+        graph and can be useful for debugging and model inspection.
+
+        Returns:
+            A sequence of strings representing output names, or None to use default names.
+            The number of names should match the number of outputs from the forward method.
+            For models returning multiple outputs, provide a name for each output.
+
+        Example::
+
+            def output_names(self):
+                return ["logits", "probabilities"]
+
+
+            def output_names(self):
+                # For a single output
+                return ["prediction"]
+
+        Note:
+            The default implementation returns None, which results in auto-generated names.
+        """
         return None
 
     def to_onnx(self, **kwargs: Any) -> torch.onnx.ONNXProgram:
+        """Export the module to ONNX format.
+
+        This method provides a convenient wrapper around ``torch.onnx.export`` that
+        automatically uses the example arguments, dynamic shapes, and input/output
+        names defined by the module. Additional export options can be specified via
+        keyword arguments.
+
+        Args:
+            **kwargs: Additional keyword arguments to pass to ``torch.onnx.export``.
+                Common options include:
+                    - ``opset_version`` (int): The ONNX opset version to target
+
+        Returns:
+            An ONNXProgram object containing the exported model and metadata.
+
+        See Also:
+            ``torch.onnx.export`` for complete documentation of export options.
+        """
         result = torch.onnx.export(self, **kwargs)
         assert result is not None
         return result
