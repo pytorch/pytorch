@@ -5036,7 +5036,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # instructions are for the top most Instruction translator).  Also, we
         # have to be careful about not using _cached_cleaned_instructions here
         # because that function is global, while we want the cache to be
-        # alive only during a compmilation.
+        # alive only during a compilation.
         tracing_ctx = parent.output.tracing_context
         instructions = None
         if tracing_ctx:

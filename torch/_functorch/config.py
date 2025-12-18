@@ -400,7 +400,7 @@ saved_tensors_hooks_filtering_mode = "donated"
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
 
-force_serializable_output_code = False
+force_autograd_cache = False
 
 # Note [Selective Decomposition]
 # This config allows selective decomposition of certain operators in the graph.

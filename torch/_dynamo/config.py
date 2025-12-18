@@ -577,6 +577,12 @@ capture_autograd_function = True
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
+# Enable capturing torch.profiler.record_function ops in the graph
+# When True, profiler ops are emitted to the graph and preserved through
+# compilation (make_fx, functionalization). When False, profiler ops
+# are treated as nullcontext.
+capture_profiler_record_function: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 

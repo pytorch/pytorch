@@ -241,7 +241,7 @@ def aot_compile_fullgraph(
                     "bypass_autograd_cache_key": True,
                     "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
-                    "force_serializable_output_code": True,
+                    "force_autograd_cache": True,
                 }
             ),
         ):

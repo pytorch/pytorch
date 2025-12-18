@@ -41,21 +41,6 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def wrap_serializable(compiler):
-    from torch._inductor.output_code import RegionalOutputCode
-
-    if isinstance(compiler, SerializableAOTDispatchCompiler):
-        return compiler
-    elif compiler is torch.fx.passes.regional_inductor.regional_inductor:
-        # Directly wrapping regional inductor inplace will cause circular import,
-        # so not sure where's the best place to put this.
-        return SerializableAOTDispatchCompiler(RegionalOutputCode, compiler)
-    else:
-        raise RuntimeError(
-            f"AOT Autograd doesn't support serialization for compiler: {compiler}"
-        )
-
-
 class AotAutograd:
     def __init__(self, **kwargs: Any) -> None:
         self.__name__ = "compiler_fn"
@@ -107,14 +92,7 @@ class AotAutograd:
             )
             return _wrapped_bw_compiler
 
-        fw_compiler = self.kwargs["fw_compiler"]
-        bw_compiler = self.kwargs.get("bw_compiler") or fw_compiler
-        inference_compiler = self.kwargs.get("inference_compiler") or fw_compiler
-
-        if torch._functorch.config.force_serializable_output_code:
-            fw_compiler = wrap_serializable(fw_compiler)
-            bw_compiler = wrap_serializable(bw_compiler)
-            inference_compiler = wrap_serializable(inference_compiler)
+        bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
 
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
@@ -123,9 +101,10 @@ class AotAutograd:
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
-        self.kwargs["fw_compiler"] = fw_compiler
         self.kwargs["bw_compiler"] = bw_compiler
-        self.kwargs["inference_compiler"] = inference_compiler
+        self.kwargs["inference_compiler"] = (
+            self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
+        )
 
         from functorch.compile import nop
         from torch._inductor.debug import enable_aot_logging
