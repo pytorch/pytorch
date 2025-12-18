@@ -4,7 +4,6 @@
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
 {% endif %}
     from flash_attn.cute.interface import _flash_attn_bwd
-    from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
 
     q_transposed = Q.transpose(1, 2)
     k_transposed = K.transpose(1, 2)
@@ -55,6 +54,7 @@
     {% endif %}
 
     {% if HAS_BLOCK_MASK %}
+    from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
     {# mask_mod is subgraph 2 when HAS_SCORE_MOD, else subgraph 0 #}
     {% set mask_subgraph_idx = 2 if HAS_SCORE_MOD else 0 %}
     @cute.jit

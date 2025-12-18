@@ -599,10 +599,8 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
         if case.requires_grad:
             major, _ = torch.cuda.get_device_capability()
-            if major < 9:
-                self.skipTest(
-                    "Block sparsity backward requires SM90+ (Hopper/Blackwell)"
-                )
+            if major != 10:
+                self.skipTest("block sparse only supported on blackwell for now")
 
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
@@ -681,8 +679,8 @@ class TestFlexFlash(InductorTestCase):
         self, device, dtype
     ):
         major, _ = torch.cuda.get_device_capability()
-        if major >= 9:
-            self.skipTest("Block sparsity backward is supported on SM90+")
+        if major == 10:
+            self.skipTest("Block sparsity backward is supported on SM100")
 
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
@@ -693,7 +691,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"NYI: Block sparsity in backward only supported on SM90/SM100",
+            r"NYI: Block sparsity in backward only supported on SM100",
         ):
             compiled_fn(
                 q,

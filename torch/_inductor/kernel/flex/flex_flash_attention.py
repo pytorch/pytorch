@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal, Optional
+from typing import Any, cast, Literal, Optional
 
 import sympy
 from sympy import Expr, Integer
@@ -170,8 +170,8 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 @functools.lru_cache(maxsize=1)
 def _supports_nontrivial_mask_graphs() -> bool:
-    """Currently only supported on Hopper (SM90) GPUs."""
-    return torch.cuda.get_device_capability()[0] in [9, 10]
+    """Currently only supported on Blackwell (SM100) GPUs."""
+    return torch.cuda.get_device_capability()[0] == 10
 
 
 def _can_use_flex_flash_attention(
@@ -198,7 +198,7 @@ def _can_use_flex_flash_attention(
     if not _supports_nontrivial_mask_graphs():
         return (
             False,
-            "NYI: Non-trivial mask graphs only supported on Hopper (SM90) for flash attention",
+            "NYI: Non-trivial mask graphs only supported on Blackwell (SM100) for flash attention",
         )
 
     return True, ""
@@ -353,7 +353,7 @@ def _can_use_flex_flash_attention_backward(
         if not _supports_nontrivial_mask_graphs():
             return (
                 False,
-                "NYI: Block sparsity in backward only supported on SM90/SM100",
+                "NYI: Block sparsity in backward only supported on SM100",
             )
 
     if input_buffers_require_grads(
@@ -495,19 +495,26 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
-    has_block_mask = q_num_blocks is not None
+    has_block_mask = mask_graph_buffer is not None
     if has_block_mask:
         assert q_indices is not None
         assert full_q_num_blocks is not None
         assert full_q_indices is not None
-        input_nodes.extend([q_num_blocks, q_indices, full_q_num_blocks, full_q_indices])
+        input_nodes.extend(
+            [
+                cast(TensorBox, q_num_blocks),
+                q_indices,
+                full_q_num_blocks,
+                full_q_indices,
+            ]
+        )
 
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
     subgraphs = []
     if has_score_mod:
         subgraphs.append(fw_subgraph_buffer)
         subgraphs.append(joint_subgraph_buffer)
-    if has_block_mask and mask_graph_buffer is not None:
+    if has_block_mask:
         subgraphs.append(mask_graph_buffer)
 
     error = flash_attention_backward_cutedsl_template.maybe_append_choice(
