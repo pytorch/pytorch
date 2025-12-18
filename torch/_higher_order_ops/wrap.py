@@ -73,6 +73,19 @@ redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 
+# Register with FakeTensorMode to raise a clear error
+from torch._higher_order_ops.utils import register_fake
+
+
+@register_fake(inductor_compiled_code)
+def inductor_compiled_code_fake(func, inputs):
+    raise RuntimeError(
+        "Inductor compiled code cannot be run with FakeTensor inputs. "
+        "This can happen when torch.compile is called inside a FakeTensorMode. "
+        "Consider using backend='eager' or backend='aot_eager' instead."
+    )
+
+
 class WrapWithSetGradEnabled(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("wrap_with_set_grad_enabled")
