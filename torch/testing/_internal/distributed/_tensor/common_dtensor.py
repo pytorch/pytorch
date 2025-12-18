@@ -781,7 +781,9 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(
+        self, eager_init, backend: Optional[str] = None, _use_torchcomm=False
+    ) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
@@ -840,7 +842,9 @@ class LocalDTensorTestBase(DTensorTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(
+        self, eager_init, backend: Optional[str] = None, _use_torchcomm=False
+    ) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
