@@ -2,10 +2,18 @@
 
 
 from itertools import permutations
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
-from torch.distributed.tensor import DeviceMesh, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -21,6 +29,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _fill_single_dim_strategy_placeholders,
     _insert_single_dim_replication_strategy,
     _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
@@ -332,6 +341,62 @@ class TestExpandPlaceholder(TestCase):
         )
 
         self.assertEqual(expanded_mixed, expected_mixed)
+
+
+@torch.library.custom_op("mylib::dummy_add", mutates_args=())
+def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return x + y
+
+
+@dummy_add.register_fake
+def _dummy_add_fake(x, y):
+    return torch.empty_like(x)
+
+
+class TestSingleDimStrategyRegistration(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    @patch(
+        "torch.distributed.tensor._api.DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs",
+        {},
+    )
+    def test_register_single_dim_strategy(self):
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = torch.randn(8, 16)
+        y = torch.randn(8, 16)
+
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Operator.*dummy_add.*does not have a sharding strategy registered",
+        ):
+            _ = torch.ops.mylib.dummy_add(x_dt, y_dt)
+
+        @register_single_dim_strategy(torch.ops.mylib.dummy_add.default)
+        def dummy_add_single_dim_strategy(op, args_schema, kwargs_schema):
+            # implicit replication only, is valid
+            return []
+
+        # Verify the strategy was registered in the mock
+        self.assertIn(
+            torch.ops.mylib.dummy_add.default,
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs,
+        )
+
+        # Now the op should run with DTensor
+        torch.ops.mylib.dummy_add(x_dt, y_dt)
 
 
 if __name__ == "__main__":

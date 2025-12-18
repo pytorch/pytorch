@@ -1,6 +1,5 @@
 """Detect fusion regions for overlap scheduling."""
 
-import itertools
 from dataclasses import dataclass, field
 
 import torch
@@ -24,23 +23,27 @@ class FusionRegion:
         self.total_bytes, self.cost_ms = self._compute_cost()
 
     def _compute_cost(self) -> tuple[int, float]:
-        from torch._inductor.utils import get_gpu_dram_gbps
+        from torch.utils._pytree import tree_flatten
+        from torch.utils._runtime_estimation import get_transfer_time
 
-        total_bytes = 0
         subgraph = self.subgraph_module
+        input_vals = [
+            n.meta.get("val") for n in subgraph.graph.find_nodes(op="placeholder")
+        ]
+        output_vals = [
+            n.meta.get("val")
+            for n in torch._inductor.utils.output_node(subgraph).all_input_nodes
+        ]
+        flat_inputs, _ = tree_flatten(input_vals)
+        flat_outputs, _ = tree_flatten(output_vals)
 
-        for node in itertools.chain(
-            subgraph.graph.find_nodes(op="placeholder"),
-            torch._inductor.utils.output_node(subgraph).all_input_nodes,
-        ):
-            val = node.meta.get("val")
-            if isinstance(val, torch.Tensor):
-                total_bytes += get_num_bytes(val)
-
-        fusion_bw_gbps = get_gpu_dram_gbps()
-        fusion_bw_bytes_per_s = fusion_bw_gbps * 1e9
-        cost_ms = (total_bytes / fusion_bw_bytes_per_s) * 1000
-        return total_bytes, cost_ms
+        transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
+        total_bytes = sum(
+            get_num_bytes(t)
+            for t in flat_inputs + flat_outputs
+            if isinstance(t, torch.Tensor)
+        )
+        return total_bytes, transfer_time_ns / 1e6
 
 
 def is_view_node(n: fx.Node) -> bool:
@@ -58,6 +61,7 @@ def is_fusible_node(n: fx.Node) -> bool:
     - It has a lowering in torch._inductor.lowering.lowerings
     - It does NOT have a flop counter (expensive compute ops like mm/conv)
     - It is NOT a registered fallback (ops that fall back to eager)
+    - It is NOT a collective or wait op
     - For aten.cat, it must have <= max_pointwise_cat_inputs inputs
     """
     if n.op != "call_function":
@@ -65,6 +69,10 @@ def is_fusible_node(n: fx.Node) -> bool:
 
     target = n.target
     if not isinstance(target, torch._ops.OpOverload):
+        return False
+
+    # Exclude collectives and waits (they have their own scheduling)
+    if target.namespace == "_c10d_functional":
         return False
 
     from torch._inductor.lowering import fallbacks, lowerings
@@ -202,18 +210,15 @@ def build_fusion_regions(
 def collapse_fusion_regions(
     gm: fx.GraphModule,
     region_of: dict[fx.Node, OrderedSet[fx.Node]],
-) -> tuple[dict[fx.Node, FusionRegion], dict[fx.Node, fx.Node]]:
+) -> dict[fx.Node, FusionRegion]:
     """
     Collapse fusion regions into call_module nodes using fuse_by_partitions.
-    Returns (new_region_of, replaced) mapping module nodes to regions and
-    original nodes to their replacement module node.
+    Returns new_region_of mapping module nodes to FusionRegions.
     """
     from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
-    replaced: dict[fx.Node, fx.Node] = {}
-
     if not region_of:
-        return {}, replaced
+        return {}
 
     # Get unique node sets (regions with <2 nodes already filtered in build_fusion_regions)
     unique_regions: list[tuple[OrderedSet[fx.Node], int]] = []
@@ -225,7 +230,7 @@ def collapse_fusion_regions(
             unique_regions.append((node_set, region_id))
 
     if not unique_regions:
-        return {}, replaced
+        return {}
 
     # Log graph before fusion
     trace_structured(
@@ -253,7 +258,7 @@ def collapse_fusion_regions(
         payload_fn=lambda: gm.print_readable(print_output=False),
     )
 
-    # Build replaced mapping and new_region_of by finding the call_module nodes
+    # Build new_region_of by finding the call_module nodes
     new_region_of: dict[fx.Node, FusionRegion] = {}
 
     for region_idx, (nodes, _) in enumerate(unique_regions):
@@ -274,27 +279,20 @@ def collapse_fusion_regions(
             subgraph_module=subgraph_module,
         )
 
-        # Map original nodes to module node
-        for node in nodes:
-            replaced[node] = module_node
-
         new_region_of[module_node] = region
 
-    return new_region_of, replaced
+    return new_region_of
 
 
 def expand_fusion_regions(
     gm: fx.GraphModule,
     region_of: dict[fx.Node, FusionRegion],
-    replaced: dict[fx.Node, fx.Node],
 ) -> dict[fx.Node, fx.Node]:
     """
     Expand call_module nodes back to their original nodes using _inline_module.
 
-    Returns a mapping from erased nodes (module_node) to their replacement (last inlined node).
-    The input 'replaced' dict maps original_node -> module_node (from collapse), but those
-    original nodes no longer exist in the collapsed graph, so we don't include them in the output.
-    Only the module_node -> inlined_node mapping is returned for use with transfer_erased_node_deps.
+    Returns a mapping from erased module nodes to their replacement (last inlined node).
+    This is used with transfer_erased_node_deps to update dependencies.
     """
     from torch.fx.experimental.const_fold import _inline_module
 
