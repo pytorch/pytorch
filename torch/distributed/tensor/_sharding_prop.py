@@ -433,7 +433,32 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-        if op_schema.op in self.op_strategy_funcs:
+
+        has_registered_strategy = op_schema.op in self.op_strategy_funcs
+        if not has_registered_strategy:
+            from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+            from torch.distributed.tensor._ops._pointwise_ops import (
+                is_pointwise_op,
+                linear_pointwise_ops,
+                linear_pointwise_strategy,
+                pointwise_strategy,
+            )
+
+            if is_pointwise_op(op_schema.op):
+                has_registered_strategy = True
+
+                if op_schema.op in linear_pointwise_ops:
+                    strategy_func = linear_pointwise_strategy
+                else:
+                    strategy_func = pointwise_strategy
+                self.op_strategy_funcs[op_schema.op] = strategy_func
+
+                # Register schema info for out variant ops
+                self.op_to_schema_info[op_schema.op] = RuntimeSchemaInfo(
+                    static_kwargkey=["out"]
+                )
+
+        if has_registered_strategy:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
