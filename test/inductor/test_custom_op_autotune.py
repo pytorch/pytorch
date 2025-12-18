@@ -453,6 +453,115 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
+    @skipIfXpu
+    def test_range_based_autotuning(self):
+        """Test dynamic input range-based autotuning.
+
+        Example: If ranges [1,64], [129,256], [513,inf] all choose impl_medium,
+        they should be grouped into a single branch with OR predicate:
+        (dim <= 64) | ((dim >= 129) & (dim <= 256)) | (dim >= 513)
+        """
+        test_op_name = f"test_lib::range_merge_{id(self)}"
+
+        def impl_small(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 1: direct add"""
+            return x + weight
+
+        def impl_medium(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 2: add with intermediate variable"""
+            result = x
+            result = result + weight
+            return result
+
+        def impl_large(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 3: add with broadcasting"""
+            return x + weight.view(1, 1, -1).expand_as(x)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def range_merge_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Custom op with 5 ranges that may merge to fewer impl groups"""
+            return x + weight
+
+        @range_merge_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        # Register with only 3 unique implementations for 5 ranges
+        # All implementations are numerically equivalent (x + weight)
+        # but use different computational approaches
+        register_custom_op_autotuning(
+            range_merge_op,
+            configs=[
+                CustomOpConfig(impl_small),
+                CustomOpConfig(impl_medium),
+                CustomOpConfig(impl_large),
+            ],
+            dispatch_on={"tensor_name": "x", "dim": 1},  # Dispatch based on x.shape[1]
+            split_points=[64, 128, 256, 512],
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device),
+                "weight": lambda fake: torch.randn_like(fake, device=self.device),
+            },
+        )
+
+        # Verify all implementations produce equivalent results
+        test_cases = [
+            (32, "Range 1: [1, 64]"),
+            (96, "Range 2: [65, 128]"),
+            (192, "Range 3: [129, 256]"),
+            (384, "Range 4: [257, 512]"),
+            (768, "Range 5: [513, inf]"),
+        ]
+
+        for seq_len, desc in test_cases:
+            test_x = torch.randn(2, seq_len, 32, device=self.device, dtype=self.dtype)
+            test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+            expected = test_x + test_weight
+
+            # Verify each implementation produces equivalent result
+            for impl_name, impl_fn in [
+                ("small", impl_small),
+                ("medium", impl_medium),
+                ("large", impl_large),
+            ]:
+                result = impl_fn(test_x, test_weight)
+                # All implementations should produce x + weight
+                torch.testing.assert_close(
+                    result,
+                    expected,
+                    rtol=1e-5,
+                    atol=1e-5,
+                    msg=f"{impl_name} produced different result for {desc}",
+                )
+
+        @torch.compile
+        def test_model(x, weight):
+            return range_merge_op(x, weight)
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            for seq_len, desc in test_cases:
+                torch._dynamo.reset()
+                test_x = torch.randn(
+                    2, seq_len, 32, device=self.device, dtype=self.dtype
+                )
+                test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+                expected = test_x + test_weight
+
+                compiled_result = test_model(test_x, test_weight)
+
+                self.assertEqual(
+                    compiled_result,
+                    expected,
+                    msg=f"RangeMerge_{seq_len} numerical mismatch",
+                )
+
 
 if __name__ == "__main__":
     run_tests()
