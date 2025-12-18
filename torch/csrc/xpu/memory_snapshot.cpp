@@ -16,9 +16,7 @@ std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
   return CapturedTraceback::gather(true, true, true);
 }
 
-} // anonymous namespace
-
-static void checkOptionIn(
+inline void checkOptionIn(
     const std::string& option,
     std::initializer_list<std::string> valid,
     const char* error) {
@@ -26,12 +24,14 @@ static void checkOptionIn(
       valid.end() != std::find(valid.begin(), valid.end(), option), error);
 }
 
+} // anonymous namespace
+
 void _record_memory_history(
     std::optional<std::string> enabled,
     std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries,
-    bool clearHistory) {
+    bool clear_history) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -67,7 +67,7 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   c10::xpu::XPUCachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(), recorder, max_entries, when, clear_history);
 }
 
 } // namespace torch::xpu
