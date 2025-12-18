@@ -1,7 +1,7 @@
 # Owner(s): ["module: bazel"]
 
 """
-This test module contains minimalistic "smoke tests" for the bazel build. 
+This test module contains minimalistic "smoke tests" for the bazel build.
 
 Currently it doesn't use any testing framework (i.e. pytest).
 TODO: integrate this into the existing pytorch testing framework.
