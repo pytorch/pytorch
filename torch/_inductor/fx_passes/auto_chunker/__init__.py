@@ -53,8 +53,7 @@ def chunk(gm: GraphModule) -> GraphModule:
         # no tangents. Can be the optimizer graph. Skip chunking
         return gm
 
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
+    # if log.isEnabledFor(logging.DEBUG): log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
 
     amplifier_node = find_amplifier_node(graph)
     if amplifier_node is None:
@@ -74,4 +73,5 @@ def chunk(gm: GraphModule) -> GraphModule:
     num_chunks = config.auto_chunker.num_chunk or decide_num_chunks(gm)
     out_gm = ChunkingApplier(gm, num_chunks).apply()
     metrics.num_auto_chunking += 1
+    print(" >>> AutoChunker takes effect")
     return out_gm
