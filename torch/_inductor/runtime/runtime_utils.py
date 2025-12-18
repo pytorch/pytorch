@@ -247,3 +247,33 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     if dtype_name == "bool":
         dtype_name = "bool_"
     return f"jnp.{dtype_name}"
+
+
+# Mosaic GPU tile size - each tile is (1, MOSAIC_GPU_TILE_SIZE)
+MOSAIC_GPU_TILE_SIZE = 128
+
+
+def reshape_for_mosaic_gpu(arr: Any) -> Any:
+    """
+    Reshape a JAX array to 2D (num_tiles, 128) format for Mosaic GPU.
+
+    Mosaic GPU requires tensors to be 2D with the inner dimension being 128.
+    This function flattens the input, pads to a multiple of 128, and reshapes
+    to (num_tiles, 128).
+
+    Args:
+        arr: JAX array to reshape
+
+    Returns:
+        JAX array reshaped to (num_tiles, 128)
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    flat = arr.flatten()
+    numel = flat.size
+    if numel % MOSAIC_GPU_TILE_SIZE != 0:
+        pad_size = MOSAIC_GPU_TILE_SIZE - (numel % MOSAIC_GPU_TILE_SIZE)
+        flat = jnp.pad(flat, (0, pad_size))
+        numel = flat.size
+    num_tiles = numel // MOSAIC_GPU_TILE_SIZE
+    return flat.reshape(num_tiles, MOSAIC_GPU_TILE_SIZE)

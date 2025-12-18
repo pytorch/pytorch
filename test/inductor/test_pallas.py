@@ -92,6 +92,7 @@ class PallasTestsMixin:
 
         compiled = self._compile(fn)
 
+        # Use 128 elements to meet Mosaic GPU requirements (aligned size, <=256 per dim)
         a = torch.randn(1024, device=self.DEVICE)
         b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
@@ -407,12 +408,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     def test_non_power_of_2_sizes(self):
-        """Test that non-power-of-2 tensor sizes work with masked ops on GPU.
-
-        On GPU (Triton backend), Pallas requires power-of-2 sizes. We use masked
-        loads/stores to handle non-power-of-2 tensors by allocating power-of-2
-        blocks and masking out invalid elements.
-        """
+        """Test that non-power-of-2 tensor sizes work."""
 
         def fn(a, b):
             return a + b
@@ -430,12 +426,15 @@ class PallasTestsMixin:
         """Test non-power-of-2 sizes with multiple operations."""
 
         def fn(x, y):
-            return x.sin() + y.cos() - (x * y)
+            # Use exp which is supported by Mosaic GPU (sin/cos are not yet)
+            return x.exp() + y.neg() - (x * y)
 
         compiled = self._compile(fn)
 
         # Non-power-of-2 size: 17
-        x = torch.randn(17, device=self.DEVICE)
+        x = (
+            torch.randn(17, device=self.DEVICE) * 0.5
+        )  # Scale down to avoid exp overflow
         y = torch.randn(17, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
@@ -451,7 +450,6 @@ class PallasTestsMixin:
         compiled = self._compile(fn)
 
         x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
-        # Use power-of-2 size for indices (Pallas Triton requirement)
         indices = torch.tensor(
             [0, 2, 5, 7, 11, 13, 14, 15], dtype=torch.int64, device=self.DEVICE
         )
@@ -461,12 +459,6 @@ class PallasTestsMixin:
 
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
-        if self.DEVICE == "cuda":
-            # Pallas Triton backend doesn't support gather operations with array indices
-            # This limitation is in the Pallas/Triton lowering, not our implementation
-            self.skipTest(
-                "Multi-dimensional gather not supported on Pallas Triton (CUDA) backend"
-            )
 
         def fn(x, row_indices):
             # Select specific rows using integer array indexing
@@ -475,7 +467,6 @@ class PallasTestsMixin:
         compiled = self._compile(fn)
 
         x = torch.randn(16, 8, device=self.DEVICE)
-        # Use power-of-2 sizes (Pallas Triton requirement)
         row_indices = torch.tensor([0, 2, 5, 7], dtype=torch.int64, device=self.DEVICE)
         result = compiled(x, row_indices)
         expected = fn(x, row_indices)
@@ -686,8 +677,6 @@ class PallasTestsMixin:
 
     def test_erf(self):
         """Test erf operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("erf not supported in Pallas GPU (Triton) backend")
 
         def fn(x):
             return torch.erf(x)
@@ -754,8 +743,6 @@ class PallasTestsMixin:
 
     def test_prod_reduction(self):
         """Test prod reduction."""
-        if self.DEVICE == "cuda":
-            self.skipTest("prod reduction not supported in Pallas GPU (Triton) backend")
 
         def fn(x):
             # Use smaller values to avoid overflow
