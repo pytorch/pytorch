@@ -331,7 +331,7 @@ else:
             # or mesh dimension groups
             backend = os.environ.get("TORCH_BACKEND", None)
             if not default_initialized:
-                init_process_group(backend=backend)
+                init_process_group(backend=backend, _use_torchcomm=self._use_torchcomm)
 
             world_size = get_world_size()
             if self._layout.numel() > world_size:
@@ -410,9 +410,10 @@ else:
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
                 # Otherwise, create new pg.
                 ranks = list(range(get_world_size()))
+                backend = os.environ.get("TORCH_BACKEND", "cpu:gloo,cuda:nccl")
                 dim_group = (
                     new_group(
-                        backend="cpu:gloo,cuda:nccl",
+                        backend=backend,
                         ranks=ranks,
                         group_desc="mesh_default",
                         _use_torchcomm=_use_torchcomm,
@@ -432,10 +433,14 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                (getattr(default_group, "bound_device_id", None) is not None or _use_torchcomm)
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    or _use_torchcomm
+                )
                 and torch.cuda.is_available()
                 and (
                     backend is None
+                    or _use_torchcomm
                     or default_group._get_backend(torch.device("cuda")).name()
                     == backend
                 )
@@ -446,6 +451,7 @@ else:
                     pg_options=pg_options,
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
+                    _use_torchcomm=_use_torchcomm,
                 )
                 return dim_group.group_name  # type: ignore[union-attr]
 
@@ -491,7 +497,11 @@ else:
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
                     DeviceMesh._init_one_process_group(
-                        layout[dim], rank_map, dim_name, backend_override[dim], _use_torchcomm
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
+                        _use_torchcomm,
                     )
                 )
             # Filter out None values. If any are None then they should all be None.

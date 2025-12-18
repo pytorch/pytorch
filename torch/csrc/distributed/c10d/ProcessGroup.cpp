@@ -174,20 +174,25 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::string groupName = name.has_value()
       ? name.value()
       : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
-  c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
-      c10::make_intrusive<PrefixStore>(
-          fmt::format("{}/", groupName), store_->clone()));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
+    auto nameByDeviceType =
+        fmt::format("{}_{}", groupName, c10::DeviceTypeName(deviceType));
 
     auto parentBackend = getBackend(deviceType);
     auto backendOpts =
         opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
-    backendOpts->group_name = groupName;
+    backendOpts->group_name = nameByDeviceType;
+    // We need to use different prefix and name for each device type otherwise
+    // there will be complaint from torchcomm split which tries to get the same
+    // store for different backends.
+    c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
+        c10::make_intrusive<PrefixStore>(
+            fmt::format("{}/", nameByDeviceType), store_->clone()));
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
