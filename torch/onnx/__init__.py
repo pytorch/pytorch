@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 
 # Set namespace for exposed private names
 ONNXProgram.__module__ = "torch.onnx"
+ExportableModule.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 
 # TODO(justinchuby): Remove these two properties
