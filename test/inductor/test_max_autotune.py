@@ -55,9 +55,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
-    NAVI_ARCH,
     parametrize,
-    skipIfRocmArch,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
