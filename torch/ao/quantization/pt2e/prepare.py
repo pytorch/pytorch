@@ -336,6 +336,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
+                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -358,6 +359,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     # find the original `arg` node to the current node, skipping inserted observer/fake_quant nodes
     original_arg = arg
+    # pyrefly: ignore [bad-argument-type, bad-assignment]
     while _is_activation_post_process_node(original_arg, named_modules):
         original_arg = original_arg.args[0]  # type: ignore[assignment]
     if not isinstance(original_arg, Node):

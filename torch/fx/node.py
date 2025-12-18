@@ -4,6 +4,7 @@ import inspect
 import logging
 import operator
 import types
+import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
@@ -44,7 +45,7 @@ BaseArgumentTypes = Union[
     torch.SymBool,
     torch.SymFloat,
 ]
-base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
+base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Union[Callable[..., Any], str]
 
@@ -104,8 +105,11 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter.default,
     _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_enter_new.default,
     _ops.profiler._record_function_exit,
+    _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
