@@ -376,6 +376,35 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_input_mutations(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x, y):
+            out = x.sin()
+            y.add_(2)
+            return out
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(True)
+        y_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(False)
+
+        x = x_ref.clone().detach().requires_grad_(True)
+        y = y_ref.clone().detach().requires_grad_(False)
+
+        ref = fn(x_ref.clone(), y_ref)
+        res = opt_fn(x.clone(), y)
+        self.assertEqual(res, ref)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
     @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
