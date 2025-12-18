@@ -48,7 +48,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   DeviceCapability getDeviceCapability(Device d) const override {
     DeviceCapability cap;
-    cap.capability_data.capability_bits = 0;
     cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
         (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
         (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
