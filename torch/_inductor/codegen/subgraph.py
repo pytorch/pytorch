@@ -1,7 +1,7 @@
 import itertools
 import logging
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch._inductor.config as config
@@ -85,7 +85,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         TODO: Add precompile() method to enable parallel compilation of all choices
         before benchmarking.
         """
-        import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
@@ -125,7 +124,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(
+            with config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
@@ -185,7 +184,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             ]
         )
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+    def output_node(self) -> ir.TensorBox:
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

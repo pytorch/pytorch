@@ -373,7 +373,7 @@ _run_symm_mem_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -870,6 +870,12 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
+  # Set TPU target for TPU tests
+  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
+    export PALLAS_TARGET_TPU=1
+    # Check if TPU backend is available
+    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
+  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
@@ -1290,7 +1296,7 @@ test_libtorch_agnostic_targetting() {
 
     # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
     echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
+    pushd test/cpp_extensions/libtorch_agn_2_9_extension
     time python setup.py bdist_wheel
 
     # Save the wheel
