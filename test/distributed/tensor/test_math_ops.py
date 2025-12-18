@@ -1079,6 +1079,38 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(res.placements, [Shard(0), Replicate()])
         self.assertEqual(res.full_tensor(), expected_answer)
 
+    @with_comms
+    def test_add_inplace_locally_derived_scalar_to_partial(self):
+        """Test adding a locally derived scalar to a Partial DTensor buffer.
+
+        This reproduces a pattern from sixlib's PTGC where:
+        1. A buffer is created with Partial("sum") placement
+        2. A scalar is derived from a local computation (e.g., local_norms.numel())
+        3. The scalar is added in-place to the partial buffer
+        """
+        mesh = self.build_device_mesh()
+
+        # Create a partial buffer (like ptgc_count in sixlib)
+        buffer = DTensor.from_local(
+            torch.tensor(0, dtype=torch.int64, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Partial("sum")],
+        )
+
+        # Simulate norms tensor (like norms in sixlib's backward)
+        norms = torch.rand(3, 1, dtype=torch.float32, device=self.device_type)
+
+        # Extract local tensor (mirrors sixlib pattern)
+        local_norms = norms._local_tensor if isinstance(norms, DTensor) else norms
+
+        # Add numel to the partial buffer (like ctx.ptgc_count.add_(local_norms.numel()))
+        buffer.add_(local_norms.numel())
+
+        # Verify the result after redistribution
+        result = buffer.redistribute(mesh, placements=[Replicate()])
+        expected = local_norms.numel() * self.world_size
+        self.assertEqual(result.to_local(), expected)
+
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMathOpsTest,
