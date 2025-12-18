@@ -124,7 +124,7 @@ class TestFusionRegionDetection(InductorTestCase):
             traced = make_fx(model)(a, b)
 
         region_of = build_fusion_regions(traced)
-        new_region_of, replaced = collapse_fusion_regions(traced, region_of)
+        new_region_of = collapse_fusion_regions(traced, region_of)
 
         # Should have 3 fusion regions
         self.assertEqual(len(new_region_of), 3)
@@ -141,7 +141,7 @@ class TestFusionRegionDetection(InductorTestCase):
             self.assertGreater(region.cost_ms, 0)
 
         # Expand back
-        expand_fusion_regions(traced, new_region_of, replaced)
+        expand_fusion_regions(traced, new_region_of)
         self.assertEqual(len(list(traced.graph.find_nodes(op="call_module"))), 0)
 
     def test_is_fusible_node(self):
@@ -228,7 +228,7 @@ class TestFusionRegionDetection(InductorTestCase):
 
         # Build and collapse fusion regions
         region_of = build_fusion_regions(traced)
-        new_region_of, replaced = collapse_fusion_regions(traced, region_of)
+        new_region_of = collapse_fusion_regions(traced, region_of)
 
         # Run traced module after collapse (with call_module nodes)
         traced.recompile()
@@ -237,7 +237,7 @@ class TestFusionRegionDetection(InductorTestCase):
             self.assertEqual(exp, res, f"Output {i} mismatch after collapse")
 
         # Expand (inline) the fusion regions back
-        expand_fusion_regions(traced, new_region_of, replaced)
+        expand_fusion_regions(traced, new_region_of)
 
         # Run traced module after expand
         traced.recompile()
@@ -245,7 +245,6 @@ class TestFusionRegionDetection(InductorTestCase):
         for i, (exp, res) in enumerate(zip(expected, result_after_expand)):
             self.assertEqual(exp, res, f"Output {i} mismatch after expand")
 
-        # test
         # Verify graph string is identical after round-trip
         # Note: Multi-output regions may add getitem nodes, so we run DCE first
         traced.graph.eliminate_dead_code()
