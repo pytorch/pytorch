@@ -1,10 +1,22 @@
+# pyrefly: ignore-errors
+
+"""
+We ignore pyrefly errors on this files since a lot of errors reported by
+pyre does not make sense. E.g. it complains the arg type for
+    if not has_any_chunking_meta(bias_node, input_node, weight_node):
+while we already assert that all the inputs are of Node type.
+mypy does not have this issue.
+"""
+
 import functools
 import logging
+from collections.abc import Callable, Sequence
 from enum import Enum
 from queue import Queue
+from typing import Any, TypeAlias
 
 import torch
-from torch.fx import Node, Graph
+from torch.fx import Graph, Node
 
 from .common import CantChunk
 from .core import (
@@ -29,7 +41,6 @@ from .utils import (
     is_chunked_by_dim,
     is_tangent_node,
 )
-from typing import TypeAlias, Callable, Any
 
 
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
@@ -73,21 +84,27 @@ https://gist.github.com/shunting314/324e57881f168009784991300acab852
 # or from the current node back to its inputs
 propagate_rules = {}  # type: ignore[var-annotated]
 
+
 class PropagateStatus(Enum):
     SUCCEED_NO_CHANGE = 0
     SUCCEED_WITH_CHANGE = 1
     FAIL = 2
 
+
 _HandlerRetType: TypeAlias = PropagateStatus | tuple[PropagateStatus, PropagateStatus]
 
 _HandlerType: TypeAlias = Callable[[Node], _HandlerRetType]
 
-def _register_propagate_rule(aten_op: torch._ops.OpOverload, handler: _HandlerType) -> _HandlerType:
+
+def _register_propagate_rule(
+    aten_op: torch._ops.OpOverload | Sequence[torch._ops.OpOverload],
+    handler: _HandlerType,
+) -> _HandlerType:
     if not isinstance(aten_op, (list, tuple)):
-        aten_op = [aten_op]
+        aten_op = [aten_op]  # type: ignore[assignment, list-item]
 
     @functools.wraps(handler)
-    def wrapper(node, *args: Any, **kwargs: Any) -> PropagateStatus:
+    def wrapper(node: Node, *args: Any, **kwargs: Any) -> PropagateStatus:
         fwd_bwd_status = handler(node, *args, **kwargs)
         if isinstance(fwd_bwd_status, PropagateStatus):
             return fwd_bwd_status
@@ -108,12 +125,15 @@ def _register_propagate_rule(aten_op: torch._ops.OpOverload, handler: _HandlerTy
             return PropagateStatus.SUCCEED_WITH_CHANGE
         return PropagateStatus.SUCCEED_NO_CHANGE
 
+    assert isinstance(aten_op, (list, tuple)), f"{type(aten_op)=}"
     for op in aten_op:
         propagate_rules[op] = wrapper
     return wrapper
 
 
-def register_propagate_rule(aten_op: torch._ops.OpOverload):
+def register_propagate_rule(
+    aten_op: torch._ops.OpOverload | Sequence[torch._ops.OpOverload],
+) -> Callable[[_HandlerType], _HandlerType]:
     return functools.partial(_register_propagate_rule, aten_op)
 
 
@@ -121,7 +141,7 @@ def _is_success(*statuslist: PropagateStatus) -> bool:
     return not any(status == PropagateStatus.FAIL for status in statuslist)
 
 
-def _enqueue(queue: Queue, item: Node) -> None:
+def _enqueue(queue: Queue, item: Node) -> None:  # type: ignore[type-arg]
     """
     Have a function to make it easier to do debug logging in a central place
     """
@@ -129,7 +149,9 @@ def _enqueue(queue: Queue, item: Node) -> None:
     log.debug("Enqueue: %s", item)
 
 
-def can_reach_amplified_node(graph: Graph, amplifier_node: Node, is_fwd: bool) -> dict[Node, bool]:
+def can_reach_amplified_node(
+    graph: Graph, amplifier_node: Node, is_fwd: bool
+) -> dict[Node, bool]:
     """
     A amplified node means a node with the same numel as `amplifier_node`
     """
@@ -191,7 +213,9 @@ def propagate(amplifier_node: Node) -> None:
             format_node_with_chunking_meta(node)
 
 
-def propagate_single_node(queue: Queue, fwd_filter: dict[Node, bool], bwd_filter: dict[Node, bool], node: Node) -> None:
+def propagate_single_node(
+    queue: Queue, fwd_filter: dict[Node, bool], bwd_filter: dict[Node, bool], node: Node
+) -> None:  # type: ignore[type-arg]
     log.debug("Propagate_single_node: %s", node.format_node())
 
     if node.op != "call_function":
@@ -252,6 +276,9 @@ def _bool_to_status(changed: bool) -> PropagateStatus:
 @register_propagate_rule(aten.addmm.default)
 def propagate_addmm(addmm_node: Node) -> _HandlerRetType:
     bias_node, input_node, weight_node = addmm_node.args
+    assert isinstance(bias_node, Node)
+    assert isinstance(input_node, Node)
+    assert isinstance(weight_node, Node)
 
     def propagate_addmm_fwd() -> PropagateStatus:
         if not has_any_chunking_meta(bias_node, input_node, weight_node):
@@ -303,6 +330,8 @@ def propagate_addmm(addmm_node: Node) -> _HandlerRetType:
 @register_propagate_rule(aten.mm.default)
 def propagate_mm(mm_node: Node) -> _HandlerRetType:
     lhs_node, rhs_node = mm_node.args[:2]
+    assert isinstance(lhs_node, Node)
+    assert isinstance(rhs_node, Node)
 
     def fwd() -> PropagateStatus:
         lhs_meta = get_chunking_meta(lhs_node)
@@ -371,7 +400,9 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         aten.neg.default,
     ]
 )
-def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
+def propagate_general_copy_metadata(
+    out_node: Node, ignore_broadcast: bool = False
+) -> _HandlerRetType:
     """
     A general propagation rules that basically copy around the chunking
     metadata.
@@ -391,13 +422,13 @@ def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
     ):
         return PropagateStatus.FAIL
 
-    def _chunk_broadcasted_tensor(chunk_dim):
+    def _chunk_broadcasted_tensor(chunk_dim: int) -> bool:
         for node in non_scalar_args:
             if node_ndim[node] != out_ndim and chunk_dim >= out_ndim - node_ndim[node]:
                 return True
         return False
 
-    def propagate_fwd():
+    def propagate_fwd() -> PropagateStatus:
         if len(node_args) == 0:
             return PropagateStatus.FAIL
 
@@ -408,7 +439,11 @@ def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
         need_handle_broadcast = (
             not ignore_broadcast and first_meta.chunk_dim is not None
         )
-        if need_handle_broadcast and _chunk_broadcasted_tensor(first_meta.chunk_dim):
+        if (
+            need_handle_broadcast
+            and first_meta.chunk_dim is not None
+            and _chunk_broadcasted_tensor(first_meta.chunk_dim)
+        ):
             # We don't chunking a broadcasted tensor for now.
             # Can add the rule if such a use case come up
             return PropagateStatus.FAIL
@@ -430,12 +465,16 @@ def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
         changed |= copy_chunking_meta(out_node, first_meta)
         return _bool_to_status(changed)
 
-    def propagate_bwd():
+    def propagate_bwd() -> PropagateStatus:
         if not (meta := get_chunking_meta(out_node)):
             return PropagateStatus.SUCCEED_NO_CHANGE
 
         need_handle_broadcast = not ignore_broadcast and meta.chunk_dim is not None
-        if need_handle_broadcast and _chunk_broadcasted_tensor(meta.chunk_dim):
+        if (
+            need_handle_broadcast
+            and meta.chunk_dim is not None
+            and _chunk_broadcasted_tensor(meta.chunk_dim)
+        ):
             return PropagateStatus.FAIL
 
         # apply any to a list to avoid short-curcuit
@@ -474,8 +513,8 @@ def propagate_general_copy_metadata(out_node, ignore_broadcast=False):
         aten.scatter.value,
     ]
 )
-def propagate_general_copy_metadata_ignore_broadcast(out_node):
-    return propagate_general_copy_metadata(out_node, ignore_broadcast=True)
+def propagate_general_copy_metadata_ignore_broadcast(out_node: Node) -> _HandlerRetType:
+    return propagate_general_copy_metadata(out_node, ignore_broadcast=True)  # type: ignore[call-arg]
 
 
 @register_propagate_rule(
@@ -487,6 +526,7 @@ def propagate_general_copy_metadata_ignore_broadcast(out_node):
 def propagate_reduce(reduce_node: Node) -> _HandlerRetType:
     arg_node, reduce_dims = reduce_node.args[0:2]
     assert isinstance(arg_node, Node)
+    assert isinstance(reduce_dims, (tuple, list))
 
     def propagate_fwd() -> PropagateStatus:
         arg_meta = get_chunking_meta(arg_node)
@@ -532,6 +572,7 @@ def propagate_reduce(reduce_node: Node) -> _HandlerRetType:
 def propagate_permute(permute_node: Node) -> _HandlerRetType:
     input_node, order = permute_node.args[:2]
     assert isinstance(input_node, Node)
+    assert isinstance(order, (tuple, list))
 
     def propagate_fwd() -> PropagateStatus:
         input_meta = get_chunking_meta(input_node)
@@ -543,7 +584,7 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
             return PropagateStatus.FAIL
 
         orig_chunk_dim = input_meta.chunk_dim
-        reverse_lookup = {v: k for k, v in enumerate(order)}
+        reverse_lookup: dict[int, int] = {v: k for k, v in enumerate(order)}
         new_chunk_dim = reverse_lookup[orig_chunk_dim]
 
         # sanity check
@@ -554,6 +595,8 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
         )
 
     def propagate_bwd() -> PropagateStatus:
+        assert isinstance(input_node, Node)
+
         input_meta = get_chunking_meta(input_node)
         output_meta = get_chunking_meta(permute_node)
         if output_meta is None:
@@ -563,13 +606,16 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
             return PropagateStatus.FAIL
 
         orig_chunk_dim = output_meta.chunk_dim
+        # pyrefly: ignore[bad-index, unsupported-operation]
         new_chunk_dim = order[orig_chunk_dim]
 
         # sanity check
         if input_meta is not None:
             assert input_meta.chunk_dim == new_chunk_dim
         return _bool_to_status(
-            set_chunking_meta(input_node, meta=output_meta, chunk_dim=new_chunk_dim)
+            set_chunking_meta(
+                input_node, meta=output_meta, chunk_dim=new_chunk_dim
+            )  # pyrefly: ignore[bad-argument-type]
         )
 
     return propagate_fwd(), propagate_bwd()
@@ -620,8 +666,8 @@ def propagate_sum_to_scalar(sum_node: Node) -> _HandlerRetType:
     assert isinstance(input_node, Node)
 
     def fwd() -> PropagateStatus:
-        input_meta = get_chunking_meta(input_node)
-        if has_nop_chunking_meta(input_node):
+        input_meta = get_chunking_meta(input_node)  # pyrefly: ignore[bad-argument-type]
+        if has_nop_chunking_meta(input_node):  # pyrefly: ignore[bad-argument-type]
             return _bool_to_status(False)
 
         assert input_meta is not None
@@ -631,7 +677,7 @@ def propagate_sum_to_scalar(sum_node: Node) -> _HandlerRetType:
         return PropagateStatus.FAIL
 
     def bwd() -> PropagateStatus:
-        input_meta = get_chunking_meta(input_node)
+        input_meta = get_chunking_meta(input_node)  # pyrefly: ignore[bad-argument-type]
         if has_nop_chunking_meta(sum_node):
             return _bool_to_status(False)
 
