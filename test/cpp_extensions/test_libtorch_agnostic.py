@@ -464,6 +464,7 @@ class TestLibtorchAgnostic(TestCase):
         for tensor_t, expected_t in zip(tensors, expected_values):
             self.assertEqual(tensor_t, expected_t)
 
+    @skipIfWindows(msg="ValueError: vector too long")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my__foreach_mul(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
