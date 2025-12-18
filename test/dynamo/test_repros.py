@@ -8557,11 +8557,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         linear.compile()
         linear(torch.randn(1, 2, device=device))
 
-        # TODO @azahed98: We wish to test for one weakref, but there is a known issue with
-        # FakeTensorMode caches holding onto weakrefs that blocks this test from passing.
-        # Check that there is one weakref
+        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
+        # with weakrefs from
+        # 1. TracingContext.tensor_to_context
+        # 2. MetaTensorDescriber.lookup_tensor
+
+        # Check for weakrefs
         t1 = linear.weight
-        self.assertEqual(len(weakref.getweakrefs(t1)), 1)
+        self.assertEqual(len(weakref.getweakrefs(t1)), 2)
 
         # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
         with self.assertRaises(RuntimeError):
