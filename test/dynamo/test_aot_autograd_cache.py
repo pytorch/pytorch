@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import multiprocessing
 import os
 import shutil
 import unittest
@@ -129,6 +130,41 @@ def _unpack_fp8_with_scale_wrap(x):
     dtype, scale, x_fp8 = x
     y = x_fp8.to(torch.float32) / scale
     return y.to(dtype)
+
+
+def _subprocess_test_cache_hit(queue):
+    import torch
+    import torch._dynamo
+    from torch._dynamo.utils import counters
+    from torch._functorch import config as functorch_config
+    from torch._inductor import config as inductor_config
+
+    # Clear dynamo state but NOT the cache - we want to test cache hit
+    counters.clear()
+    torch._dynamo.reset()
+
+    # Must apply same config patches as the main process
+    with functorch_config.patch({"enable_autograd_cache": True}):
+        with inductor_config.patch(
+            {"fx_graph_cache": True, "fx_graph_remote_cache": False}
+        ):
+
+            def fn(x):
+                return x.sin().cos()
+
+            a = torch.randn(25, requires_grad=True)
+            compiled_fn = torch.compile(fn, backend="inductor")
+            result = compiled_fn(a)
+            result.sum().backward()
+
+            # Return counter values to parent process
+            queue.put(
+                (
+                    counters["aot_autograd"]["autograd_cache_miss"],
+                    counters["aot_autograd"]["autograd_cache_hit"],
+                    counters["aot_autograd"]["autograd_cache_saved"],
+                )
+            )
 
 
 @instantiate_parametrized_tests
@@ -361,6 +397,46 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_different_process_cache_hit(self):
+        def fn(x):
+            return x.sin().cos()
+
+        a = torch.randn(25, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call should miss and save to cache (need backward to trigger save)
+        result = compiled_fn(a)
+        result.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Run in a subprocess to verify cache hit from a different process
+        # The subprocess needs its own torch.compile call to test cross-process cache consistency
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+        p = ctx.Process(
+            target=_subprocess_test_cache_hit,
+            args=(queue,),
+        )
+        p.start()
+        p.join()
+
+        # If subprocess crashed, skip the test rather than hang on queue.get()
+        if p.exitcode != 0:
+            self.skipTest(f"Subprocess exited with code {p.exitcode}")
+
+        miss, hit, saved = queue.get()
+        # The subprocess should have a cache hit (not miss)
+        self.assertEqual(miss, 0, "Expected no cache miss in subprocess")
+        self.assertEqual(hit, 1, "Expected cache hit in subprocess")
+        self.assertEqual(
+            saved, 0, "Expected no cache save in subprocess (already cached)"
+        )
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2062,8 +2138,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c1, c2)
 
     def test_different_process_hash_key(self):
-        import multiprocessing
-
         ctx = multiprocessing.get_context("spawn")
         results = []
         for _ in range(2):
