@@ -252,6 +252,7 @@ class graph:
             gc.collect()
 
         torch.cuda.empty_cache()
+        torch._C._host_emptyCache()
 
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
