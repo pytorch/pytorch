@@ -86,7 +86,7 @@ jobs:
           cd dist || exit 1
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b  # v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b  # v2.5.0
         with:
           files: |
             ${{ env.PT_RELEASE_FILE }}
