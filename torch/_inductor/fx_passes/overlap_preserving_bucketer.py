@@ -17,6 +17,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
 )
+from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
     CollectiveInfo,
@@ -279,9 +280,8 @@ class OverlapPreservingBucketer:
         fsdp_pgs = OrderedSet()
         for start in self.collective_info:
             pg = get_group_name(start)
-            pg_collectives[pg].add(start)
             if is_all_gather(start) and pg not in checked_pgs:
-                if self._is_fsdp_all_gather(start):
+                if is_fsdp_all_gather(start):
                     fsdp_pgs.add(pg)
                 checked_pgs.add(pg)
         return fsdp_pgs
@@ -320,7 +320,7 @@ class OverlapPreservingBucketer:
                     key,
                     [n.name for n in collective_group],
                 )
-                buckets = self._find_buckets(collective_group, key, fsdp_pgs)
+                buckets = self._find_buckets(collective_group, fsdp_pgs)
                 all_buckets.extend(buckets)
 
         # Apply bucketing transformations
@@ -437,20 +437,23 @@ class OverlapPreservingBucketer:
         fsdp_pgs: OrderedSet[str],
     ) -> bool:
         """Determine whether to bucket exposed collectives first."""
-        if self.bucket_expoed_first == "auto":
+        if self.bucket_exposed_first == "auto":
             return current_pg in fsdp_pgs
         return self.bucket_exposed_first == "True"
 
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
-        current_pg: str,
         fsdp_pgs: OrderedSet[str],
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
         max_bucket_bytes = int(self.max_bucket_memory_gb * 1024 * 1024 * 1024)
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
+        if len(collective_group) == 0:
+            return []
+
+        current_pg = get_group_name(next(iter(collective_group)))
 
         bucket_exposed_first = self._should_bucket_exposed_first(
             collective_group, current_pg, fsdp_pgs

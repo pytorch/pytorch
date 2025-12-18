@@ -6,7 +6,7 @@ from torch._inductor.fx_passes.bucketing import (
     bucket_all_gather_by_mb,
     bucket_reduce_scatter_by_mb,
     BucketMode,
-    is_all_gather,
+    is_all_gather_into_tensor as is_all_gather,
     merge_all_gather,
     merge_reduce_scatter,
 )
@@ -20,7 +20,7 @@ def is_graph_input(node: torch.fx.Node) -> bool:
     return node.op == "placeholder"
 
 
-def is_fsdp_all_gather(self, n):
+def is_fsdp_all_gather(n):
     assert is_all_gather(n)
     while len(n.all_input_nodes) == 1:
         n = n.all_input_nodes[0]
