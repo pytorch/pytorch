@@ -648,6 +648,16 @@
       "Hints": []
     }
   ],
+  "GB4636": [
+    {
+      "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
+      "Context": "",
+      "Explanation": "User-inserted step_unsupported.",
+      "Hints": [
+        "Remove the `torch._dynamo.step_unsupported()` call."
+      ]
+    }
+  ],
   "GB0065": [
     {
       "Gb_type": "Graph break in inlined function",
@@ -3835,6 +3845,16 @@
       "Gb_type": "Frozen dataclass with missing field",
       "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
       "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0370": [
+    {
+      "Gb_type": "record_function escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
