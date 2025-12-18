@@ -1186,11 +1186,9 @@ class LocalTensorMode(TorchDispatchMode):
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
 
-        self.enable_()
-
     def __enter__(self) -> "LocalTensorMode":
-        self.enable_()
         get_local_tensor_mode_list().append(self)
+        self.enable_()
 
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
@@ -1210,8 +1208,12 @@ class LocalTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self.disable_()
-        get_local_tensor_mode_list().pop()
+        local_tensor_mode_list = get_local_tensor_mode_list()
+        local_tensor_mode_list.pop()
+        if not local_tensor_mode_list:
+            self.disable_()
+        if len(local_tensor_mode_list) > 0 and local_tensor_mode_list[-1]._disable:
+            local_tensor_mode_list[-1].disable_()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_dispatch__(
