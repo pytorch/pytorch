@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -243,6 +244,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
         self.assertEqual(orig_out, opt_out)
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
     def test_inductor_python_wrapper_uses_builtin_print(self):
         """Test that the Python wrapper uses builtins.print instead of HOP for print fallback.
 
@@ -261,18 +263,21 @@ x = add_1, y = add_2);  getitem = None
 
         # Compile and get the generated code
         compiled_f = torch.compile(f, backend="inductor")
-        _, code = run_and_get_code(compiled_f, *inputs)
+        _, codes = run_and_get_code(compiled_f, *inputs)
 
-        # Verify that the generated code uses builtins.print
-        # and not torch.ops.higher_order.print
+        # Concatenate all generated code chunks to simplify assertions
+        merged_code = "\n".join(codes)
+
+        # Verify that the merged code uses builtins.print
         self.assertIn(
             "builtins.print",
-            code,
+            merged_code,
             "Generated code should use builtins.print for print HOP fallback",
         )
+        # And does not call torch.ops.higher_order.print
         self.assertNotIn(
             "torch.ops.higher_order.print",
-            code,
+            merged_code,
             "Generated code should not call torch.ops.higher_order.print directly",
         )
 

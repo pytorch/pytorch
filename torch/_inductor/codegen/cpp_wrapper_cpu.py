@@ -2357,9 +2357,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 obj = raw_args[0]
                 method = raw_args[1]
                 return_schema = op_overload.schema(obj, method).returns
-            else:
-                # For non-CallTorchBind HOPs (like print), we don't need schema for C++ wrapper
-                # since they're handled specially (e.g., printf for print)
+            elif op_overload == torch.ops.higher_order.print:
+                # We dont need to add schema to cpp print - no return value
                 return_schema = []
         else:
             return_schema = op_overload._schema.returns
