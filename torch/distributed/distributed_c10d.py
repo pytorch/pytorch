@@ -142,7 +142,7 @@ _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
 try:
-    # pyrefly: ignore [missing-import]
+    # pyrefly: ignore [import-error, missing-import]
     from torchcomms._comms import _BackendWrapper, new_comm
 
     _TORCHCOMM_AVAILABLE = True
@@ -5309,7 +5309,6 @@ def split_group(
     # PrefixStore prefix for initialization of splits. Thus, names have to be
     # unique to avoid key collisions.
     group_name = _process_group_name(my_group, use_hashed_name=True)
-    print("group name: ", group_name)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,

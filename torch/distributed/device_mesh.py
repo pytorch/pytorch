@@ -182,6 +182,8 @@ else:
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Flag to specify whether to use torchComms backend or not for a device mesh.
+        # This is a short-term hack to enable torchComms+device mesh with a seamless UX.
+        # TODO: remove this flag once we migrate to torchComm fully.
         _use_torchcomm = False
 
         def __init__(
