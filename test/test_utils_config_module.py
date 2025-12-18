@@ -460,6 +460,15 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             d = config._get_dict()
             self.assertFalse(d["e_bool"])
 
+    def test_global_in_patch(self):
+        self.assertEqual(config.e_int, 1)
+        with config.patch(e_int=2):
+            self.assertEqual(config.e_int, 2)
+            config.e_int = 3
+            # breakpoint()
+            self.assertEqual(config.e_int, 3)
+        self.assertEqual(config.e_int, 3)
+
 
 if __name__ == "__main__":
     run_tests()

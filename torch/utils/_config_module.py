@@ -368,9 +368,16 @@ class ConfigModule(ModuleType):
         elif self._config[name].alias is not None:
             self._set_alias_val(self._config[name], value, set_tls=set_tls)
         else:
-            if set_tls:
+            # Even if set_tls isn't set, we need to update the tl override (if set) to handle the case of a setattr
+            # inside of an active patch.  Note that this doesn't handle nested patches correctly - the update will be
+            # lost when the innermost patch exits
+            active_patch = (
+                getattr(self._tl_overrides, name, _UNSET_SENTINEL)
+                is not _UNSET_SENTINEL
+            )
+            if set_tls or active_patch:
                 setattr(self._tl_overrides, name, value)
-            else:
+            if not set_tls:
                 self._config[name].user_override = value
             self._is_dirty = True
             self._config[name].hide = False
