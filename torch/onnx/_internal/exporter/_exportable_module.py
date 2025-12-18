@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import abc
 from typing import Any, TYPE_CHECKING
+
 import torch
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -20,6 +22,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         class Model(torch.nn.Module):
             def forward(self, x):
                 return x * 2
+
 
         class MyExportableModule(torch.onnx.ExportableModule):
             def __init__(self):
@@ -40,6 +43,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
             def dynamic_shapes(self):
                 return ({0: "batch_size"},)
+
 
         exportable_module = MyExportableModule()
         onnx_program = exportable_module.to_onnx()
