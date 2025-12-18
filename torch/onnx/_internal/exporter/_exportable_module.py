@@ -56,7 +56,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
     def example_arguments(self) -> tuple[tuple[Any], dict[str, Any] | None]:
         raise NotImplementedError
 
-    def dynamic_shapes(self):
+    def dynamic_shapes(self) -> Any:
         return None
 
     def input_names(self) -> Sequence[str] | None:
