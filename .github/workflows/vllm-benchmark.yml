@@ -44,7 +44,7 @@ jobs:
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      torch_cuda_arch_list: '8.0 8.9 9.0'
+      torch_cuda_arch_list: '8.0 8.9 9.0 10.0'
       build_environment: linux-jammy-cuda12.9-py3.12-gcc11
     steps:
       - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
