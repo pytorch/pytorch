@@ -25,3 +25,17 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
     def output_names(self) -> Sequence[str] | None:
         return None
+
+    def to_onnx(self, **kwargs: Any) -> torch.onnx.ONNXProgram:
+        example_args, example_kwargs = self.example_arguments()
+        result = torch.onnx.export(
+            self,
+            example_args,
+            kwargs=example_kwargs,
+            input_names=self.input_names(),
+            output_names=self.output_names(),
+            dynamic_shapes=self.dynamic_shapes(),
+            **kwargs,
+        )
+        assert result is not None
+        return result
