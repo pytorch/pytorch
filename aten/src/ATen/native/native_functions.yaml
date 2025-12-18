@@ -9617,26 +9617,32 @@
 - func: linear_cross_entropy(Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, str chunking_strategy="none", int? vocab_chunk_size=None, int? batch_chunk_size=None) -> Tensor
   dispatch:
     CPU: linear_cross_entropy_cpu
+    CUDA: linear_cross_entropy_cuda
 
 - func: linear_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, str chunking_strategy="none", int? vocab_chunk_size=None, int? batch_chunk_size=None) -> (Tensor, Tensor, Tensor?)
   dispatch:
     CPU: linear_cross_entropy_backward_cpu
+    CUDA: linear_cross_entropy_backward_cuda
 
 - func: _linear_cross_entropy_vocab_chunking(Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, SymInt chunk_size=4096) -> (Tensor loss, Tensor logsumexp)
   dispatch:
     CPU: _linear_cross_entropy_vocab_chunking_cpu
+    CUDA: _linear_cross_entropy_vocab_chunking_cuda
 
 - func: _linear_cross_entropy_vocab_chunking_backward(Tensor grad_output, Tensor saved_logsumexp, Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, SymInt chunk_size=4096) -> (Tensor, Tensor, Tensor?)
   dispatch:
     CPU: _linear_cross_entropy_vocab_chunking_backward_cpu
+    CUDA: _linear_cross_entropy_vocab_chunking_backward_cuda
 
 - func: _linear_cross_entropy_batch_chunking(Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, SymInt chunk_size=1024) -> (Tensor loss, Tensor grad_input_template, Tensor grad_weight_template, Tensor grad_bias_template, Tensor grad_weight_valid, Tensor grad_bias_valid)
   dispatch:
     CPU: _linear_cross_entropy_batch_chunking_cpu
+    CUDA: _linear_cross_entropy_batch_chunking_cuda
 
 - func: _linear_cross_entropy_batch_chunking_backward(Tensor grad_output, Tensor saved_grad_input, Tensor saved_grad_weight, Tensor saved_grad_bias, Tensor grad_weight_valid, Tensor grad_bias_valid, Tensor self, Tensor linear_weight, Tensor target, *, Tensor? linear_bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, SymInt chunk_size=1024) -> (Tensor, Tensor, Tensor?)
   dispatch:
     CPU: _linear_cross_entropy_batch_chunking_backward_cpu
+    CUDA: _linear_cross_entropy_batch_chunking_backward_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
