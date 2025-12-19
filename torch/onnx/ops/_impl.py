@@ -545,3 +545,805 @@ def attention_23(
         )
 
     return output, present_key, present_value, qk_output
+
+
+# Basic arithmetic operations
+def _add_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Add-13 for torch.compile purposes."""
+    return A.clone()
+
+
+@_onnx_op("Add", 13, _add_13_fake_impl)
+def add_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Add-13 https://onnx.ai/onnx/operators/onnx__Add.html"""
+    return torch.add(A, B)
+
+
+def _sub_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Sub-13 for torch.compile purposes."""
+    return A.clone()
+
+
+@_onnx_op("Sub", 13, _sub_13_fake_impl)
+def sub_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Sub-13 https://onnx.ai/onnx/operators/onnx__Sub.html"""
+    return torch.sub(A, B)
+
+
+def _mul_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Mul-13 for torch.compile purposes."""
+    return A.clone()
+
+
+@_onnx_op("Mul", 13, _mul_13_fake_impl)
+def mul_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Mul-13 https://onnx.ai/onnx/operators/onnx__Mul.html"""
+    return torch.mul(A, B)
+
+
+def _div_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Div-13 for torch.compile purposes."""
+    return A.clone()
+
+
+@_onnx_op("Div", 13, _div_13_fake_impl)
+def div_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Div-13 https://onnx.ai/onnx/operators/onnx__Div.html"""
+    return torch.div(A, B)
+
+
+def _pow_13_fake_impl(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Pow-13 for torch.compile purposes."""
+    return X.clone()
+
+
+@_onnx_op("Pow", 13, _pow_13_fake_impl)
+def pow_13(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    """Pow-13 https://onnx.ai/onnx/operators/onnx__Pow.html"""
+    return torch.pow(X, Y)
+
+
+def _matmul_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for MatMul-13 for torch.compile purposes."""
+    return torch.empty(A.shape[:-1] + B.shape[-1:], dtype=A.dtype, device=A.device)
+
+
+@_onnx_op("MatMul", 13, _matmul_13_fake_impl)
+def matmul_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """MatMul-13 https://onnx.ai/onnx/operators/onnx__MatMul.html"""
+    return torch.matmul(A, B)
+
+
+# Activation functions
+def _relu_13_fake_impl(X: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Relu-13 for torch.compile purposes."""
+    return X.clone()
+
+
+@_onnx_op("Relu", 13, _relu_13_fake_impl)
+def relu_13(X: torch.Tensor) -> torch.Tensor:
+    """Relu-13 https://onnx.ai/onnx/operators/onnx__Relu.html"""
+    return torch.relu(X)
+
+
+def _sigmoid_13_fake_impl(X: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Sigmoid-13 for torch.compile purposes."""
+    return X.clone()
+
+
+@_onnx_op("Sigmoid", 13, _sigmoid_13_fake_impl)
+def sigmoid_13(X: torch.Tensor) -> torch.Tensor:
+    """Sigmoid-13 https://onnx.ai/onnx/operators/onnx__Sigmoid.html"""
+    return torch.sigmoid(X)
+
+
+# Tensor manipulation operations
+def _reshape_13_fake_impl(
+    data: torch.Tensor, shape: torch.Tensor, *, allowzero: bool = False
+) -> torch.Tensor:
+    """Fake implementation for Reshape-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Reshape", 13, _reshape_13_fake_impl)
+def reshape_13(
+    data: torch.Tensor, shape: torch.Tensor, *, allowzero: bool = False
+) -> torch.Tensor:
+    """Reshape-13 https://onnx.ai/onnx/operators/onnx__Reshape.html"""
+    target_shape = shape.tolist()
+    if not allowzero:
+        # Replace 0 with corresponding input dimension
+        target_shape = [
+            target_shape[i] if target_shape[i] != 0 else data.shape[i]
+            for i in range(len(target_shape))
+        ]
+    return torch.reshape(data, target_shape)
+
+
+def _transpose_13_fake_impl(
+    data: torch.Tensor, *, perm: Optional[list[int]] = None
+) -> torch.Tensor:
+    """Fake implementation for Transpose-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Transpose", 13, _transpose_13_fake_impl)
+def transpose_13(
+    data: torch.Tensor, *, perm: Optional[list[int]] = None
+) -> torch.Tensor:
+    """Transpose-13 https://onnx.ai/onnx/operators/onnx__Transpose.html"""
+    if perm is None:
+        # Default behavior: reverse the dimensions
+        perm = list(range(data.ndim - 1, -1, -1))
+    return torch.permute(data, perm)
+
+
+def _concat_13_fake_impl(
+    *tensors: torch.Tensor, axis: int = 0
+) -> torch.Tensor:
+    """Fake implementation for Concat-13 for torch.compile purposes."""
+    return tensors[0].clone()
+
+
+@_onnx_op("Concat", 13, _concat_13_fake_impl)
+def concat_13(*tensors: torch.Tensor, axis: int = 0) -> torch.Tensor:
+    """Concat-13 https://onnx.ai/onnx/operators/onnx__Concat.html"""
+    return torch.cat(tensors, dim=axis)
+
+
+def _unsqueeze_13_fake_impl(
+    data: torch.Tensor, axes: torch.Tensor
+) -> torch.Tensor:
+    """Fake implementation for Unsqueeze-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Unsqueeze", 13, _unsqueeze_13_fake_impl)
+def unsqueeze_13(data: torch.Tensor, axes: torch.Tensor) -> torch.Tensor:
+    """Unsqueeze-13 https://onnx.ai/onnx/operators/onnx__Unsqueeze.html"""
+    axes_list = sorted(axes.tolist())
+    result = data
+    for axis in axes_list:
+        result = torch.unsqueeze(result, axis)
+    return result
+
+
+def _gather_13_fake_impl(
+    data: torch.Tensor, indices: torch.Tensor, *, axis: int = 0
+) -> torch.Tensor:
+    """Fake implementation for Gather-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Gather", 13, _gather_13_fake_impl)
+def gather_13(
+    data: torch.Tensor, indices: torch.Tensor, *, axis: int = 0
+) -> torch.Tensor:
+    """Gather-13 https://onnx.ai/onnx/operators/onnx__Gather.html"""
+    return torch.gather(data, axis, indices)
+
+
+def _slice_13_fake_impl(
+    data: torch.Tensor,
+    starts: torch.Tensor,
+    ends: torch.Tensor,
+    axes: Optional[torch.Tensor] = None,
+    steps: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Fake implementation for Slice-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Slice", 13, _slice_13_fake_impl)
+def slice_13(
+    data: torch.Tensor,
+    starts: torch.Tensor,
+    ends: torch.Tensor,
+    axes: Optional[torch.Tensor] = None,
+    steps: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Slice-13 https://onnx.ai/onnx/operators/onnx__Slice.html"""
+    starts_list = starts.tolist()
+    ends_list = ends.tolist()
+    axes_list = axes.tolist() if axes is not None else list(range(len(starts_list)))
+    steps_list = steps.tolist() if steps is not None else [1] * len(starts_list)
+
+    # Build slice objects for each dimension
+    slices = [slice(None)] * data.ndim
+    for i, axis in enumerate(axes_list):
+        slices[axis] = slice(starts_list[i], ends_list[i], steps_list[i])
+
+    return data[tuple(slices)]
+
+
+# Reduction operations
+def _reduce_mean_13_fake_impl(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """Fake implementation for ReduceMean-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("ReduceMean", 13, _reduce_mean_13_fake_impl)
+def reduce_mean_13(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """ReduceMean-13 https://onnx.ai/onnx/operators/onnx__ReduceMean.html"""
+    if axes is None:
+        axes = list(range(data.ndim))
+    return torch.mean(data, dim=axes, keepdim=keepdims)
+
+
+def _reduce_max_13_fake_impl(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """Fake implementation for ReduceMax-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("ReduceMax", 13, _reduce_max_13_fake_impl)
+def reduce_max_13(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """ReduceMax-13 https://onnx.ai/onnx/operators/onnx__ReduceMax.html"""
+    if axes is None:
+        return torch.max(data).view(1) if keepdims else torch.max(data)
+    result = data
+    for axis in sorted(axes, reverse=True):
+        result = torch.max(result, dim=axis, keepdim=keepdims).values
+    return result
+
+
+def _reduce_min_13_fake_impl(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """Fake implementation for ReduceMin-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("ReduceMin", 13, _reduce_min_13_fake_impl)
+def reduce_min_13(
+    data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
+) -> torch.Tensor:
+    """ReduceMin-13 https://onnx.ai/onnx/operators/onnx__ReduceMin.html"""
+    if axes is None:
+        return torch.min(data).view(1) if keepdims else torch.min(data)
+    result = data
+    for axis in sorted(axes, reverse=True):
+        result = torch.min(result, dim=axis, keepdim=keepdims).values
+    return result
+
+
+# Pooling operations
+def _average_pool_11_fake_impl(
+    X: torch.Tensor,
+    *,
+    kernel_shape: list[int],
+    strides: Optional[list[int]] = None,
+    auto_pad: str = "NOTSET",
+    pads: Optional[list[int]] = None,
+    count_include_pad: bool = False,
+) -> torch.Tensor:
+    """Fake implementation for AveragePool-11 for torch.compile purposes."""
+    if strides is None:
+        strides = [1] * len(kernel_shape)
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * len(kernel_shape) if pads is None else pads[: len(kernel_shape)]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * len(kernel_shape)
+
+    if len(kernel_shape) == 2:
+        return torch.nn.functional.avg_pool2d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            count_include_pad=count_include_pad,
+        )
+    elif len(kernel_shape) == 1:
+        return torch.nn.functional.avg_pool1d(
+            X,
+            kernel_size=kernel_shape[0],
+            stride=strides[0],
+            padding=padding[0],
+            count_include_pad=count_include_pad,
+        )
+    elif len(kernel_shape) == 3:
+        return torch.nn.functional.avg_pool3d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            count_include_pad=count_include_pad,
+        )
+    else:
+        raise ValueError(f"Unsupported kernel_shape length: {len(kernel_shape)}")
+
+
+@_onnx_op("AveragePool", 11, _average_pool_11_fake_impl)
+def average_pool_11(
+    X: torch.Tensor,
+    *,
+    kernel_shape: list[int],
+    strides: Optional[list[int]] = None,
+    auto_pad: str = "NOTSET",
+    pads: Optional[list[int]] = None,
+    count_include_pad: bool = False,
+) -> torch.Tensor:
+    """AveragePool-11 https://onnx.ai/onnx/operators/onnx__AveragePool.html"""
+    if strides is None:
+        strides = [1] * len(kernel_shape)
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * len(kernel_shape) if pads is None else pads[: len(kernel_shape)]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * len(kernel_shape)
+
+    if len(kernel_shape) == 2:
+        return torch.nn.functional.avg_pool2d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            count_include_pad=count_include_pad,
+        )
+    elif len(kernel_shape) == 1:
+        return torch.nn.functional.avg_pool1d(
+            X,
+            kernel_size=kernel_shape[0],
+            stride=strides[0],
+            padding=padding[0],
+            count_include_pad=count_include_pad,
+        )
+    elif len(kernel_shape) == 3:
+        return torch.nn.functional.avg_pool3d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            count_include_pad=count_include_pad,
+        )
+    else:
+        raise ValueError(f"Unsupported kernel_shape length: {len(kernel_shape)}")
+
+
+def _max_pool_12_fake_impl(
+    X: torch.Tensor,
+    *,
+    kernel_shape: list[int],
+    strides: Optional[list[int]] = None,
+    auto_pad: str = "NOTSET",
+    pads: Optional[list[int]] = None,
+    dilations: Optional[list[int]] = None,
+    storage_order: int = 0,
+) -> torch.Tensor:
+    """Fake implementation for MaxPool-12 for torch.compile purposes."""
+    if strides is None:
+        strides = [1] * len(kernel_shape)
+    if dilations is None:
+        dilations = [1] * len(kernel_shape)
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * len(kernel_shape) if pads is None else pads[: len(kernel_shape)]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * len(kernel_shape)
+
+    if len(kernel_shape) == 2:
+        return torch.nn.functional.max_pool2d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            dilation=dilations,
+        )
+    elif len(kernel_shape) == 1:
+        return torch.nn.functional.max_pool1d(
+            X,
+            kernel_size=kernel_shape[0],
+            stride=strides[0],
+            padding=padding[0],
+            dilation=dilations[0],
+        )
+    elif len(kernel_shape) == 3:
+        return torch.nn.functional.max_pool3d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            dilation=dilations,
+        )
+    else:
+        raise ValueError(f"Unsupported kernel_shape length: {len(kernel_shape)}")
+
+
+@_onnx_op("MaxPool", 12, _max_pool_12_fake_impl)
+def max_pool_12(
+    X: torch.Tensor,
+    *,
+    kernel_shape: list[int],
+    strides: Optional[list[int]] = None,
+    auto_pad: str = "NOTSET",
+    pads: Optional[list[int]] = None,
+    dilations: Optional[list[int]] = None,
+    storage_order: int = 0,
+) -> torch.Tensor:
+    """MaxPool-12 https://onnx.ai/onnx/operators/onnx__MaxPool.html"""
+    if strides is None:
+        strides = [1] * len(kernel_shape)
+    if dilations is None:
+        dilations = [1] * len(kernel_shape)
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * len(kernel_shape) if pads is None else pads[: len(kernel_shape)]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * len(kernel_shape)
+
+    if len(kernel_shape) == 2:
+        return torch.nn.functional.max_pool2d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            dilation=dilations,
+        )
+    elif len(kernel_shape) == 1:
+        return torch.nn.functional.max_pool1d(
+            X,
+            kernel_size=kernel_shape[0],
+            stride=strides[0],
+            padding=padding[0],
+            dilation=dilations[0],
+        )
+    elif len(kernel_shape) == 3:
+        return torch.nn.functional.max_pool3d(
+            X,
+            kernel_size=kernel_shape,
+            stride=strides,
+            padding=padding,
+            dilation=dilations,
+        )
+    else:
+        raise ValueError(f"Unsupported kernel_shape length: {len(kernel_shape)}")
+
+
+# Convolution operation
+def _conv_11_fake_impl(
+    X: torch.Tensor,
+    W: torch.Tensor,
+    B: Optional[torch.Tensor] = None,
+    *,
+    auto_pad: str = "NOTSET",
+    dilations: Optional[list[int]] = None,
+    group: int = 1,
+    kernel_shape: Optional[list[int]] = None,
+    pads: Optional[list[int]] = None,
+    strides: Optional[list[int]] = None,
+) -> torch.Tensor:
+    """Fake implementation for Conv-11 for torch.compile purposes."""
+    spatial_dims = W.ndim - 2
+
+    if strides is None:
+        strides = [1] * spatial_dims
+    if dilations is None:
+        dilations = [1] * spatial_dims
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * spatial_dims if pads is None else pads[:spatial_dims]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * spatial_dims
+
+    if spatial_dims == 2:
+        return torch.nn.functional.conv2d(
+            X, W, B, stride=strides, padding=padding, dilation=dilations, groups=group
+        )
+    elif spatial_dims == 1:
+        return torch.nn.functional.conv1d(
+            X, W, B, stride=strides[0], padding=padding[0], dilation=dilations[0], groups=group
+        )
+    elif spatial_dims == 3:
+        return torch.nn.functional.conv3d(
+            X, W, B, stride=strides, padding=padding, dilation=dilations, groups=group
+        )
+    else:
+        raise ValueError(f"Unsupported spatial dimensions: {spatial_dims}")
+
+
+@_onnx_op("Conv", 11, _conv_11_fake_impl)
+def conv_11(
+    X: torch.Tensor,
+    W: torch.Tensor,
+    B: Optional[torch.Tensor] = None,
+    *,
+    auto_pad: str = "NOTSET",
+    dilations: Optional[list[int]] = None,
+    group: int = 1,
+    kernel_shape: Optional[list[int]] = None,
+    pads: Optional[list[int]] = None,
+    strides: Optional[list[int]] = None,
+) -> torch.Tensor:
+    """Conv-11 https://onnx.ai/onnx/operators/onnx__Conv.html"""
+    spatial_dims = W.ndim - 2
+
+    if strides is None:
+        strides = [1] * spatial_dims
+    if dilations is None:
+        dilations = [1] * spatial_dims
+
+    # Handle padding
+    if auto_pad == "NOTSET":
+        padding = [0] * spatial_dims if pads is None else pads[:spatial_dims]
+    else:
+        # Auto padding not fully implemented, use default
+        padding = [0] * spatial_dims
+
+    if spatial_dims == 2:
+        return torch.nn.functional.conv2d(
+            X, W, B, stride=strides, padding=padding, dilation=dilations, groups=group
+        )
+    elif spatial_dims == 1:
+        return torch.nn.functional.conv1d(
+            X, W, B, stride=strides[0], padding=padding[0], dilation=dilations[0], groups=group
+        )
+    elif spatial_dims == 3:
+        return torch.nn.functional.conv3d(
+            X, W, B, stride=strides, padding=padding, dilation=dilations, groups=group
+        )
+    else:
+        raise ValueError(f"Unsupported spatial dimensions: {spatial_dims}")
+
+
+# Element-wise Min/Max operations
+def _max_13_fake_impl(*data_tensors: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Max-13 for torch.compile purposes."""
+    result = data_tensors[0]
+    for tensor in data_tensors[1:]:
+        result = torch.maximum(result, tensor)
+    return result
+
+
+@_onnx_op("Max", 13, _max_13_fake_impl)
+def max_13(*data_tensors: torch.Tensor) -> torch.Tensor:
+    """Max-13 https://onnx.ai/onnx/operators/onnx__Max.html"""
+    result = data_tensors[0]
+    for tensor in data_tensors[1:]:
+        result = torch.maximum(result, tensor)
+    return result
+
+
+def _min_13_fake_impl(*data_tensors: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Min-13 for torch.compile purposes."""
+    result = data_tensors[0]
+    for tensor in data_tensors[1:]:
+        result = torch.minimum(result, tensor)
+    return result
+
+
+@_onnx_op("Min", 13, _min_13_fake_impl)
+def min_13(*data_tensors: torch.Tensor) -> torch.Tensor:
+    """Min-13 https://onnx.ai/onnx/operators/onnx__Min.html"""
+    result = data_tensors[0]
+    for tensor in data_tensors[1:]:
+        result = torch.minimum(result, tensor)
+    return result
+
+
+# Shape operations
+def _shape_13_fake_impl(data: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Shape-13 for torch.compile purposes."""
+    return torch.tensor(data.shape, device=data.device)
+
+
+@_onnx_op("Shape", 13, _shape_13_fake_impl)
+def shape_13(data: torch.Tensor) -> torch.Tensor:
+    """Shape-13 https://onnx.ai/onnx/operators/onnx__Shape.html"""
+    return torch.tensor(data.shape, device=data.device)
+
+
+def _squeeze_13_fake_impl(
+    data: torch.Tensor, axes: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """Fake implementation for Squeeze-13 for torch.compile purposes."""
+    return data.clone()
+
+
+@_onnx_op("Squeeze", 13, _squeeze_13_fake_impl)
+def squeeze_13(
+    data: torch.Tensor, axes: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """Squeeze-13 https://onnx.ai/onnx/operators/onnx__Squeeze.html"""
+    if axes is None:
+        # Squeeze all dimensions of size 1
+        return torch.squeeze(data)
+    else:
+        # Squeeze specific axes
+        axes_list = sorted(axes.tolist(), reverse=True)
+        result = data
+        for axis in axes_list:
+            result = torch.squeeze(result, dim=axis)
+        return result
+
+
+def _split_13_fake_impl(
+    input: torch.Tensor,
+    split: Optional[torch.Tensor] = None,
+    *,
+    axis: int = 0,
+    num_outputs: Optional[int] = None,
+) -> tuple[torch.Tensor, ...]:
+    """Fake implementation for Split-13 for torch.compile purposes."""
+    if num_outputs is None:
+        num_outputs = 2
+    return tuple(input.clone() for _ in range(num_outputs))
+
+
+@_onnx_op("Split", 13, _split_13_fake_impl)
+def split_13(
+    input: torch.Tensor,
+    split: Optional[torch.Tensor] = None,
+    *,
+    axis: int = 0,
+    num_outputs: Optional[int] = None,
+) -> tuple[torch.Tensor, ...]:
+    """Split-13 https://onnx.ai/onnx/operators/onnx__Split.html"""
+    if split is not None:
+        split_sizes = split.tolist()
+        return tuple(torch.split(input, split_sizes, dim=axis))
+    else:
+        # Equal split
+        if num_outputs is None:
+            num_outputs = input.shape[axis]
+        size = input.shape[axis] // num_outputs
+        return tuple(torch.split(input, size, dim=axis))
+
+
+def _expand_13_fake_impl(input: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    """Fake implementation for Expand-13 for torch.compile purposes."""
+    return input.clone()
+
+
+@_onnx_op("Expand", 13, _expand_13_fake_impl)
+def expand_13(input: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    """Expand-13 https://onnx.ai/onnx/operators/onnx__Expand.html"""
+    target_shape = shape.tolist()
+    return input.expand(target_shape)
+
+
+def _range_11_fake_impl(
+    start: torch.Tensor, limit: torch.Tensor, delta: torch.Tensor
+) -> torch.Tensor:
+    """Fake implementation for Range-11 for torch.compile purposes."""
+    return start.clone()
+
+
+@_onnx_op("Range", 11, _range_11_fake_impl)
+def range_11(
+    start: torch.Tensor, limit: torch.Tensor, delta: torch.Tensor
+) -> torch.Tensor:
+    """Range-11 https://onnx.ai/onnx/operators/onnx__Range.html"""
+    start_val = start.item()
+    limit_val = limit.item()
+    delta_val = delta.item()
+    return torch.arange(
+        start_val, limit_val, delta_val, dtype=start.dtype, device=start.device
+    )
+
+
+def _cast_13_fake_impl(input: torch.Tensor, *, to: int) -> torch.Tensor:
+    """Fake implementation for Cast-13 for torch.compile purposes."""
+    target_dtype = _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE.get(to, input.dtype)
+    return torch.empty_like(input, dtype=target_dtype)
+
+
+@_onnx_op("Cast", 13, _cast_13_fake_impl)
+def cast_13(input: torch.Tensor, *, to: int) -> torch.Tensor:
+    """Cast-13 https://onnx.ai/onnx/operators/onnx__Cast.html"""
+    target_dtype = _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE.get(to)
+    torch._check(
+        target_dtype is not None,
+        lambda: f"Unsupported ONNX data type: {to}",
+    )
+    return input.to(target_dtype)
+
+
+def _dft_20_fake_impl(
+    input: torch.Tensor,
+    dft_length: Optional[torch.Tensor] = None,
+    *,
+    axis: int = -1,
+    inverse: bool = False,
+    onesided: bool = False,
+) -> torch.Tensor:
+    """Fake implementation for DFT-20 for torch.compile purposes."""
+    # Normalize axis to positive index
+    normalized_axis = axis if axis >= 0 else input.ndim + axis - 1  # -1 for the complex dimension
+
+    # Determine output shape along the FFT axis
+    if inverse:
+        if onesided:
+            # irfft output: real-valued, then converted to [..., 2] format
+            if dft_length is not None:
+                n = dft_length.item()
+            else:
+                # Default irfft size
+                n = 2 * (input.shape[normalized_axis] - 1)
+            output_shape = list(input.shape)
+            output_shape[normalized_axis] = n
+        else:
+            # ifft output: same size or dft_length
+            output_shape = list(input.shape)
+            if dft_length is not None:
+                output_shape[normalized_axis] = dft_length.item()
+    else:
+        if onesided:
+            # rfft output: (n // 2) + 1 for real input
+            if dft_length is not None:
+                n = dft_length.item()
+            else:
+                n = input.shape[normalized_axis]
+            output_size = (n // 2) + 1
+            output_shape = list(input.shape)
+            output_shape[normalized_axis] = output_size
+        else:
+            # fft output: same size or dft_length
+            output_shape = list(input.shape)
+            if dft_length is not None:
+                output_shape[normalized_axis] = dft_length.item()
+
+    return torch.empty(output_shape, dtype=input.dtype, device=input.device)
+
+
+@_onnx_op("DFT", 20, _dft_20_fake_impl)
+def dft_20(
+    input: torch.Tensor,
+    dft_length: Optional[torch.Tensor] = None,
+    *,
+    axis: int = -1,
+    inverse: bool = False,
+    onesided: bool = False,
+) -> torch.Tensor:
+    """DFT-20 https://onnx.ai/onnx/operators/onnx__DFT.html"""
+    # ONNX DFT expects input shape [..., 2] where last dimension is [real, imag]
+    # Convert to complex tensor
+    torch._check(
+        input.shape[-1] == 2,
+        lambda: f"DFT input must have last dimension of size 2 (real, imag). Got shape {input.shape}",
+    )
+
+    complex_input = torch.view_as_complex(input.contiguous())
+
+    # Determine FFT length
+    n = None
+    if dft_length is not None:
+        n = dft_length.item()
+
+    # Perform FFT or IFFT
+    if inverse:
+        if onesided:
+            result = torch.fft.irfft(complex_input, n=n, dim=axis)
+            # Convert real result back to [..., 2] format with zero imaginary part
+            result_complex = torch.view_as_real(torch.complex(result, torch.zeros_like(result)))
+            return result_complex
+        else:
+            result = torch.fft.ifft(complex_input, n=n, dim=axis)
+    else:
+        if onesided:
+            # For onesided forward FFT, input should be real-valued
+            # But ONNX format is [..., 2], so extract real part
+            real_input = input[..., 0]
+            result = torch.fft.rfft(real_input, n=n, dim=axis)
+        else:
+            result = torch.fft.fft(complex_input, n=n, dim=axis)
+
+    # Convert back to [..., 2] format
+    return torch.view_as_real(result)
