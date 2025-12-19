@@ -127,7 +127,10 @@ class CausalBias(torch.Tensor):
 
         Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
-        assert isinstance(variant, CausalVariant)
+        if not isinstance(variant, CausalVariant):
+            raise AssertionError(
+                f"variant must be a CausalVariant, got {type(variant).__name__}"
+            )
         super().__init__()
         self.variant = variant
         self.seq_len_q = seq_len_q
@@ -330,7 +333,8 @@ def causal_upper_left(*size) -> CausalBias:
     Returns:
         CausalBias: The UPPER_LEFT triangular causal bias variant.
     """
-    assert len(size) == 2, "causal_upper_left only supports 2D tensors"
+    if len(size) != 2:
+        raise AssertionError("causal_upper_left only supports 2D tensors")
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seq_len_kv)
 
@@ -366,6 +370,7 @@ def causal_lower_right(*size) -> CausalBias:
     Returns:
         CausalBias: The LOWER_RIGHT triangular causal bias variant.
     """
-    assert len(size) == 2, "causal_lower_right only supports 2D tensors"
+    if len(size) != 2:
+        raise AssertionError("causal_lower_right only supports 2D tensors")
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.LOWER_RIGHT, seq_len_q, seq_len_kv)

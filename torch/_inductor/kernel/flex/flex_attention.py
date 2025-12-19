@@ -42,6 +42,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    is_trivial_mask_graph,
 )
 
 
@@ -729,9 +730,27 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         mask_graph,
         backend=backend,
+        joint_outputs=joint_outputs,
+        score_mod_other_buffers=score_mod_other_buffers,
     ):
+        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
-            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            scale,
+            kernel_options,
+            fw_subgraph_buffer=fw_subgraph_buffer,
+            joint_subgraph_buffer=joint_outputs.grad_input,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            q_num_blocks=q_num_blocks if needs_block_mask else None,
+            q_indices=q_indices if needs_block_mask else None,
+            full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
+            full_q_indices=full_q_indices if needs_block_mask else None,
         )
 
     # Construct layout with stride order matching K
