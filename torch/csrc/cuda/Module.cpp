@@ -473,28 +473,6 @@ PyObject* THCPModule_cudaSleep(PyObject* /*_unused*/, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaBusyWaitForFlag(
-    PyObject* /*_unused*/,
-    PyObject* /*noargs*/) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::busy_wait_for_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cudaClearFlag(
-    PyObject* /*_unused*/,
-    PyObject* /*noargs*/) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::clear_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // We need to ensure that as long as a thread will NEVER loose the GIL as long
 // as it holds the CUDA mutex. Otherwise another thread might be scheduled and
 // try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
@@ -799,7 +777,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* /*_unused*/, PyObject* arg) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
-  py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
@@ -983,17 +960,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* /*_unused*/, PyObject* arg) {
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
-
-    // Add forward frames if available
-    auto* tb = to_gather_frames.at(i);
-    const auto& forward_tb = tb->forward_traceback();
-    if (forward_tb.has_value() && !forward_tb->empty()) {
-      py::list forward_list;
-      for (const auto& frame_str : *forward_tb) {
-        forward_list.append(py::str(frame_str));
-      }
-      to_gather_dest.at(i)[forward_frames_s] = forward_list;
-    }
   }
 
   return result.release().ptr();
@@ -2160,11 +2126,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
-    {"_cuda_busy_wait_for_flag",
-     THCPModule_cudaBusyWaitForFlag,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",
