@@ -7563,12 +7563,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hx = torch.randn(4, hidden_size)
             cx = torch.randn(4, hidden_size)
 
-            w_ih_invalid = torch.randn((gate_count*hidden_size)+1, 8)
-            w_ih = torch.randn(gate_count*hidden_size, 8)
-            w_hh_invalid = torch.randn((gate_count*hidden_size)+1, 16)
-            w_hh = torch.randn(gate_count*hidden_size, 16)
-            b_ih = torch.randn(gate_count*hidden_size)
-            b_hh = torch.randn(gate_count*hidden_size)
+            w_ih_invalid = torch.randn((gate_count * hidden_size) + 1, 8)
+            w_ih = torch.randn(gate_count * hidden_size, 8)
+            w_hh_invalid = torch.randn((gate_count * hidden_size) + 1, 16)
+            w_hh = torch.randn(gate_count * hidden_size, 16)
+            b_ih = torch.randn(gate_count * hidden_size)
+            b_hh = torch.randn(gate_count * hidden_size)
 
             if cell_fn is torch.lstm_cell:
                 state = (hx, cx)
