@@ -505,53 +505,40 @@ class OpDispatcher:
     ) -> OpInfo:
         return self._unwrap_to_op_info_impl(op_call, args, kwargs, True)
 
-    def _unwrap_arg_recursive(
+    def _unwrap_leaf(
         self,
-        arg: object,
+        leaf: object,
         op_call: torch._ops.OpOverload,
-        args_list: Sequence[object],
+        all_args: Sequence[object],
         compute_mesh: DeviceMesh | None,
     ) -> tuple[object, object, DeviceMesh | None]:
         """
-        Recursively unwrap an argument for DTensor dispatch.
+        Unwrap a single leaf argument (no nested structures).
 
         Args:
-            arg: The argument to unwrap
+            leaf: A leaf value from pytree traversal (tensor or scalar)
             op_call: The operator being called
-            args_list: The full args list (for try_find_mesh_from_args)
+            all_args: All flattened args (for try_find_mesh_from_args)
             compute_mesh: Current compute mesh (may be None)
 
         Returns:
-            tuple: (schema_arg, local_arg, updated_compute_mesh)
+            tuple: (schema_leaf, local_leaf, updated_compute_mesh)
         """
-        if isinstance(arg, dtensor.DTensor):
+        if isinstance(leaf, dtensor.DTensor):
             return (
-                arg._spec,
-                arg._local_tensor,
-                compute_mesh if compute_mesh is not None else arg.device_mesh,
+                leaf._spec,
+                leaf._local_tensor,
+                compute_mesh if compute_mesh is not None else leaf.device_mesh,
             )
-        elif isinstance(arg, torch.Tensor):
-            updated_mesh = compute_mesh or try_find_mesh_from_args(op_call, args_list)
+        elif isinstance(leaf, torch.Tensor):
+            updated_mesh = compute_mesh or try_find_mesh_from_args(op_call, all_args)
             replicate_spec = self._try_replicate_spec_for_scalar_tensor(
-                op_call, arg, updated_mesh
+                op_call, leaf, updated_mesh
             )
-            return (replicate_spec, arg, updated_mesh)
-        elif isinstance(arg, (list, tuple)):
-            # Recursively process each element in the list/tuple
-            schema_list = []
-            local_list = []
-            updated_mesh = compute_mesh
-            for item in arg:
-                schema_item, local_item, updated_mesh = self._unwrap_arg_recursive(
-                    item, op_call, args_list, updated_mesh
-                )
-                schema_list.append(schema_item)
-                local_list.append(local_item)
-            # Preserve the type (list vs tuple)
-            return (type(arg)(schema_list), type(arg)(local_list), updated_mesh)
+            return (replicate_spec, leaf, updated_mesh)
         else:
-            # Non-tensor types (int, float, bool, etc.) pass through unchanged
-            return (arg, arg, compute_mesh)
+            # Non-tensor types (int, float, bool, None, etc.) pass through unchanged
+            return (leaf, leaf, compute_mesh)
 
     def _unwrap_to_op_info_impl(
         self,
@@ -565,56 +552,74 @@ class OpDispatcher:
             op_call, None
         )
 
-        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when op says necessary
-            tree_args, args_spec = pytree.tree_flatten(args)
-            args_list: Sequence[object] = tree_args
-        else:
-            args_list, args_spec = args, None
+        # Always use pytree to flatten args and kwargs for uniform traversal
+        tree_args, args_spec = pytree.tree_flatten(args)
+        tree_kwargs, kwargs_spec = pytree.tree_flatten(kwargs)
 
-        args_schema: list[object] = []
-        kwargs_schema: dict[str, object] = {}
-        local_args: list[object] = []
-        local_kwargs: dict[str, object] = {}
+        # Combine all flattened args for mesh finding
+        all_flattened = tree_args + tree_kwargs
+
         compute_mesh: DeviceMesh | None = None
+        schema_args_leaves: list[object] = []
+        local_args_leaves: list[object] = []
 
-        for arg in args_list:
-            schema_arg, local_arg, compute_mesh = self._unwrap_arg_recursive(
-                arg, op_call, args_list, compute_mesh
+        # Process each arg leaf
+        for leaf in tree_args:
+            schema_leaf, local_leaf, compute_mesh = self._unwrap_leaf(
+                leaf, op_call, all_flattened, compute_mesh
             )
-            args_schema.append(schema_arg)
-            local_args.append(local_arg)
+            schema_args_leaves.append(schema_leaf)
+            local_args_leaves.append(local_leaf)
 
-        for k, v in kwargs.items():
-            schema_v, local_v, compute_mesh = self._unwrap_arg_recursive(
-                v, op_call, args_list, compute_mesh
+        schema_kwargs_leaves: list[object] = []
+        local_kwargs_leaves: list[object] = []
+
+        # Process each kwarg leaf
+        for leaf in tree_kwargs:
+            schema_leaf, local_leaf, compute_mesh = self._unwrap_leaf(
+                leaf, op_call, all_flattened, compute_mesh
             )
-            kwargs_schema[k] = schema_v
-            local_kwargs[k] = local_v
+            schema_kwargs_leaves.append(schema_leaf)
+            local_kwargs_leaves.append(local_leaf)
 
         assert compute_mesh is not None, (
             f"found no DeviceMesh from dtensor args for {op_call}!"
         )
+
+        # Unflatten to restore original structure for OpSchema
+        args_schema_unflattened = pytree.tree_unflatten(schema_args_leaves, args_spec)
+        kwargs_schema_unflattened = pytree.tree_unflatten(schema_kwargs_leaves, kwargs_spec)
+        local_kwargs_unflattened = pytree.tree_unflatten(local_kwargs_leaves, kwargs_spec)
+
+        # For OpSchema.args_schema:
+        # - If needs_pytree=True: use unflattened structure
+        # - If needs_pytree=False: convert unflattened to tuple
+        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
+            op_schema_args = args_schema_unflattened
+            op_schema_args_spec = args_spec
+        else:
+            op_schema_args = args_schema_unflattened
+            op_schema_args_spec = None
+
         op_info = OpInfo(
             compute_mesh,
             # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
-                (
-                    # pyrefly: ignore [bad-argument-type]
-                    pytree.tree_unflatten(args_schema, args_spec)
-                    if args_spec
-                    else tuple(args_schema)
-                ),
-                kwargs_schema,
+                op_schema_args,
+                kwargs_schema_unflattened,
                 schema_info=runtime_schema_info,
             )
             if create_schema
             else None,  # type: ignore[arg-type]
-            args_schema,
-            tuple(local_args),
-            local_kwargs,
-            args_spec,
+            # flat_args_schema is always the flattened list
+            schema_args_leaves,
+            # local_args is always the flattened tuple
+            tuple(local_args_leaves),
+            # local_kwargs is unflattened back to dict
+            local_kwargs_unflattened,
+            # args_tree_spec tells how to unflatten args
+            op_schema_args_spec,
         )
         return op_info
 
