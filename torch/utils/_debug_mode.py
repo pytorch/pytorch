@@ -606,7 +606,8 @@ class _AnnotateCall(_DebugCall):
 
 def _run_hook(hook, *args):
     out = hook(*args)
-    assert out is None or isinstance(out, dict)
+    if out is not None and not isinstance(out, dict):
+        raise AssertionError(f"hook must return None or dict, got {type(out).__name__}")
     return out
 
 
@@ -682,6 +683,7 @@ class DebugMode(TorchDispatchMode):
         record_output=True,
         record_ids=False,
         record_profiler_context=True,
+        record_localtensor=True,
     ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -698,6 +700,9 @@ class DebugMode(TorchDispatchMode):
 
         # Records __torch_dispatch__ calls on real tensors.
         self.record_realtensor = record_realtensor
+
+        # Records __torch_dispatch__ calls on LocalTensor.
+        self.record_localtensor = record_localtensor
 
         # Optional list[str] of tensor attributes, to be annotated in the string dump.
         self.record_tensor_attributes = record_tensor_attributes or []
@@ -812,7 +817,10 @@ class DebugMode(TorchDispatchMode):
         self.call_depth += 1
 
     def _maybe_exit_record_function(self):
-        assert self.ignored_record_functions >= 0
+        if self.ignored_record_functions < 0:
+            raise AssertionError(
+                f"ignored_record_functions is negative: {self.ignored_record_functions}"
+            )
         if self.ignored_record_functions > 0:
             self.ignored_record_functions -= 1
         else:
@@ -825,16 +833,20 @@ class DebugMode(TorchDispatchMode):
         # Handle record_function entries
         if self.record_profiler_context:
             if func == torch.ops.profiler._record_function_enter_new.default:
-                assert len(args) == 1
+                if len(args) != 1:
+                    raise AssertionError(f"expected 1 arg, got {len(args)}")
                 self._maybe_record_function(args[0])
             elif func == torch.ops.profiler._record_function_exit._RecordFunction:
                 self._maybe_exit_record_function()
 
         # Handle DebugMode._annotate()
         if func is torch.ops.debug_mode_ops.annotate.default:
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             self._handle_annotate(args[0])
             return
+
+        from torch.distributed._local_tensor import LocalTensor
 
         # Record the operation with its call depth
         call = None
@@ -857,6 +869,17 @@ class DebugMode(TorchDispatchMode):
                         stack=self.record_stack_trace,
                     )
                     self._record_call(call)
+        # TODO: check the context manager
+        elif LocalTensor in types:
+            if self.record_localtensor:
+                call = _OpCall(
+                    func,
+                    args,
+                    kwargs,
+                    self.call_depth + 1,
+                    stack=self.record_stack_trace,
+                )
+                self._record_call(call)
         elif len(types) == 0:
             if self.record_realtensor:
                 call = _OpCall(
@@ -1091,7 +1114,13 @@ class DebugMode(TorchDispatchMode):
         """
 
         def hash_fn_option(hash_type):
-            assert isinstance(hash_type, str) and hash_type in ["norm", "hash_tensor"]
+            if not isinstance(hash_type, str) or hash_type not in [
+                "norm",
+                "hash_tensor",
+            ]:
+                raise AssertionError(
+                    f"hash_type must be 'norm' or 'hash_tensor', got {hash_type!r}"
+                )
             return functools.partial(
                 norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
             )
@@ -1278,7 +1307,10 @@ class DebugMode(TorchDispatchMode):
                     )
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
-                    assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
+                    if set(hashes1.keys()) != set(hashes2.keys()):  # type: ignore[union-attr]
+                        raise AssertionError(
+                            f"hash key mismatch: {set(hashes1.keys())} vs {set(hashes2.keys())}"
+                        )
                     for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
