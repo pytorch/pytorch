@@ -7,19 +7,20 @@ import shlex
 import sys
 from functools import cached_property, partial
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
+from typing_extensions import override
 
 
 _PARENT = Path(__file__).parent.absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
 
 if TYPE_CHECKING or _PARENT not in _PATH:
-    from ._linter import FileLinter, LintResult, PythonFile
+    from ._linter import FileLinter, is_public, LintResult, PythonFile
 else:
-    from _linter import FileLinter, LintResult, PythonFile
+    from _linter import FileLinter, is_public, LintResult, PythonFile
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Collection, Iterator, Sequence
 
 
 DESCRIPTION = """`missing_type_linter` is a lintrunner linter which uses pyrefly to detect
@@ -56,18 +57,11 @@ def _add_arguments(add: Callable[..., Any]) -> None:
     help = "The name of a JSON file with type checking results (ignore --type-check)"
     add("--type-result", "-r", default=None, type=Path, help=help)
 
+    help = "Use block_name instead of pyrefly_name (slower but more compatible)"
+    add("--use-block-name", "-u", action="store_true", help=help)
+
     help = "Rewrite the grandfather list"
     add("--write-grandfather", "-w", action="store_true", help=help)
-
-
-def _is_public(*p: str) -> bool:
-    # TODO: this rule is simple and correct as far as it goes, but incomplete.
-    #
-    # What is missing is checking `__all__`: see
-    # https://github.com/pytorch/pytorch/wiki/Public-API-definition-and-documentation
-
-    it = (j for i in p for j in i.split("."))
-    return not any(i.startswith("_") and i not in PUBLIC_NAMES for i in it)
 
 
 class MissingTypeLinter(FileLinter):
@@ -75,158 +69,199 @@ class MissingTypeLinter(FileLinter):
     description = DESCRIPTION
     epilog = EPILOG
     report_column_numbers = True
-    summary: dict[str, float | int]
 
     def __init__(self, argv: Sequence[str] | None = None) -> None:
         super().__init__(argv)
-        self.summary = {}
-
         _add_arguments(self.parser.add_argument)
 
+    @override
     def lint_all(self) -> bool:
         if self.must_write_grandfather:
             self._write_grandfather()
         else:
-            for path in self.missing_annotations_delta:
+            for path in self.failing_annotations:
                 self._lint_file(path)
 
-        self._summarize()
-        return self.must_write_grandfather or not self.missing_annotations_delta
+        self._report()
+        return self.must_write_grandfather or not self.failing_annotations
 
+    @override
     def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
-        assert pf.path is not None
-        lr = [m.lint_result() for m in self.missing_annotations_delta[pf.path]]
+        lr = [m.lint_result() for m in self.failing_annotations[pf.path]]
         if not self.args.dry_run:
             yield from lr
 
-    def _summarize(self) -> None:
-        # TODO: add commit ID, commit message, timestamp, more? to the summary report
-        s = dict(self.summary)
-
-        def percent(name: str, base: str = "public_functions") -> None:
-            s[name + "_percent"] = round(100 * s[name] / s[base], 4)
-
-        percent("full_annotations")
-        percent("partial_annotations")
-        percent("unannotated")
-
-        percent("return_annotations")
-        percent("self_parameters")
-
-        percent("parameter_annotations", "public_functions_public_parameters")
-
-        s = dict(sorted(s.items()))
-        print(json.dumps(s, indent=4), file=sys.stderr)
-
     @cached_property
-    def missing_annotations_delta(self) -> dict[Path, list[MissingAnnotation]]:
-        """Missing annotations which are not grandfathered"""
-        with self.args.grandfather.open() as fp:
-            grandfather = {i.strip() for i in fp}
-        self.summary["grandfather"] = len(grandfather)
+    def all_functions(self) -> list[Function]:
+        """All Functions, including empty and non-public"""
 
-        def grandfathered(lm: list[MissingAnnotation]) -> list[MissingAnnotation]:
-            return [m for m in lm if m.name not in grandfather]
-
-        items = self.missing_annotations.items()
-        return {k: g for k, v in items if (g := grandfathered(v))}
-
-    @cached_property
-    def missing_annotations(self) -> dict[Path, list[MissingAnnotation]]:
-        """All unannotated functions and parameters, indexed by Path"""
-
-        def count(key: str) -> None:
-            self.summary[key] = 1 + self.summary.get(key, 0)
-
-        def function(f: dict[str, Any]) -> Iterator[MissingAnnotation]:
-            count("all_functions")
-            if not _is_public(f["name"]):
+        def functions(filename: str, d: dict[str, Any]) -> Iterator[Function]:
+            path = Path(filename)
+            if path.suffix not in SUFFIXES:
                 return
-            count("public_functions")
+            pf = PythonFile(MissingTypeLinter.linter_name, path=path)
+            use = self.args.use_block_name
+            for f in d["functions"]:
+                yield Function(
+                    Annotation.make(f, pf, f["name"], use),
+                    [Annotation.make(p, pf, f["name"], use) for p in f["parameters"]],
+                )
 
-            if annotated := bool(f["return_annotation"]):
-                count("return_annotations")
-            else:
-                yield MissingAnnotation(f["name"], f["location"])
-            has_annotations = [annotated]  # pyrefly: ignore[unbound-name]
-
-            for p in f["parameters"]:
-                count("public_functions_all_parameters")
-                if p["name"] == "self":
-                    count("self_parameters")
-                    continue
-                if not _is_public(p["name"]):
-                    continue
-                count("public_functions_public_parameters")
-
-                if annotated := bool(p["annotation"]):
-                    count("parameter_annotations")
-                else:
-                    yield MissingAnnotation(f["name"], p["location"], p["name"])
-                has_annotations.append(annotated)  # pyrefly: ignore[unbound-name]
-
-            if all(has_annotations):
-                count("full_annotations")
-            elif any(has_annotations):
-                count("partial_annotations")
-            else:
-                count("unannotated")
-
-        def missing(i: int, pf: PythonFile) -> Iterator[MissingAnnotation]:
-            count("all_files")
-
-            assert pf.path is not None
-            functions = self.type_results[pf.path.absolute()]["functions"]
-
-            if self.args.verbose:
-                msg = f"{i + 1:03d}:{len(functions):03d}:{pf.path}"
-                _log(msg)
-
-            for f in functions:
-                yield from function(f)
-
-        all_files = [self.make_file(Path(f)) for f in self.type_results]
-        missed = ((pf, missing(i, pf)) for i, pf in enumerate(all_files))
-        return {pf.path: v for pf, m in missed if (v := [i for i in m if i.is_public])}
-
-    def _write_grandfather(self) -> None:
-        """Names of symbols that are grandfathered into not having type annotations"""
-        annotations = self.missing_annotations.values()
-        grandfather = sorted({m.name for v in annotations for m in v})
-        self.summary["grandfather"] = len(grandfather)
-        if not self.args.dry_run:
-            with self.args.grandfather.open("w") as fp:
-                fp.writelines(g + "\n" for g in grandfather)
+        items = sorted(self.type_results.items())
+        return [i for k, v in items for i in functions(k, v)]
 
     @cached_property
-    def _raw_type_results(self) -> dict[Path, Any]:
-        """`Results from calling `pyrefly` and un-JSONing it"""
+    def functions(self) -> list[Function]:
+        """All public annotations, grouped by function"""
+        return [f.public for f in self.all_functions if f.public]
+
+    @cached_property
+    def failing_annotations(self) -> dict[Path, list[Annotation]]:
+        """Public, missing annotations that are not grandfathered"""
+        d: dict[Path, list[Annotation]] = {}
+        it = (a for f in self.functions for a in f)
+        for a in it:
+            if a.missing_annotation and a.grandfather_name not in self.grandfather:
+                d.setdefault(a.python_file.path, []).append(a)
+        return d
+
+    @cached_property
+    def grandfather(self) -> set[str]:
+        """
+        Read lines from grandfather file, ignore comments and blank lines, return as set
+        """
+        with self.args.grandfather.open() as fp:
+            return {v for i in fp if (v := i.split("#")[0].strip())}
+
+    @cached_property
+    def must_write_grandfather(self) -> bool:
+        return self.args.write_grandfather or not self.args.grandfather.exists()
+
+    @cached_property
+    def type_results(self) -> dict[str, Any]:
+        """Results from calling `pyrefly` and un-JSONing it, then making names unique"""
         if self.args.type_result:
             text = self.args.type_result.read_text()
         else:
             path = self.args.path or ["torch"]
             cmd = *shlex.split(self.args.type_check), *path
             text = self.call(cmd)
-        return json.loads(text)
 
-    @cached_property
-    def type_results(self) -> dict[Path, Any]:
-        """Map sorted absolute file paths to lists of `pyrefly` function reports"""
-        it = ((Path(k), v) for k, v in sorted(self._raw_type_results.items()))
-        return {p: v for p, v in it if p.suffix in SUFFIXES}
+        type_results = json.loads(text)
+        name_count: dict[str, int] = {}
 
-    @cached_property
-    def must_write_grandfather(self) -> bool:
-        return self.args.write_grandfather or not self.args.grandfather.exists()
+        # Uniquify pyrefly names
+        for contents in type_results.values():
+            for f in contents["functions"]:
+                name = f["name"]
+                if count := name_count.get(name, 0):
+                    f["name"] = f"{name}[{count + 1}]"
+                name_count[name] = count + 1  # pyrefly: ignore[unbound-name]
+
+        return type_results
+
+    def _report(self) -> None:
+        def count(name: str, value: Number | Collection[Any]) -> None:
+            report[name] = value if isinstance(value, Number) else len(value)
+
+        def percent(name: str, base: str) -> None:
+            report[name + "_percent"] = round(100 * report[name] / report[base], 4)
+
+        Number: TypeAlias = int | float
+        report: dict[str, Number] = {}
+
+        full = "fully_annotated_functions"  # Our metric
+        part = "partially_annotated_functions"
+        un = "unannotated_functions"
+        report.update({full: 0, part: 0, un: 0})
+
+        for f in self.functions:
+            assert f.public is not None
+            a = [i.missing_annotation for i in f.public]
+            category = un if all(a) else part if any(a) else full
+            report[category] += 1
+
+        count("functions", self.functions)
+        for category in (full, part, un):
+            percent(category, "functions")
+
+        all_annotations = [a for f in self.all_functions for a in f]
+        annotations = [a for f in self.functions for a in f]
+        params = [a for a in annotations if a.param_name]
+        returns = [a for a in annotations if not a.param_name]
+
+        count("all_files", {a.python_file.path for a in all_annotations})
+        count("public_files", {f.path for f in self.functions})
+
+        count("all_functions", sum(not a.param_name for a in all_annotations))
+        count("public_functions", sum(not a.param_name for a in annotations))
+
+        count("all_annotations", all_annotations)
+        count("public_annotations", annotations)
+
+        count("all_params", sum(bool(a.param_name) for a in all_annotations))
+        count("public_params", params)
+
+        count("grandfather", self.grandfather)
+
+        def missing_percent(name: str, annotations: Collection[Annotation]) -> None:
+            report[name + "_needed"] = sum(a.needs_annotation for a in annotations)
+            report[name + "_missing"] = sum(a.missing_annotation for a in annotations)
+            percent(name + "_missing", name + "_needed")
+
+        missing_percent("annotations", annotations)
+        missing_percent("return_annotations", returns)
+        missing_percent("param_annotations", params)
+
+        print(json.dumps(report, indent=4), file=sys.stderr)
+
+    def _write_grandfather(self) -> None:
+        it = (i for f in self.functions for i in f.missing())
+        grandfather = sorted(a.grandfather_name for a in it)
+        if not self.args.dry_run:
+            with self.args.grandfather.open("w") as fp:
+                fp.writelines(g + "\n" for g in grandfather)
 
 
 @dc.dataclass(frozen=True)
-class MissingAnnotation:
-    name: str
-    location: dict[str, Any]
-    param_name: str | None = None
+class Annotation:
+    """
+    Represents one piece of information from `pyrefly` about a possible annotation,
+    which might be None.
+    """
 
-    is_fixer = False
+    annotation: str | None
+    location: dict[str, Any]
+    param_name: str | None
+    pyrefly_name: str
+    python_file: PythonFile
+    use_block_name: bool
+
+    @staticmethod
+    def make(
+        d: dict[str, Any], pf: PythonFile, pyrefly_name: str, use_block_name: bool
+    ) -> Annotation:
+        if (annotation := d.get("annotation", d)) is d:
+            # It's a return annotation
+            annotation = d["return_annotation"]
+            param_name = None
+        else:
+            # It's a parameter annotation
+            param_name = d["name"]
+
+        return Annotation(
+            annotation=annotation,  # pyrefly: ignore[unbound-name]
+            location=d["location"],
+            param_name=param_name,
+            pyrefly_name=pyrefly_name,
+            python_file=pf,
+            use_block_name=use_block_name,
+        )
+
+    @cached_property
+    def block_name(self) -> str:
+        # This triggers a somewhat expensive tokenization of the file.
+        return self.python_file.block_name(self.line + 1)
 
     @cached_property
     def column(self) -> int:
@@ -235,8 +270,29 @@ class MissingAnnotation:
         return column
 
     @cached_property
+    def function_name(self) -> str:
+        name = self.block_name if self.use_block_name else self.pyrefly_name
+        return name.split(".")[-1]
+
+    @cached_property
+    def grandfather_name(self) -> str:
+        if self.use_block_name:
+            name = ".".join((*self.python_file.python_parts, self.block_name))
+        else:
+            name = self.pyrefly_name
+        assert not name.endswith("."), (name, self)
+        return f"{name}({self.param_name}=)" if self.param_name else name
+
+    @cached_property
     def is_public(self) -> bool:
-        return _is_public(self.name)
+        return (
+            (self.param_name is None or is_public(self.param_name))
+            and is_public(self.pyrefly_name)
+            and (
+                not self.use_block_name
+                or (self.python_file.is_public and is_public(self.block_name))
+            )
+        )
 
     @cached_property
     def length(self) -> int | None:
@@ -251,14 +307,53 @@ class MissingAnnotation:
 
     def lint_result(self) -> LintResult:
         category = "parameter" if self.param_name else "return"
-        name = f"Missing {category} type for {self.name}"
+        name = f"Missing {category} type for {self.pyrefly_name}"
         return LintResult(
             char=self.column, length=self.length, line=self.line, name=name
         )
 
     @cached_property
-    def suffix(self) -> str:
-        return f"({self.param_name}=)" if self.param_name else ""
+    def missing_annotation(self) -> bool:
+        """Does this need an annotation but doesn't have one?"""
+        return self.annotation is None and self.needs_annotation
+
+    @cached_property
+    def needs_annotation(self) -> bool:
+        """Does this actually require annotation?
+
+        Parameters named `self` and `cls` do not need annotations, nor do the returns
+        of double underscore functions.
+        """
+        return (
+            self.is_public
+            and self.param_name not in ("self", "cls")
+            and (bool(self.param_name) or not self.function_name.startswith("__"))
+        )
+
+
+@dc.dataclass
+class Function:
+    return_: Annotation
+    params: Sequence[Annotation]
+
+    @cached_property
+    def public(self) -> Function | None:
+        if self.return_.is_public:
+            params = [a for a in self.params if a.is_public]
+            return Function(self.return_, params)
+        return None
+
+    def missing(self) -> Iterator[Annotation]:
+        if self.return_.missing_annotation:
+            yield self.return_
+        yield from (p for p in self.params if p.missing_annotation)
+
+    def path(self) -> Path:
+        return self.return_.python_file.path
+
+    def __iter__(self) -> Iterator[Annotation]:
+        yield self.return_
+        yield from self.params
 
 
 if __name__ == "__main__":

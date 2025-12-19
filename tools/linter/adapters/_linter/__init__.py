@@ -14,6 +14,7 @@ __all__ = [
     "Block",
     "FileLinter",
     "is_empty",
+    "is_public",
     "LineWithSets",
     "LintResult",
     "ParseError",
@@ -45,4 +46,4 @@ def is_empty(t: TokenInfo) -> bool:
 from .block import Block
 from .file_linter import FileLinter
 from .messages import LintResult
-from .python_file import PythonFile
+from .python_file import is_public, PythonFile

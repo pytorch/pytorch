@@ -64,7 +64,7 @@ class FileLinter:
         return success
 
     @classmethod
-    def make_file(cls, pc: Path | str) -> PythonFile:
+    def make_file(cls, pc: Path | str | None = None) -> PythonFile:
         return PythonFile.make(cls.linter_name, pc)
 
     @cached_property

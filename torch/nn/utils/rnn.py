@@ -238,7 +238,8 @@ def _packed_sequence_init_args(
 
     # support being called as `PackedSequence((data, batch_sizes), *, sorted_indices)`
     else:
-        assert isinstance(data, (list, tuple)) and len(data) == 2
+        if not (isinstance(data, (list, tuple)) and len(data) == 2):
+            raise AssertionError("Expected data to be a list or tuple of length 2")
         return data[0], data[1], sorted_indices, unsorted_indices
 
 
