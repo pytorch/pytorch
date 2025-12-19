@@ -1143,6 +1143,70 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_9', {'test': 1})""",
         )
 
+    def test_annotate_combine_function(self):
+        """Test basic annotate_fn usage"""
+
+        def combine_fn(old, new):
+            return f"{old}.{new}"
+
+        class Bar(nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "bar"}, combine_fn=combine_fn):
+                    return x * 1
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "foo"}, combine_fn=combine_fn):
+                    y = self.bar(x)
+                    return y * 2
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                with fx_traceback.annotate(
+                    {"mod_name": "my_mod"}, combine_fn=combine_fn
+                ):
+                    x = x / 2
+                    y = self.foo(x)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = MyMod()
+
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', {'mod_name': 'my_mod'})
+('call_function', 'mul', {'mod_name': 'my_mod.foo.bar'})
+('call_function', 'mul_1', {'mod_name': 'my_mod.foo'})""",
+            )
+
+        # Now test with require gradients
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', {'mod_name': 'my_mod'})
+('call_function', 'mul', {'mod_name': 'my_mod.foo.bar'})
+('call_function', 'mul_1', {'mod_name': 'my_mod.foo'})
+('call_function', 'mul_2', {'mod_name': 'my_mod.foo'})
+('call_function', 'mul_3', {'mod_name': 'my_mod.foo.bar'})
+('call_function', 'div_1', {'mod_name': 'my_mod'})""",
+            )
+
 
 if __name__ == "__main__":
     run_tests()

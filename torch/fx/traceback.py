@@ -2,6 +2,7 @@
 import copy
 import logging
 import traceback
+from collections.abc import Callable
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
@@ -268,9 +269,16 @@ def set_stack_trace(stack: list[str]):
         current_meta["stack_trace"] = "".join(stack)
 
 
+def _replace_combine_fn(old, new):
+    """
+    Combine the old and new annotations by replacing the old annotation with the new one.
+    """
+    return new
+
+
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def annotate(annotation_dict: dict):
+def annotate(annotation_dict: dict, combine_fn: Optional[Callable] = None):
     """
     Temporarily adds custom annotations to the current tracing context.
     The fx_node produced from this tracing context will have the
@@ -295,6 +303,10 @@ def annotate(annotation_dict: dict):
     Args:
         annotation_dict (dict): A dictionary of custom key-value pairs to inject
             into the FX trace metadata.
+        combine_fn (None | Callable): A function that specifies how to combines old and new annotations.
+            i.e. if nested annotations have the same key, how to combine them.
+            The default is to override with the new key.
+
 
     Example:
         After exiting the context, custom annotations are removed.
@@ -308,12 +320,20 @@ def annotate(annotation_dict: dict):
     has_custom = "custom" in current_meta
     old_custom = copy.copy(current_meta.get("custom", {}))
 
+    if combine_fn is None:
+        combine_fn = _replace_combine_fn
+
     try:
         if not has_custom:
             current_meta["custom"] = {}
 
-        # Update with all key-value pairs from the input dict
-        current_meta["custom"].update(annotation_dict)
+        # Update with all key-value pairs from the input dict using combine_fn
+        for key, new_value in annotation_dict.items():
+            if key in current_meta["custom"]:
+                old_value = current_meta["custom"][key]
+                current_meta["custom"][key] = combine_fn(old_value, new_value)
+            else:
+                current_meta["custom"][key] = new_value
         yield
     finally:
         if has_custom:
@@ -324,7 +344,7 @@ def annotate(annotation_dict: dict):
 
 
 @compatibility(is_backward_compatible=False)
-def annotate_fn(annotation_dict: dict):
+def annotate_fn(annotation_dict: dict, combine_fn: Optional[Callable] = None):
     """
     A decorator that wraps a function with the annotate context manager.
     Use this when you want to annotate an entire function instead of a specific code block.
@@ -352,7 +372,7 @@ def annotate_fn(annotation_dict: dict):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            with annotate(annotation_dict):
+            with annotate(annotation_dict, combine_fn=combine_fn):
                 return func(*args, **kwargs)
 
         return wrapper

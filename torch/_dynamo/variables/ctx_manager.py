@@ -1489,7 +1489,10 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         # preserve_node_meta context manager is setup. This is important to pass
         # on the metadata to the create_proxy nodes.
         stack = ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        annotation_dict, combine_fn = self.target_values
+        stack.enter_context(
+            torch.fx.traceback.annotate(annotation_dict, combine_fn=combine_fn)
+        )
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)

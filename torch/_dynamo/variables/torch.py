@@ -390,9 +390,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.fx.traceback.annotate,
             torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
-            assert len(args) <= 1 and len(kwargs) == 0
+            assert len(args) == 1
+            annotation_dict = args[0].as_python_constant()
+            combine_fn = (
+                kwargs["combine_fn"].as_python_constant()
+                if "combine_fn" in kwargs
+                else None
+            )
             return FxTracebackAnnotateVariable(
-                args[0].as_python_constant(), source=self.source
+                (annotation_dict, combine_fn), source=self.source
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
