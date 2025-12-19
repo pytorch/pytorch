@@ -30,6 +30,8 @@ It consists of
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
 
+For complete API documentation of the stable operators, see the [Torch Stable API](https://pytorch.org/cppdocs/stable.html) reference.
+
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
 ### Stable C headers
@@ -121,9 +123,9 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
 }
 
 // (5) Register the operator using STABLE_TORCH_LIBRARY
-//     Use TORCH_BOX to automatically handle boxing/unboxing
+//     Use TORCH_BOX to automatically generate the boxed wrapper
 STABLE_TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor", TORCH_BOX(&add_scalar));
 }
 
 // (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL

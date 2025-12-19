@@ -301,6 +301,32 @@ struct boxer {
 
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
+/**
+ * @brief Wraps a function to conform to the stable boxed kernel calling
+ * convention.
+ *
+ * This macro takes an unboxed kernel function and generates a boxed wrapper
+ * that can be registered with the stable library API. The boxed wrapper handles
+ * conversion between StableIValue representations and native C++ types.
+ *
+ * @param func The unboxed kernel function to wrap. Must be a function pointer
+ *             or a reference to a function.
+ *
+ * @return A pointer to the boxed function with signature:
+ *         `void(StableIValue* stack, uint64_t num_inputs, uint64_t
+ * num_outputs)`
+ *
+ * Example usage:
+ * @code
+ * Tensor my_kernel(const Tensor& input, int64_t size) {
+ *     return input.reshape({size});
+ * }
+ *
+ * STABLE_TORCH_LIBRARY_IMPL(my_namespace, CPU, m) {
+ *     m.impl("my_op", TORCH_BOX(my_kernel));
+ * }
+ * @endcode
+ */
 #define TORCH_BOX(func)                                               \
   torch::stable::detail::boxer<                                       \
       std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
@@ -317,6 +343,38 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 #define STABLE_CONCATENATE(s1, s2) STABLE_CONCATENATE_IMPL(s1, s2)
 // end of macros copied from c10/macros/Macros.h
 
+/**
+ * @brief Registers operator implementations for a specific dispatch key using
+ * the stable ABI.
+ *
+ * This is the stable ABI equivalent of `TORCH_LIBRARY_IMPL`. Use this macro
+ * to provide implementations of operators for a specific dispatch key (e.g.,
+ * CPU, CUDA) while maintaining binary compatibility across PyTorch versions.
+ *
+ * @note All kernel functions registered with this macro must be boxed using
+ *       the `TORCH_BOX` macro. The boxed calling convention is required for
+ *       stable ABI compatibility.
+ *
+ * @param ns The namespace in which the operators are defined (e.g., `myops`).
+ * @param k The dispatch key for which implementations are being registered
+ *          (e.g., `CPU`, `CUDA`).
+ * @param m The name of the StableLibrary variable that will be available in the
+ *          block for registering implementations.
+ *
+ * Example usage:
+ * @code
+ * STABLE_TORCH_LIBRARY_IMPL(myops, CPU, m) {
+ *     m.impl("my_op", TORCH_BOX(my_cpu_kernel));
+ * }
+ *
+ * STABLE_TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+ *     m.impl("my_op", TORCH_BOX(my_cuda_kernel));
+ * }
+ * @endcode
+ *
+ * @see STABLE_TORCH_LIBRARY for defining operator schemas
+ * @see TORCH_BOX for wrapping kernel functions
+ */
 #define STABLE_TORCH_LIBRARY_IMPL(ns, k, m) \
   _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, STABLE_UID)
 
@@ -337,6 +395,31 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
   void STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)( \
       torch::stable::detail::StableLibrary & m)
 
+/**
+ * @brief Defines a library of operators in a namespace using the stable ABI.
+ *
+ * This is the stable ABI equivalent of `TORCH_LIBRARY`. Use this macro to
+ * define operator schemas that will maintain binary compatibility across
+ * PyTorch versions. Only one `STABLE_TORCH_LIBRARY` block can exist per
+ * namespace; use `STABLE_TORCH_LIBRARY_FRAGMENT` for additional definitions
+ * in the same namespace from different translation units.
+ *
+ * @param ns The namespace in which to define operators (e.g., `myops`).
+ *           This should be a valid C++ identifier.
+ * @param m The name of the StableLibrary variable that will be available in the
+ *          block for defining operator schemas.
+ *
+ * Example usage:
+ * @code
+ * STABLE_TORCH_LIBRARY(myops, m) {
+ *     m.def("my_op(Tensor input, int size) -> Tensor");
+ *     m.def("another_op(Tensor a, Tensor b) -> Tensor");
+ * }
+ * @endcode
+ *
+ * @see STABLE_TORCH_LIBRARY_IMPL for registering implementations
+ * @see STABLE_TORCH_LIBRARY_FRAGMENT for extending a namespace
+ */
 #define STABLE_TORCH_LIBRARY(ns, m)                          \
   static void STABLE_TORCH_LIBRARY_init_##ns(                \
       torch::stable::detail::StableLibrary&);                \
@@ -350,6 +433,36 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
           __LINE__);                                         \
   void STABLE_TORCH_LIBRARY_init_##ns(torch::stable::detail::StableLibrary& m)
 
+/**
+ * @brief Extends operator definitions in an existing namespace using the stable
+ * ABI.
+ *
+ * This is the stable ABI equivalent of `TORCH_LIBRARY_FRAGMENT`. Use this macro
+ * to add additional operator definitions to a namespace that was already
+ * created with `STABLE_TORCH_LIBRARY`. This is useful when operator definitions
+ * need to be split across multiple translation units or files.
+ *
+ * @param ns The namespace to extend (must match a namespace previously defined
+ *           with `STABLE_TORCH_LIBRARY`).
+ * @param m The name of the StableLibrary variable that will be available in the
+ *          block for defining operator schemas.
+ *
+ * Example usage:
+ * @code
+ * // In file1.cpp
+ * STABLE_TORCH_LIBRARY(myops, m) {
+ *     m.def("op1(Tensor input) -> Tensor");
+ * }
+ *
+ * // In file2.cpp
+ * STABLE_TORCH_LIBRARY_FRAGMENT(myops, m) {
+ *     m.def("op2(Tensor input) -> Tensor");
+ * }
+ * @endcode
+ *
+ * @see STABLE_TORCH_LIBRARY for initial namespace definition
+ * @see STABLE_TORCH_LIBRARY_IMPL for registering implementations
+ */
 #define STABLE_TORCH_LIBRARY_FRAGMENT(ns, m) \
   _STABLE_TORCH_LIBRARY_FRAGMENT(ns, m, STABLE_UID)
 
