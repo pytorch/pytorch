@@ -1,5 +1,5 @@
-:term:`TorchScript`
-===========
+TorchScript
+===================
 
 .. toctree::
     :maxdepth: 1
@@ -12,13 +12,13 @@
     torch.jit.supported_ops <jit_builtin_functions>
 
 .. warning::
-    :term:`TorchScript` is deprecated, please use
+    TorchScript is deprecated, please use
     `torch.export <https://docs.pytorch.org/docs/stable/export.html>`__ instead.
 
 .. automodule:: torch.jit
 
-Creating :term:`TorchScript` Code
---------------------------
+Creating TorchScript Code
+----------------------------------
 
 .. autosummary::
     :toctree: generated
