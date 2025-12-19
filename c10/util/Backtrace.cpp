@@ -22,6 +22,7 @@
 #include <backtrace.h>
 #include <dlfcn.h>
 #include <iomanip>
+#include <regex>
 #endif
 
 #if SUPPORTS_LIBBACKTRACE || SUPPORTS_BACKTRACE
@@ -136,6 +137,8 @@ struct PrintData {
   size_t frame_curr; // frame being printed
   size_t frame_prev; // last frame to be printed
   backtrace_state* bt_state;
+  bool skip_python_frames;
+  bool has_skipped_python_frames;
   std::ostringstream os;
 };
 
@@ -162,6 +165,17 @@ void print_syminfo_callback(
 
   Dl_info info;
   bool dladdr_success = dladdr((void*)pc, &info) != 0;
+
+  if (pdata->skip_python_frames && dladdr_success) {
+    static const std::regex python(R"(\b(lib)?python3?\b)");
+    if (std::regex_search(info.dli_fname, python)) {
+      if (!std::exchange(pdata->has_skipped_python_frames, true)) {
+        pdata->os << "<omitting python frames>\n";
+      }
+      return;
+    }
+    pdata->has_skipped_python_frames = false;
+  }
 
   pdata->os << "frame #" << pdata->frame_curr << ": ";
   pdata->os << std::hex << std::showbase;
@@ -228,7 +242,8 @@ class GetBacktraceImpl {
   C10_ALWAYS_INLINE GetBacktraceImpl(
       size_t frames_to_skip,
       size_t maximum_number_of_frames,
-      bool /* skip_python_frames */) {
+      bool skip_python_frames)
+      : skip_python_frames_(skip_python_frames) {
     backtrace_.pcs.reserve(maximum_number_of_frames);
     backtrace_.max_frames = maximum_number_of_frames;
     backtrace_simple(
@@ -244,6 +259,8 @@ class GetBacktraceImpl {
     pdata.frame_curr = 0;
     pdata.frame_prev = -1;
     pdata.bt_state = state();
+    pdata.skip_python_frames = skip_python_frames_;
+    pdata.has_skipped_python_frames = false;
 
     for (size_t i = 0; i < backtrace_.pcs.size(); ++i) {
       pdata.frame_curr = i;
@@ -258,6 +275,7 @@ class GetBacktraceImpl {
     return pdata.os.str();
   }
 
+  bool skip_python_frames_;
   BacktraceData backtrace_;
 };
 
