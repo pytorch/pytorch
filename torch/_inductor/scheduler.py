@@ -2706,6 +2706,19 @@ def _replace_operation_buffer(
     V.graph.name_to_op[orig_op_name] = new_node
 
 
+def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    # If no extra memory read by epilogue, assume epilogue is free
+    # if extra memory is read by epilogue, add to minimum choice
+    total_read_bytes = node2.get_read_buffer_sizes()
+    template_write_bytes = node1.get_write_buffer_sizes()
+    extra_bytes = total_read_bytes - template_write_bytes
+    extra_bytes_ratio = extra_bytes / template_write_bytes
+
+    # Smoothly approaches 1 as extra_bytes_ratio increases
+    extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
+    return extra_memory_ratio * epilogue_runtime
+
+
 @dataclasses.dataclass
 class NodeUser:
     node: Union[BaseSchedulerNode, OutputNode]
@@ -2884,6 +2897,11 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        if (
+            config.max_autotune_gemm or config.max_autotune
+        ) and config.pipeline_max_autotune_gemm:
+            torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
+
         if config.combo_kernels:
             with dynamo_timed(
                 "Scheduler.create_combo_kernel_nodes",
@@ -3931,12 +3949,23 @@ class Scheduler:
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()
-            _, ms1 = multi_node.get_min_choice()
-            ms2, path2 = (
-                self.benchmark_fused_nodes(node_list_2)
-                if epilogue_fusion
-                else self.benchmark_fused_nodes(node_list_1)
-            )
+            min_choice, ms1 = multi_node.get_min_choice()
+
+            ms2 = float("inf")
+            bench_epilogue = config.benchmark_epilogue_fusion
+            if bench_epilogue:
+                ms2, path2 = (
+                    self.benchmark_fused_nodes(node_list_2)
+                    if epilogue_fusion
+                    else self.benchmark_fused_nodes(node_list_1)
+                )
+            else:
+                # By default, don't do prologue fusion. Generally slower
+                if not epilogue_fusion:
+                    return False
+
+                ms2 = node2._get_estimated_runtime()
+                ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
@@ -3959,7 +3988,7 @@ class Scheduler:
                 ):
                     continue
 
-                if unfused_time >= ms1 + ms2:
+                if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
                 triton_choices += 1
@@ -3975,13 +4004,17 @@ class Scheduler:
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
-
                 new_timings = {}
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
-                            future.result()
+                            res = future.result()
+                        elif not bench_epilogue:
+                            res = mod_fused.triton_
+                            res.precompile()
+                        else:
+                            res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
                     # triton  will unpredictably error with valid prologue fusions
@@ -3993,21 +4026,42 @@ class Scheduler:
                                 str(e),
                             )
                         continue
-                    # pyrefly: ignore [missing-attribute]
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused,
-                            # pyrefly: ignore [bad-argument-type]
-                            device,
+
+                    if bench_epilogue:
+                        # pyrefly: ignore [missing-attribute]
+                        with multi_node.swap_as_triton_caller(choice):
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused,
+                                # pyrefly: ignore [bad-argument-type]
+                                device,
+                            )
+                            new_timings[choice] = ms_fused
+                            if ms_fused < min_ms_fused:
+                                min_ms_fused = ms_fused
+                                ms_fused_choice = choice
+                    else:
+                        fusible_choice = (
+                            min_choice == choice
+                            or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
+
+                        if (
+                            res
+                            # pyrefly: ignore [missing-attribute]
+                            and len(res.launchers) == 1
+                            # pyrefly: ignore [bad-index]
+                            and res.launchers[0].n_spills <= 8
+                            and fusible_choice
+                        ):
                             ms_fused_choice = choice
+                            break
 
-                log_fusion(min_ms_fused, ms1, ms2)
+                if bench_epilogue:
+                    log_fusion(min_ms_fused, ms1, ms2)
 
-                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+                if (
+                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                ) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
                         # pyrefly: ignore [missing-attribute]

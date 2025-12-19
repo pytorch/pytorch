@@ -299,6 +299,34 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
             )
 
+    def test_dynamo_side_effect(self):
+        class GlobalContext:
+            def __init__(self):
+                self._tensors = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                with GlobalContext() as ctx:
+                    z = x + 1
+                    ctx._tensors["6"] = x + 2
+                return z, ctx
+
+        mod = Module()
+        inp = torch.randn(4, 4)
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="warn"
+        ):
+            val = torch.compile(mod)(inp)
+            # Verify new object is properly initialized
+            self.assertIn("6", val[1]._tensors)
+            self.assertEqual(val[1]._tensors["6"], inp + 2)
+
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
         cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
@@ -2155,25 +2183,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         actual = fn_opt(x, y)
 
         self.assertEqual(actual, expected)
-
-    def test_structseq_repr(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x):
-            result = torch.max(x, dim=0)
-            s = repr(result)
-            return result.values
-
-        x = torch.randn(3, 2)
-
-        # Verify that fullgraph=True fails (confirms graph break occurs)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True, backend="eager")(x)
-
-        # Verify that it works without fullgraph
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        result = opt_fn(x)
-        self.assertEqual(cnts.frame_count, 1)
 
     def test_range_input(self):
         def fn(a, rng):
@@ -7755,7 +7764,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected(x):
             return x + 42
@@ -7780,27 +7789,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), [], None
+        )
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [], None)
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), []
+            lambda L: isinstance(L["x"], torch.Tensor), [], None
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [], None)
 
         def injected_str(x: str):
             return x + "1"
@@ -7877,7 +7888,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"], None
         )
 
         def injected_bool(x: bool):

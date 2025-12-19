@@ -22,7 +22,7 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
@@ -43,6 +43,7 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
+from .lists import ListIteratorVariable
 
 
 if TYPE_CHECKING:
@@ -787,8 +788,6 @@ class ConstDictVariable(VariableTracker):
             self.call_method(tx, "update", args, kwargs)
             return self
         elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
             if self.source and not is_constant_source(self.source):
                 tx.output.guard_on_key_order.add(self.source)
             return ListIteratorVariable(
@@ -1018,12 +1017,10 @@ class SetVariable(ConstDictVariable):
 
     def __init__(
         self,
-        items: list[VariableTracker],
+        items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(items, SetVariable._default_value())
-        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:
@@ -1571,8 +1568,6 @@ class DictViewVariable(VariableTracker):
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         elif name == "__iter__":
-            from .lists import ListIteratorVariable
-
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
