@@ -17,6 +17,7 @@ from torch._inductor.ir import (
     ShapeAsConstantBuffer,
     TensorBox,
 )
+from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.utils import ensure_cutlass_api_available
 from torch._logging import getArtifactLogger
 
@@ -195,8 +196,11 @@ def add_cutlass_api_gemm_choices(
         log.debug("Failed to create GemmArguments", exc_info=True)
         return
 
-    cc = torch.cuda.get_device_capability()
-    cc_int = cc[0] * 10 + cc[1]
+    cc = get_cuda_arch()
+    if cc is None:
+        log.debug("Failed to get CUDA arch")
+        return
+    cc_int = int(cc)
 
     try:
         kernels = cutlass_api.get_kernels(args=args, cc=cc_int)
