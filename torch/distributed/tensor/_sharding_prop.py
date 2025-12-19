@@ -407,6 +407,13 @@ class ShardingPropagator:
         # Ideally, this function would be deleted, but there are a handful of
         # one off call sites here that aren't cleaned up.
 
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called after unwrap_to_op_info (create_schema=True).
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,

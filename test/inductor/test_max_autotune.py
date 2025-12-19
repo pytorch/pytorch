@@ -16,6 +16,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import torch
+import torch._inductor.async_compile
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
@@ -37,6 +38,7 @@ from torch._inductor.select_algorithm import (
     add_feedback_saver,
     add_preprocessing_fn,
     AlgorithmSelectorCache,
+    autotune_select_algorithm,
     clear_feedback_savers,
     clear_preprocessing_fns,
     ExternKernelCaller,
@@ -46,6 +48,7 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.template_heuristics.registry import override_template_heuristics
 from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
+    CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -1194,7 +1197,6 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
-    @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1306,7 +1308,6 @@ class TestMaxAutotune(TestCase):
             bf16_red_setting
         )
 
-    @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1355,7 +1356,6 @@ class TestMaxAutotune(TestCase):
                 rtol=1e-2,
             )
 
-    @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1406,7 +1406,6 @@ class TestMaxAutotune(TestCase):
                 code[1]
             )
 
-    @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1449,9 +1448,9 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check_not("extern_kernels.bmm_dtype").check(
                 "decompose_k"
-            ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
-                code[0]
-            )
+            ).check(
+                f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
+            ).run(code[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
@@ -1650,7 +1649,6 @@ class TestMaxAutotune(TestCase):
 
     @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
-    @skipIfXpu(msg="out_dtype override only available on NVIDIA")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -1983,7 +1981,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @fresh_cache()
-    @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2282,6 +2279,25 @@ class TestMaxAutotune(TestCase):
             c_f = torch.compile(f, mode="max-autotune-no-cudagraphs")
             _, code_out = run_and_get_code(c_f, *args)
             FileCheck().check(output_code_padding_check).run(code_out[0])
+
+    @parametrize("k", (15, 16))
+    @parametrize("dynamic", (False, True))
+    def test_even_k(self, k: int, dynamic: bool):
+        M, N = 21, 31
+        a = torch.randn((M, k), dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn((k, N), dtype=torch.float16, device=GPU_TYPE)
+
+        if dynamic:
+            torch._dynamo.mark_dynamic(a, 1)
+            torch._dynamo.mark_dynamic(b, 0)
+
+        with config.patch({"max_autotune": True}), fresh_cache():
+            _ = torch.compile(torch.mm)(a, b)
+            cache = TritonTemplate.all_templates["mm"]._generated_code_cache._cache
+            cache_key = next(iter(cache))
+
+        self.assertObjectIn(k, (15, 16))
+        self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
 
 class TestMaxAutotunePrecompile(TestCase):
@@ -3077,9 +3093,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        FileCheck().check("def triton").check_count(
+            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
+        ).check("tl.store").run(code[0])
 
     @config.patch(
         {
@@ -3312,6 +3328,338 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
 
+def autotune_select_algorithm_wrapper_return_multi():
+    def wrapper(*args, **kwargs):
+        kwargs["return_multi_template"] = True
+        return autotune_select_algorithm(*args, **kwargs)
+
+    return wrapper
+
+
+@instantiate_parametrized_tests
+class TestEpilogueFusionStaticAnalysis(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_fallback_to_aten": False,
+                    "benchmark_epilogue_fusion": False,
+                    "prologue_fusion": False,
+                }
+            )
+        )
+
+    @contextlib.contextmanager
+    def get_common_patches(self, async_compile: bool, persistent_tma: bool):
+        common_patches = (
+            config.patch(
+                {
+                    "triton.enable_persistent_tma_matmul": persistent_tma,
+                    "compile_threads": 1
+                    if not async_compile
+                    else config.compile_threads,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                autotune_select_algorithm_wrapper_return_multi(),
+            ),
+            fresh_cache(),
+        )
+        with contextlib.ExitStack() as stack:
+            for p in common_patches:
+                stack.enter_context(p)
+
+            yield
+
+    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
+    @parametrize("use_async_compile", (True, False))
+    def test_template_bad_epilogue_fusion(self, use_async_compile: bool):
+        def f(a, b):
+            return (a @ b).to(torch.float32)
+
+        a = torch.randn(512, 1152, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(1152, 7680, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+
+        # Save original configs to restore later
+        original_tma_mm_configs = tma_heuristic.mm_configs
+        original_mm_mm_configs = mm_heuristic.mm_configs
+
+        bad_tma_config = GemmConfig(256, 128, 64, 4, 8, group_m=8)
+        good_tma_config = GemmConfig(128, 64, 64, 4, 8, group_m=8)
+        if use_async_compile:
+            async_compile = torch._inductor.async_compile.AsyncCompile()
+            async_compile.wait_pool_ready()
+
+        for gemm_config in [bad_tma_config, good_tma_config]:
+            torch._dynamo.reset()
+            tma_heuristic.mm_configs = [
+                gemm_config,
+            ]
+            # Regular mm template gets no configs
+            mm_heuristic.mm_configs = []
+
+            # Different paths:
+            # benchmark_epilogue_fusion: True -> always multi_template
+            # causes benchmarking always
+            # benchmark_epilogue_fusion: False -> TritonTemplateBuffer
+            # returns speedup_from_fusion automatically as True
+            # What we want: force multi template -> no benchmarking with safety
+            try:
+                with (
+                    self.get_common_patches(use_async_compile, True),
+                    mock.patch.object(
+                        # Patch so that aten always loses
+                        ExternKernelCaller,
+                        "benchmark",
+                        return_value=float("inf"),
+                    ),
+                ):
+                    compiled_f = torch.compile(f, mode="max-autotune")
+                    out, code = run_and_get_code(compiled_f, a, b)
+
+                    if gemm_config == good_tma_config:
+                        # Fusion should occur
+                        FileCheck().check("triton_tem_fused__to_copy_mm").run(code[0])
+                    else:
+                        # Fusion should fail to occur, unfused kernels
+                        FileCheck().check("triton_tem_fused_mm").check(
+                            "triton_poi_fused__to_copy"
+                        ).run(code[0])
+
+                    if not config.cpp_wrapper:
+                        torch.testing.assert_close(out, f(a, b), atol=1e-2, rtol=1e-2)
+            finally:
+                # Restore original configs
+                tma_heuristic.mm_configs = original_tma_mm_configs
+                mm_heuristic.mm_configs = original_mm_mm_configs
+
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
+    )
+    @parametrize(
+        "test_case",
+        [
+            "spills_reject",  # High register spillage should reject fusion
+            "timing_reject",  # Triton much slower than aten should reject fusion
+            "accept_with_triton_faster",  # Low spills and good timing should accept fusion
+            "accept_with_aten_faster",  # Fusion even if aten is slightly faster
+        ],
+    )
+    @parametrize("use_async_compile", (True, False))
+    def test_template_epilogue_fusion_static_analysis(
+        self, test_case: str, use_async_compile: bool
+    ):
+        """
+        Test static analysis decisions for matmul epilogue fusions.
+
+        Tests the scheduler logic that decides whether to fuse epilogues without
+        benchmarking, based on:
+        1. Register spillage (n_spills <= 8 required for fusion)
+        2. Runtime comparison (epilogue_runtime + ms_min_choice > choice_timings[choice])
+        """
+
+        def f(a, b):
+            return (a @ b).to(torch.float32) + 1.0
+
+        torch._dynamo.reset()
+
+        a = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        original_mm_configs = mm_heuristic.mm_configs
+
+        # Use a single GemmConfig for the regular MM template
+        gemm_config = GemmConfig(64, 64, 32, 2, 4, group_m=8)
+        mm_heuristic.mm_configs = [gemm_config]
+
+        if use_async_compile:
+            async_compile = torch._inductor.async_compile.AsyncCompile()
+            async_compile.wait_pool_ready()
+
+        if test_case == "spills_reject":
+            mock_n_spills = 100
+            triton_time = 0.1
+            aten_time = float("inf")
+            expect_fusion = False
+        elif test_case == "timing_reject":
+            mock_n_spills = 0
+            triton_time = 100.0
+            aten_time = 0.001
+            expect_fusion = False
+        elif test_case == "accept_with_triton_faster":
+            mock_n_spills = 0
+            triton_time = 0.1
+            aten_time = float("inf")
+            expect_fusion = True
+        elif test_case == "accept_with_aten_faster":
+            mock_n_spills = 0
+            triton_time = 0.1
+            aten_time = 0.100000001
+            expect_fusion = True
+        else:
+            raise RuntimeError("Invalid test case")
+
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        original_precompile = CachingAutotuner.precompile
+
+        def mock_precompile(self, *args, **kwargs):
+            original_precompile(self, *args, **kwargs)
+            # After precompile, patch launchers with mock n_spills
+            for launcher in self.launchers:
+                launcher.n_spills = mock_n_spills
+
+        # Mock benchmark_choice to return predefined timings based on choice type
+        original_benchmark_choice = AlgorithmSelectorCache.benchmark_choice
+
+        @classmethod
+        def mock_benchmark_choice(cls, choice, autotune_args):
+            if isinstance(choice, ExternKernelCaller):
+                return aten_time
+            elif isinstance(choice, TritonTemplateCaller):
+                return triton_time
+            else:
+                return original_benchmark_choice(choice, autotune_args)
+
+        try:
+            with (
+                self.get_common_patches(use_async_compile, False),
+                mock.patch.object(
+                    AlgorithmSelectorCache,
+                    "benchmark_choice",
+                    mock_benchmark_choice,
+                ),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "precompile",
+                    mock_precompile,
+                ),
+            ):
+                compiled_f = torch.compile(f)
+                out, code = run_and_get_code(compiled_f, a, b)
+
+                if expect_fusion:
+                    FileCheck().check("triton_tem_fused__to_copy_add_mm_0.run").run(
+                        code[0]
+                    )
+                elif triton_time < aten_time:
+                    FileCheck().check("triton_tem_fused_mm").check(
+                        "triton_poi_fused__to_copy"
+                    ).run(code[0])
+                else:
+                    FileCheck().check_not("triton_tem_fused_mm").check(
+                        "triton_poi_fused__to_copy"
+                    ).run(code[0])
+
+                # TODO (paulzhan): Accuracy fails with cpp_warpper, ok for now
+                # as path is only hit with Async Pipelined Autotuning
+                # mainly for training
+                if not config.cpp_wrapper:
+                    torch.testing.assert_close(out, f(a, b), atol=1e-2, rtol=1e-2)
+        finally:
+            mm_heuristic.mm_configs = original_mm_configs
+
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
+    )
+    @parametrize("fuse_epilogue", (True, False))
+    @parametrize("use_async_compile", (True, False))
+    def test_template_epilogue_fusion_extra_reads(
+        self, fuse_epilogue: bool, use_async_compile: bool
+    ):
+        # Function has 2 extra reads for epilogue, same size as write
+        def fn(x, w, bias, scale):
+            out = torch.mm(x, w)
+            return out * scale + bias
+
+        torch._dynamo.reset()
+
+        x = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
+        bias = torch.randn(512, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.randn(512, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        original_mm_configs = mm_heuristic.mm_configs
+
+        gemm_config = GemmConfig(64, 64, 32, 2, 4, group_m=8)
+        mm_heuristic.mm_configs = [gemm_config]
+
+        if use_async_compile:
+            async_compile = torch._inductor.async_compile.AsyncCompile()
+            async_compile.wait_pool_ready()
+
+        epilogue_runtime = 0.5
+        aten_time = 1.0
+        unfused_time = aten_time + epilogue_runtime
+        # 2 times extra bytes / 3
+        estimated_fused = epilogue_runtime * 2 / 3
+
+        if fuse_epilogue:
+            # triton + 1 read / 2 extra memory ratio * epilogue_runtime
+            # < aten_time + epilogue_runtime
+            triton_time = unfused_time - estimated_fused - 0.01
+        else:
+            triton_time = unfused_time - estimated_fused + 0.01
+
+        from torch._inductor.scheduler import BaseSchedulerNode
+
+        original_benchmark_choice = AlgorithmSelectorCache.benchmark_choice
+
+        @classmethod
+        def mock_benchmark_choice(cls, choice, autotune_args):
+            if isinstance(choice, ExternKernelCaller):
+                return aten_time
+            elif isinstance(choice, TritonTemplateCaller):
+                return triton_time
+            else:
+                return original_benchmark_choice(choice, autotune_args)
+
+        def mock_get_estimated_runtime(node):
+            return epilogue_runtime
+
+        try:
+            with (
+                self.get_common_patches(use_async_compile, False),
+                mock.patch.object(
+                    AlgorithmSelectorCache,
+                    "benchmark_choice",
+                    mock_benchmark_choice,
+                ),
+                mock.patch.object(
+                    BaseSchedulerNode,
+                    "_get_estimated_runtime",
+                    mock_get_estimated_runtime,
+                ),
+            ):
+                compiled_fn = torch.compile(fn)
+                out, code = run_and_get_code(compiled_fn, x, w, bias, scale)
+
+                if fuse_epilogue:
+                    FileCheck().check("triton_tem_fused_add_mm_mul").run(code[0])
+                else:
+                    # Aten wins in unfused case
+                    FileCheck().check_not("triton_tem").check(
+                        "triton_poi_fused_add_mul"
+                    ).run(code[0])
+
+                if not config.cpp_wrapper:
+                    torch.testing.assert_close(
+                        out, fn(x, w, bias, scale), atol=1e-1, rtol=1e-1
+                    )
+        finally:
+            mm_heuristic.mm_configs = original_mm_configs
+
+
 class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
     """Standalone tests for AsyncAutotuner caching behavior."""
 
@@ -3322,7 +3670,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
-        "test_template_bad_epilogue_fusion": "Benchmarking path is different",
     }
 
     @classmethod
