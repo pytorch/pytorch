@@ -106,6 +106,7 @@ class _Action(NamedTuple):
             return f"({';'.join(sub_action_reprs)}){self.computation_type.value}"
         else:
             repr_str = str(self.stage_index)
+            # Use .value to get the short string (e.g., "F", "B") instead of the full enum name
             repr_str += self.computation_type.value
             if self.microbatch_index is not None:
                 repr_str += str(self.microbatch_index)
