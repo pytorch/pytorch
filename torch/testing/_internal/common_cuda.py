@@ -383,6 +383,69 @@ def xfailIfSM120OrLater(func):
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
+def _get_dummy_allocator(check_vars):
+    dummy_allocator_source_vars = """
+    #include <torch/extension.h>
+    #include <ATen/cuda/Exceptions.h>
+    #include <cuda_runtime_api.h>
+
+    extern "C" {
+        C10_EXPORT int called_dummy_alloc = 0;
+        C10_EXPORT int called_dummy_free = 0;
+
+        // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+        C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+        called_dummy_alloc = 123;
+        void* ptr;
+        C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+        return ptr;
+        }
+
+        C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+        called_dummy_free = 321;
+        C10_CUDA_CHECK(cudaFree(ptr));
+        }
+    }
+    """
+    dummy_allocator_source_no_vars = """
+    #include <torch/extension.h>
+    #include <ATen/cuda/Exceptions.h>
+    #include <cuda_runtime_api.h>
+
+    extern "C" {
+      // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+      C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+        void* ptr;
+        C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+        return ptr;
+      }
+
+      C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+        C10_CUDA_CHECK(cudaFree(ptr));
+      }
+    }
+    """
+
+    from torch.utils.cpp_extension import load_inline
+
+    dummy_allocator_libname = "dummy_allocator"
+    dummy_allocator = load_inline(
+        name=dummy_allocator_libname,
+        cpp_sources=dummy_allocator_source_vars
+        if check_vars
+        else dummy_allocator_source_no_vars,
+        is_python_module=False,
+        keep_intermediates=False,
+        verbose=True,
+        with_cuda=True,
+    )
+    allocator = torch.cuda.memory.CUDAPluggableAllocator(
+        dummy_allocator,
+        "dummy_alloc",
+        "dummy_free",
+    )
+    return allocator, dummy_allocator
+
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     assert not torch.cuda.is_initialized()
