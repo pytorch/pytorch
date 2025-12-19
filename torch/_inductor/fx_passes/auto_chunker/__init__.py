@@ -45,6 +45,10 @@ def chunk(gm: GraphModule) -> GraphModule:
     """
     graph = gm.graph
 
+    if torch._inductor.config.cpp_wrapper:
+        # cpp wrapper does not support codegening invoke_subgraph
+        return gm
+
     if gm.meta.get("produced_by_chunker", False):
         # Don't chunk a graph produced by the chunker
         return gm
