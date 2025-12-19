@@ -2030,7 +2030,7 @@ class TestStandaloneCompile(TestCase):
                             file_contents = f.read()
                         if device == GPU_TYPE:
                             file_contents = file_contents.replace(
-                                "2.0, tl.float32", "8.0, tl.float32"
+                                "tmp1 = 2.0", "tmp1 = 8.0"
                             )
                         else:
                             assert device == "cpu"

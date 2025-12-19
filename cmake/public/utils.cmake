@@ -409,7 +409,7 @@ function(torch_compile_options libname)
         -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+        list(APPEND private_compile_options -Werror=unused-but-set-variable -Werror=cpp)
       endif()
     endif()
   endif()
