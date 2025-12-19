@@ -270,9 +270,7 @@ def memory_snapshot(
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
-def _snapshot(
-    device: _device_t = None, augment_with_fx_traces: bool = False
-) -> _Snapshot:
+def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _Snapshot:
     """
     Capture a snapshot of the XPU memory state at the time this function is called.
 
@@ -334,8 +332,10 @@ def _snapshot(
                 "free_completed",  # memory reclaimed and reusable
                 "segment_alloc",  # ask SYCL runtime for more memory
                 "segment_free",  # called SYCL runtime to return memory to XPU
-                "oom",  # threw an OOM exception
+                "segment_map",  # ask SYCL runtime to map memory
+                "segment_unmap",  # called SYCL runtime to unmap memory
                 "snapshot",  # snapshot taken
+                "oom",  # threw an OOM exception
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
@@ -373,10 +373,10 @@ def _dump_snapshot(
     workflows with large `max_entries`.
 
     Arguments:
-        filename (str): Name of the file to create. Defaults to "dump_snapshot.pickle".
-        augment_with_fx_traces (bool): If True, augment the snapshot with FX debug information
+        filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+        augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
             before dumping. This maps generated FX code stack traces back to original model
-            source code. Defaults to False.
+            source code. Defaults to ``False``.
     """
     s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
 
@@ -442,7 +442,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
-        clear_history (bool, optional): Clear history when enabling, defaults to False.
+        clear_history (bool, optional): Clear history when enabling, defaults to ``False``.
         skip_actions (list[str], optional): List of action types to skip when recording
             memory history. This can be used to reduce memory overhead by excluding
             certain types of events from being recorded. Valid action types are:
@@ -460,7 +460,7 @@ def _record_memory_history(
             For example, to skip recording free_requested events:
             `skip_actions=["free_requested"]`
 
-            Defaults to `None` (record all actions).
+            Defaults to ``None`` (record all actions).
     """
     torch._C._xpu_recordMemoryHistory(
         enabled,
