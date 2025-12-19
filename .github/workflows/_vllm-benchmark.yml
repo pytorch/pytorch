@@ -82,17 +82,24 @@ jobs:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          python-version: 3.12
+          activate-environment: true
+
       - name: Install build artifacts
+        shell: bash
         run: |
           set -eux
           ls -laR dist
 
-           pip install \
+          uv pip install \
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
             dist/vllm/vllm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu129
+            --extra-index-url https://download.pytorch.org/whl/cu129 \
+            --index-strategy unsafe-best-match
 
       - name: Print some debug information
         env:
@@ -105,7 +112,8 @@ jobs:
 
           {
             echo "### Run vLLM benchmark with the following packages:"
-            echo "PyTorch: ${PYTORCH_WHL}"
+            echo "PyTorch:"
+            echo "${PYTORCH_WHL}"
             echo "vLLM: ${VLLM_WHL}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
