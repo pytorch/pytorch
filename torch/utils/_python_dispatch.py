@@ -106,10 +106,11 @@ class TorchDispatchMode:
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        if "__torch_dispatch__" in cls.__dict__:
-            raw = cls.__dict__["__torch_dispatch__"]
-            if not isinstance(raw, classmethod):
-                cls.__torch_dispatch__ = torch._disable_dynamo(raw, recursive=True)
+        if cls._should_skip_dynamo():
+            if "__torch_dispatch__" in cls.__dict__:
+                raw = cls.__dict__["__torch_dispatch__"]
+                if not isinstance(raw, classmethod):
+                    cls.__torch_dispatch__ = torch._disable_dynamo(raw, recursive=True)
 
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
@@ -204,6 +205,32 @@ class TorchDispatchMode:
     @classmethod
     def is_infra_mode(cls) -> bool:
         return False
+
+    @classmethod
+    def _should_skip_dynamo(cls) -> bool:
+        """Skip Dynamo when the flag is set to True
+
+        This is temporary measure to rollout a feature
+        that skips PT2 compilation inside __torch_dispatch__
+        frames.
+
+        If this flag is off, we would expect following:
+
+        class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+        # instead of recursively disabling, we are compiling into __torch_dispatch__
+        assert len(backend.graphs) == 1
+        """
+        return True
 
     @classmethod
     def ignore_compile_internals(cls) -> bool:

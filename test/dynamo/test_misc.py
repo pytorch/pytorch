@@ -412,6 +412,25 @@ graph():
         self.assertEqual(out.sum().item(), 5.0)
         self.assertEqual(len(backend.graphs), 0)
 
+    def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+        self.assertEqual(len(backend.graphs), 1)
+
     def test_compile_non_infra_multiple(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -546,6 +565,10 @@ graph():
         # When the config is False, torch.compile inside __torch_dispatch__ should
         # be skipped (old behavior) because we are inside a dispatch mode.
         class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 out = torch.compile(func, backend=backend, fullgraph=True)(
                     *args, **kwargs
