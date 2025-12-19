@@ -101,17 +101,7 @@ class ComputedLazyCache:
             # We need to recompute the result symbolically instead of using
             # the pre-computed constant value.
             tx = InstructionTranslator.current_tx()
-
-            # Realize all args (lazy vars are already realized, this handles
-            # ComputedLazyConstantVariable recursively)
-            realized_args = []
-            for arg in self.args:
-                if isinstance(arg, LazyVariableTracker):
-                    realized_args.append(arg.realize())
-                else:
-                    realized_args.append(arg)
-
-            # Re-apply the operation with the realized args
+            realized_args = [arg.realize() for arg in self.args]
             self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
         else:
             # All sources are constants, use the pre-computed value
