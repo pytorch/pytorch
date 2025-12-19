@@ -193,7 +193,10 @@ def sum(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
-    assert dtype is None or isinstance(dtype, torch.dtype)
+    if dtype is not None and not isinstance(dtype, torch.dtype):
+        raise AssertionError(
+            f"dtype must be None or a torch.dtype, got {type(dtype).__name__}"
+        )
 
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
