@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    NumberType,
     suggest_memory_format,
     TensorLike,
 )
@@ -7174,6 +7175,51 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
+@register_meta(aten.miopen_rnn.default)
+def miopen_rnn(
+    input,
+    weight,
+    weight_stride0,
+    # weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    # proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+    total_weight_elems = 0
+    for w in weight:
+        if w.numel() > 0:
+            total_weight_elems += w.numel()
+
+    weight_buf = input.new_empty((total_weight_elems,))
+    return _cudnn_rnn(
+        input,
+        weight,
+        weight_stride0,
+        weight_buf,
+        hx,
+        cx,
+        mode,
+        hidden_size,
+        0,
+        num_layers,
+        batch_first,
+        dropout,
+        train,
+        bidirectional,
+        batch_sizes,
+        dropout_state,
+    )
+
+
 @register_meta(aten.mkldnn_rnn_layer.default)
 def mkldnn_rnn_layer(
     input,
@@ -7429,6 +7475,20 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
         memory_format=torch.contiguous_format,
+    )
+
+
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(
+    self: NumberType,
+    boundaries: Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
     )
 
 

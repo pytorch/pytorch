@@ -10,7 +10,7 @@ import re
 import sys
 import warnings
 from inspect import signature
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypedDict
+from typing import Any, cast, Literal, TYPE_CHECKING, TypedDict
 from typing_extensions import deprecated, NotRequired
 
 import torch
@@ -919,12 +919,13 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
 
 def _record_memory_history(
-    enabled: Optional[Literal["state", "all"]] = "all", *args, **kwargs
+    enabled: Literal["state", "all"] | None = "all", *args, **kwargs
 ) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
@@ -1016,15 +1017,15 @@ def _record_memory_history(
 
 
 def _record_memory_history_impl(
-    enabled: Optional[str] = "all",
-    context: Optional[str] = "all",
+    enabled: str | None = "all",
+    context: str | None = "all",
     stacks: str = "all",
     max_entries: int = sys.maxsize,
     device: "Device" = None,
     clear_history: bool = False,
     compile_context: bool = False,
     global_record_annotations: bool = False,
-    skip_actions: Optional[list[str]] = None,
+    skip_actions: list[str] | None = None,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -1034,6 +1035,7 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
     )
 
@@ -1421,7 +1423,7 @@ class MemPool(_MemPool):
 
     def __init__(
         self,
-        allocator: Optional[_cuda_CUDAAllocator] = None,
+        allocator: _cuda_CUDAAllocator | None = None,
         use_on_oom: bool = False,
         no_split: bool = False,
     ):
@@ -1434,7 +1436,7 @@ class MemPool(_MemPool):
         return super().id
 
     @property
-    def allocator(self) -> Optional[_cuda_CUDAAllocator]:
+    def allocator(self) -> _cuda_CUDAAllocator | None:
         r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
