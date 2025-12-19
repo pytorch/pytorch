@@ -663,7 +663,10 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
             # spec.mesh._layout and spec.tensor_meta have different stride, spec.tensor_meta.stride as hardcode value 0
             global_strides = (1,)
-            for dim in reversed(spec.tensor_meta.shape[1:]):
+            shape_for_strides = (
+                spec.tensor_meta.shape if spec.tensor_meta is not None else global_shape
+            )
+            for dim in reversed(shape_for_strides[1:]):
                 global_strides = (global_strides[0] * dim,) + global_strides
 
             if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
