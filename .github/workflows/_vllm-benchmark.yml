@@ -105,10 +105,10 @@ jobs:
         env:
           VLLM_PINNED_COMMIT: ${{ steps.vllm-pinned-commit.outputs.commit }}
         run: |
-          pip list
+          uv pip list
 
-          PYTORCH_WHL=$(pip list | grep torch)
-          VLLM_WHL=$(pip list | grep vllm)
+          PYTORCH_WHL=$(uv pip list | grep torch)
+          VLLM_WHL=$(uv pip list | grep vllm)
 
           {
             echo "### Run vLLM benchmark with the following packages:"
