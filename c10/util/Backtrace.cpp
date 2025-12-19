@@ -20,6 +20,7 @@
 #if SUPPORTS_LIBBACKTRACE
 #include <backtrace-supported.h>
 #include <backtrace.h>
+#include <dlfcn.h>
 #include <iomanip>
 #endif
 
@@ -155,7 +156,7 @@ void print_syminfo_callback(
     void* data,
     uintptr_t pc,
     const char* symname,
-    uintptr_t symval,
+    uintptr_t /* symval */,
     uintptr_t /* symsize */) {
   PrintData* pdata = (PrintData*)data;
 
@@ -164,14 +165,26 @@ void print_syminfo_callback(
     return; // skip inlined frame
   }
 
+  Dl_info info;
+  bool dladdr_success = dladdr((void*)pc, &info) != 0;
+
   pdata->os << "frame #" << pdata->frame_curr << ": ";
   pdata->os << std::hex << std::showbase;
   if (symname != nullptr) {
-    pdata->os << symname << " + " << (pc - symval) << '\n';
+    pdata->os << symname;
+  } else if (dladdr_success && info.dli_sname != nullptr) {
+    pdata->os << info.dli_sname;
+  } else if (dladdr_success) {
+    pdata->os << "<start_offset>+" << (pc - (uintptr_t)info.dli_fbase);
   } else {
-    pdata->os << '(' << pc << ")\n";
+    pdata->os << '<' << pc << '>';
   }
-  pdata->os << std::noshowbase << std::dec;
+
+  if (dladdr_success) {
+    pdata->os << " from " << info.dli_fname;
+  }
+
+  pdata->os << '\n' << std::noshowbase << std::dec;
   pdata->frame_prev = pdata->frame_curr;
 }
 
@@ -200,7 +213,7 @@ int print_pcinfo_callback(
   int status = 0;
   char* demangled = abi::__cxa_demangle(function, nullptr, nullptr, &status);
   pdata->os << "frame #" << pdata->frame_curr << ": "
-            << (status == 0 ? demangled : function) << " at "
+            << (status == 0 ? demangled : function) << " from "
             << (filename ? filename : "???") << ':' << lineno << '\n';
   pdata->frame_prev = pdata->frame_curr;
   free(demangled);
