@@ -1557,6 +1557,12 @@
     {
       "Gb_type": "Unsupported function call (delayed)",
       "Context": "source: {self.source}",
+      "Explanation": "Dynamo determined that a graph break should occur when calling `{name}`. Reason: {self.msg}",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported function call (delayed)",
+      "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
     }
