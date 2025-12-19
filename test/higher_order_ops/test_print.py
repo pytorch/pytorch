@@ -468,6 +468,36 @@ x = add_1, y = add_2);  getitem = None
             expected = f_args(*inputs)
             self.assertTrue(torch.allclose(res, expected))
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_compile_inductor_cpp_wrapper_codegen(self):
+        """Test that C++ wrapper generates std::cout statements for print HOP.
+
+        This verifies that when compiling with inductor (C++ wrapper), the generated
+        code uses std::cout directly for printing.
+        """
+
+        def f(x):
+            torch._higher_order_ops.print("C++ codegen test: val={v}", v=x)
+            res = x + x
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        # Enable C++ wrapper and get the generated code
+        with config.patch({"cpp_wrapper": True}):
+            compiled_f = torch.compile(f, backend="inductor")
+            _, codes = run_and_get_code(compiled_f, *inputs)
+
+            # Concatenate all generated code chunks
+            merged_code = "\n".join(codes)
+
+            # Verify that the generated C++ code uses std::cout
+            self.assertIn(
+                'std::cout << "C++ codegen test: val=<Tensor:arg1_1>" << std::endl;',
+                merged_code,
+                "Generated C++ code should use std::cout for print HOP",
+            )
+
 
 if __name__ == "__main__":
     run_tests()
