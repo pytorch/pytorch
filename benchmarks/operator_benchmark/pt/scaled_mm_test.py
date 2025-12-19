@@ -9,6 +9,8 @@ from typing import Optional
 
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.torch_version import TorchVersion
 
 
 """
@@ -19,6 +21,21 @@ Uses the same dtype + scale/quantize helpers as `test/test_scaled_matmul_cuda.py
 """
 
 _TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
+
+
+def _should_generate_scaled_mm_configs() -> bool:
+    # Benchmarks are CUDA-centric; register nothing when the op can't run.
+    # Minimum requirements:
+    # - PyTorch 2.9+ (scaled_mm introduced)
+    # - CUDA SM90+ (compute capability >= 9.0) OR ROCm MI300+ (gfx94x)
+    return (
+        TorchVersion(torch.__version__) >= "2.9"
+        and hasattr(torch.nn.functional, "scaled_mm")
+        and (
+            (torch.version.hip is None and bool(SM90OrLater))
+            or (torch.version.hip is not None and bool(PLATFORM_SUPPORTS_FP8))
+        )
+    )
 
 
 def _get_test_scaled_matmul_cuda() -> ModuleType:
@@ -64,21 +81,10 @@ def _supports_fp8_deepseek_blockwise_scaling() -> bool:
     # to SM90 (H100) only. On SM100 (B200) this errors with NotImplementedError.
     if not torch.cuda.is_available() or torch.version.cuda is None:
         return False
+    # These scaling modes require CUDA 12.9+ (see `aten/src/ATen/cuda/CUDABlas.cpp:get_scale_mode`).
+    if torch.version.hip is None and TorchVersion(torch.version.cuda) < "12.9":
+        return False
     return torch.cuda.get_device_capability(0) == (9, 0)
-
-
-def _cuda_version_tuple() -> tuple[int, int]:
-    v = torch.version.cuda
-    if v is None:
-        return (0, 0)
-    # torch.version.cuda is typically like "12.9"
-    parts = v.split(".")
-    try:
-        major = int(parts[0])
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        return (major, minor)
-    except Exception:
-        return (0, 0)
 
 
 def _supports_fp8_rowwise_fp32_output() -> bool:
@@ -88,7 +94,7 @@ def _supports_fp8_rowwise_fp32_output() -> bool:
         return False
     if not torch.cuda.is_available() or torch.version.cuda is None:
         return False
-    if _cuda_version_tuple() < (12, 9):
+    if TorchVersion(torch.version.cuda) < "12.9":
         return False
     return torch.cuda.get_device_capability(0) == (9, 0)
 
@@ -432,19 +438,22 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         return torch.nn.functional.scaled_mm(x, y, **kwargs)
 
 # FP8 matmul only supports E4M3.
-scaled_mm_configs_short = op_bench.config_list(
-    attr_names=["M", "N", "K"],
-    attrs=[
-        [16384, 2048, 7168],   # DSv3 671B
-        [16384, 8192, 5120],   # Llama4 16e
-    ],
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16"],
-    },
-    tags=["short"],
-)
+if _should_generate_scaled_mm_configs():
+    scaled_mm_configs_short = op_bench.config_list(
+        attr_names=["M", "N", "K"],
+        attrs=[
+            [16384, 2048, 7168],   # DSv3 671B
+            [16384, 8192, 5120],   # Llama4 16e
+        ],
+        cross_product_configs={
+            "device": ["cuda"],
+            "float8_dtype": ["e4m3fn"],
+            "output_dtype": ["bfloat16"],
+        },
+        tags=["short"],
+    )
+else:
+    scaled_mm_configs_short = []
 
 # Reduced shapes for faster runs.
 _scaled_mm_long_shapes = [
@@ -458,48 +467,8 @@ _scaled_mm_long_shapes = [
 # combinations based on the running platform.
 scaled_mm_configs_long = []
 
-# FP8 tensorwise supports bf16 and fp32 output.
-scaled_mm_configs_long += op_bench.config_list(
-    attr_names=["M", "N", "K"],
-    attrs=_scaled_mm_long_shapes,
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16"],
-        "scaling": ["fp8_tensorwise"],
-    },
-    tags=["long"],
-)
-
-# FP8 rowwise: keep bf16-only for now.
-rowwise_output_dtypes = ["bfloat16"]
-scaled_mm_configs_long += op_bench.config_list(
-    attr_names=["M", "N", "K"],
-    attrs=_scaled_mm_long_shapes,
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],
-        "output_dtype": rowwise_output_dtypes,
-        "scaling": ["fp8_rowwise"],
-    },
-    tags=["long"],
-)
-
-# MX + NVFP4: keep bf16-only for now.
-scaled_mm_configs_long += op_bench.config_list(
-    attr_names=["M", "N", "K"],
-    attrs=_scaled_mm_long_shapes,
-    cross_product_configs={
-        "device": ["cuda"],
-        "float8_dtype": ["e4m3fn"],
-        "output_dtype": ["bfloat16"],
-        "scaling": ["mxfp8", "mxfp4", "nvfp4"],
-    },
-    tags=["long"],
-)
-
-# DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
-if _supports_fp8_deepseek_blockwise_scaling():
+if _should_generate_scaled_mm_configs():
+    # FP8 tensorwise supports bf16 and fp32 output.
     scaled_mm_configs_long += op_bench.config_list(
         attr_names=["M", "N", "K"],
         attrs=_scaled_mm_long_shapes,
@@ -507,15 +476,63 @@ if _supports_fp8_deepseek_blockwise_scaling():
             "device": ["cuda"],
             "float8_dtype": ["e4m3fn"],
             "output_dtype": ["bfloat16"],
-            "scaling": ["fp8_blockwise_1x128", "fp8_blockwise_128x128"],
+            "scaling": ["fp8_tensorwise"],
         },
         tags=["long"],
     )
 
-# Generate tests for scaled_mm
-op_bench.generate_pt_test(
-    scaled_mm_configs_short + scaled_mm_configs_long, ScaledMMBenchmark
-)
+    # FP8 rowwise requires CUDA 12.9+ on CUDA builds (see `aten/src/ATen/cuda/CUDABlas.cpp:get_scale_mode`).
+    if torch.version.hip is None and TorchVersion(torch.version.cuda) < "12.9":
+        pass
+    else:
+        # Keep bf16-only for now.
+        rowwise_output_dtypes = ["bfloat16"]
+        scaled_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K"],
+            attrs=_scaled_mm_long_shapes,
+            cross_product_configs={
+                "device": ["cuda"],
+                "float8_dtype": ["e4m3fn"],
+                "output_dtype": rowwise_output_dtypes,
+                "scaling": ["fp8_rowwise"],
+            },
+            tags=["long"],
+        )
+
+    # MX + NVFP4: keep bf16-only for now.
+    scaled_mm_configs_long += op_bench.config_list(
+        attr_names=["M", "N", "K"],
+        attrs=_scaled_mm_long_shapes,
+        cross_product_configs={
+            "device": ["cuda"],
+            "float8_dtype": ["e4m3fn"],
+            "output_dtype": ["bfloat16"],
+            "scaling": ["mxfp8", "mxfp4", "nvfp4"],
+        },
+        tags=["long"],
+    )
+
+    # DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
+    if _supports_fp8_deepseek_blockwise_scaling():
+        scaled_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K"],
+            attrs=_scaled_mm_long_shapes,
+            cross_product_configs={
+                "device": ["cuda"],
+                "float8_dtype": ["e4m3fn"],
+                "output_dtype": ["bfloat16"],
+                "scaling": ["fp8_blockwise_1x128", "fp8_blockwise_128x128"],
+            },
+            tags=["long"],
+        )
+
+# Generate tests for scaled_mm (register nothing on unsupported platforms).
+if _should_generate_scaled_mm_configs():
+    _scaled_mm_configs = scaled_mm_configs_short + scaled_mm_configs_long
+else:
+    _scaled_mm_configs = []
+
+op_bench.generate_pt_test(_scaled_mm_configs, ScaledMMBenchmark)
 
 
 if __name__ == "__main__":
