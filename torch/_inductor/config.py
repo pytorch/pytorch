@@ -1278,7 +1278,7 @@ class auto_chunker:
     output_size_threshold = 1024 * 1024
 
     # Don't chunk from a node if it does not 'amplify' the inputs a lot
-    amplify_ratio_threshold = 8
+    amplify_ratio_threshold = 6
 
     num_chunk = (
         int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
