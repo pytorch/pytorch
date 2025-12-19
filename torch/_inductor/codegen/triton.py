@@ -5333,20 +5333,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
                 contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
-
-                # Make get_reduction_hint() return the correct value by setting its cache
-                # This ensures get_reduction_hint() returns INNER instead of DEFAULT for inner reductions
-                if contiguous_red:
-                    # Set the cache so get_reduction_hint() returns INNER when called later
-                    # If cache already exists, clear it first, then set to correct value
-                    if hasattr(self.features, "__get_reduction_hint_cache"):
-                        self.features.get_reduction_hint.clear_cache(self.features)
-                    object.__setattr__(
-                        self.features, "__get_reduction_hint_cache", ReductionHint.INNER
-                    )
             else:
                 contiguous_red = (
-                    self.features.get_reduction_hint() == ReductionHint.INNER
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
                 )
 
             looped_mem = memory_stats.looped.memory.bytes
@@ -5431,7 +5421,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint()
+            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
