@@ -129,7 +129,7 @@ def lazy_register_extern_choice(fn):
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_dtype_out_cuda",
+    "at::_mm_dtype_out_xpu" if torch.xpu.is_available() else "at::_mm_dtype_out_cuda",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
@@ -312,8 +312,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "input dtypes must be the same",
         )
         torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
+            mat1.get_device().type in ("cuda", "xpu"),
+            lambda: "out_dtype is only supported for CUDA or XPU",
         )
         torch._check(
             out_dtype == input_dtype
