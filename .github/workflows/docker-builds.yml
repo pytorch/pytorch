@@ -113,6 +113,12 @@ jobs:
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        with:
+          version: latest
+          driver-opts: image=moby/buildkit:v0.19.0
+
       - name: Build docker image
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main

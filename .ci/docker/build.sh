@@ -6,6 +6,10 @@
 
 set -ex
 
+# zstd compression settings
+COMPRESSION="${COMPRESSION:-zstd}"
+COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-3}"
+
 image="$1"
 shift
 
@@ -389,10 +393,19 @@ if [[ -n "${CI:-}" ]]; then
   progress_flag="--progress=plain"
 fi
 
-# Build image
-docker build \
+# Ensure buildx builder exists and is active
+if ! docker buildx inspect pytorch-builder > /dev/null 2>&1; then
+  docker buildx create --name pytorch-builder --driver docker-container \
+    --driver-opt image=moby/buildkit:v0.19.0 --use
+else
+  docker buildx use pytorch-builder
+fi
+
+# Build with zstd compression
+docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
+       --output "type=docker,compression=${COMPRESSION},compression-level=${COMPRESSION_LEVEL},force-compression=true,name=${tmp_tag}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "VISION=${VISION:-}" \
@@ -428,7 +441,6 @@ docker build \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
-       -t "$tmp_tag" \
        "$@" \
        .
 
