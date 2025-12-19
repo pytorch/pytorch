@@ -1153,9 +1153,10 @@ class BuildExtension(build_ext):
         if self.no_python_abi_suffix:
             # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
             ext_filename_parts = ext_filename.split('.')
-            # Omit the second to last element.
-            without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
-            ext_filename = '.'.join(without_abi)
+            if len(ext_filename_parts) > 2:
+                # Omit the second to last element.
+                without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
+                ext_filename = '.'.join(without_abi)
         return ext_filename
 
     def _check_abi(self) -> tuple[str, TorchVersion]:
