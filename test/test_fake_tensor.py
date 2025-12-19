@@ -256,7 +256,6 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device, base.device)
             self.assertTrue(isinstance(out, FakeTensor))
 
-
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
