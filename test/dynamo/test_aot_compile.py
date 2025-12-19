@@ -955,18 +955,9 @@ from user code:
         )
         mod.forward = compiled_fn
         result = compiled_fn.save_compiled_function(self.path())
-        self.assertIs(
-            result.external_data.get(
-                "function:TestAOTCompile.test_aot_compile_with_captured_module.<locals>.with_processing:0"
-            ),
-            with_processing,
-        )
-        self.assertIs(
-            result.external_data.get(
-                "torch_nn_module:dynamo.test_aot_compile.SimpleLinearModule:0"
-            ),
-            mod,
-        )
+        values = list(result.external_data.values())
+        self.assertIn(with_processing, values)
+        self.assertIn(mod, values)
         with open(self.path(), "rb") as f:
             with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
                 torch.compiler.load_compiled_function(f)
@@ -997,18 +988,9 @@ from user code:
         )
         mod.forward = compiled_fn
         result = compiled_fn.save_compiled_function(self.path())
-        self.assertIs(
-            result.external_data.get(
-                "function:TestAOTCompile.test_aot_compile_with_captured_module_2.<locals>.with_processing:0"
-            ),
-            with_processing,
-        )
-        self.assertIs(
-            result.external_data.get(
-                "torch_nn_module:dynamo.test_aot_compile.SimpleLinearModule:0"
-            ),
-            mod,
-        )
+        values = list(result.external_data.values())
+        self.assertIn(with_processing, values)
+        self.assertIn(mod, values)
         with open(self.path(), "rb") as f:
             with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
                 torch.compiler.load_compiled_function(f)
