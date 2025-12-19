@@ -19,9 +19,22 @@ __all__ = [
     "manual_seed",
     "OffsetBasedRNGTracker",
     "ThreadBasedRNGTracker",
+    "_USE_THREAD_RNG_TRACKER",
+    "_use_thread_rng_tracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
+_USE_THREAD_RNG_TRACKER: bool = False
+
+
+def _use_thread_rng_tracker(enabled: bool = True):
+    global _use_thread_rng_tracker
+    old_value = _USE_THREAD_RNG_TRACKER
+    _USE_THREAD_RNG_TRACKER = enabled
+    try:
+        yield
+    finally:
+        _USE_THREAD_RNG_TRACKER = old_value
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -88,11 +101,14 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # )
     # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
-    # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
+    # instantiate a RNG tracker if haven't. The tracker type is controlled
+    # by the global _USE_THREAD_RNG_TRACKER.
     global _rng_tracker
     if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+        if _USE_THREAD_RNG_TRACKER:
+            _rng_tracker = ThreadBasedRNGTracker(device_mesh)
+        else:
+            _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(
