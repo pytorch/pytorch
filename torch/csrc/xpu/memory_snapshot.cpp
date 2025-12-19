@@ -31,8 +31,7 @@ void _record_memory_history(
     std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries,
-    bool clear_history,
-    const std::vector<std::string>& skip_actions) {
+    bool clear_history) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -68,12 +67,7 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   c10::xpu::XPUCachingAllocator::recordHistory(
-      enabled.has_value(),
-      recorder,
-      max_entries,
-      when,
-      clear_history,
-      skip_actions);
+      enabled.has_value(), recorder, max_entries, when, clear_history);
 }
 
 } // namespace torch::xpu
