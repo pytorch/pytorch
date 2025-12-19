@@ -222,19 +222,24 @@ class LoggingTests(LoggingTestCase):
         record_str = "\n".join(r.getMessage() for r in records)
 
         self.assertIn(
-            "0: for y, z in zip(ys, zs)",
+            "Full recompile user stack trace:",
+            record_str,
+        )
+
+        self.assertIn(
+            "0: return outer_fn(x, ys, zs)",
             record_str,
         )
         self.assertIn(
-            "1: return inner(x, ys, zs)",
+            "1: return fn(x, ys, zs)",
             record_str,
         )
         self.assertIn(
-            "2: return fn(x, ys, zs)",
+            "2: return inner(x, ys, zs)",
             record_str,
         )
         self.assertIn(
-            "3: return outer_fn(x, ys, zs)",
+            "3: for y, z in zip(ys, zs)",
             record_str,
         )
 
