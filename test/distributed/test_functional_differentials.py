@@ -6,6 +6,7 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 from torch.distributed import _functional_collectives as fcols
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
@@ -700,6 +701,10 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
+
+instantiate_device_type_tests(
+    TestFunctionalDifferentialsWithCompile, globals(), only_for=DEVICE
+)
 
 if __name__ == "__main__":
     run_tests()
