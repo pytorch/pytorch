@@ -14,6 +14,35 @@ __all__ = [
     "symbolic_multi_out",
     "rotary_embedding",
     "attention",
+    "add",
+    "average_pool",
+    "cast",
+    "concat",
+    "conv",
+    "dft",
+    "div",
+    "expand",
+    "gather",
+    "matmul",
+    "max",
+    "max_pool",
+    "min",
+    "mul",
+    "pow",
+    "range",
+    "reduce_max",
+    "reduce_mean",
+    "reduce_min",
+    "relu",
+    "reshape",
+    "shape",
+    "sigmoid",
+    "slice",
+    "split",
+    "squeeze",
+    "sub",
+    "transpose",
+    "unsqueeze",
 ]
 
 
@@ -465,3 +494,332 @@ def attention(
         softcap=softcap,
         softmax_precision=softmax_precision,
     )
+
+
+def add(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Add op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Add.html
+    """
+    return _impl.add_13(A, B)
+
+
+def sub(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Sub op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Sub.html
+    """
+    return _impl.sub_13(A, B)
+
+
+def mul(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Mul op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Mul.html
+    """
+    return _impl.mul_13(A, B)
+
+
+def div(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Div op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Div.html
+    """
+    return _impl.div_13(A, B)
+
+
+def pow(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Pow op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Pow.html
+    """
+    return _impl.pow_13(A, B)
+
+
+def matmul(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """MatMul op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__MatMul.html
+    """
+    return _impl.matmul_13(A, B)
+
+
+def concat(
+    inputs: Sequence[torch.Tensor], *, axis: int = 0
+) -> torch.Tensor:
+    """Concat op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Concat.html
+    """
+    return _impl.concat_13(inputs, axis=axis)
+
+
+def reshape(data: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    """Reshape op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Reshape.html
+    """
+    return _impl.reshape_14(data, shape)
+
+
+def transpose(data: torch.Tensor, *, perm: Sequence[int] | None = None) -> torch.Tensor:
+    """Transpose op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Transpose.html
+    """
+    return _impl.transpose_13(data, perm=perm)
+
+
+def gather(
+    data: torch.Tensor, indices: torch.Tensor, *, axis: int = 0
+) -> torch.Tensor:
+    """Gather op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Gather.html
+    """
+    return _impl.gather_13(data, indices, axis=axis)
+
+
+def slice(
+    data: torch.Tensor,
+    starts: torch.Tensor,
+    ends: torch.Tensor,
+    axes: torch.Tensor | None = None,
+    steps: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Slice op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Slice.html
+    """
+    return _impl.slice_13(data, starts, ends, axes, steps)
+
+
+def unsqueeze(data: torch.Tensor, axes: torch.Tensor) -> torch.Tensor:
+    """Unsqueeze op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Unsqueeze.html
+    """
+    return _impl.unsqueeze_13(data, axes)
+
+
+def squeeze(data: torch.Tensor, *, axes: torch.Tensor | None = None) -> torch.Tensor:
+    """Squeeze op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Squeeze.html
+    """
+    return _impl.squeeze_13(data, axes=axes)
+
+
+def split(
+    input: torch.Tensor,
+    *,
+    split: torch.Tensor | int | None = None,
+    axis: int = 0,
+    num_outputs: int | None = None,
+) -> Sequence[torch.Tensor]:
+    """Split op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Split.html
+    """
+    return _impl.split_13(input, split=split, axis=axis, num_outputs=num_outputs)
+
+
+def relu(X: torch.Tensor) -> torch.Tensor:
+    """Relu op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Relu.html
+    """
+    return _impl.relu_13(X)
+
+
+def sigmoid(X: torch.Tensor) -> torch.Tensor:
+    """Sigmoid op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Sigmoid.html
+    """
+    return _impl.sigmoid_13(X)
+
+
+def reduce_max(
+    data: torch.Tensor,
+    *,
+    axes: Sequence[int] | None = None,
+    keepdims: bool = True,
+) -> torch.Tensor:
+    """ReduceMax op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__ReduceMax.html
+    """
+    return _impl.reduce_max_13(data, axes=axes, keepdims=keepdims)
+
+
+def reduce_mean(
+    data: torch.Tensor,
+    *,
+    axes: Sequence[int] | None = None,
+    keepdims: bool = True,
+) -> torch.Tensor:
+    """ReduceMean op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__ReduceMean.html
+    """
+    return _impl.reduce_mean_13(data, axes=axes, keepdims=keepdims)
+
+
+def reduce_min(
+    data: torch.Tensor,
+    *,
+    axes: Sequence[int] | None = None,
+    keepdims: bool = True,
+) -> torch.Tensor:
+    """ReduceMin op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__ReduceMin.html
+    """
+    return _impl.reduce_min_13(data, axes=axes, keepdims=keepdims)
+
+
+def conv(
+    X: torch.Tensor,
+    W: torch.Tensor,
+    B: torch.Tensor | None = None,
+    *,
+    auto_pad: str = "NOTSET",
+    dilations: Sequence[int] | None = None,
+    group: int = 1,
+    kernel_shape: Sequence[int] | None = None,
+    pads: Sequence[int] | None = None,
+    strides: Sequence[int] | None = None,
+) -> torch.Tensor:
+    """Conv op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Conv.html
+    """
+    return _impl.conv_11(
+        X,
+        W,
+        B,
+        auto_pad=auto_pad,
+        dilations=dilations,
+        group=group,
+        kernel_shape=kernel_shape,
+        pads=pads,
+        strides=strides,
+    )
+
+
+def average_pool(
+    X: torch.Tensor,
+    *,
+    auto_pad: str = "NOTSET",
+    ceil_mode: int = 0,
+    count_include_pad: int = 0,
+    kernel_shape: Sequence[int],
+    pads: Sequence[int] | None = None,
+    strides: Sequence[int] | None = None,
+) -> torch.Tensor:
+    """AveragePool op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__AveragePool.html
+    """
+    return _impl.average_pool_11(
+        X,
+        auto_pad=auto_pad,
+        ceil_mode=ceil_mode,
+        count_include_pad=count_include_pad,
+        kernel_shape=kernel_shape,
+        pads=pads,
+        strides=strides,
+    )
+
+
+def max_pool(
+    X: torch.Tensor,
+    *,
+    auto_pad: str = "NOTSET",
+    ceil_mode: int = 0,
+    dilations: Sequence[int] | None = None,
+    kernel_shape: Sequence[int],
+    pads: Sequence[int] | None = None,
+    storage_order: int = 0,
+    strides: Sequence[int] | None = None,
+) -> torch.Tensor:
+    """MaxPool op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__MaxPool.html
+    """
+    return _impl.max_pool_12(
+        X,
+        auto_pad=auto_pad,
+        ceil_mode=ceil_mode,
+        dilations=dilations,
+        kernel_shape=kernel_shape,
+        pads=pads,
+        storage_order=storage_order,
+        strides=strides,
+    )
+
+
+def cast(input: torch.Tensor, *, to: int) -> torch.Tensor:
+    """Cast op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Cast.html
+    """
+    return _impl.cast_13(input, to=to)
+
+
+def expand(input: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
+    """Expand op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Expand.html
+    """
+    return _impl.expand_13(input, shape)
+
+
+def max(data_0: Sequence[torch.Tensor]) -> torch.Tensor:
+    """Max op in ONNX (element-wise).
+
+    https://onnx.ai/onnx/operators/onnx__Max.html
+    """
+    return _impl.max_13(data_0)
+
+
+def min(data_0: Sequence[torch.Tensor]) -> torch.Tensor:
+    """Min op in ONNX (element-wise).
+
+    https://onnx.ai/onnx/operators/onnx__Min.html
+    """
+    return _impl.min_13(data_0)
+
+
+def shape(data: torch.Tensor) -> torch.Tensor:
+    """Shape op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Shape.html
+    """
+    return _impl.shape_15(data)
+
+
+def range(
+    start: torch.Tensor, limit: torch.Tensor, delta: torch.Tensor
+) -> torch.Tensor:
+    """Range op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__Range.html
+    """
+    return _impl.range_11(start, limit, delta)
+
+
+def dft(
+    input: torch.Tensor,
+    dft_length: torch.Tensor | None = None,
+    *,
+    axis: int = -2,
+    inverse: int = 0,
+    onesided: int = 0,
+) -> torch.Tensor:
+    """DFT op in ONNX.
+
+    https://onnx.ai/onnx/operators/onnx__DFT.html
+    """
+    return _impl.dft_20(input, dft_length, axis=axis, inverse=inverse, onesided=onesided)
