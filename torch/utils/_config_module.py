@@ -664,28 +664,48 @@ class ConfigModule(ModuleType):
     def get_serializable_config_copy(self) -> dict[str, Any]:
         return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
 
-    def patch(
-        self,
-        arg1: str | dict[str, Any] | None = None,
-        arg2: Any = None,
-        **kwargs: dict[str, Any],
+    def _patch(
+        self, changes: dict[str, Any], is_thread_local: bool
     ) -> "ContextDecorator":
-        """
-        Decorator and/or context manager to make temporary changes to a config.
+        prior: dict[str, Any] = {}
+        unset_tls: set[str] = set()
+        config = self
 
-        As a decorator:
+        class ConfigPatch(ContextDecorator):
+            def __init__(self) -> None:
+                self.changes = changes
 
-            @config.patch("name", val)
-            @config.patch(name1=val1, name2=val2)
-            @config.patch({"name1": val1, "name2", val2})
-            def foo(...):
-                ...
+            def __enter__(self) -> None:
+                if prior or unset_tls:
+                    raise AssertionError(
+                        "prior and unset_tls should be empty when entering ConfigPatch"
+                    )
+                for key in self.changes:
+                    # KeyError on invalid entry
+                    prior[key] = config.__getattr__(key)
+                    if (
+                        is_thread_local
+                        and getattr(config._tl_overrides, key, _UNSET_SENTINEL)
+                        is _UNSET_SENTINEL
+                    ):
+                        unset_tls.add(key)
+                for k, v in self.changes.items():
+                    config._do_setattr(k, v, is_thread_local)
 
-        As a context manager:
+            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+                for k, v in prior.items():
+                    config._do_setattr(k, v, is_thread_local)
+                    if is_thread_local and k in unset_tls:
+                        config._do_setattr(k, _UNSET_SENTINEL, True)
+                prior.clear()
+                unset_tls.clear()
 
-            with config.patch("name", val):
-                ...
-        """
+        return ConfigPatch()
+
+    @staticmethod
+    def _check_patch_args(
+        arg1: str | dict[str, Any] | None, arg2: Any, kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
         changes: dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
@@ -715,39 +735,46 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
-        prior: dict[str, Any] = {}
-        unset_tls: set[str] = set()
-        config = self
+        return changes
 
-        class ConfigPatch(ContextDecorator):
-            def __init__(self) -> None:
-                self.changes = changes
+    def global_patch(
+        self,
+        arg1: str | dict[str, Any] | None = None,
+        arg2: Any = None,
+        **kwargs: dict[str, Any],
+    ) -> "ContextDecorator":
+        """
+        Similar to patch, but patches the global config
+        """
+        changes = self._check_patch_args(arg1, arg2, kwargs)
+        return self._patch(changes, False)
 
-            def __enter__(self) -> None:
-                if prior or unset_tls:
-                    raise AssertionError(
-                        "prior and unset_tls should be empty when entering ConfigPatch"
-                    )
-                for key in self.changes:
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
-                    if (
-                        getattr(config._tl_overrides, key, _UNSET_SENTINEL)
-                        is _UNSET_SENTINEL
-                    ):
-                        unset_tls.add(key)
-                for k, v in self.changes.items():
-                    config._do_setattr(k, v, set_tls=True)
+    def patch(
+        self,
+        arg1: str | dict[str, Any] | None = None,
+        arg2: Any = None,
+        **kwargs: dict[str, Any],
+    ) -> "ContextDecorator":
+        """
+        Decorator and/or context manager to make temporary changes to a config.
 
-            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                for k, v in prior.items():
-                    config._do_setattr(k, v, set_tls=True)
-                    if k in unset_tls:
-                        config._do_setattr(k, _UNSET_SENTINEL, True)
-                prior.clear()
-                unset_tls.clear()
+        Patched changes are thread-local.  See global_patch for a global version.
 
-        return ConfigPatch()
+        As a decorator:
+
+            @config.patch("name", val)
+            @config.patch(name1=val1, name2=val2)
+            @config.patch({"name1": val1, "name2", val2})
+            def foo(...):
+                ...
+
+        As a context manager:
+
+            with config.patch("name", val):
+                ...
+        """
+        changes = self._check_patch_args(arg1, arg2, kwargs)
+        return self._patch(changes, True)
 
     def _make_closure_patcher(self, **changes: dict[str, Any]) -> Any:
         """

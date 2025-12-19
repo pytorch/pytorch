@@ -393,6 +393,18 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             with config.patch("does_not_exist"):
                 pass
 
+    def test_global_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.global_patch("e_bool", False):
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+        with config.global_patch(e_bool=False):
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+        with self.assertRaises(AssertionError):
+            with config.global_patch("does_not_exist"):
+                pass
+
     def test_make_closur_patcher(self):
         revert = config._make_closure_patcher(e_bool=False)()
         self.assertFalse(config.e_bool)
@@ -465,7 +477,6 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with config.patch(e_int=2):
             self.assertEqual(config.e_int, 2)
             config.e_int = 3
-            # breakpoint()
             self.assertEqual(config.e_int, 3)
         self.assertEqual(config.e_int, 3)
 
