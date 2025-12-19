@@ -1,5 +1,2 @@
 ERROR
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_tensor.py", line 1763, in __dlpack__
-    raise BufferError(
-BufferError: Can't export tensors that require gradient, use tensor.detach()
+TypeError: mul got incompatible shapes for broadcasting: (1025, 2), (2, 2).

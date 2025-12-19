@@ -1586,7 +1586,6 @@ class TestStridedShardCollectiveOpUtils:
 
 
 class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
-
     @property
     def world_size(self):
         return 4
@@ -1682,10 +1681,10 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     )
                     # TODO enable this once fixing the issue that op_info.schema is None in some calls to
                     # redistribute_local_tensor
-                    # self.assertRegex(
-                    #     captured.output[0],
-                    #     r".*aten\.mm\.default.*",
-                    # )
+                    self.assertRegex(
+                        captured.output[0],
+                        r".*aten\.mm\.default.*",
+                    )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():
