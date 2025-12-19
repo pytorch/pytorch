@@ -2,6 +2,7 @@
 """
 NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 """
+
 import hashlib
 import logging
 from collections.abc import Sequence
@@ -53,9 +54,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     def is_nv_universal_gemm_fused_template(self, node: BaseSchedulerNode) -> bool:
         """Check if a node is a fused NVIDIA Universal GEMM template."""
-        return isinstance(node, FusedSchedulerNode) and self.is_nv_universal_gemm_template(
-            node
-        )
+        return isinstance(
+            node, FusedSchedulerNode
+        ) and self.is_nv_universal_gemm_template(node)
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -100,7 +101,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         _, _, kernel_path = get_path(code_hash(src_code), "py")
 
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.nv_universal_gemm({kernel_name!r}, r'''")
+        compile_wrapper.writeline(
+            f"async_compile.nv_universal_gemm({kernel_name!r}, r'''"
+        )
         compile_wrapper.splice(src_code, strip=True)
         compile_wrapper.writeline("''')")
 
@@ -125,8 +128,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
             "SchedulerNode that wraps a NVUniversalGemmBuffer"
         )
         # TODO: add support for fusion when needed
-        assert not epilogue_nodes, "NVIDIA Universal GEMM doesn't support epilogue fusion yet"
-        assert not prologue_nodes, "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+        assert not epilogue_nodes, (
+            "NVIDIA Universal GEMM doesn't support epilogue fusion yet"
+        )
+        assert not prologue_nodes, (
+            "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+        )
 
         template_node = cast(SchedulerNode, template_node)
         ctb: NVUniversalGemmBuffer = cast(NVUniversalGemmBuffer, template_node.node)
