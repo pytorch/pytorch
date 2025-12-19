@@ -904,12 +904,12 @@ class FakeTensor(Tensor):
     ) -> tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
-        # cpu - zero-dim tensors can be called in cuda kernels,
-        # so overwrite the common_device if it the only existing
-        # device comes from a cpu zero-dim tensor
+        # cpu - zero-dim tensors and cpu - one-dim one-element tensors
+        # can be called in cuda kernels, so overwrite the common_device
+        # if the only existing device comes from a cpu single value tensor
         common_device = None
         has_scalar_only_inputs = False
-        is_cpu_zero_dim = None
+        is_cpu_single_value = None
 
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
@@ -917,46 +917,52 @@ class FakeTensor(Tensor):
         )
 
         # list of ops not using zero dim cpu tensor logic to align with the eager mode.
-        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
+        bypass_single_value_cpu_tensor_check_ops = ordered_set(
             aten.nextafter.default,
         )
 
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
-        def cpu_zero_dim(t: Tensor) -> bool:
-            return check_cpu_device(t.device) and t.dim() == 0
+        def zero_dim(t: Tensor) -> bool:
+            return t.dim() == 0
+
+        def one_dim_one_elem(t: Tensor) -> bool:
+            return t.dim() == 1 and t.size()[0] == 1
+
+        def cpu_single_value(t: Tensor) -> bool:
+            return check_cpu_device(t.device) and (zero_dim(t) or one_dim_one_elem(t))
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
-            nonlocal is_cpu_zero_dim
+            nonlocal is_cpu_single_value
             if not isinstance(t, FakeTensor):
                 return
 
             if common_device is None:
                 common_device = t.device
-                is_cpu_zero_dim = cpu_zero_dim(t)
+                is_cpu_single_value = cpu_single_value(t)
                 return
 
-            t_is_cpu_zero_dim = cpu_zero_dim(t)
+            t_is_cpu_single_value = cpu_single_value(t)
             if t.device == common_device:
-                if is_cpu_zero_dim:
-                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                if is_cpu_single_value:
+                    is_cpu_single_value = t_is_cpu_single_value
                 return
 
-            is_bypass_zero_dim_cpu_tensor_check_op = (
-                func in bypass_zero_dim_cpu_tensor_check_ops
+            is_bypass_single_value_cpu_tensor_check_op = (
+                func in bypass_single_value_cpu_tensor_check_ops
             )
 
             # mismatching devices !
-            # if current tensor is cpu 0 dim, defer to existing device
-            if t_is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
+            # if current tensor is cpu single value, defer to existing device
+            if t_is_cpu_single_value and not is_bypass_single_value_cpu_tensor_check_op:
                 return
 
-            # current device is from cpu 0 dim tensor, overwrite
-            if is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
+            # current device is from cpu single value tensor, overwrite
+            if is_cpu_single_value and not is_bypass_single_value_cpu_tensor_check_op:
                 common_device = t.device
-                is_cpu_zero_dim = t_is_cpu_zero_dim
+                is_cpu_single_value = t_is_cpu_single_value
                 return
 
             # if still device mismatches we will check ops which can work
@@ -976,13 +982,13 @@ class FakeTensor(Tensor):
                 if not common_has_preferred and t_has_preferred:
                     # Switch to the preferred device type
                     common_device = t.device
-                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                    is_cpu_single_value = t_is_cpu_single_value
                     return
                 elif common_has_preferred and not t_has_preferred:
                     # Keep the existing preferred device type
                     return
 
-            # mismatching devices of non-zero dim tensors, throw
+            # mismatching devices of non - single value tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
