@@ -189,38 +189,6 @@ jobs:
           set -eux
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
 
-      - name: Get the actual device name to name the uploaded artifacts
-        env:
-          MODELS: ${{ inputs.models }}
-        shell: bash
-        run: |
-          set -eux
-
-          if [[ "${DEVICE_NAME}" == "cuda" ]]; then
-            DEVICE_TYPE=$(nvidia-smi -i 0 --query-gpu=name --format=csv,noheader | awk '{print $2}')
-          elif [[ "${DEVICE_NAME}" == "rocm" ]]; then
-            DEVICE_TYPE=$(rocminfo | grep "Marketing Name" | tail -n1 | awk -F':' '{print $2}' | xargs)
-          elif [[ "${DEVICE_NAME}" == "hpu" ]]; then
-            DEVICE_TYPE="Intel Gaudi3 "$(hl-smi -q | grep "Product Name" | head -n 1 | awk -F ':' '{print $2}' | sed 's/^ *//')
-          elif [[ "${DEVICE_NAME}" == "cpu" ]]; then
-            DEVICE_TYPE="$(lscpu | grep "Model name" | sed -E 's/.*Model name:[[:space:]]*//; s/Intel\(R\)//g; s/\(R\)//g; s/\(TM\)//g; s/CPU//g; s/Processor//g; s/[[:space:]]+/ /g; s/^ //; s/ $//; s/ /_/g')_$(awk -F: '/Core\(s\) per socket/ {c=$2} /Socket\(s\)/ {s=$2} END {gsub(/ /,"",c); gsub(/ /,"",s); printf "%sc", c*s}' < <(lscpu))"
-          elif [[ "${DEVICE_NAME}" == "arm64-cpu" ]]; then
-            DEVICE_TYPE=$(lscpu | grep 'Vendor ID' | cut -f 2 -d ":" | awk '{$1=$1}1' | cut -f 2 -d " ")
-          fi
-
-          # shellcheck disable=SC2001
-          SANITIZED_DEVICE_TYPE=$(echo "${DEVICE_TYPE// /_}" | sed "s/[^[:alnum:].-]/_/g")
-          SANITIZED_MODELS="${MODELS//\//_}"
-
-          echo "SANITIZED_DEVICE_TYPE=${SANITIZED_DEVICE_TYPE}" >> "${GITHUB_ENV}"
-          echo "SANITIZED_MODELS=${SANITIZED_MODELS}" >> "${GITHUB_ENV}"
-
-      # Keep a copy of the benchmark results on GitHub for reference
-      - uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ env.SANITIZED_DEVICE_TYPE }}-${{ env.SANITIZED_MODELS }}
-          path: vllm-project/vllm/benchmarks/results
-
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
@@ -230,9 +198,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results to OSS benchmark database for the dashboard
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        # DEBUG: REVERT ONCE https://github.com/pytorch/test-infra/pull/7612 LANDS
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@update-upload-bm-results-gha
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
+          benchmark-name: 'PyTorch x vLLM benchmark'
           # TODO: SWITCH THIS TO FALSE BEFORE LANDING
           dry-run: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
