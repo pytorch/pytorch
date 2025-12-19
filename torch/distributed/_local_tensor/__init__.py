@@ -924,6 +924,9 @@ class LocalTensor(torch.Tensor):
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
 
+        if len(local_tensors) == 0:
+            raise ValueError("LocalTensor cannot be empty!")
+
         (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
             _compute_local_tensor_meta(local_tensors)
         )
@@ -1186,11 +1189,9 @@ class LocalTensorMode(TorchDispatchMode):
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
 
-        self.enable_()
-
     def __enter__(self) -> "LocalTensorMode":
-        self.enable_()
         get_local_tensor_mode_list().append(self)
+        self.enable_()
 
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
@@ -1210,8 +1211,14 @@ class LocalTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        local_tensor_mode_list = get_local_tensor_mode_list()
+        local_tensor_mode_list.pop()
         self.disable_()
-        get_local_tensor_mode_list().pop()
+        if len(local_tensor_mode_list) > 0:
+            if local_tensor_mode_list[-1]._disable:
+                local_tensor_mode_list[-1].disable_()
+            else:
+                local_tensor_mode_list[-1].enable_()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_dispatch__(
@@ -1400,9 +1407,13 @@ class LocalTensorMode(TorchDispatchMode):
         self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
         self._old_get_local_rank = DeviceMesh.get_local_rank  # type: ignore[assignment]
         DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
-        DeviceMesh.sym_get_coordinate = _LocalDeviceMesh.sym_get_coordinate  # type: ignore[method-assign]
         DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[method-assign]
         DeviceMesh.get_local_rank = _LocalDeviceMesh.get_local_rank  # type: ignore[method-assign]
+        # type: ignore[method-assign]
+        DeviceMesh.is_current_rank_part_of_mesh = (
+            _LocalDeviceMesh.is_current_rank_part_of_mesh
+        )
+        DeviceMesh.sym_get_coordinate = _LocalDeviceMesh.sym_get_coordinate  # type: ignore[method-assign]
 
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
@@ -1532,6 +1543,11 @@ class _LocalDeviceMesh:
         # their meshes formed from root mesh and selecting the same dimensions
         # as the current mesh.
         return out  # type: ignore[return-value]
+
+    @staticmethod
+    def is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
+        my_coordinate = self.get_coordinate()
+        return my_coordinate is not None
 
     @staticmethod
     def sym_get_coordinate(self: DeviceMesh, index: int) -> int:

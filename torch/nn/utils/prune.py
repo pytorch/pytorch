@@ -64,9 +64,10 @@ class BasePruningMethod(ABC):
         """
         # to carry out the multiplication, the mask needs to have been computed,
         # so the pruning method must know what tensor it's operating on
-        assert self._tensor_name is not None, (
-            f"Module {module} has to be pruned"
-        )  # this gets set in apply()
+        if self._tensor_name is None:
+            raise AssertionError(
+                f"Module {module} has to be pruned"
+            )  # this gets set in apply()
         mask = getattr(module, self._tensor_name + "_mask")
         orig = getattr(module, self._tensor_name + "_orig")
         pruned_tensor = mask.to(dtype=orig.dtype) * orig
@@ -110,10 +111,11 @@ class BasePruningMethod(ABC):
                     old_method = hook
                     hooks_to_remove.append(k)
                     found += 1
-            assert found <= 1, (
-                f"Avoid adding multiple pruning hooks to the\
-                same tensor {name} of module {module}. Use a PruningContainer."
-            )
+            if found > 1:
+                raise AssertionError(
+                    f"Avoid adding multiple pruning hooks to the "
+                    f"same tensor {name} of module {module}. Use a PruningContainer."
+                )
 
             for k in hooks_to_remove:
                 del module._forward_pre_hooks[k]
@@ -154,9 +156,11 @@ class BasePruningMethod(ABC):
 
         orig = getattr(module, name)
         if importance_scores is not None:
-            assert importance_scores.shape == orig.shape, (
-                f"importance_scores should have the same shape as parameter                 {name} of {module}"
-            )
+            if importance_scores.shape != orig.shape:
+                raise AssertionError(
+                    f"importance_scores should have the same shape as parameter "
+                    f"{name} of {module}, got {importance_scores.shape} vs {orig.shape}"
+                )
         else:
             importance_scores = orig
 
@@ -223,9 +227,11 @@ class BasePruningMethod(ABC):
             pruned version of tensor ``t``.
         """
         if importance_scores is not None:
-            assert importance_scores.shape == t.shape, (
-                "importance_scores should have the same shape as tensor t"
-            )
+            if importance_scores.shape != t.shape:
+                raise AssertionError(
+                    f"importance_scores should have the same shape as tensor t, "
+                    f"got {importance_scores.shape} vs {t.shape}"
+                )
         else:
             importance_scores = t
         default_mask = default_mask if default_mask is not None else torch.ones_like(t)
@@ -242,9 +248,10 @@ class BasePruningMethod(ABC):
             Pruning itself is NOT undone or reversed!
         """
         # before removing pruning from a tensor, it has to have been applied
-        assert self._tensor_name is not None, (
-            f"Module {module} has to be pruned            before pruning can be removed"
-        )  # this gets set in apply()
+        if self._tensor_name is None:
+            raise AssertionError(
+                f"Module {module} has to be pruned before pruning can be removed"
+            )  # this gets set in apply()
 
         # to update module[name] to latest trained weights
         weight = self.apply_mask(module)  # masked weights
@@ -803,7 +810,11 @@ class CustomFromMask(BasePruningMethod):
         self.mask = mask
 
     def compute_mask(self, t, default_mask):
-        assert default_mask.shape == self.mask.shape
+        if default_mask.shape != self.mask.shape:
+            raise AssertionError(
+                f"default_mask shape {default_mask.shape} must match "
+                f"self.mask shape {self.mask.shape}"
+            )
         mask = default_mask * self.mask.to(dtype=default_mask.dtype)
         return mask
 

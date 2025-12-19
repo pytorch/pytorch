@@ -44,31 +44,38 @@ class DecoratorTests(PytreeRegisteringTestCase):
         from torch.library import Library
 
         foo = Library("foo", "DEF")  # noqa: TOR901
-        foo.define("custom(Tensor self) -> Tensor")
+        try:
+            foo.define("custom(Tensor self) -> Tensor")
 
-        # Dynamic shape data dependent operator. For static shape compilation, Dynamo
-        # should graph break on it. But, the meta kernel is not implemented properly.
-        @torch.library.impl(foo, "custom", "CPU")
-        def foo_cpu(x):
-            return x.nonzero()
+            # Dynamic shape data dependent operator. For static shape compilation, Dynamo
+            # should graph break on it. But, the meta kernel is not implemented properly.
+            @torch.library.impl(foo, "custom", "CPU")
+            def foo_cpu(x):
+                return x.nonzero()
 
-        # Disallow does not work because of extra python frames with torch.library python API
-        torch.ops.foo.custom = torch._dynamo.disable(torch.ops.foo.custom)
+            # Disallow does not work because of extra python frames with torch.library python API
+            orig_custom = torch.ops.foo.custom
+            try:
+                torch.ops.foo.custom = torch._dynamo.disable(torch.ops.foo.custom)
 
-        def fn(x):
-            a = torch.nn.functional.relu(x)
-            b = torch.ops.foo.custom(a)
-            c = torch.cos(b)
-            return c
+                def fn(x):
+                    a = torch.nn.functional.relu(x)
+                    b = torch.ops.foo.custom(a)
+                    c = torch.cos(b)
+                    return c
 
-        x = torch.randint(2, (100,))
-        ref = fn(x)
+                x = torch.randint(2, (100,))
+                ref = fn(x)
 
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        res = opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(ref, res)
+                cnts = torch._dynamo.testing.CompileCounter()
+                opt_fn = torch.compile(fn, backend=cnts)
+                res = opt_fn(x)
+                self.assertEqual(cnts.frame_count, 2)
+                self.assertEqual(ref, res)
+            finally:
+                torch.ops.foo.custom = orig_custom
+        finally:
+            foo._destroy()
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
@@ -493,10 +500,16 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def __hash__(self):
                 return hash(self.n)
 
+            def __repr__(self):
+                return f"State({self.n})"
+
+            def __fx_repr__(self):
+                return f"State({self.n})", {"State": State}
+
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        self.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="value")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -791,7 +804,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        self.register_constant(State)
+        torch._library.opaque_object.register_opaque_type(State, typ="reference")
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -809,7 +822,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn(
-                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                "An opaque object was created in the middle of the program.",
                 str(e),
             )
 

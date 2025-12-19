@@ -173,7 +173,7 @@ def _get_spec(func: FunctionType) -> FunctionSpec:
 def bind_args_cached(
     func: FunctionType,
     tx: "InstructionTranslator",
-    fn_source: Optional[Source],
+    fn_source: Source | None,
     args: Sequence[Any],
     kwargs: dict[str, Any],
 ) -> dict[str, VariableTracker]:
@@ -270,7 +270,7 @@ def bind_args_cached(
 
 
 def wrap_bound_arg(
-    tx: "InstructionTranslator", val: Any, source: Optional[Source] = None
+    tx: "InstructionTranslator", val: Any, source: Source | None = None
 ) -> VariableTracker:
     # Source propagation is best effort since not every object we encounter has a source to begin with.
     if isinstance(val, VariableTracker):
@@ -315,10 +315,10 @@ def _create_nested_fn(
     code: types.CodeType,
     f_globals: dict[str, Any],
     name: str,
-    defaults: Optional[tuple[object, ...]],
-    closure: Optional[tuple[CellType]],
-    kwdefaults: Optional[dict[str, Any]],
-    annotations: Optional[dict[str, Any]],
+    defaults: tuple[object, ...] | None,
+    closure: tuple[CellType] | None,
+    kwdefaults: dict[str, Any] | None,
+    annotations: dict[str, Any] | None,
 ) -> types.FunctionType:
     from types import FunctionType
 
@@ -349,7 +349,7 @@ fn_known_dunder_attrs = {
 
 
 def fn_var_getattr(
-    tx: "InstructionTranslator", fn: object, source: Optional[Source], name: str
+    tx: "InstructionTranslator", fn: object, source: Source | None, name: str
 ) -> VariableTracker:
     source = source and AttrSource(source, name)
 
@@ -391,6 +391,13 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
+        # the optimizer.step method and we don't need to trace it
+        if (
+            self.get_name() == "patch_track_step_called"
+            and self.get_filename().endswith("torch/optim/lr_scheduler.py")
+        ):
+            return ConstantVariable.create(None)
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
@@ -682,7 +689,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> Optional[VariableTracker]:
+    ) -> VariableTracker | None:
         rewrite = self._rewrite_tree_map_only_call(tx, args, kwargs)
         if rewrite is not None:
             tree_map_fn, tree_map_args, tree_map_kwargs = rewrite
@@ -727,13 +734,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> Optional[
+    ) -> (
         tuple[
             "UserFunctionVariable",
             Sequence[VariableTracker],
             dict[str, VariableTracker],
         ]
-    ]:
+        | None
+    ):
         if not self._is_tree_map_only_function():
             return None
 
@@ -759,7 +767,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         tree_map_variable = variables.UserFunctionVariable(tree_map_callable)
         return tree_map_variable, [wrapped_map_fn, tree_arg], dict(kwargs)
 
-    def _lookup_tree_map_function(self) -> Optional[types.FunctionType]:
+    def _lookup_tree_map_function(self) -> types.FunctionType | None:
         module_name = getattr(self.fn, "__module__", None)
         if not module_name:
             return None
@@ -773,7 +781,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def _extract_tree_map_only_types(
         self, selector: VariableTracker
-    ) -> Optional[tuple[type, ...]]:
+    ) -> tuple[type, ...] | None:
         if not selector.is_python_constant():
             return None
         try:
@@ -788,7 +796,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return None
         return tuple(dict.fromkeys(flattened))
 
-    def _flatten_type_spec(self, value: Any) -> Optional[list[type]]:
+    def _flatten_type_spec(self, value: Any) -> list[type] | None:
         if isinstance(value, type):
             return [value]
         if isinstance(value, tuple):
@@ -919,7 +927,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self) -> Never:
-        raise NotImplementedError
+        raise NotImplementedError("get_function")
 
     def has_self(self) -> bool:
         return False
@@ -1351,7 +1359,7 @@ class UserMethodVariable(UserFunctionVariable):
         self,
         fn: Callable[..., Any],
         obj: VariableTracker,
-        source_fn: Optional[Callable[..., Any]] = None,
+        source_fn: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
@@ -1545,13 +1553,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         fn_name: VariableTracker,
         code: VariableTracker,
         f_globals: dict[str, Any],
-        defaults: Optional[VariableTracker],
-        kwdefaults: Optional[VariableTracker],
-        annotations: Optional[VariableTracker],
-        closure: Optional[VariableTracker],
+        defaults: VariableTracker | None,
+        kwdefaults: VariableTracker | None,
+        annotations: VariableTracker | None,
+        closure: VariableTracker | None,
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
-        wrapped_fn: Optional[VariableTracker] = None,
+        wrapped_fn: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         if kwargs.get("mutation_type") is None:
@@ -1567,10 +1575,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
+        self.wrapped_fn: VariableTracker | None = wrapped_fn
 
     def self_args(self) -> list[VariableTracker]:
         return []
+
+    def as_python_constant(self):
+        return self.get_function()
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
@@ -1580,7 +1591,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self) -> types.FunctionType:
         if self.closure:
-            raise NotImplementedError
+            raise NotImplementedError("get_function")
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
@@ -1790,7 +1801,7 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value: Any, reason: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, value: Any, reason: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -1867,7 +1878,17 @@ class SkipFunctionVariable(VariableTracker):
                 )
             )
         elif self.value is torch._dynamo.step_unsupported:
-            raise StepUnsupported
+            try:
+                unimplemented(
+                    gb_type="Call to `torch._dynamo.step_unsupported()`",
+                    context="",
+                    explanation="User-inserted step_unsupported.",
+                    hints=[
+                        "Remove the `torch._dynamo.step_unsupported()` call.",
+                    ],
+                )
+            except Unsupported as e:
+                raise StepUnsupported(e.msg) from None
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -2273,11 +2294,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
+    _nonvar_fields = {
+        "original_cache_hash",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         func: VariableTracker,
         args: Sequence[VariableTracker],
         keywords: dict[str, VariableTracker],
+        original_cache_hash: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -2289,6 +2316,8 @@ class FunctoolsPartialVariable(VariableTracker):
         # fake_value is used for id calculation. Creating this value and id'ng
         # on it is sufficient for the tracing purposes.
         self.fake_value = functools.partial(identity)
+        # Store cache_hash from the original partial for SAC context_fn caching
+        self.original_cache_hash = original_cache_hash
 
     def python_type(self) -> type:
         return functools.partial
@@ -2352,11 +2381,15 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def guard_as_python_constant(self) -> Any:
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
-        return functools.partial(
+        result = functools.partial(
             self.func.guard_as_python_constant(),
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+        # Preserve cache_hash for SAC context_fn caching
+        if self.original_cache_hash is not None:
+            result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
+        return result
 
     def is_python_hashable(self) -> bool:
         return (
@@ -2522,16 +2555,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         return self.fn
 
 
-class TracebackVariable(VariableTracker):
-    # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(  # type: ignore[empty-body]
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker: ...
-
-
 class SysFunctionVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2541,12 +2564,8 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
-            tb = None
-            items = [
-                VariableTracker.build(tx, typ),
-                exn,
-                VariableTracker.build(tx, tb),
-            ]
+            tb = exn.var_getattr(tx, "__traceback__")
+            items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
                 variables.ConstantVariable(None),
@@ -2766,11 +2785,11 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
-    kernel_idx: Optional[int]
+    kernel_idx: int | None
     kernel_source: "AttrSource"
 
     def __init__(
-        self, kernel: Any, kernel_idx: Optional[int], grid: Any, **kwargs: Any
+        self, kernel: Any, kernel_idx: int | None, grid: Any, **kwargs: Any
     ) -> None:
         self.kernel_source = kwargs.pop("kernel_source", None)
         super().__init__(**kwargs)
