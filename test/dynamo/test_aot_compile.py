@@ -299,6 +299,14 @@ class RedistributeModel(torch.nn.Module):
         return x, y
 
 
+def wrap_forward_function(fn):
+    @functools.wraps(fn, assigned=("__doc__", "__annotations__", "__type_params__"))
+    def wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -928,6 +936,91 @@ from user code:
                 self.assertEqual(expected, actual)
         finally:
             torch.distributed.destroy_process_group()
+
+    def test_aot_compile_with_captured_module(self):
+        mod = SimpleLinearModule()
+
+        fn = mod.forward
+
+        def with_processing(f, *args, **kwargs):
+            return f(*args, **kwargs)
+
+        fn = functools.partial(with_processing, fn)
+
+        fn = wrap_forward_function(fn)
+        mod.forward = fn
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(4, 3),), {})
+        )
+        mod.forward = compiled_fn
+        result = compiled_fn.save_compiled_function(self.path())
+        self.assertIs(
+            result.external_data.get(
+                "function:TestAOTCompile.test_aot_compile_with_captured_module.<locals>.with_processing:0"
+            ),
+            with_processing,
+        )
+        self.assertIs(
+            result.external_data.get(
+                "torch_nn_module:dynamo.test_aot_compile.SimpleLinearModule:0"
+            ),
+            mod,
+        )
+        with open(self.path(), "rb") as f:
+            with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
+                torch.compiler.load_compiled_function(f)
+
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(
+                f, external_data=result.external_data
+            )
+            test_inputs = (torch.randn(4, 3),)
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_captured_module_2(self):
+        mod = SimpleLinearModule()
+
+        fn = mod.forward
+
+        def with_processing(f, *args, **kwargs):
+            return f(*args, **kwargs)
+
+        fn = functools.partial(with_processing, fn)
+
+        fn = wrap_forward_function(fn)
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(4, 3),), {})
+        )
+        mod.forward = compiled_fn
+        result = compiled_fn.save_compiled_function(self.path())
+        self.assertIs(
+            result.external_data.get(
+                "function:TestAOTCompile.test_aot_compile_with_captured_module_2.<locals>.with_processing:0"
+            ),
+            with_processing,
+        )
+        self.assertIs(
+            result.external_data.get(
+                "torch_nn_module:dynamo.test_aot_compile.SimpleLinearModule:0"
+            ),
+            mod,
+        )
+        with open(self.path(), "rb") as f:
+            with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
+                torch.compiler.load_compiled_function(f)
+
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(
+                f, external_data=result.external_data
+            )
+            test_inputs = (torch.randn(4, 3),)
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
 
     def test_aot_compile_with_checkpoint(self):
         from torch.utils.checkpoint import checkpoint
