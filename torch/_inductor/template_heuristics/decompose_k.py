@@ -25,6 +25,11 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
 
+@register_template_heuristic(
+    decompose_k_subgraph_template.uid,
+    "xpu",
+    op_name="mm",
+)
 # on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,

@@ -34,6 +34,8 @@ if TYPE_CHECKING:
         pytree as pytree,
         struct as struct,
         sys as sys,
+        torch_c_nn as torch_c_nn,
+        traceback as traceback,
     )
 
 from torch.overrides import BaseTorchFunctionMode
@@ -141,7 +143,7 @@ def dict___eq__(d, other):
     return True
 
 
-def set_symmetric_difference(set1, set2):
+def set_symmetric_difference(set1, set2, cls=set):
     symmetric_difference_set = set()
     for x in set1:
         if x not in set2:
@@ -149,7 +151,7 @@ def set_symmetric_difference(set1, set2):
     for x in set2:
         if x not in set1:
             symmetric_difference_set.add(x)
-    return symmetric_difference_set
+    return cls(symmetric_difference_set)
 
 
 def set_symmetric_difference_update(set1, set2):
@@ -171,7 +173,7 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, *others):
+def set_intersection(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
@@ -190,7 +192,7 @@ def set_intersection(set1, *others):
                 break
         else:
             intersection_set.add(x)
-    return intersection_set
+    return cls(intersection_set)
 
 
 def set_intersection_update(set1, *others):
@@ -199,8 +201,11 @@ def set_intersection_update(set1, *others):
     set1.update(result)
 
 
-def set_union(set1, *others):
+def set_union(set1, *others, cls=None):
     # frozenset also uses this function
+    if cls is None:
+        cls = type(set1)
+
     if len(others) == 0:
         return set1.copy()
 
@@ -216,7 +221,7 @@ def set_union(set1, *others):
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    return type(set1)(union_set)
+    return cls(union_set)
 
 
 def set_update(set1, *others):
@@ -229,7 +234,7 @@ def set_update(set1, *others):
                 set1.add(x)
 
 
-def set_difference(set1, *others):
+def set_difference(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
@@ -247,7 +252,7 @@ def set_difference(set1, *others):
                 break
         else:
             difference_set.add(x)
-    return difference_set
+    return cls(difference_set)
 
 
 def set_difference_update(set1, *others):
@@ -398,7 +403,14 @@ def cmp_eq(a, b):
 def cmp_ne(a, b):
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
-        return a.__ne__(b)
+        result = a.__ne__(b)
+        if result is not NotImplemented:
+            return result
+        # Fall through to try b.__ne__(a) or cmp_eq
+    if isinstance(type(b).__ne__, types.FunctionType):
+        result = b.__ne__(a)
+        if result is not NotImplemented:
+            return result
     return not cmp_eq(a, b)
 
 
@@ -429,3 +441,59 @@ def cmp_ge(a, b):
     if isinstance(type(a).__ge__, types.FunctionType):
         return a.__ge__(b)
     return cmp_eq(a, b) or cmp_gt(a, b)
+
+
+def group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+    """Pure Python implementation of torch._C._group_tensors_by_device_and_dtype.
+
+    Groups tensors by their device and dtype. This is useful before sending
+    tensors off to a foreach implementation, which requires tensors to be on
+    one device and dtype.
+
+    Args:
+        tensorlistlist: A list of lists of tensors (tensors can be None).
+        with_indices: If True, track original indices in the output.
+
+    Returns:
+        A dict mapping (device, dtype) tuples to (grouped_tensorlistlist, indices).
+    """
+    # Result dict: (device, dtype) -> (list of lists, indices)
+    result: dict[tuple[torch.device, torch.dtype], tuple[list[list], list[int]]] = {}
+
+    if not tensorlistlist or not tensorlistlist[0]:
+        return result
+
+    num_lists = len(tensorlistlist)
+    num_tensors = len(tensorlistlist[0])
+
+    for idx in range(num_tensors):
+        # Find the first non-None tensor at this index to get device and dtype
+        first_tensor = None
+        for tlist in tensorlistlist:
+            if tlist is not None and idx < len(tlist) and tlist[idx] is not None:
+                first_tensor = tlist[idx]
+                break
+
+        if first_tensor is None:
+            # All tensors at this index are None, skip
+            continue
+
+        key = (first_tensor.device, first_tensor.dtype)
+
+        if key not in result:
+            # Initialize empty lists for each tensorlist
+            result[key] = ([[] for _ in range(num_lists)], [])
+
+        grouped_lists, indices = result[key]
+
+        # Add tensors from each list at this index
+        for list_idx, tlist in enumerate(tensorlistlist):
+            if tlist is not None and idx < len(tlist):
+                grouped_lists[list_idx].append(tlist[idx])
+            else:
+                grouped_lists[list_idx].append(None)
+
+        if with_indices:
+            indices.append(idx)
+
+    return result

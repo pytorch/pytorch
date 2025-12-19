@@ -1,7 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
-
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
-#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 namespace c10d::nccl_extension {
@@ -149,7 +149,9 @@ __global__ void nccl_wait_for_signal_kernel(
         while (true) {
             unsigned long long val = *sig_ptr;
             if (val >= static_cast<unsigned long long>(target_signal_value)) break;
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
             __nanosleep(64);
+#endif
         }
     }
 }

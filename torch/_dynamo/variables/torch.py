@@ -34,14 +34,15 @@ import logging
 import math
 import re
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
+import torch.utils._pytree as _pytree
 from torch._guards import TracingContext
-from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -75,6 +76,7 @@ from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
+    ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
@@ -87,7 +89,6 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
-from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -209,6 +210,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.compiler.is_compiling: True,
         torch.compiler.is_dynamo_compiling: True,
         torch.compiler.is_exporting: True,
+        torch._dynamo.eval_frame._is_in_optimized_module: True,
         # Look into https://github.com/pytorch/pytorch/pull/164721 why this is
         # turned to True for Dynamo.
         torch.nn.modules.activation._is_make_fx_tracing: True,
@@ -413,12 +415,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
+        ):
+            return ProfilerRecordFunctionContextVariable.create(
+                func=self.value, record_args=args, record_kwargs=kwargs
+            )
+        elif self.value in (
+            torch.profiler.profile,
+            torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
@@ -547,6 +552,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
                 torch.compiler.is_exporting,
+                torch._dynamo.eval_frame._is_in_optimized_module,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions()[self.value])
@@ -739,6 +745,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 not tx.symbolic_torch_function_state.torch_function_mode_enabled
             )
 
+        @register(torch._C._is_torch_function_mode_enabled)
+        def handle_is_torch_function_mode_enabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            # _is_torch_function_mode_enabled returns True only if:
+            # 1. Torch function modes are not disabled (DisableTorchFunction not entered)
+            # 2. There are actually modes on the stack
+            return VariableTracker.build(
+                tx,
+                tx.symbolic_torch_function_state.torch_function_mode_enabled
+                and tx.symbolic_torch_function_state.in_torch_function_mode(),
+            )
+
         @register(
             torch.overrides.has_torch_function,
             torch.overrides.has_torch_function_variadic,
@@ -869,6 +887,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
         ):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -878,6 +899,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch._foreach_pow)
         def handle_foreach_pow_scalar(_, tx: "InstructionTranslator", *args, **kwargs):
+            if not config.enable_dynamo_decompositions:
+                return None
+
             # In eager it's more performant to call item() from within the C op implementation
             # in compile, it's more performant to not graph break.
             if len(args) == 2 and args[0].is_tensor() and not kwargs:
@@ -886,6 +910,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args,
                     kwargs,
                 )
+
+        @register(torch._C._group_tensors_by_device_and_dtype)
+        def handle_group_tensors_by_device_and_dtype(
+            _, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.group_tensors_by_device_and_dtype),
+                args,
+                kwargs,
+            )
 
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
@@ -1515,27 +1549,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         )
             return self.call_tensor_method(tx, args, kwargs)
 
-        intermediate_opaques = [
-            type(x.value)
-            for x in args
-            if x.source is None
-            and isinstance(x, UserDefinedObjectVariable)
-            and is_opaque_type(type(x.value))
-        ]
-        if len(intermediate_opaques) > 0:
-            unimplemented(
-                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
-                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
-                explanation=(
-                    "Opaque objects cannot be created inside the torch.compile region. "
-                    "They must be created before entering the compiled function."
-                ),
-                hints=[
-                    "Please create the opaque object before calling torch.compile "
-                    "and pass it in as an argument or as a global variable."
-                ],
-            )
-
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1614,14 +1627,52 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
-        tensor_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                fn_,
-                *proxy_args_kwargs(args, kwargs),
-            ),
-        )
+        # Ops that consume scalar values from tensors (via .item()) for computation only,
+        # not for output shapes. When capture_scalar_outputs is enabled, these ops would
+        # create unbacked symbols that are not in the outputs, causing
+        # PendingUnbackedSymbolNotFound errors. We ignore these fresh unbacked symbols
+        # since they only affect tensor values, not shapes.
+        ops_consuming_unbacked_scalars = {
+            # foreach ops with scalar/alpha arguments
+            torch._foreach_add,
+            torch._foreach_add_,
+            torch._foreach_sub,
+            torch._foreach_sub_,
+            torch._foreach_mul,
+            torch._foreach_mul_,
+            torch._foreach_div,
+            torch._foreach_div_,
+            torch._foreach_clamp_max,
+            torch._foreach_clamp_max_,
+            torch._foreach_clamp_min,
+            torch._foreach_clamp_min_,
+            torch._foreach_maximum,
+            torch._foreach_maximum_,
+            torch._foreach_minimum,
+            torch._foreach_minimum_,
+            torch._foreach_pow,
+            torch._foreach_pow_,
+            torch._foreach_lerp,
+            torch._foreach_lerp_,
+            torch._foreach_addcmul,
+            torch._foreach_addcmul_,
+            torch._foreach_addcdiv,
+            torch._foreach_addcdiv_,
+        }
+        ctx = nullcontext
+        if fn_ in ops_consuming_unbacked_scalars:
+            if tx.fake_mode and tx.fake_mode.shape_env:
+                ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        with ctx():
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
@@ -1729,10 +1780,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        import torch._higher_order_ops.flat_apply as flat_apply
         from torch._higher_order_ops.flat_apply import (
+            flat_apply,
             func_to_graphable,
             is_graphable_type,
+            is_valid_output,
+            to_graphable,
         )
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
@@ -1862,13 +1915,45 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
-        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+
+        # What's going on here? The output of the nonstrict-traced function must
+        # be something we can put into the graph. This means it has to be Tuple,
+        # int, str, etc or lists/tuples of those (or lists of lists of those,
+        # etc). So by default we don't handle PyTree-able outputs.
+
+        # To handle PyTree-able outputs we flatten the output to a flattened
+        # list of graph types and then trace the unflattening into the graph.
+        captured_spec = None
+
+        def flat_apply_capture(*args):
+            nonlocal captured_spec
+            out = flat_apply(*args, checked_output=False)
+            # Output is handled similar to flat_apply input but reverse by
+            # tree_flattening the output and trace the unflattening. Note that
+            # wrapped functions must return the same pytree structure every time
+            # they're called.
+            flat_out, spec = to_graphable(out)
+            if captured_spec is None:
+                captured_spec = spec
+            else:
+                assert captured_spec == spec, (
+                    "Error: nonstrict-traced functions must return the same "
+                    f"output shape every time. got {spec!r} vs but expected {captured_spec!r}"
+                )
+            assert is_valid_output(flat_out)
+            return flat_out
+
+        proxy = tx.output.create_proxy(
+            "call_function", flat_apply_capture, all_args, {}
+        )
+
+        # Instead of calling tree_unflatten at runtime, symbolically trace it
+        # just like we did for tree_flatten on inputs. This lets Dynamo
+        # capture the unflatten into the FX graph as well.
+
+        # Build VTs representing (flat_output_list, out_spec)
         try:
-            # TODO support more output types once `flat_apply` supports
-            # pytree-able output types. We can have Dynamo trace through an
-            # unflatten call (just like we traced through a flatten above)
-            # to rebuild the actual output VT.
-            out_vt = wrap_fx_proxy(tx, proxy)
+            proxy_list_vt = wrap_fx_proxy(tx, proxy)
         except (
             # From `handle_traced_output`.
             torch._dynamo.exc.Unsupported,
@@ -1884,6 +1969,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+            # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
+            raise AssertionError("unreachable")  # noqa: B904
+
+        assert captured_spec is not None
+        out_spec_vt = VariableTracker.build(tx, captured_spec)
+
+        # Reuse the same pattern used above for tree_flatten: call the python
+        # function through Dynamo so it symbolically interprets it.
+        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+            tx, [proxy_list_vt, out_spec_vt], {}
+        )
 
         return out_vt
 
