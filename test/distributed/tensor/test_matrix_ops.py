@@ -54,6 +54,10 @@ def scale_for_fp8(
 
 
 class DistMatrixOpsTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 6
+
     @with_comms
     def test_addmm(self):
         device_mesh = self.build_device_mesh()
@@ -152,14 +156,25 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_mm_with_strided_input(self):
-        mesh = self.build_device_mesh()
-        batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7
-        global_inps_viewed = torch.arange(batch_size * seq_len * contract_dim, device="cuda").float().view(batch_size * seq_len, contract_dim)
-        inps_viewed = distribute_tensor(global_inps_viewed, mesh, (_StridedShard(dim=0, split_factor=2),), src_data_rank=None)
-        global_weight = torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
-        weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
+        # mesh = self.build_device_mesh()
+        # batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7
+        # global_inps_viewed = torch.arange(batch_size * seq_len * contract_dim, device="cuda").float().view(batch_size * seq_len, contract_dim)
+        # inps_viewed = distribute_tensor(global_inps_viewed, mesh, (_StridedShard(dim=0, split_factor=2),), src_data_rank=None)
+        # global_weight = torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
+        # weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
+        # out = torch.mm(inps_viewed, weight)
+        # expected_placements = (_StridedShard(dim=0, split_factor=2),)
+        # self.assertEqual(out.placements, expected_placements)
+
+        assert self.world_size == 6
+        mesh = init_device_mesh(self.device_type, (3, 2))
+        tensor_dims = (4, 12, 6, 8)
+        global_inps_viewed = torch.arange(4 * 12 * 6 * 8, device="cuda").float().view(4 * 12 * 6, 8)
+        inps_viewed = distribute_tensor(global_inps_viewed, mesh, (_StridedShard(dim=0, split_factor=4), _StridedShard(dim=0, split_factor=16)), src_data_rank=None)
+        global_weight = torch.arange(8 * 8).float().view(8, 8)
+        weight = distribute_tensor(global_weight, mesh, (Replicate(), Replicate()))
         out = torch.mm(inps_viewed, weight)
-        expected_placements = (_StridedShard(dim=0, split_factor=2),)
+        expected_placements = (_StridedShard(dim=0, split_factor=4), _StridedShard(dim=0, split_factor=16))
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms

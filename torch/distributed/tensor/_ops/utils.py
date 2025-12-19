@@ -396,7 +396,7 @@ def expand_to_full_mesh_op_strategy(
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
     all_strategies = []
-    skipped_non_shard_order = []
+    # skipped_non_shard_order = []
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
         non_ordered_shard = False
@@ -405,15 +405,15 @@ def expand_to_full_mesh_op_strategy(
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
                 # pyrefly: ignore [bad-argument-type]
                 spec = DTensorSpec(mesh, specs)
-                if spec.shard_order is None or len(spec.shard_order) == 0:
-                    non_ordered_shard = True
-                    break
+                # if spec.shard_order is None or len(spec.shard_order) == 0:
+                #     non_ordered_shard = True
+                #     break
                 spec_list.append(spec)
             else:
                 spec_list.append(None)
-        if non_ordered_shard:
-            skipped_non_shard_order.append(strategy_comb)
-            continue
+        # if non_ordered_shard:
+        #     skipped_non_shard_order.append(strategy_comb)
+        #     continue
 
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
@@ -467,12 +467,12 @@ def expand_to_full_mesh_op_strategy(
             redistribute_cost=redistribute_cost,
         )
         all_strategies.append(strategy)
-    if skipped_non_shard_order:
-        logger.warning(
-            "Skipped %d non-ordered shard order combinations: %s",
-            len(skipped_non_shard_order),
-            skipped_non_shard_order,
-        )
+    # if skipped_non_shard_order:
+    #     logger.warning(
+    #         "Skipped %d non-ordered shard order combinations: %s",
+    #         len(skipped_non_shard_order),
+    #         skipped_non_shard_order,
+    #     )
     return OpStrategy(all_strategies)
 
 
