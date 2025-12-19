@@ -257,7 +257,7 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
                                          batch2_.stride(0),
                                          output.stride(-1),
                                          output.stride(-2),
-                                         output.stride(0), // Output batch is unusued for addbmm
+                                         output.stride(0), // Output batch is unused for addbmm
                                          bias_expanded.stride(-1),
                                          bias_expanded.stride(-2),
                                          bias_expanded.stride(0)}; // Output bias is unused for addbmm
