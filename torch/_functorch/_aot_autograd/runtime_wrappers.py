@@ -319,6 +319,8 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
             not isinstance(func, torch._ops.HigherOrderOperator)
             and not is_builtin(func)
             and func.namespace not in ("_c10d_functional", "c10d")
+            # This op is quite important but has wrong schema, so lets skip for now
+            and func not in [torch.ops.fsdp.all_gather_copy_in.default]
             and not _schema_allows_aliasing(func)
         ):
             _check_custom_op_aliasing(

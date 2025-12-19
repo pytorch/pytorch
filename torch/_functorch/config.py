@@ -90,8 +90,8 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When False: Emits UserWarning on aliasing violations.
 #
 # Currently both are only enabled in CI, but eventually we should enable them everywhere.
-check_custom_op_aliasing = bool(os.getenv("CI"))
-error_on_custom_op_aliasing = bool(os.getenv("CI"))
+check_custom_op_aliasing = True  # bool(os.getenv("CI"))
+error_on_custom_op_aliasing = True  # bool(os.getenv("CI"))
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
