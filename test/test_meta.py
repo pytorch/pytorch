@@ -367,7 +367,6 @@ CHECK_STRIDES_SKIPS = {
     aten.div.Tensor_mode,
     aten.floor_divide.default,
     aten.heaviside.default,
-    aten.ldexp.Tensor,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
     aten.logaddexp.default,
