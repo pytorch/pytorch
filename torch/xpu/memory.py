@@ -323,7 +323,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
-        clear_history (bool, optional): Clear history when enabling, defaults to False.
+        clear_history (bool, optional): Clear history when enabling, defaults to ``False``.
         skip_actions (list[str], optional): List of action types to skip when recording
             memory history. This can be used to reduce memory overhead by excluding
             certain types of events from being recorded. Valid action types are:
@@ -341,7 +341,7 @@ def _record_memory_history(
             For example, to skip recording free_requested events:
             `skip_actions=["free_requested"]`
 
-            Defaults to `None` (record all actions).
+            Defaults to ``None`` (record all actions).
     """
     torch._C._xpu_recordMemoryHistory(
         enabled,
