@@ -1,6 +1,8 @@
 name: vLLM Benchmark
 
 on:
+  # DEBUG: TO BE REMOVED BEFORE LANDING
+  pull_request:
   workflow_dispatch:
     inputs:
       pytorch_branch:
@@ -61,7 +63,8 @@ jobs:
         working-directory: pytorch/pytorch-integration-testing
         id: set-parameters
         env:
-          MODELS: ${{ inputs.models || '' }}
+          # DEBUG: REMOVE BEFORE LANDING
+          MODELS: ${{ inputs.models || 'facebook/opt-125m' }}
           # Only need CUDA for now, we can add ROCm later if needed
           RUNNERS: ${{ inputs.runners || 'h100,b200' }}
         run: |
