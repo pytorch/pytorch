@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import logging
 import re
 import sys
@@ -95,14 +96,22 @@ class CompileId:
     def __str__(self) -> str:
         # NOTE: Keep this in sync with both from_string and the tlparse repo
         if self.compiled_autograd_id is not None:
-            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            if (self.frame_id is None) != (self.frame_compile_id is None):
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must both be None or both be set, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             frame_str = ""
             if self.frame_id is not None:
                 frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
 
             return f"!{self.compiled_autograd_id}{frame_str}"
         else:
-            assert self.frame_id is not None and self.frame_compile_id is not None
+            if self.frame_id is None or self.frame_compile_id is None:
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must not be None, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
@@ -402,10 +411,11 @@ class Guard:
 
         self.guard_types.append(guard_type)
 
-        assert self.guarded_class_weakref in (
-            guarded_class,
-            None,
-        ), "Guarded class id must be identical, or None"
+        if self.guarded_class_weakref not in (guarded_class, None):
+            raise AssertionError(
+                f"Guarded class id must be identical, or None, "
+                f"got {self.guarded_class_weakref} vs {guarded_class}"
+            )
         self.guarded_class_weakref = guarded_class
 
         if not self.code_list:
@@ -417,11 +427,16 @@ class Guard:
         # multiple guards on the same object, the weakref can die between the
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
-        assert (
+        is_valid = (
             self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
-        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
+        )
+        if not is_valid:
+            raise AssertionError(
+                f"Guarded object must be identical, None or ephemeral (dead weakref), "
+                f"got {self.obj_weakref} vs {obj_weakref}"
+            )
         self.obj_weakref = obj_weakref
 
 
@@ -452,7 +467,11 @@ class DuplicateInputs(GuardEnvExpr):
     input_source_b: Source
 
     def __post_init__(self) -> None:
-        assert self.input_source_a != self.input_source_b
+        if self.input_source_a == self.input_source_b:
+            raise AssertionError(
+                f"input_source_a and input_source_b must be different, "
+                f"got {self.input_source_a}"
+            )
 
 
 """
@@ -556,7 +575,10 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
         return ModuleContextCheckpointState(dict(self.nn_modules))
 
     def restore_graphstate(self, state: ModuleContextCheckpointState) -> None:
-        assert isinstance(state, ModuleContextCheckpointState)
+        if not isinstance(state, ModuleContextCheckpointState):
+            raise AssertionError(
+                f"expected ModuleContextCheckpointState, got {type(state)}"
+            )
         self.nn_modules = state.nn_modules
 
 
@@ -606,12 +628,19 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         return GlobalContextCheckpointState(self.global_state)
 
     def restore_graphstate(self, state: GlobalContextCheckpointState) -> None:
-        assert isinstance(state, GlobalContextCheckpointState)
+        if not isinstance(state, GlobalContextCheckpointState):
+            raise AssertionError(
+                f"expected GlobalContextCheckpointState, got {type(state)}"
+            )
         self.global_state = state.global_state
-        assert (
+        if not (
             len(self.global_state) == len(self._supported_global_states)
             and set(self.global_state.keys()) == self._supported_global_states
-        ), "Global state mismatch"
+        ):
+            raise AssertionError(
+                f"Global state mismatch: got keys {set(self.global_state.keys())}, "
+                f"expected {self._supported_global_states}"
+            )
         for func, args in self.global_state.values():
             func(args)
 
@@ -683,7 +712,8 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
         # NB: "steals" the passed in state
-        assert isinstance(state, GuardsCheckpointState)
+        if not isinstance(state, GuardsCheckpointState):
+            raise AssertionError(f"expected GuardsCheckpointState, got {type(state)}")
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
@@ -772,12 +802,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def add_effects(self, identifier: str, effects: set) -> None:
         """Store the effect types for a given invoke_subgraph identifier."""
         if prev_effects := self.effects_cache.get(identifier, None):
-            assert effects == prev_effects, (
-                "Different number of effects were found for invoke_subgraph "
-                f"call with identifier {identifier}. \n"
-                f"Previously we had the following effects: {prev_effects}.\n"
-                f"But now we have: {effects}."
-            )
+            if effects != prev_effects:
+                raise AssertionError(
+                    "Different number of effects were found for invoke_subgraph "
+                    f"call with identifier {identifier}. \n"
+                    f"Previously we had the following effects: {prev_effects}.\n"
+                    f"But now we have: {effects}."
+                )
         self.effects_cache[identifier] = effects
 
     def get_effects(self, identifier: str) -> set | None:
@@ -822,7 +853,8 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 class CompileContext:
     @staticmethod
     def get() -> CompileContext:
-        assert _TLS.compile_context is not None
+        if _TLS.compile_context is None:
+            raise AssertionError("compile_context is not set")
         return _TLS.compile_context
 
     @staticmethod
@@ -830,7 +862,10 @@ class CompileContext:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id: CompileId | None) -> None:
-        assert compile_id is None or isinstance(compile_id, CompileId)
+        if compile_id is not None and not isinstance(compile_id, CompileId):
+            raise AssertionError(
+                f"compile_id must be None or CompileId, got {type(compile_id)}"
+            )
         self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
@@ -959,7 +994,8 @@ class TracingContext:
         return traceback.StackSummary.from_list(stack)
 
     def _populate_loc_in_frame_summary(self) -> traceback.FrameSummary:
-        assert self.loc_in_frame is not None
+        if self.loc_in_frame is None:
+            raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
         return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
@@ -1091,6 +1127,16 @@ def tracing(
         _TLS.tracing_context = old_context
 
 
+def _stable_hash(obj: Any) -> int:
+    """
+    Compute a stable hash that is consistent across Python processes.
+
+    Python's built-in hash() uses PYTHONHASHSEED for strings, which varies
+    across processes. This function uses repr() + sha256 for stable hashing.
+    """
+    return int.from_bytes(hashlib.sha256(repr(obj).encode()).digest()[:8], "big")
+
+
 @overload
 def dataclass_with_cached_hash(cls: type[T], **kwargs: Any) -> type[T]: ...
 
@@ -1105,16 +1151,36 @@ def dataclass_with_cached_hash(
 def dataclass_with_cached_hash(
     cls: type[T] | None = None, **kwargs: Any
 ) -> type[T] | Callable[[type[T]], type[T]]:
+    """
+    Decorator that creates a frozen dataclass with cached, **stable** hashing.
+
+    This decorator wraps dataclasses.dataclass and overrides __hash__ to:
+    1. Use a stable hash function that is consistent across Python processes
+       (unlike Python's built-in hash() which varies with PYTHONHASHSEED)
+    2. Cache the hash value for performance
+
+    This is important for serialization/deserialization scenarios where
+    hash consistency across processes is required.
+    """
+
     def wrap(cls_inner: type[T]) -> type[T]:
         new_cls = dataclasses.dataclass(cls_inner, **kwargs)
-        old_hash = cls_inner.__hash__
 
-        def __hash__(self) -> int:
+        def __hash__(self: Any) -> int:
             if not hasattr(self, "_hash"):
-                object.__setattr__(self, "_hash", old_hash(self))
+                object.__setattr__(self, "_hash", _stable_hash(self))
             return self._hash
 
+        def __reduce__(self):
+            # Exclude _hash from pickling to ensure deterministic cache keys.
+            # The _hash is a cached value that can be nondeterministically computed
+            # (e.g., based on id() of objects), so it should not affect pickling.
+            fields = dataclasses.fields(self)
+            field_values = tuple(getattr(self, f.name) for f in fields)
+            return (self.__class__, field_values)
+
         new_cls.__hash__ = __hash__
+        new_cls.__reduce__ = __reduce__
         return new_cls  # type: ignore[return-value]
 
     if cls is None:
@@ -1282,13 +1348,14 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert fake_mode is m, (
-                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
-            )
+            if fake_mode is not m:
+                raise AssertionError(
+                    f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                    # pyrefly: ignore [missing-attribute]
+                    f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                    # pyrefly: ignore [missing-attribute]
+                    f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+                )
         # pyrefly: ignore [bad-return]
         return fake_mode
     else:

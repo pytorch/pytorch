@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    NumberType,
     suggest_memory_format,
     TensorLike,
 )
@@ -2400,19 +2401,20 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index]
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -3356,7 +3358,15 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
+    if device_hint(self) == "cpu":
+        return self.new_empty((size, self.dim()), dtype=torch.long)
+    else:
+        return torch.empty_strided(
+            (size, self.dim()),
+            (1, size),
+            dtype=torch.long,
+            device=self.device,
+        )
 
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
@@ -5087,16 +5097,11 @@ def meta_max_pool3d_with_indices(
         "max_pool3d_with_indices()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
     if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
         out_shape = (nslices, otime, oheight, owidth)
     else:
         out_shape = (nbatch, nslices, otime, oheight, owidth)  # type: ignore[assignment]
@@ -5195,16 +5200,10 @@ def meta_max_pool3d_with_indices_backward(
         "max_pool3d_with_indices_backward()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
-    if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
 
     grad_input = input.new_empty(input.shape)
 
@@ -5663,8 +5662,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
+    attention = torch.empty_like(query)
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -5717,8 +5715,7 @@ def alloc_with_matching_layout(
     res_shape: tuple[int, ...],
 ):
     if tuple(query.shape) == res_shape:
-        query_t = query.transpose(1, 2)
-        res = torch.empty_like(query_t).transpose(1, 2)
+        res = torch.empty_like(query)
     else:
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
@@ -5841,9 +5838,9 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: float | None = None,
 ):
-    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
     return grad_q, grad_k, grad_v
 
 
@@ -7178,6 +7175,51 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
+@register_meta(aten.miopen_rnn.default)
+def miopen_rnn(
+    input,
+    weight,
+    weight_stride0,
+    # weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    # proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+    total_weight_elems = 0
+    for w in weight:
+        if w.numel() > 0:
+            total_weight_elems += w.numel()
+
+    weight_buf = input.new_empty((total_weight_elems,))
+    return _cudnn_rnn(
+        input,
+        weight,
+        weight_stride0,
+        weight_buf,
+        hx,
+        cx,
+        mode,
+        hidden_size,
+        0,
+        num_layers,
+        batch_first,
+        dropout,
+        train,
+        bidirectional,
+        batch_sizes,
+        dropout_state,
+    )
+
+
 @register_meta(aten.mkldnn_rnn_layer.default)
 def mkldnn_rnn_layer(
     input,
@@ -7433,6 +7475,20 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
         memory_format=torch.contiguous_format,
+    )
+
+
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(
+    self: NumberType,
+    boundaries: Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
     )
 
 

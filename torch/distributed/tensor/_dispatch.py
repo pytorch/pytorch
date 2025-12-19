@@ -205,6 +205,13 @@ class OpDispatcher:
         # don't have to throw an exception even in "fastpath".
         try_cache: bool,
     ) -> object:
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
+        # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in sharding propagation. "
+            "This function should only be called after unwrap_to_op_info."
+        )
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
@@ -227,7 +234,7 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"{e}\n\nSharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema or op_call}"
             ) from e
 
     def _dispatch_get_local_results_slow_path(
@@ -238,6 +245,7 @@ class OpDispatcher:
     ) -> object:
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
+        assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
@@ -466,7 +474,7 @@ class OpDispatcher:
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                        message=f"Implicit redistribution occurred for {op_info.schema} "
+                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema or suggested_input_schema.op} "
                         "while ExplicitRedistributionContext was active",
                     )
                     with redistribute_context:
@@ -569,6 +577,7 @@ class OpDispatcher:
         )
         op_info = OpInfo(
             compute_mesh,
+            # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
                 (
@@ -608,6 +617,7 @@ class OpDispatcher:
             )
             res_list = []
             for e, s in zip(res, spec):
+                # pyrefly: ignore [bad-argument-type]
                 res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list
