@@ -1501,6 +1501,7 @@ inline Vectorized<T> flip(const Vectorized<T>& data) {
 // dimension of `dst`.
 template <typename T>
 #if !defined(__clang__) && defined(__aarch64__)
+// Workaround for https://github.com/pytorch/pytorch/issues/170877
 inline void __attribute__((optimize("no-tree-vectorize"))) transpose_mxn(
 #else
 inline void transpose_mxn(

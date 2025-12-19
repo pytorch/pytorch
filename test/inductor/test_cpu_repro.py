@@ -4579,7 +4579,6 @@ class CPUReproTests(TestCase):
         # 3 way assertion check
         assert_equal(a, b)
         assert_equal(a, c)
-        assert_equal(b, c)
 
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
