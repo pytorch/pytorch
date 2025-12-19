@@ -15,12 +15,9 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    _ShardingPlaceholder,
-    register_single_dim_strategy,
-)
-
-from torch.distributed.tensor._ops.utils import (    generate_redistribute_costs,
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.utils import (
+    generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
@@ -520,23 +517,22 @@ def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
 
-# Note: single_dim pointwise strategy is a WIP and used for local testing, needs TODOs addressed
-# for Partial support
-def single_dim_pointwise_strategy(
+def single_mesh_dim_pointwise_strategy(
     op: OpOverload,
     args_schema: ArgsType,
     kwargs_schema: KwargsType,
     linearity: int = -1,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    return single_dim_common_pointwise_strategy(args_schema, linearity)
+    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
 
 
-def single_dim_common_pointwise_strategy(
+def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
     scalar_tensor_idx: Optional[int] = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    tensor_metas: list[TensorMeta] = [
+    # TODO rename
+    tensor_arg_strategies: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)
     ]
     common_shape = torch.broadcast_shapes(
@@ -548,7 +544,7 @@ def single_dim_common_pointwise_strategy(
         shard_placements: list[Placement | _ShardingPlaceholder] = [
             _ShardingPlaceholder(i)
         ]
-        for arg in tensor_metas:
+        for arg in tensor_arg_strategies:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
                 shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
@@ -560,7 +556,7 @@ def single_dim_common_pointwise_strategy(
     if linearity == 0:
         # unary op (e.g. to_copy), and also binary ops like mul.scalar
         # input, output can be partial
-        assert len(tensor_metas) == 1, (
+        assert len(tensor_arg_strategies) == 1, (
             "expected single tensor input for linearity==0 op"
         )
         placements_list.append([Partial("sum"), Partial("sum")])
@@ -573,14 +569,14 @@ def single_dim_common_pointwise_strategy(
     elif linearity == 1:
         # binary add ops
         # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_metas) == 2, (
+        assert len(tensor_arg_strategies) == 2, (
             "expected two tensor inputs for linearity==1 op"
         )
         placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
     elif linearity == 2:
         # binary mul ops (2 tensor inputs)
         # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_metas) == 2, (
+        assert len(tensor_arg_strategies) == 2, (
             "expected two tensor inputs for linearity==2 op"
         )
         placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
@@ -763,7 +759,6 @@ for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
     )
-    # Not ready to enable yet, just used for local testing
     # register_single_dim_strategy(
     #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     # )(single_mesh_dim_pointwise_strategy)
