@@ -225,7 +225,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -272,7 +272,7 @@ class ShardingPropagator:
     @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
         This is a private API. Use propagate_tensor_meta instead.
@@ -281,7 +281,7 @@ class ShardingPropagator:
 
     def propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
@@ -296,7 +296,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -406,6 +406,13 @@ class ShardingPropagator:
         # NB: The logic here is duplicated in _propagate_op_sharding_dispatch_slow_path.
         # Ideally, this function would be deleted, but there are a handful of
         # one off call sites here that aren't cleaned up.
+
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called after unwrap_to_op_info (create_schema=True).
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
 
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
