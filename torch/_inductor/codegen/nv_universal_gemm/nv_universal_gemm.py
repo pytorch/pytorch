@@ -5,6 +5,7 @@ NVIDIA Universal GEMM (NVGEMM) backend for PyTorch Inductor.
 This module provides integration with the cutlass_api library to enable
 high-performance GEMM kernels for NVIDIA GPUs.
 """
+
 import itertools
 import random
 from typing import Any, Optional, Union
@@ -16,6 +17,7 @@ from torch._inductor.autotune_process import (
     GPUDeviceBenchmarkMixin,
     TensorMeta,
 )
+from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.ir import (
     Buffer,
     ChoiceCaller,
@@ -23,7 +25,6 @@ from torch._inductor.ir import (
     ShapeAsConstantBuffer,
     TensorBox,
 )
-from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 

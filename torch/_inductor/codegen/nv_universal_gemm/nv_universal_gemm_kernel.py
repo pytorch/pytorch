@@ -4,11 +4,18 @@ NVIDIA Universal GEMM kernel code generation.
 
 This module generates Python code that calls cutlass_api to execute GEMM operations.
 """
+
 import logging
 from typing import Any, Optional
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
-from torch._inductor.ir import BaseView, Buffer, ExternKernel, MutableBox, ReinterpretView
+from torch._inductor.ir import (
+    BaseView,
+    Buffer,
+    ExternKernel,
+    MutableBox,
+    ReinterpretView,
+)
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 

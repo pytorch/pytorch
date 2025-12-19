@@ -652,7 +652,9 @@ class AsyncCompile:
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernelWrapper,
         )
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import MAIN_SUFFIX
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            MAIN_SUFFIX,
+        )
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
 
@@ -665,7 +667,8 @@ class AsyncCompile:
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
-                    f"Could not find NVIDIA Universal GEMM main kernel function '{main_func_name}'. Available callables: {available}"
+                    f"Could not find NVIDIA Universal GEMM main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
                 )
 
             return NVUniversalGemmKernelWrapper(

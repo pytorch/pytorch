@@ -11,8 +11,8 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
-from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
@@ -131,7 +131,9 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._cutedsl_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
-        elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(template_node):
+        elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
+            template_node
+        ):
             # NVIDIA Universal GEMM doesn't support epilogue/prologue fusion yet
             assert not epilogue_nodes
             assert not prologue_nodes

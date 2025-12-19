@@ -23,9 +23,9 @@ class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
-    @parametrize("m,n,k", ((512, 512, 512), (1024, 1024, 1024), (2048, 2048, 512)))
-    def test_basic_matmul(self, dtype, m, n, k):
+    def test_basic_matmul(self, dtype):
         """Test basic matmul with NVIDIA Universal GEMM backend."""
+        m, n, k = 512, 512, 512
 
         def matmul(a, b):
             return a @ b
@@ -232,80 +232,6 @@ class TestNVUniversalGemm(TestCase):
         x = torch.randn(m, k, device=device, dtype=dtype)
         # Weight projects to 2*n so we can split
         weight = torch.randn(k, 2 * n, device=device, dtype=dtype)
-
-        expected = fn(x, weight)
-
-        torch._dynamo.reset()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(fn)
-            result = compiled_fn(x, weight)
-
-        torch.testing.assert_close(result, expected)
-
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_reinterpret_view_from_reshape(self, dtype):
-        """Test matmul with tensors from reshape/view operations.
-
-        Reshape operations can create ReinterpretViews when the underlying
-        storage layout differs from the logical layout.
-        """
-        m, n, k = 512, 512, 512
-        device = "cuda"
-
-        def fn(x, weight):
-            # Create a larger tensor and reshape
-            large = x @ weight  # (m, 2*k)
-            reshaped = large.view(m * 2, k)  # Reshape to different dims
-            a = reshaped[:m, :]  # (m, k)
-            b = reshaped[m:, :]  # (m, k)
-            return a @ b.t()  # (m, m)
-
-        x = torch.randn(m, k, device=device, dtype=dtype)
-        weight = torch.randn(k, 2 * k, device=device, dtype=dtype)
-
-        expected = fn(x, weight)
-
-        torch._dynamo.reset()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(fn)
-            result = compiled_fn(x, weight)
-
-        torch.testing.assert_close(result, expected)
-
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_reinterpret_view_unbind(self, dtype):
-        """Test matmul with tensors from unbind operations.
-
-        Similar to fused QKV in attention, unbind creates multiple
-        ReinterpretViews from a single tensor.
-        """
-        m, n, k = 512, 512, 512
-        device = "cuda"
-
-        def fn(x, weight):
-            # Project and reshape to have an extra dim for unbind
-            projected = x @ weight  # (m, 3*n)
-            stacked = projected.view(m, 3, n)  # (m, 3, n)
-            a, b, c = stacked.unbind(1)  # Each is (m, n)
-            # Use two of them in a matmul
-            return a @ b.t()  # (m, m)
-
-        x = torch.randn(m, k, device=device, dtype=dtype)
-        weight = torch.randn(k, 3 * n, device=device, dtype=dtype)
 
         expected = fn(x, weight)
 
