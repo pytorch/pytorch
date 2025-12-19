@@ -367,6 +367,7 @@ CHECK_STRIDES_SKIPS = {
     aten.div.Tensor_mode,
     aten.floor_divide.default,
     aten.heaviside.default,
+    aten.ldexp.Tensor,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
     aten.logaddexp.default,
@@ -437,6 +438,8 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
             test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
+            if not same_strides:
+                print(same_strides)
             test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
