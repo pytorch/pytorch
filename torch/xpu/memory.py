@@ -246,7 +246,7 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
 
 
 def memory_snapshot(
-    mempool_id: Union[tuple[int, int], None] = None,
+    mempool_id: tuple[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     r"""
     Return a snapshot of the XPU memory allocator state across all devices.
