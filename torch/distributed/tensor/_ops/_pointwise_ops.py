@@ -15,10 +15,12 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
-from torch.distributed.tensor._ops.utils import (
-    generate_redistribute_costs,
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
+
+from torch.distributed.tensor._ops.utils import (    generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
@@ -31,7 +33,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.types import _Number
 from torch.utils._typing_utils import not_none
 
 
@@ -381,8 +382,10 @@ pointwise_ops = [
     aten.square.out,
     aten.square_.default,
     aten.sub.Scalar,
+    aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Scalar,
+    aten.sub_.Tensor,
     aten.tan.default,
     aten.tan.out,
     aten.tan_.default,
@@ -417,8 +420,6 @@ linear_pointwise_ops = {
     aten.to.dtype: 0,
     aten.add.Tensor: 1,
     aten.add_.Tensor: 1,
-    aten.sub.Tensor: 1,
-    aten.sub_.Tensor: 1,
     aten.div.Scalar: 0,
     aten.div_.Scalar: 0,
     aten.mul.Scalar: 0,
@@ -483,7 +484,6 @@ def pointwise_strategy(
         f"no strategy to follow for {op_schema}!"
     )
     return common_pointwise_strategy(
-        op_schema.op,
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
@@ -520,22 +520,23 @@ def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
 
-def single_mesh_dim_pointwise_strategy(
+# Note: single_dim pointwise strategy is a WIP and used for local testing, needs TODOs addressed
+# for Partial support
+def single_dim_pointwise_strategy(
     op: OpOverload,
     args_schema: ArgsType,
     kwargs_schema: KwargsType,
     linearity: int = -1,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
+    return single_dim_common_pointwise_strategy(args_schema, linearity)
 
 
-def single_mesh_dim_common_pointwise_strategy(
+def single_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
     scalar_tensor_idx: Optional[int] = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # TODO rename
-    tensor_arg_strategies: list[TensorMeta] = [
+    tensor_metas: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)
     ]
     common_shape = torch.broadcast_shapes(
@@ -547,7 +548,7 @@ def single_mesh_dim_common_pointwise_strategy(
         shard_placements: list[Placement | _ShardingPlaceholder] = [
             _ShardingPlaceholder(i)
         ]
-        for arg in tensor_arg_strategies:
+        for arg in tensor_metas:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
                 shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
@@ -559,7 +560,7 @@ def single_mesh_dim_common_pointwise_strategy(
     if linearity == 0:
         # unary op (e.g. to_copy), and also binary ops like mul.scalar
         # input, output can be partial
-        assert len(tensor_arg_strategies) == 1, (
+        assert len(tensor_metas) == 1, (
             "expected single tensor input for linearity==0 op"
         )
         placements_list.append([Partial("sum"), Partial("sum")])
@@ -572,14 +573,14 @@ def single_mesh_dim_common_pointwise_strategy(
     elif linearity == 1:
         # binary add ops
         # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
+        assert len(tensor_metas) == 2, (
             "expected two tensor inputs for linearity==1 op"
         )
         placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
     elif linearity == 2:
         # binary mul ops (2 tensor inputs)
         # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
+        assert len(tensor_metas) == 2, (
             "expected two tensor inputs for linearity==2 op"
         )
         placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
@@ -590,7 +591,6 @@ def single_mesh_dim_common_pointwise_strategy(
 
 
 def common_pointwise_strategy(
-    op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
@@ -642,33 +642,14 @@ def common_pointwise_strategy(
                 else:
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
-                is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
-                propagate_partial = False
-
-                # ordering matters here since NormPartial is a subclass of Partial
-                if isinstance(placement, _NormPartial):
-                    # explanation for args_schema[1] >= 0 can be found in summary
-                    # https://github.com/pytorch/pytorch/pull/170035
-                    propagate_partial = (
-                        op in norm_partial_avoidable_redistribute_ops
-                        and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
-                    )
-
-                elif isinstance(placement, Partial):
-                    propagate_partial = not (
-                        op in p_sum_scalar_redistribute_ops and is_scalar_arg
-                    )
-
                 # Check if this partial type should be preserved
                 if preserve_partial is not None and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
                 # note that only partial-sum and partial-avg are supported for linearity
-                elif (
-                    linearity >= 0
-                    and (placement.is_partial("sum") or placement.is_partial("avg"))
-                    and propagate_partial
+                elif linearity >= 0 and (
+                    placement.is_partial("sum") or placement.is_partial("avg")
                 ):
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -768,29 +749,10 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-p_sum_scalar_redistribute_ops = {
-    aten.add.Tensor,
-    aten.add_.Tensor,
-    aten.sub.Tensor,
-    aten.sub_.Tensor,
-}
-
-norm_partial_avoidable_redistribute_ops = {
-    aten.div.Scalar,
-    aten.div_.Scalar,
-    aten.mul.Scalar,
-    aten.mul_.Scalar,
-}
-
 for op in linear_pointwise_ops:
-    if op in norm_partial_avoidable_redistribute_ops:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
-    else:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        linear_pointwise_strategy
+    )
 
 for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
@@ -801,6 +763,7 @@ for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
     )
+    # Not ready to enable yet, just used for local testing
     # register_single_dim_strategy(
     #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     # )(single_mesh_dim_pointwise_strategy)
@@ -924,7 +887,6 @@ def list_pointwise_strategy(
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
-            op_schema.op,
             args_schema,
             child_strtgy,
             linearity,
