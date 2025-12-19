@@ -187,9 +187,6 @@ jobs:
         shell: bash
         run: |
           set -eux
-
-          # Remove this once torchao become a vLLM dependency
-          pip install torchao==0.14.1
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
 
       - name: Get the actual device name to name the uploaded artifacts
