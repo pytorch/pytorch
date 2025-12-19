@@ -233,11 +233,16 @@ class TracerBase:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
 
         if self.record_stack_traces and not node.stack_trace:
-            user_stack_summary = CapturedTraceback.extract().summary()
-            if user_stack_summary:
-                user_stack_summary = self._filter_traceback_frames(user_stack_summary)
-                if user_stack_summary:
-                    node.stack_trace = "".join(user_stack_summary.format()).strip()
+            # Use the new filtering approach
+            try:
+                raw_stack_trace = ''.join(CapturedTraceback.extract().format())
+                if raw_stack_trace:
+                    filtered_stack_trace = self._filter_user_frames(raw_stack_trace)
+                    if filtered_stack_trace.strip():
+                        node.stack_trace = filtered_stack_trace.strip()
+            except Exception:
+                # Fallback to original behavior if our method fails
+                pass
 
         log.debug("create_node %s", node)
         return node
@@ -353,6 +358,48 @@ class TracerBase:
             return None
 
         return frame
+
+    def _filter_user_frames(self, stack_trace_str: str) -> str:
+        """
+        Filter out internal PyTorch frames from stack trace string.
+
+        Args:
+            stack_trace_str: Raw stack trace string
+
+        Returns:
+            Filtered stack trace string containing only user frames
+        """
+        if not stack_trace_str:
+            return ""
+
+        stack_lines = stack_trace_str.split('\n')
+        user_lines = []
+
+        # Skip internal PyTorch frames
+        skip_patterns = [
+            'torch/fx/proxy.py',
+            'torch/fx/_symbolic_trace.py', 
+            'torch/fx/experimental/proxy_tensor.py',
+            'torch/_ops.py',
+            'torch/_tensor.py',
+            'torch/utils/_python_dispatch.py',
+            'torch/_prims_common/wrappers.py',
+            'torch/_refs/__init__.py',
+            'torch/_refs/nn/functional/__init__.py',
+            'torch/utils/_stats.py',
+        ]
+
+        for line in stack_lines:
+            # Check if this line contains any of the skip patterns
+            should_skip = any(pattern in line for pattern in skip_patterns)
+            if not should_skip:
+                user_lines.append(line)
+            else:
+                # If we hit an internal frame, we can stop here
+                # as the user frames should come before the internal ones
+                break
+
+        return '\n'.join(user_lines)
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> Argument:
