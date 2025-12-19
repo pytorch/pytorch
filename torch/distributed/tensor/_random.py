@@ -482,6 +482,7 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
 
     return shard_linear_idx
 
+
 class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
     """
     This subclass of `RNGStateTracker` defines how RNG states should be distributed and
@@ -760,6 +761,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             torch.uint8
         )
         state._state = torch.cat([seed_tensor, spec_tensor])
+
 
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_type = device_mesh.device_type

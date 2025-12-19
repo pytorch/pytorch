@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._random import (
+    _use_thread_rng_tracker,
     is_rng_supported_mesh,
     manual_seed,
     OffsetBasedRNGTracker,
@@ -33,7 +34,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.utils._typing_utils import not_none
-from torch.distributed.tensor._random import _use_thread_rng_tracker
 
 
 def get_generator_seed_for_device_type(device_type: str):
@@ -733,6 +733,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
                     )
 
         compute_rankwise_if_local_tensor(weight_local, self.rank)
+
 
 class DistTensorRandomOpsTestND(DTensorTestBase):
     @property
