@@ -29,6 +29,7 @@ devices = ["cpu"]
 if acc := torch.accelerator.current_accelerator(True):
     devices += [acc.type]
 
+
 def with_comms(func=None):
     if func is None:
         return partial(with_comms)
