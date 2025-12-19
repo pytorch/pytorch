@@ -99,6 +99,28 @@ def _supports_fp8_rowwise_fp32_output() -> bool:
     return torch.cuda.get_device_capability(0) == (9, 0)
 
 
+def _supports_scaled_mm_benchmark() -> tuple[bool, str]:
+    # `scaled_mm` was introduced in PyTorch 2.9.
+    if not hasattr(torch.nn.functional, "scaled_mm"):
+        return False, "torch.nn.functional.scaled_mm requires PyTorch 2.9+"
+
+    if not torch.cuda.is_available():
+        return False, "CUDA not available"
+
+    # Mirror torch._scaled_mm support message:
+    # "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+"
+    if torch.version.hip is not None:
+        arch = torch.cuda.get_device_properties(0).gcnArchName
+        if "gfx94" in arch:
+            return True, ""
+        return False, f"unsupported ROCm arch {arch} (requires MI300+ / gfx94x)"
+
+    cap = torch.cuda.get_device_capability(0)
+    if cap >= (9, 0) or cap == (8, 9):
+        return True, ""
+    return False, f"unsupported CUDA compute capability {cap[0]}.{cap[1]} (requires >= 9.0 or 8.9)"
+
+
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     _MX_BLOCK_SIZE: int = 32
     _NVFP4_BLOCK_SIZE: int = 16
