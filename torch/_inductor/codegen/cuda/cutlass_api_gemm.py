@@ -41,6 +41,34 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.accumulator_type = accumulator_type
         self._compiled_artifact = None
 
+    def benchmark(
+        self,
+        *input_tensors: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+    ) -> float:
+        """Benchmark the cutlass_api kernel.
+
+        Override the base class to always create tensors from input_tensor_meta.
+        This is necessary because input_nodes may be ReinterpretViews that share
+        the same underlying buffer name. The autotuning framework deduplicates
+        inputs by name (in AlgorithmSelectorCache.get_inputs()), resulting in
+        fewer tensors than expected. By always creating from input_tensor_meta,
+        we ensure each input gets its own tensor with the correct size/stride/offset
+        from the view's layout.
+
+        Note: CuteDSL/Triton templates don't need this workaround because they
+        benchmark in a subprocess where BenchmarkRequest.benchmark() is called
+        with out=None, causing it to recreate tensors from TensorMeta rather than
+        using the deduplicated inputs passed from the main process.
+        """
+        # Always create tensors from input_tensor_meta, ignoring passed-in tensors
+        input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+        if out is None:
+            out = self.output_tensor_meta.to_tensor()
+
+        fn = self.make_run_fn(*input_tensors, out=out)
+        return self.do_bench(fn, *input_tensors, out=out)
+
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the cutlass_api kernel."""
         import cutlass_api

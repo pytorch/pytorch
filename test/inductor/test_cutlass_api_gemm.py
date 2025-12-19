@@ -211,6 +211,118 @@ class TestCutlassAPIGemm(TestCase):
             ):
                 compiled_fn(a, b)
 
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_reinterpret_view_from_slice(self, dtype):
+        """Test that sliced tensors (creating ReinterpretViews) work correctly.
+
+        When tensors are slices of a shared buffer (e.g., from a fused projection),
+        they become ReinterpretViews with non-contiguous strides. cutlass_api must
+        handle these correctly.
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(x, weight):
+            # Fused projection creates a single large output
+            projected = x @ weight  # (m, 2*n)
+            # Slicing creates ReinterpretViews
+            a, b = projected.split(n, dim=1)  # Each is (m, n)
+            return a @ b.t()  # (m, m)
+
+        x = torch.randn(m, k, device=device, dtype=dtype)
+        # Weight projects to 2*n so we can split
+        weight = torch.randn(k, 2 * n, device=device, dtype=dtype)
+
+        expected = fn(x, weight)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "cuda.cutlass_api_max_profiling_configs": 3,
+            }
+        ):
+            compiled_fn = torch.compile(fn)
+            result = compiled_fn(x, weight)
+
+        torch.testing.assert_close(result, expected)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_reinterpret_view_from_reshape(self, dtype):
+        """Test matmul with tensors from reshape/view operations.
+
+        Reshape operations can create ReinterpretViews when the underlying
+        storage layout differs from the logical layout.
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(x, weight):
+            # Create a larger tensor and reshape
+            large = x @ weight  # (m, 2*k)
+            reshaped = large.view(m * 2, k)  # Reshape to different dims
+            a = reshaped[:m, :]  # (m, k)
+            b = reshaped[m:, :]  # (m, k)
+            return a @ b.t()  # (m, m)
+
+        x = torch.randn(m, k, device=device, dtype=dtype)
+        weight = torch.randn(k, 2 * k, device=device, dtype=dtype)
+
+        expected = fn(x, weight)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "cuda.cutlass_api_max_profiling_configs": 3,
+            }
+        ):
+            compiled_fn = torch.compile(fn)
+            result = compiled_fn(x, weight)
+
+        torch.testing.assert_close(result, expected)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_reinterpret_view_unbind(self, dtype):
+        """Test matmul with tensors from unbind operations.
+
+        Similar to fused QKV in attention, unbind creates multiple
+        ReinterpretViews from a single tensor.
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(x, weight):
+            # Project and reshape to have an extra dim for unbind
+            projected = x @ weight  # (m, 3*n)
+            stacked = projected.view(m, 3, n)  # (m, 3, n)
+            a, b, c = stacked.unbind(1)  # Each is (m, n)
+            # Use two of them in a matmul
+            return a @ b.t()  # (m, m)
+
+        x = torch.randn(m, k, device=device, dtype=dtype)
+        weight = torch.randn(k, 3 * n, device=device, dtype=dtype)
+
+        expected = fn(x, weight)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "cuda.cutlass_api_max_profiling_configs": 3,
+            }
+        ):
+            compiled_fn = torch.compile(fn)
+            result = compiled_fn(x, weight)
+
+        torch.testing.assert_close(result, expected)
+
 
 @unittest.skipIf(
     not (ensure_cutlass_api_available() and is_datacenter_blackwell_arch()),

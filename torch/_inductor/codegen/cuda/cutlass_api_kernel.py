@@ -3,7 +3,7 @@ import logging
 from typing import Any, Optional
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
-from torch._inductor.ir import Buffer, ReinterpretView
+from torch._inductor.ir import BaseView, Buffer, ExternKernel, MutableBox, ReinterpretView
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -179,11 +179,12 @@ class CutlassAPITemplateKernel(Kernel):
 
         return code.getvalue()
 
-    # TODO(nikhilap) Do this like cutedsl
-    def _get_reinterpret_view(self, node: Buffer) -> Optional[ReinterpretView]:
-        """Check if node is a ReinterpretView and return it."""
-        if isinstance(node, ReinterpretView):
-            return node
+    def _get_reinterpret_view(self, node) -> Optional[ReinterpretView]:
+        """Extract or convert to ReinterpretView from a node, handling all views."""
+        while isinstance(node, MutableBox):
+            node = node.data
+        if isinstance(node, BaseView):
+            return ExternKernel.convert_to_reinterpret_view(node)
         return None
 
     def call_kernel(self, name: str, node=None):
