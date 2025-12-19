@@ -157,33 +157,38 @@ Tensor& do_metal_addmm(const Tensor& self,
   if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
     return do_metal_mm(self, other, output);
   }
+  // Handle conjugated inputs by creating resolved copies
+  auto self_ = self.is_conj() ? self.resolve_conj() : self;
+  auto other_ = other.is_conj() ? other.resolve_conj() : other;
+  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self, other});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
-                                       static_cast<uint32_t>(self.size(1)),
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
+                                       static_cast<uint32_t>(self_.size(1)),
                                        static_cast<uint32_t>(output.size(1))};
-      std::array<int64_t, 8> strides = {self.stride(0),
-                                        self.stride(1),
-                                        other.stride(0),
-                                        other.stride(1),
+      std::array<int64_t, 8> strides = {self_.stride(0),
+                                        self_.stride(1),
+                                        other_.stride(0),
+                                        other_.stride(1),
                                         output.stride(0),
                                         output.stride(1),
-                                        bias.stride(0),
-                                        bias.stride(1)};
+                                        bias_.stride(0),
+                                        bias_.stride(1)};
       auto alpha_beta = make_alpha_beta(alpha, beta, output.scalar_type());
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
       uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self_.size(0) + TILE_DIM - 1) / TILE_DIM;
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
-      mtl_setArgs(computeEncoder, self, other, output, bias, alpha_beta.i64, strides, sizes);
+      mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -214,7 +219,8 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded});
+      getMPSProfiler().beginProfileKernel(
+          matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
 
