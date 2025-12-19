@@ -14,7 +14,11 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -306,6 +310,90 @@ class TestExpandPlaceholder(TestCase):
             shard_0_found,
             "No strategy found with Shard(0) for left input",
         )
+
+    def test_pointwise_op_different_shard_orders(self):
+        """Test that pointwise ops (add) trigger redistribution when inputs have different shard orders.
+
+        This test verifies that when two tensors are sharded on the same tensor dimension
+        but across different mesh dimensions, the sharding propagator correctly detects
+        the mismatch and requires redistribution to align them.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        shape = torch.Size([8, 16])
+        tensor_meta = TensorMeta(
+            shape=shape,
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+        input_a_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Shard(0), Shard(0)),
+            tensor_meta=tensor_meta,
+        )
+        input_b_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Shard(0), Shard(0)),
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
+            tensor_meta=tensor_meta,
+        )
+        op_schema = OpSchema(
+            op=torch.ops.aten.add.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(input_a_spec)]),
+                OpStrategy([OpSpec(input_b_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        def add_single_dim_strategy(op, args_schema, kwargs_schema):
+            return [
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                ],
+                [
+                    _ShardingPlaceholder(1),
+                    _ShardingPlaceholder(1),
+                    _ShardingPlaceholder(1),
+                ],
+            ]
+
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, add_single_dim_strategy, tensor_meta
+        )
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.add.Tensor, op_schema.args_meta, op_schema.kwargs_meta
+        )
+        assert isinstance(strategy, OpStrategy)
+        min_cost_strategy = _select_min_cost_strategy(strategy, op_schema)
+        assert min_cost_strategy.redistribute_cost is not None
+
+        # Check that at least one input has non-zero redistribution cost
+        has_redistribution = False
+        for redistribute_costs_for_input in min_cost_strategy.redistribute_cost:
+            if len(redistribute_costs_for_input) > 0:
+                current_input_cost = redistribute_costs_for_input[0]
+                if current_input_cost > 0:
+                    has_redistribution = True
+
+        self.assertTrue(
+            has_redistribution,
+            "Expected redistribution for inputs with different shard orders, but all costs were 0. "
+            f"Input A placements: {input_a_spec.placements}, "
+            f"Input B placements: {input_b_spec.placements}, "
+            f"Selected strategy output placements: {min_cost_strategy.output_spec.placements}, ",
+        )
+
+        # Verify that the output has valid placements (not None)
+        self.assertIsNotNone(min_cost_strategy.output_spec.placements)
+
+        # Verify tensor_meta is populated in the output spec
+        self.assertIsNotNone(
+            min_cost_strategy.output_spec.tensor_meta,
+            "Output spec should have tensor_meta populated",
+        )
+        self.assertEqual(min_cost_strategy.output_spec.tensor_meta.shape, shape)
 
     def test_fill_single_dim_strategy_placeholders(self):
         """Test _fill_single_dim_strategy_placeholders with different input sharding types.

@@ -353,7 +353,10 @@ def redistribute_cost(
     # No redistribution needed when placements are already identical.
     # This also prevents potential failures in _gen_transform_infos for certain configurations
     # (e.g., sub-meshes) where finding a transform path between identical states may error out.
-    if current_spec.placements == target_spec.placements:
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
         return cost
 
     # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary

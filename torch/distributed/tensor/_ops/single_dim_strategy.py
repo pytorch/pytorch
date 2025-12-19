@@ -157,6 +157,46 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
     return num_inputs
 
 
+def _get_unique_shard_orders(op_schema: OpSchema) -> set[tuple[tuple[int, ...], ...]]:
+    """
+    Extract unique shard order patterns from input specs.
+
+    Returns a set of shard order patterns, where each pattern is a tuple of
+    (mesh_dims tuple) for each tensor dimension that is sharded across multiple mesh dims.
+
+    For example, if an input has shard_order:
+        (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),)
+    We extract the mesh_dims pattern: ((1, 0),)
+
+    Only multi-dim shard orders (where len(mesh_dims) > 1) are included.
+    """
+
+    unique_shard_order_patterns = set()
+
+    def _extract_shard_order_pattern(obj: Any) -> None:
+        if isinstance(obj, DTensorSpec):
+            if obj.shard_order:
+                # Extract mesh_dims tuples for multi-dim sharding only
+                pattern_entries = []
+                for entry in obj.shard_order:
+                    if len(entry.mesh_dims) > 1:
+                        pattern_entries.append(entry.mesh_dims)
+                if pattern_entries:
+                    pattern = tuple(pattern_entries)
+                    unique_shard_order_patterns.add(pattern)
+        elif isinstance(obj, OpStrategy):
+            assert len(obj.strategies) == 1
+            _extract_shard_order_pattern(obj.strategies[0].output_spec)
+        elif isinstance(obj, TupleStrategy):
+            for child in obj.children:
+                _extract_shard_order_pattern(child)
+
+    for obj in op_schema.args_schema:
+        _extract_shard_order_pattern(obj)
+
+    return unique_shard_order_patterns
+
+
 def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -180,6 +220,7 @@ def _expand_single_dim_strategy_to_mesh(
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
     unique_input_placements = _get_unique_placements(op_schema)
+    unique_shard_orders = _get_unique_shard_orders(op_schema)
     num_inputs = _get_num_tensor_inputs(op_schema)
 
     def expanded_strategy(
@@ -220,6 +261,7 @@ def _expand_single_dim_strategy_to_mesh(
             op_schema,
             cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
             output_tensor_meta=output_tensor_meta,
+            unique_shard_orders=unique_shard_orders,
         )
 
     return expanded_strategy
