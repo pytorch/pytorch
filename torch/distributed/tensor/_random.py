@@ -563,6 +563,25 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
     def _distribute_region(
         self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
     ):
+        """Context manager that sets up the RNG state for distributed random operations.
+
+        This method encodes DTensor sharding metadata into the RNG state before executing
+        the random operation, then restores and synchronizes the RNG state afterward.
+
+        Args:
+            spec (:class:`DTensorSpec`): The spec of the DTensor object on which
+                the random operation will be executed.
+            generator (:class:`torch.Generator`, optional): An optional generator to use
+                for the random operation. If not provided, uses the default device RNG.
+
+        Yields:
+            None: Executes the random operation within the context.
+
+        Note:
+            Unlike ``OffsetBasedRNGTracker``, this implementation embeds full sharding
+            metadata (local shape, global offset, global shape, strides) into the RNG
+            state, allowing CUDA kernels to compute correct global indices per thread.
+        """
         if generator is not None:
             # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
             # not because we need to keep a copy of it but because its the easiest way to make it work with the
@@ -595,19 +614,38 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             self._set_device_state(state.state)
 
     def _set_pre_op_sharding_spec(self, state: _PhiloxState, spec: DTensorSpec) -> None:
-        """Passing the DTensor sharding info via Cuda RNG State. Later on,
-        each GPU thread can use the info to deduce the correct thread id and
-        offset when generating an entry of a DTensor.
+        """Encode DTensor sharding metadata into the RNG state before random op execution.
+
+        This method packs the following sharding information into the RNG state tensor:
+        - local_shape: The shape of the local shard on this rank
+        - global_offset: The starting index of this shard in the global tensor
+        - global_shape: The shape of the full DTensor
+        - global_strides: The strides for computing linear indices in the global tensor
+
+        Each CUDA thread reads this metadata to compute its global element index,
+        which is then used as the Philox subsequence. This ensures that distributed
+        random generation produces the same output as single-GPU execution.
 
         Args:
-            spec (:class:`DTensorSpec`): the spec of the DTensor object on which
-                we prepare the offset for running random ops.
+            state (:class:`_PhiloxState`): The generator state to modify with sharding info.
+            spec (:class:`DTensorSpec`): The spec of the DTensor object on which
+                we prepare the sharding info for running random ops.
 
         Returns:
             None
 
         .. warning::
-            Note that, current implementation does not consider DTensor's continguity.
+            Current implementation does not consider DTensor's contiguity.
+
+        Example:
+            For a DTensor of shape [8, 16] sharded on dim 1 across 2 GPUs:
+
+            - GPU 0: local_shape=(8, 8), global_offset=(0, 0)
+            - GPU 1: local_shape=(8, 8), global_offset=(0, 8)
+
+            Both GPUs share global_shape=(8, 16) and global_strides=(16, 1).
+            A thread on GPU 1 processing local index (i, j) computes:
+            global_idx = (0 + i) * 16 + (8 + j), matching single-GPU indexing.
         """
         if spec.num_shards > 0:
             global_shape = spec.shape
@@ -632,8 +670,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
                         size_on_dim = local_shape[shard_dim]
                         num_chunks = mesh_dim_size
                         rank = my_coordinate[idx]
-                        # TODO: what if placement is InterleavedShard
-                        # Compute the chunk size inline with ``torch.chunk``
                         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 
                         # Compute chunk size for each chunk on the dimension.
@@ -684,16 +720,29 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
     def _set_post_op_offset(
         self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
     ) -> None:
-        """Set the RNG state as the DTensor operation is executed on a single GPU. This
-        includes (1) removing the sharding info and (2) incrementing the global offset by
-        the number of randomness used in each thread as if there is only one GPU.
+        """Restore the RNG state to a synchronized form after random op execution.
+
+        This method performs two operations:
+        1. Removes the sharding metadata from the RNG state (restores standard format)
+        2. Increments the offset to match single-GPU execution semantics
+
+        The offset increment is computed based on how many random values each CUDA
+        thread would consume if the entire DTensor were generated on a single GPU,
+        ensuring all ranks advance their RNG state identically.
 
         Args:
-            spec (:class:`DTensorSpec`): the spec of the DTensor object on which
+            state (:class:`_PhiloxState`): The generator state to restore and update.
+            spec (:class:`DTensorSpec`): The spec of the DTensor object on which
                 we post-process the offset for running random ops.
+            old_offset (int): The RNG offset before the random operation was executed.
 
         Returns:
             None
+
+        Note:
+            The offset increment formula accounts for CUDA kernel launch parameters
+            (block size, grid size, unroll factor) to match the actual number of
+            Philox invocations per thread in single-GPU execution.
         """
         dtensor_shape = spec.shape
         from torch.distributed.tensor._ops.utils import prod
