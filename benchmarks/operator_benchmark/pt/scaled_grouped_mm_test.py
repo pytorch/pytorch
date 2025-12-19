@@ -9,8 +9,6 @@ from typing import Optional
 
 import torch
 from torch.nn.functional import ScalingType
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.torch_version import TorchVersion
 
 """
 Operator microbenchmarks for `scaled_grouped_mm`.
@@ -20,30 +18,6 @@ reusing the same conversion helpers as `test/test_scaled_matmul_cuda.py`.
 """
 
 _TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
-
-
-def _should_generate_scaled_grouped_mm_configs() -> bool:
-    # `torch._scaled_grouped_mm` / `torch.nn.functional.scaled_grouped_mm` are only available in torch 2.9+.
-    if TorchVersion(torch.__version__) < "2.9":
-        return False
-    if not hasattr(torch.nn.functional, "scaled_grouped_mm"):
-        return False
-
-    # If CUDA isn't available on the current machine, keep configs around and let the
-    # operator_benchmark harness skip CUDA tests (see benchmark_core._build_test).
-    if not torch.cuda.is_available():
-        return True
-
-    if torch.version.hip is not None:
-        # ROCm: MI300+ (rely on shared platform check used by tests)
-        return bool(PLATFORM_SUPPORTS_FP8)
-
-    # CUDA: compute capability must be exactly one of [9.0, 10.0]
-    try:
-        cc = torch.cuda.get_device_capability(0)
-    except Exception:
-        return False
-    return cc in {(9, 0), (10, 0)}
 
 
 def _get_test_scaled_matmul_cuda() -> ModuleType:
@@ -100,6 +74,8 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
         if device != "cuda":
             raise ValueError("scaled_grouped_mm benchmark is CUDA-only")
+        if torch.version.hip is not None:
+            raise ValueError("scaled_grouped_mm benchmark currently supports CUDA-only (non-HIP)")
 
         if scaling not in ("mxfp8", "mxfp4", "nvfp4"):
             raise ValueError(f"Unsupported scaling format: {scaling}")
@@ -195,12 +171,9 @@ scaled_grouped_mm_configs_long = op_bench.config_list(
     tags=["long"],
 )
 
-if _should_generate_scaled_grouped_mm_configs():
-    _scaled_grouped_mm_configs = scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long
-else:
-    _scaled_grouped_mm_configs = []
-
-op_bench.generate_pt_test(_scaled_grouped_mm_configs, ScaledGroupedMMBenchmark)
+op_bench.generate_pt_test(
+    scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long, ScaledGroupedMMBenchmark
+)
 
 
 if __name__ == "__main__":
