@@ -1444,6 +1444,44 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
     return Q, R
 
 
+@register_meta([aten.linalg_qr_piv.default, aten.linalg_qr_piv.out])
+@out_wrapper("Q", "R", "pivots")
+def linalg_qr_piv_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor, Tensor]:
+
+    # --- Validations ---
+    checkIsMatrix(A, "linalg.qr_piv")
+    checkFloatingOrComplex(A, "linalg.qr_piv")
+
+    compute_q, reduced_mode = _parse_qr_mode(mode)
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    k = min(m, n)
+
+    # --- Allocate Q ---
+    if compute_q:
+        Q_shape = list(A.shape)
+        Q_shape[-1] = k if reduced_mode else m
+        Q = A.new_empty(Q_shape)
+        Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
+    else:
+        Q = A.new_empty([0])
+
+    # --- Allocate R ---
+    R_shape = list(A.shape)
+    # Same logic as linalg_qr_meta
+    R_shape[-2] = k if reduced_mode or not compute_q else m
+    R = A.new_empty(R_shape)
+    R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
+
+    # --- Allocate pivots (length = min(m, n)) ---
+    P_shape = list(A.shape)
+    P_shape[-1] = k
+    P = A.new_empty(P_shape, dtype=torch.int64)
+
+    return Q, R, P
+
+
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
 @out_wrapper("sign", "logabsdet", "LU", "pivots")
 def _linalg_slogdet(A: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:

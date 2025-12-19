@@ -2923,6 +2923,127 @@ Examples::
 """,
 )
 
+qr_piv = _add_docstr(
+    _linalg.linalg_qr_piv,
+    r"""
+qr_piv(A, mode='reduced', *, out=None) -> (Tensor, Tensor, Tensor)
+
+Computes the rank-revealing QR decomposition with column pivoting of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **full QR decomposition** of a matrix
+:math:`A \in \mathbb{K}^{m \times n}` is defined as
+
+.. math::
+
+    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times m}, R \in \mathbb{K}^{m \times n}, P \in \mathbb{N}^{n \times n}}
+
+where :math:`Q` is orthogonal in the real case and unitary in the complex case,
+and :math:`R` is upper triangular with real diagonal (even in the complex case).
+
+The pivot matrix :math:`P` acts as a permutation of the columns of :math:`A`, such that the
+diagonal of :math:`R` is non-increasing. This routine computes a vector-like :math:`P` with dimensions `n`,
+which permutes the of the columns of `A` such that :math:`A[:,P] = QR`.
+
+When `m > n` (tall matrix), as `R` is upper triangular, its last `m - n` rows are zero.
+In this case, we can drop the last `m - n` columns of `Q` to form the
+**reduced QR decomposition**:
+
+.. math::
+
+    AP = QR\mathrlap{\qquad Q \in \mathbb{K}^{m \times n}, R \in \mathbb{K}^{n \times n}, P \in \mathbb{N}^{n \times n}}
+
+The reduced QR decomposition agrees with the full QR decomposition when `n >= m` (wide matrix).
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+The parameter :attr:`mode` chooses between the full and reduced QR decomposition.
+If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
+
+- :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R, P)` of shapes `(*, m, k)`, `(*, k, n)` and `(*, n)`.
+  It is always differentiable.
+- :attr:`mode`\ `= 'complete'`: Returns `(Q, R, P)` of shapes `(*, m, m)`, `(*, m, n)` and `(*, n)`.
+  It is differentiable for `m <= n`.
+- :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R, P)` with `Q` empty, `R` of shape `(*, k, n)`
+  and `P` of shape `(*, n)`. It is never differentiable.
+
+Differences with `scipy.linalg.qr` with argument pivoting=True:
+
+- :attr:`mode`\ `= 'raw'` is not implemented.
+- Unlike `scipy.linalg.qr` with argument pivoting=True, this function always returns a tuple of three tensors.
+  When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
+
+.. warning:: The elements in the diagonal of `R` are not necessarily positive.
+             As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
+             Therefore, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: The QR decomposition is only well-defined if the first `k = min(m, n)` columns
+             of every matrix in :attr:`A` are linearly independent.
+             If this condition is not met, no error will be thrown, but the QR produced
+             may be incorrect and its autodiff may fail or produce incorrect results.
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    mode (str, optional): one of `'reduced'`, `'complete'`, `'r'`.
+                          Controls the shape of the returned tensors. Default: `'reduced'`.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(Q, R, P)`.
+
+Examples::
+
+    >>> A = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> Q, R, P = torch.linalg.qr_piv(A)
+    >>> Q
+    tensor([[-0.2894, -0.4682, -0.8349],
+            [ 0.9475, -0.0160, -0.3194],
+            [ 0.1362, -0.8835,  0.4483]])
+    >>> R
+    tensor([[176.2555, -71.1694,   1.6680],
+            [  0.0000,  35.4389,  -2.1809],
+            [  0.0000,   0.0000, -13.7281]])
+    >>> P
+    tensor([1, 2, 0])
+    >>> A[:,P]
+    tensor([[-51.,   4.,  12.],
+            [167., -68.,   6.],
+            [ 24., -41.,  -4.]])
+    >>> B = torch.eye(P.size(0), dtype=A.dtype)[P].T  # construct the full permutation matrix
+    >>> A @ B
+    tensor([[-51.,   4.,  12.],
+            [167., -68.,   6.],
+            [ 24., -41.,  -4.]])
+    >>> (Q @ R).round()
+    tensor([[-51.,   4.,  12.],
+            [167., -68.,   6.],
+            [ 24., -41.,  -4.]])
+    >>> (Q.T @ Q).round()
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
+    >>> Q2, R2, P2 = torch.linalg.qr(A, mode='r')
+    >>> Q2
+    tensor([])
+    >>> torch.equal(R, R2)
+    True
+    >>> torch.equal(P, P2)
+    True
+    >>> A = torch.randn(3, 4, 5)
+    >>> Q, R, P = torch.linalg.qr_piv(A, mode='complete')
+    >>> AP = A.gather(-1, P.unsqueeze(-2).expand(*A.shape[:-1], A.size(-1)))
+    >>> torch.dist(Q @ R, AP)
+    tensor(1.3853e-06)
+    >>> torch.dist(Q.mT @ Q, torch.eye(4))
+    tensor(1.0540e-06)
+""",
+)
+
 vander = _add_docstr(
     _linalg.linalg_vander,
     r"""

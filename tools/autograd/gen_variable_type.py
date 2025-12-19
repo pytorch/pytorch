@@ -297,6 +297,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
+    "linalg_qr_piv",
     "_linalg_svd",
     "_fft_c2c",
     "_fft_r2c",

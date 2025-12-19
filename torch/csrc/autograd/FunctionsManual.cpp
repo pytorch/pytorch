@@ -4196,6 +4196,69 @@ Tensor linalg_qr_backward(
   }
 }
 
+
+// Return the inverted permutation vector P^-1 = P^T, dimensions P: (*batch, n)
+at::Tensor invertP(const at::Tensor& P) {
+    TORCH_CHECK(P.scalar_type() == at::kLong, "P must be int64 for indexing.");
+    auto Pt = at::zeros_like(P);
+    int64_t ndim = P.dim();
+    int64_t n = P.size(-1);
+    // Build shape [1, 1, ..., 1, n] same number of dims as P, but all batch dims are 1
+    std::vector<int64_t> idx_shape(ndim, 1);
+    idx_shape[ndim - 1] = n;
+    auto idx = at::arange(n, P.options());  // idx: shape [n]
+    auto idx_exp = idx.view(idx_shape).expand_as(P);  // reshape to [1, 1, ..., 1, n]
+    Pt.scatter_(-1, P, idx_exp);  // Scatter: Pt[..., P[..., j]] = j
+    return Pt;
+}
+
+Tensor linalg_qr_piv_backward(
+    const Tensor& gQ,
+    const Tensor& gR,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode) {
+    // The formulas for the backward derivative with pivoting can be derived similar to
+    // "Auto-Differentiating Linear Algebra" by M. Seeger, A. Hetzel, Z. Dai, E. Meissner, N. D. Lawrence,
+    // arXiv:1710.08717 [cs.MS] https://doi.org/10.48550/arXiv.1710.08717
+    // Using that (dA)P=(dQ)R + Q(dR)
+    // and following the derivation on page 25, section gelqf in the appendix of above cited article,
+    // one finds the gradient for the pivoted QR decomposition as A = gA0 * P^T,
+    // where gA0 is the gradient calculated without pivoting and P^T is the transposed pivot matrix.
+
+    auto [compute_q, reduced] = at::native::_parse_qr_mode(mode);
+
+    TORCH_CHECK(
+      compute_q,
+      "The derivative of linalg.qr_piv depends on Q, which is not computed when "
+      "mode='r'. Please use linalg.qr_piv(A, mode='reduced') if you are "
+      "going to differentiate through linalg.qr_piv.");
+
+    auto m = Q.sym_size(-2);
+    auto n = R.sym_size(-1);
+
+    TORCH_CHECK(
+      reduced || m <= n,
+      "The pivoted QR decomposition is not differentiable when "
+      "mode='complete' and nrows > ncols.");
+
+    auto P_dense = P.contiguous();
+    auto Pt = invertP(P_dense);
+    auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
+    auto Pt_expanded = Pt.toType(at::kLong).unsqueeze(-2).expand_as(gA);   // (*batch, m, n)
+    return gA.take_along_dim(Pt_expanded, -1);
+}
+
+std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
+    const Tensor& dA,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode) {
+    return linalg_qr_jvp(dA, Q, R, mode);
+}
+
 // Based on:
 //
 // Mathias, Roy.
