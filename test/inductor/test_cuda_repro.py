@@ -2607,7 +2607,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.randn(
                 (B * S, Hkv * D), dtype=torch.bfloat16, device=device
             ),  # k_proj
-            torch.zeros((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
+            torch.ones((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
         )
         correct = forward(*example_inputs)
         compiled = torch.compile(forward, dynamic=True)
@@ -2621,7 +2621,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.randn(
                 (S * B, Hkv * D), dtype=torch.bfloat16, device=device
             ),  # k_proj
-            torch.zeros((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
+            torch.ones((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
         )
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
