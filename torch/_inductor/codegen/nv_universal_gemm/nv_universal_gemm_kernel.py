@@ -1,4 +1,9 @@
 # mypy: allow-untyped-defs
+"""
+NVIDIA Universal GEMM kernel code generation.
+
+This module generates Python code that calls cutlass_api to execute GEMM operations.
+"""
 import logging
 from typing import Any, Optional
 
@@ -11,21 +16,21 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 
-class CutlassAPIKernelWrapper:
-    """Wrapper to provide .run() interface for cutlass_api kernels."""
+class NVUniversalGemmKernelWrapper:
+    """Wrapper to provide .run() interface for NVIDIA Universal GEMM kernels."""
 
     def __init__(self, kernel_fn, kernel_path: Optional[str] = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
 
     def run(self, *args, stream=None, **kwargs):
-        """Execute the cutlass_api kernel."""
+        """Execute the NVIDIA Universal GEMM kernel."""
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
-class CutlassAPITemplateKernel(Kernel):
+class NVUniversalGemmKernel(Kernel):
     """
-    Template kernel implementation for cutlass_api.
+    Kernel implementation for NVIDIA Universal GEMM.
 
     Generates Python code that calls cutlass_api to execute GEMM operations.
     Unlike CuteDSL which uses Jinja templates, this generates simpler direct
@@ -56,7 +61,7 @@ class CutlassAPITemplateKernel(Kernel):
             self._seen_input_args.add(param_name)
 
     def gen_imports(self) -> str:
-        """Generate common imports for cutlass_api code."""
+        """Generate common imports for NVIDIA Universal GEMM code."""
         imports = IndentedBuffer()
         imports.splice(
             """
@@ -69,14 +74,14 @@ class CutlassAPITemplateKernel(Kernel):
 
     def render(self) -> str:
         """
-        Render the cutlass_api kernel code as a Python source string.
+        Render the NVIDIA Universal GEMM kernel code as a Python source string.
 
         Generates Python code that:
         1. Looks up the cutlass_api kernel by name from the manifest (cached in
-           _cutlass_api_kernel_cache to avoid repeated manifest searches)
+           _nv_universal_gemm_kernel_cache to avoid repeated manifest searches)
         2. Creates GemmArguments with the input/output tensors and accumulator type
         3. Compiles the kernel for the specific tensor shapes/dtypes (cached in
-           _cutlass_api_artifact_cache keyed by (shape, dtype) tuple)
+           _nv_universal_gemm_artifact_cache keyed by (shape, dtype) tuple)
         4. Runs the kernel with the compiled artifact and CUDA stream
 
         The caching strategy ensures:
@@ -86,7 +91,7 @@ class CutlassAPITemplateKernel(Kernel):
 
         Returns:
             Python source code string to be written to a .py file and loaded
-            via async_compile.cutlass_api()
+            via async_compile.nv_universal_gemm()
         """
         code = IndentedBuffer()
 
@@ -94,9 +99,9 @@ class CutlassAPITemplateKernel(Kernel):
         code.writeline("")
 
         kernel_name_str = self.kernel_metadata["kernel_name"]
-        code.writeline(f'_CUTLASS_API_KERNEL_NAME = "{kernel_name_str}"')
-        code.writeline("_cutlass_api_kernel_cache = {}")
-        code.writeline("_cutlass_api_artifact_cache = {}")
+        code.writeline(f'_NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"')
+        code.writeline("_nv_universal_gemm_kernel_cache = {}")
+        code.writeline("_nv_universal_gemm_artifact_cache = {}")
         code.writeline("")
 
         acc_dtype_str = str(self.accumulator_type).split(".")[-1]  # e.g., "float32"
@@ -125,30 +130,30 @@ class CutlassAPITemplateKernel(Kernel):
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
             code.writeline(
-                "global _cutlass_api_kernel_cache, _cutlass_api_artifact_cache"
+                "global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_artifact_cache"
             )
             code.writeline("")
             code.writeline(
-                "if _CUTLASS_API_KERNEL_NAME not in _cutlass_api_kernel_cache:"
+                "if _NV_UNIVERSAL_GEMM_KERNEL_NAME not in _nv_universal_gemm_kernel_cache:"
             )
             with code.indent():
                 code.writeline("kernels = cutlass_api.get_kernels(")
                 with code.indent():
                     code.writeline(
-                        "metadata_filter=lambda m: m.kernel_name == _CUTLASS_API_KERNEL_NAME"
+                        "metadata_filter=lambda m: m.kernel_name == _NV_UNIVERSAL_GEMM_KERNEL_NAME"
                     )
                 code.writeline(")")
                 code.writeline("if not kernels:")
                 with code.indent():
                     code.writeline(
-                        'raise RuntimeError(f"Could not find cutlass_api kernel: {_CUTLASS_API_KERNEL_NAME}")'
+                        'raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {_NV_UNIVERSAL_GEMM_KERNEL_NAME}")'
                     )
                 code.writeline(
-                    "_cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME] = kernels[0]"
+                    "_nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME] = kernels[0]"
                 )
             code.writeline("")
             code.writeline(
-                "kernel = _cutlass_api_kernel_cache[_CUTLASS_API_KERNEL_NAME]"
+                "kernel = _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME]"
             )
             code.writeline("")
 
@@ -164,13 +169,13 @@ class CutlassAPITemplateKernel(Kernel):
             code.writeline(
                 "cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
             )
-            code.writeline("if cache_key not in _cutlass_api_artifact_cache:")
+            code.writeline("if cache_key not in _nv_universal_gemm_artifact_cache:")
             with code.indent():
                 code.writeline(
-                    "_cutlass_api_artifact_cache[cache_key] = kernel.compile(args)"
+                    "_nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)"
                 )
             code.writeline("")
-            code.writeline("artifact = _cutlass_api_artifact_cache[cache_key]")
+            code.writeline("artifact = _nv_universal_gemm_artifact_cache[cache_key]")
             code.writeline("")
 
             code.writeline(
@@ -191,7 +196,7 @@ class CutlassAPITemplateKernel(Kernel):
         """
         Generate the kernel call in the wrapper code.
 
-        Similar to CuteDSLTemplateKernel.call_kernel but simplified for cutlass_api.
+        Similar to CuteDSLTemplateKernel.call_kernel but simplified for NVIDIA Universal GEMM.
         """
         wrapper = V.graph.wrapper_code
 

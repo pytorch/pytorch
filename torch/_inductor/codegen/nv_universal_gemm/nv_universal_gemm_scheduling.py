@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+"""
+NVIDIA Universal GEMM scheduling for PyTorch Inductor.
+"""
 import hashlib
 import logging
 from collections.abc import Sequence
@@ -13,7 +16,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import CutlassAPIGemmBuffer
+from ...ir import NVUniversalGemmBuffer
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -29,9 +32,9 @@ log = logging.getLogger(__name__)
 MAIN_SUFFIX = "main"
 
 
-class CutlassAPIScheduling(BaseScheduling):
+class NVUniversalGemmScheduling(BaseScheduling):
     """
-    Scheduling implementation for cutlass_api kernels.
+    Scheduling implementation for NVIDIA Universal GEMM kernels.
 
     This class is intended to be used in combination with other schedulers,
     and delegated to by CUDACombinedScheduling.
@@ -42,33 +45,33 @@ class CutlassAPIScheduling(BaseScheduling):
         return OrderedSet()
 
     @staticmethod
-    def is_cutlass_api_template(node: BaseSchedulerNode) -> bool:
-        """Check if a node is a cutlass_api template."""
+    def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
+        """Check if a node is a NVIDIA Universal GEMM template."""
         return isinstance(node, SchedulerNode) and isinstance(
-            node.node, CutlassAPIGemmBuffer
+            node.node, NVUniversalGemmBuffer
         )
 
-    def is_cutlass_api_fused_template(self, node: BaseSchedulerNode) -> bool:
-        """Check if a node is a fused cutlass_api template."""
-        return isinstance(node, FusedSchedulerNode) and self.is_cutlass_api_template(
+    def is_nv_universal_gemm_fused_template(self, node: BaseSchedulerNode) -> bool:
+        """Check if a node is a fused NVIDIA Universal GEMM template."""
+        return isinstance(node, FusedSchedulerNode) and self.is_nv_universal_gemm_template(
             node
         )
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        # cutlass_api templates don't support vertical fusion yet
+        # NVIDIA Universal GEMM templates don't support vertical fusion yet
         return False
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        # cutlass_api templates don't support horizontal fusion yet
+        # NVIDIA Universal GEMM templates don't support horizontal fusion yet
         return False
 
     def define_kernel(self, src_code: str, node_schedule) -> str:
         """
-        Define a cutlass_api kernel by writing source code and generating wrapper.
+        Define a NVIDIA Universal GEMM kernel by writing source code and generating wrapper.
 
         Based on CuteDSLScheduling.define_kernel.
         """
@@ -86,9 +89,9 @@ class CutlassAPIScheduling(BaseScheduling):
 
         kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
         if fused_name == "fused":
-            kernel_name = f"cutlass_api_{kernel_hash}"
+            kernel_name = f"nv_universal_gemm_{kernel_hash}"
         else:
-            kernel_name = f"cutlass_api_{fused_name}_{kernel_hash}"
+            kernel_name = f"nv_universal_gemm_{fused_name}_{kernel_hash}"
 
         wrapper.src_to_kernel[src_code] = kernel_name
 
@@ -97,7 +100,7 @@ class CutlassAPIScheduling(BaseScheduling):
         _, _, kernel_path = get_path(code_hash(src_code), "py")
 
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.cutlass_api({kernel_name!r}, r'''")
+        compile_wrapper.writeline(f"async_compile.nv_universal_gemm({kernel_name!r}, r'''")
         compile_wrapper.splice(src_code, strip=True)
         compile_wrapper.writeline("''')")
 
@@ -115,18 +118,18 @@ class CutlassAPIScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
-        Codegen a cutlass_api template. Currently doesn't support fusion.
+        Codegen a NVIDIA Universal GEMM template. Currently doesn't support fusion.
         """
-        assert self.is_cutlass_api_template(template_node), (
-            "Template node passed to CutlassAPIScheduling.codegen_template must be a "
-            "SchedulerNode that wraps a CutlassAPIGemmBuffer"
+        assert self.is_nv_universal_gemm_template(template_node), (
+            "Template node passed to NVUniversalGemmScheduling.codegen_template must be a "
+            "SchedulerNode that wraps a NVUniversalGemmBuffer"
         )
         # TODO: add support for fusion when needed
-        assert not epilogue_nodes, "cutlass_api doesn't support epilogue fusion yet"
-        assert not prologue_nodes, "cutlass_api doesn't support prologue fusion yet"
+        assert not epilogue_nodes, "NVIDIA Universal GEMM doesn't support epilogue fusion yet"
+        assert not prologue_nodes, "NVIDIA Universal GEMM doesn't support prologue fusion yet"
 
         template_node = cast(SchedulerNode, template_node)
-        ctb: CutlassAPIGemmBuffer = cast(CutlassAPIGemmBuffer, template_node.node)
+        ctb: NVUniversalGemmBuffer = cast(NVUniversalGemmBuffer, template_node.node)
 
         assert ctb.make_kernel_render is not None
         kernel, render = ctb.make_kernel_render(ctb)

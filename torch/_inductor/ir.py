@@ -5437,11 +5437,11 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         return self.outputs
 
 
-class CutlassAPIGemmBuffer(TemplateBuffer):
+class NVUniversalGemmBuffer(TemplateBuffer):
     """
-    Buffer for cutlass_api GEMM kernels.
+    Buffer for NVIDIA Universal GEMM kernels.
 
-    Unlike CuteDSL templates which use Jinja templates, cutlass_api generates
+    Unlike CuteDSL templates which use Jinja templates, this generates
     simpler Python code that directly calls the cutlass_api library.
     """
 
@@ -5476,11 +5476,11 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
         Create a kernel renderer for code generation.
 
         Returns (kernel, render) tuple where:
-        - kernel: CutlassAPITemplateKernel object with call_kernel() method
+        - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
-        from torch._inductor.codegen.cuda.cutlass_api_kernel import (
-            CutlassAPITemplateKernel,
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernel,
         )
         from torch._inductor.utils import Placeholder
 
@@ -5494,7 +5494,7 @@ class CutlassAPIGemmBuffer(TemplateBuffer):
 
         kernel_name = str(Placeholder.KERNEL_NAME)
 
-        render_kernel = CutlassAPITemplateKernel(
+        render_kernel = NVUniversalGemmKernel(
             kernel_name=kernel_name,
             input_nodes=input_nodes,
             output_node=out_node,
