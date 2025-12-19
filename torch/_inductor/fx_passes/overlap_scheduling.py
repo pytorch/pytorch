@@ -285,6 +285,7 @@ class OverlapScheduler:
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
+        bucket_exposed_first: bool = True,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -297,6 +298,7 @@ class OverlapScheduler:
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
+        self.bucket_exposed_first = bucket_exposed_first
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -1286,6 +1288,7 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            bucket_exposed_first=self.bucket_exposed_first,
         )
         bucketer.bucket_collectives()
 
@@ -1341,6 +1344,7 @@ def schedule_overlap_bucketing(
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
+    bucket_exposed_first: bool = True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1377,6 +1381,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
         log_final_collectives_estimations=log_final_collectives_estimations,
+        bucket_exposed_first=bucket_exposed_first,
     ).run()
 
 
@@ -1406,6 +1411,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_in_flight_gb",
         "max_coll_distance",
         "log_final_collectives_estimations",
+        "bucket_exposed_first",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
