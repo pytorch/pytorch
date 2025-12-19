@@ -74,6 +74,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
     is_in_any_mode_without_ignore_compile_internals,
@@ -667,6 +668,7 @@ class ConvertFrameAssert:
         # skip tracing non-recursive disabled functions
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
+        # pyrefly: ignore [bad-assignment]
         while (
             prev_frame
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
@@ -848,7 +850,6 @@ def trace_frame(
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
-
     return tracer_output
 
 
@@ -1079,10 +1080,12 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
-            backend_id, compiled_fn, extra_globals=extra_globals
+            backend_id,
+            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            extra_globals=extra_globals,
         )
 
 
@@ -1254,6 +1257,7 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
+            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -1353,6 +1357,10 @@ def compile_frame(  # type: ignore[return]
                 "Restarting analysis due to %s",
                 LazyString(format_traceback_short, e.__traceback__),
             )
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1369,6 +1377,10 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
@@ -1903,6 +1915,15 @@ def _compile(
                     else _get_error_on_graph_break()
                 )
 
+            # Cleanup guards unless if in export, which will return guards
+            # Make sure to to do this after collecting metrics
+            if (
+                tracer_output is not None
+                and tracer_output.output_graph is not None
+                and not tracer_output.output_graph.export
+            ):
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+
 
 class ConvertFrame:
     def __init__(
@@ -1920,6 +1941,7 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )

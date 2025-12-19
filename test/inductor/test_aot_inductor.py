@@ -42,12 +42,12 @@ from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     CDNA2OrLater,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    requires_triton_ptxas_compat,
     SM80OrLater,
     tf32_on_and_off,
 )
@@ -245,10 +245,7 @@ class AOTInductorTestsTemplate:
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
-        "Test is only supported on CUDA 12.8+",
-    )
+    @requires_triton_ptxas_compat
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -669,6 +666,9 @@ class AOTInductorTestsTemplate:
 
     @requires_gpu
     def test_device_moved_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
         # testing both directions
         device_movements = [
             (torch.device(type=GPU_TYPE, index=0), torch.device("cpu")),
@@ -6666,7 +6666,16 @@ class AOTInductorTestsTemplate:
 
         model = Model()
         example_inputs = (torch.tensor([1.0], device=self.device),)
-        self.check_model(model, example_inputs)
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = torch._inductor.aoti_load_package(package_path)
+
+        # First call: predicate is False
+        result1 = optimized(*example_inputs)
+        self.assertEqual(result1.item(), 1.0)
+
+        # Second call: predicate is now True
+        result2 = optimized(*example_inputs)
+        self.assertEqual(result2.item(), 2.0)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -6852,9 +6861,6 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
-    @skipIfXpu(
-        msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
-    )
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
