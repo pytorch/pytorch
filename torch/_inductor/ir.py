@@ -8162,14 +8162,14 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = cls.find_device(tensor_args, example_output)
 
+        # Default to CPU for torchbind methods or HOPs that don't produce tensors
         if not device and isinstance(
-            kernel, torch._higher_order_ops.torchbind.CallTorchBind
+            kernel,
+            (
+                torch._higher_order_ops.torchbind.CallTorchBind,
+                torch._ops.HigherOrderOperator,
+            ),
         ):
-            # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
-            device = torch.device("cpu")
-
-        # For HOPs that don't have tensor outputs (like print), use CPU device if no device found
-        if not device and isinstance(kernel, torch._ops.HigherOrderOperator):
             device = torch.device("cpu")
 
         if example_output is None:
