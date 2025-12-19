@@ -275,9 +275,6 @@ static bool isSupportedHipLtROCmArch(int index) {
 #if ROCM_VERSION >= 60402
         "gfx1150", "gfx1151",
 #endif
-#if ROCM_VERSION >= 60402
-        "gfx1150", "gfx1151",
-#endif
 #if ROCM_VERSION >= 60500
         "gfx950"
 #endif
