@@ -38,6 +38,7 @@ except ImportError:
 test_classes = {}
 
 def test_combinations_dynamic_aot_eager():
+    # Regression test for https://github.com/pytorch/pytorch/issues/163759
     import torch
 
     def f(x):
@@ -45,7 +46,26 @@ def test_combinations_dynamic_aot_eager():
 
     x = torch.randn(5)
     compiled = torch.compile(f, backend="aot_eager", dynamic=True)
-    compiled(x)
+
+    eager_out = f(x)
+    compiled_out = compiled(x)
+
+    torch.testing.assert_close(eager_out, compiled_out)
+
+
+def test_combinations_smaller_repro_170801():
+    # Smaller repro from https://github.com/pytorch/pytorch/issues/170801
+    import torch
+
+
+   def f(x):
+        return torch.combinations(x, r=2)
+
+    x = torch.arange(4)
+    compiled = torch.compile(f, backend="aot_eager")
+
+    torch.testing.assert_close(f(x), compiled(x))
+
 
 
 def make_dynamic_cls(cls):
