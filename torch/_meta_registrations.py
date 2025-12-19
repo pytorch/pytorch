@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-import platform
 from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import wraps
@@ -3861,17 +3860,6 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             )
 
 
-def _has_arm_bf16_support() -> bool:
-    if platform.machine().lower() not in ("arm64", "aarch64"):
-        return False
-    try:
-        with open("/proc/cpuinfo") as f:
-            data = f.read().lower()
-        return any(token in data for token in ("bf16", "bfloat16"))
-    except OSError:
-        return False
-
-
 @register_meta([aten._dyn_quant_pack_4bit_weight])
 def meta__dyn_quant_pack_4bit_weight(
     weights, scales_zeros, bias: Tensor | None, block_size, in_features, out_features
@@ -3881,7 +3869,8 @@ def meta__dyn_quant_pack_4bit_weight(
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
     kleidi_supported = (
-        torch.backends.kleidiai.is_available() and _has_arm_bf16_support()
+        torch.backends.kleidiai.is_available()
+        and torch._C._cpu._is_arm_bf16_supported()
     )
 
     use_kleidiai_packing = kleidi_supported and (
