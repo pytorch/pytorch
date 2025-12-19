@@ -266,7 +266,13 @@ class BenchmarkRunner:
                 print(
                     f"{mode} Execution Time (us) : {results['reported_run_time_us'][0]:.3f}"
                 )
-                print(f"Peak Memory (KB) : {results['peak_memory']}\n")
+                print(f"Peak Memory (KB) : {results['peak_memory']}")
+                # Calculate and print memory bandwidth if operator provides memory traffic
+                if results.get("memory_bandwidth_gb_s") is not None:
+                    print(
+                        f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}"
+                    )
+                print()
 
     def _perf_result_to_dict(self, results, test_case):
         """This function is the parallel of _print_perf_result, which instead of
@@ -297,7 +303,7 @@ class BenchmarkRunner:
             break_idxs = [-1]
             curr_brackets = []
             for i, c in enumerate(s):
-                if c in open_to_close.keys():
+                if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
                     assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
@@ -711,6 +717,17 @@ class BenchmarkRunner:
                 result_dict = dict()
                 result_dict["reported_run_time_us"] = [r[0] for r in results]
                 result_dict["peak_memory"] = results[0][1]
+
+                # Calculate memory bandwidth if operator provides memory traffic
+                memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
+                if memory_traffic_bytes is not None:
+                    execution_time_s = result_dict["reported_run_time_us"][0] / 1e6
+                    result_dict["memory_bandwidth_gb_s"] = (
+                        memory_traffic_bytes / execution_time_s / 1e9
+                    )
+                else:
+                    result_dict["memory_bandwidth_gb_s"] = None
+
                 self._print_perf_result(results=result_dict, test_case=test_case)
 
                 # output results to csv

@@ -753,12 +753,6 @@ class TestCommon(TestCase):
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -3002,7 +2996,7 @@ class TestForwardADWithScalars(TestCase):
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
 
-        # skip if operator doesnt support forward AD
+        # skip if operator doesn't support forward AD
         if not op.supports_forward_ad:
             raise unittest.SkipTest("Does not support forward_ad")
 

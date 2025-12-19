@@ -1,6 +1,7 @@
+import logging
 import threading
-from collections.abc import Sequence
-from typing import cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -19,6 +20,9 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class ExplicitRedistributionContext:
     """
     Within this context manager, DTensor will refuse to perform implicit redistribution,
@@ -29,22 +33,44 @@ class ExplicitRedistributionContext:
     may contain implicit redistribution calls that are not visible to the user and difficult to replace with manual
     calls.  Redistribution during backward can be made explicit by writing `autograd.Function`s that are no-op
     during forward and perform a manual redistribution during backwards.
+
+    enable (bool) if False, disables the context manager. Can be used nested inside an enabled region.
+
+    strict (bool) if True, triggers on any redistribution.  If False, only triggers on redistributions that perform
+    communication.
+
+    mode (str) Determines what happens when ExplicitRedistributionContext triggers:
+    "raise": raises an exceptoin, "warn" issues a warning
     """
 
     _local = threading.local()
 
-    def __init__(self, enable: bool = True, strict: bool = False):
+    def __init__(self, enable: bool = True, strict: bool = False, mode="raise"):
         self._enable = enable
         self._strict = strict
+        if mode not in ("raise", "warn"):
+            raise RuntimeError(f"Invalid mode {mode}")
+        self._raise_on_redistribution = mode == "raise"
 
     @classmethod
-    def is_redistribute_allowed(cls, src_spec: DTensorSpec, dst_spec: DTensorSpec):
+    def observe_redistribution(
+        cls, src_spec: DTensorSpec, dst_spec: DTensorSpec, message_fn: Callable[[], str]
+    ):
+        assert callable(message_fn)
         if instance := getattr(cls._local, "_active", None):
+            allowed = True
             if instance._enable:
                 if instance._strict:
-                    return False
-                return redistribute_cost(src_spec, dst_spec) <= 0
-        return True
+                    allowed = False
+                else:
+                    allowed = redistribute_cost(src_spec, dst_spec) <= 0
+            if not allowed:
+                if instance._raise_on_redistribution:
+                    raise RuntimeError(message_fn())
+                else:
+                    # TODO: this is still suboptimal when redistribution is on
+                    # but warnings are being suppressed
+                    logger.warning(message_fn())
 
     def __enter__(self):
         self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
@@ -109,24 +135,37 @@ def compute_local_shape_and_global_offset(
 
 
 @maybe_run_for_local_tensor
-def _compute_offsets(
-    placement,
-    shard_offsets: int,
-    shard_size: int,
-    zero_global_offset: int,
+def _get_shard_size_and_offsets(
+    curr_local_size: int,
+    mesh_dim_size: int,
+    rank: int,
+    placement: Shard | _StridedShard,
     previous_offsets,
-) -> torch.Tensor:
+    zero_global_offset: int,
+    skip_offset: bool,
+) -> tuple[int, torch.Tensor | None]:
+    kwargs: dict[str, Any] = {
+        "curr_local_size": curr_local_size,
+        "num_chunks": mesh_dim_size,
+        "rank": rank,
+    }
+    if isinstance(placement, _StridedShard):
+        kwargs["return_first_offset"] = False
+    shard_size, shard_offsets = placement._local_shard_size_and_offset(**kwargs)
+    if skip_offset:
+        return shard_size, None
     if shard_size == 0:
-        return torch.arange(zero_global_offset, zero_global_offset + 1)
+        return shard_size, torch.arange(zero_global_offset, zero_global_offset + 1)
     if isinstance(placement, Shard) and not isinstance(placement, _StridedShard):
+        assert isinstance(shard_offsets, int)
         index = torch.arange(shard_offsets, shard_offsets + shard_size)
     else:
         assert isinstance(shard_offsets, list)
         index = torch.tensor(shard_offsets)
     if previous_offsets is None:
-        return index
+        return shard_size, index
     else:
-        return previous_offsets[index]
+        return shard_size, previous_offsets[index]
 
 
 @maybe_run_for_local_tensor
@@ -138,7 +177,7 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    my_coordinate: Optional[list[int]],
+    my_coordinate: list[int] | None,
     placements: Sequence[Placement],
     skip_offset: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -194,7 +233,6 @@ def _compute_local_shape_and_global_offset(
     #   {0: [5, 7]} on my_coordinate [1, 1]
     shard_dim_to_global_offsets = {}
     for mesh_dim, placement in enumerate(placements):
-        mesh_dim_size = mesh_shape[mesh_dim]
         if not isinstance(placement, (Shard, _StridedShard)):
             continue
         shard_dim = placement.dim
@@ -202,21 +240,18 @@ def _compute_local_shape_and_global_offset(
         assert shard_dim < len(local_shape), (
             f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
         )
-        shard_size, shard_offsets = placement._local_shard_size_and_offset(
+        previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
+        shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
-            mesh_dim_size,
+            mesh_shape[mesh_dim],
             my_coordinate[mesh_dim],
+            placement,
+            previous_offsets,
+            zero_global_offset,
+            skip_offset,
         )
         local_shape[shard_dim] = shard_size
-        if skip_offset:
-            continue
-        shard_dim_to_global_offsets[shard_dim] = _compute_offsets(
-            placement,
-            shard_offsets,
-            shard_size,
-            zero_global_offset,
-            shard_dim_to_global_offsets.get(shard_dim),
-        )
+        shard_dim_to_global_offsets[shard_dim] = shard_offsets
     if skip_offset:
         return tuple(local_shape), empty_offset
     global_offset = [0] * len(global_shape)
@@ -329,22 +364,35 @@ def compute_global_tensor_shape(
     if isinstance(placements[0], Replicate):
         return shape
     elif isinstance(placements[0], Shard):
-        local_shape = torch.tensor(list(shape), device=mesh.device_type)
+
+        @maybe_run_for_local_tensor
+        def _create_local_shape_tensor(shape):
+            return torch.tensor(list(shape), device=mesh.device_type)
+
+        local_shape = _create_local_shape_tensor(shape)
         gathered_shaped_tensors = [
             torch.empty_like(local_shape, device=local_shape.device)
             for _ in range(mesh.size())
         ]
         funcol.all_gather_inplace(gathered_shaped_tensors, local_shape, mesh)
-        sharded_dim_sum = 0
-        shard_dim = placements[0].dim
-        other_dims = [d for d in range(mesh.ndim) if d != shard_dim]
-        for shape_tensor in gathered_shaped_tensors:
-            if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
-                raise RuntimeError(
-                    "Non-sharded dimensions should have identical size across ranks."
-                )
-            shape_tensor_list = shape_tensor.tolist()
-            sharded_dim_sum += shape_tensor_list[shard_dim]
+
+        @maybe_run_for_local_tensor
+        def _validate_and_compute_global_shape(local_shape, gathered_shaped_tensors):
+            sharded_dim_sum = 0
+            shard_dim = placements[0].dim  # type: ignore[union-attr]
+            other_dims = [d for d in range(len(shape)) if d != shard_dim]
+            for shape_tensor in gathered_shaped_tensors:
+                if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
+                    raise RuntimeError(
+                        "Non-sharded dimensions should have identical size across ranks."
+                    )
+                shape_tensor_list = shape_tensor.tolist()
+                sharded_dim_sum += shape_tensor_list[shard_dim]
+            return sharded_dim_sum
+
+        sharded_dim_sum = _validate_and_compute_global_shape(
+            local_shape, gathered_shaped_tensors
+        )
         global_shape = list(shape)
         global_shape[placements[0].dim] = sharded_dim_sum
         return torch.Size(global_shape)

@@ -1,14 +1,9 @@
-#include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/symbol.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/utils/op_registry.h>
-#include <torch/library.h>
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS

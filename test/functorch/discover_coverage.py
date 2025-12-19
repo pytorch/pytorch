@@ -90,7 +90,7 @@ denylist = {
 def get_method_only_ops_we_care_about():
     apis = get_public_overridable_apis()
     result = []
-    for key in apis.keys():
+    for key in apis:
         if not key.startswith("torch.Tensor"):
             continue
         if key in denylist:
@@ -99,7 +99,7 @@ def get_method_only_ops_we_care_about():
         # filter out in-place
         if api.endswith("_"):
             continue
-        if f"torch.{api}" not in apis.keys():
+        if f"torch.{api}" not in apis:
             result.append(api)
     return result
 
@@ -110,11 +110,11 @@ def get_method_only_ops_we_care_about():
 def get_public_overridable_ops():
     results = get_public_overridable_apis()
     cpy = copy.deepcopy(results)
-    for key in cpy.keys():
+    for key in cpy:
         if not key.startswith("torch.Tensor"):
             continue
         api = key.split(".")[2]
-        if f"torch.{api}" in results.keys():
+        if f"torch.{api}" in results:
             del results[key]
     return results
 
@@ -122,7 +122,7 @@ def get_public_overridable_ops():
 def get_public_overridable_outplace_ops():
     results = get_public_overridable_ops()
     cpy = copy.deepcopy(results)
-    for key in cpy.keys():
+    for key in cpy:
         # NB: there are no dunder methods bcs we don't document those
         if key.endswith("_"):
             del results[key]
@@ -132,7 +132,7 @@ def get_public_overridable_outplace_ops():
 def get_public_overridable_outplace_we_care_about():
     results = get_public_overridable_outplace_ops()
     cpy = copy.deepcopy(results)
-    for key in cpy.keys():
+    for key in cpy:
         # quantization
         if "quant" in key or ".q_" in key:
             del results[key]
