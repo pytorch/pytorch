@@ -1,15 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
+from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
 from torch.distributed import _functional_collectives as fcols
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DistributedTestBase,
     MultiThreadedTestCase,
-    skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -28,6 +28,27 @@ DEVICE = "cuda"
 devices = ["cpu"]
 if acc := torch.accelerator.current_accelerator(True):
     devices += [acc.type]
+
+def with_comms(func=None):
+    if func is None:
+        return partial(with_comms)
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if (
+            torch.cuda.is_available()
+            and torch.accelerator.device_count() < self.world_size
+        ):
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        self.pg = self.create_pg(device=DEVICE)
+        self.device = DEVICE
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    return wrapper
 
 
 @instantiate_parametrized_tests
@@ -576,7 +597,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
 
 
 @instantiate_parametrized_tests
-class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
+class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     # ============================================================
     # torch.compile Integration Tests
     # ============================================================
@@ -585,32 +606,9 @@ class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
     def world_size(self) -> int:
         return 2
 
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def _init_pg(self):
-        # Set the device explicitly before initializing the process group
-        torch.cuda.set_device(self.rank % self.world_size)
-        dist.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
-        self.device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-
-    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_all_reduce_compile(self):
         """Test that all_reduce backward works with torch.compile."""
-        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -628,10 +626,9 @@ class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
         expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_all_gather_tensor_compile(self):
         """Test that all_gather_tensor backward works with torch.compile."""
-        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -649,10 +646,9 @@ class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
         expected_grad = torch.full((3, 3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_reduce_scatter_tensor_compile(self):
         """Test that reduce_scatter_tensor backward works with torch.compile."""
-        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
@@ -675,10 +671,9 @@ class TestFunctionalDifferentialsWithCompile(MultiProcessTestCase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_all_to_all_single_compile(self):
         """Test that all_to_all_single backward works with torch.compile."""
-        self._init_pg()
         group_name = dist.group.WORLD.group_name
 
         @torch.compile(fullgraph=True)
