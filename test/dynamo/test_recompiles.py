@@ -167,12 +167,8 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(with_automatic.op_count, 3)
 
     def test_no_recompile_python_scalar_times_tensorified_lr_inplace_mul(self):
-        torch._dynamo.reset()
-        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
         def scaling_step(update: torch.Tensor, dummy_tensor: torch.Tensor, lr):
             dummy_tensor.mul_(0.5 * lr)  # forces lr to participate in tensor math
-
             r, c = update.size(-2), update.size(-1)
             scaling_factor = max(1, r / c) ** 0.5  # Python float
             update.mul_(scaling_factor * lr)  # bug trigger path
@@ -182,22 +178,13 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         dummy_tensor = torch.randn(324, 64)
 
         with patch.dict(os.environ, {"TENSORIFY_PYTHON_SCALARS": "1"}):
-            opt = torch.compile(backend=counter, fullgraph=True)(scaling_step)
-            opt(update, dummy_tensor, 1e-4)  # first compile
-            first = counter.frame_count
+            opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(scaling_step)
+            opt(update, dummy_tensor, 1e-4)  # compile
 
-            # Allow at most one extra compile due to restart-analysis mechanics.
-            opt(update, dummy_tensor, 2e-4)
-            self.assertLessEqual(counter.frame_count, first + 1)
-
-            settled = counter.frame_count
-
-            # Now changing lr many times must not recompile.
-            for i in range(3, 30):
-                opt(update, dummy_tensor, 1e-4 * (i + 1))
-
-        self.assertEqual(counter.frame_count, settled)
-        torch._dynamo.reset()
+            # Changing lr must not recompile.
+            with torch.compiler.set_stance("fail_on_recompile"):
+                for i in range(2, 30):
+                    opt(update, dummy_tensor, 1e-4 * i)
 
     def test_automatic_dynamic_tensor_scalar_change(self):
         # Test the counterfactual, lots of recompiles without this config
