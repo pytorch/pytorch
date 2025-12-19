@@ -666,9 +666,11 @@ this node and skip_cross_node_cores. ",
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert cores_per_rank >= 1, (
-                        "At least one core needs to be assigned to each rank"
-                    )
+                    if cores_per_rank < 1:
+                        raise AssertionError(
+                            f"At least one core needs to be assigned to each rank, "
+                            f"got {total_num_cores} cores for {local_size} ranks"
+                        )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]
