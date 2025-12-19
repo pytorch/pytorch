@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import multiprocessing
 import os
 import shutil
 import unittest
@@ -129,6 +130,51 @@ def _unpack_fp8_with_scale_wrap(x):
     dtype, scale, x_fp8 = x
     y = x_fp8.to(torch.float32) / scale
     return y.to(dtype)
+
+
+def _subprocess_test_cache_hit(queue, cache_dir_path, bundled_autograd_cache=False):
+    import os
+
+    # Set the cache directory BEFORE importing torch so it uses the same cache
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_path
+
+    import torch
+    import torch._dynamo
+    from torch._dynamo.utils import counters
+    from torch._functorch import config as functorch_config
+    from torch._inductor import config as inductor_config
+
+    # Clear dynamo state but NOT the cache - we want to test cache hit
+    counters.clear()
+    torch._dynamo.reset()
+
+    # Must apply same config patches as the main process
+    with functorch_config.patch(
+        {
+            "enable_autograd_cache": True,
+            "bundled_autograd_cache": bundled_autograd_cache,
+        }
+    ):
+        with inductor_config.patch(
+            {"fx_graph_cache": True, "fx_graph_remote_cache": False}
+        ):
+
+            def fn(x):
+                return x.sin().cos()
+
+            a = torch.randn(25, requires_grad=True)
+            compiled_fn = torch.compile(fn, backend="inductor")
+            result = compiled_fn(a)
+            result.sum().backward()
+
+            # Return counter values to parent process
+            queue.put(
+                (
+                    counters["aot_autograd"]["autograd_cache_miss"],
+                    counters["aot_autograd"]["autograd_cache_hit"],
+                    counters["aot_autograd"]["autograd_cache_saved"],
+                )
+            )
 
 
 @instantiate_parametrized_tests
@@ -361,6 +407,51 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_different_process_cache_hit(self):
+        def fn(x):
+            return x.sin().cos()
+
+        a = torch.randn(25, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call should miss and save to cache (need backward to trigger save)
+        result = compiled_fn(a)
+        result.sum().backward()
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Get the current cache directory to pass to subprocess
+        # The test uses fresh_cache which sets TORCHINDUCTOR_CACHE_DIR
+        current_cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR", cache_dir())
+
+        # Check if bundled_autograd_cache is enabled (set by AOTAutogradCacheBundledTests)
+        bundled_autograd_cache = functorch_config.bundled_autograd_cache
+
+        # Run in a subprocess to verify cache hit from a different process
+        # The subprocess needs its own torch.compile call to test cross-process cache consistency
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+        p = ctx.Process(
+            target=_subprocess_test_cache_hit,
+            args=(queue, current_cache_dir, bundled_autograd_cache),
+        )
+        p.start()
+        p.join()
+
+        # If subprocess crashed, skip the test rather than hang on queue.get()
+        if p.exitcode != 0:
+            self.skipTest(f"Subprocess exited with code {p.exitcode}")
+
+        miss, hit, saved = queue.get()
+        # The subprocess should have a cache hit (not miss)
+        self.assertEqual(miss, 0)
+        self.assertEqual(hit, 1)
+        self.assertEqual(saved, 0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2046,33 +2137,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
-        # Reset dynamo between runs
-        torch._dynamo.reset()
-        fx_graph = None
-        example_inputs = None
-
-        def compiler(gm, inputs, **kwargs):
-            nonlocal fx_graph
-            nonlocal example_inputs
-            fx_graph = gm
-            example_inputs = inputs
-            return gm
-
-        g = torch.compile(fn, backend=compiler, fullgraph=True)
-        result = g(*args, **kwargs)
-        return (result, fx_graph, example_inputs)
+        return _get_dynamo_output(fn, *args, **kwargs)
 
     def gen_cache_key(self, f, config, inputs=None):
-        if inputs is None:
-            inputs = [torch.ones(3)]
-        _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        shape_env = ShapeEnv()
-        ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
-        # Needs a shape env for FxGraphCache.check_can_cache to pass.
-        # Not needed for actual key calculation.
-        with torch._guards.tracing(ctx):
-            with sanitize_gm_for_cache(fx_g):
-                return autograd_cache_key(fx_g, example_inputs, config, {})
+        return gen_cache_key(f, config, inputs)
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -2083,6 +2151,18 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
+
+    def test_different_process_hash_key(self):
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(target=gen_cache_callable, args=(queue, gen_cache_key))
+            p.start()
+            p.join()
+            results.append(queue.get())
+
+        self.assertEqual(results[0], results[1])
 
     def test_identical_graphs_and_configs(self):
         def fn(x):
@@ -2292,6 +2372,67 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
+
+
+def _get_dynamo_output(fn, *args, **kwargs):
+    # Reset dynamo between runs
+    torch._dynamo.reset()
+    fx_graph = None
+    example_inputs = None
+
+    def compiler(gm, inputs, **kwargs):
+        nonlocal fx_graph
+        nonlocal example_inputs
+        fx_graph = gm
+        example_inputs = inputs
+        return gm
+
+    g = torch.compile(fn, backend=compiler, fullgraph=True)
+    result = g(*args, **kwargs)
+    return (result, fx_graph, example_inputs)
+
+
+def gen_cache_key(fn, config, inputs=None):
+    if inputs is None:
+        inputs = [torch.ones(3)]
+    _, fx_g, example_inputs = _get_dynamo_output(fn, *inputs)
+    shape_env = ShapeEnv()
+    ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
+    # Needs a shape env for FxGraphCache.check_can_cache to pass.
+    # Not needed for actual key calculation.
+    with torch._guards.tracing(ctx):
+        with sanitize_gm_for_cache(fx_g):
+            return autograd_cache_key(fx_g, example_inputs, config, {})
+
+
+def gen_cache_callable(queue, gen_cache_key):
+    from torch._dynamo.source import LocalSource
+
+    source = LocalSource("x", is_input=True)
+    hash(source)  # triggers _hash caching
+
+    def fn(x):
+        return x.sin().cos()
+
+    config = AOTConfig(
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+        dynamic_shapes=True,
+        aot_autograd_arg_pos_to_source=[source],
+        is_export=False,
+        no_tangents=False,
+        enable_log=False,
+        precompile_backend_id=None,
+    )
+
+    cache_key = gen_cache_key(fn, config)
+    queue.put(cache_key)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):
