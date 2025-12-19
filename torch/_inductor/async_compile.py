@@ -637,24 +637,24 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
-    def cutlass_api(self, kernel_name: str, source_code: str):
+    def nv_universal_gemm(self, kernel_name: str, source_code: str):
         """
-        Compile cutlass_api kernels.
+        Compile NVIDIA Universal GEMM kernels.
 
         Args:
             kernel_name: Name of the kernel to be defined
-            source_code: Source code of the cutlass_api kernel, as a string
+            source_code: Source code of the kernel, as a string
 
         Note:
-            cutlass_api kernels are Python code that calls the cutlass_api library.
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
             We use the PyCodeCache to write the source code to a file and load it.
         """
-        from torch._inductor.codegen.cuda.cutlass_api_kernel import (
-            CutlassAPIKernelWrapper,
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
         )
-        from torch._inductor.codegen.cuda.cutlass_api_scheduling import MAIN_SUFFIX
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import MAIN_SUFFIX
 
-        kernel_code_log.info("cutlass_api Kernel:\n%s", source_code)
+        kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
 
         def task():
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
@@ -665,10 +665,10 @@ class AsyncCompile:
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
                 raise RuntimeError(
-                    f"Could not find cutlass_api main kernel function '{main_func_name}'. Available callables: {available}"
+                    f"Could not find NVIDIA Universal GEMM main kernel function '{main_func_name}'. Available callables: {available}"
                 )
 
-            return CutlassAPIKernelWrapper(
+            return NVUniversalGemmKernelWrapper(
                 getattr(mod, main_func_name), kernel_path=path
             )
 
