@@ -6,8 +6,11 @@ import torch.nn.functional as F
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    MI200_ARCH,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -48,23 +51,6 @@ class SkipPatternTest(TestBase):
         torch.compile(f)(x)
         self.assertEqual(2, metrics.generated_kernel_count)
 
-    @inductor_config.patch(split_reductions=False)
-    def test_skip_if_outer_reduction_followed_by_full_pointwise(self):
-        """
-        Skip for now if the outer reduction is followed by a pointwise node
-        accessing the original tensor. Accessing the reduced tensor is fine
-        (e.g. to support torch.mean).
-        """
-
-        def f(x):
-            out1 = x.sum(dim=1)
-            out2 = x.sum(dim=0, keepdim=True) + x
-            return out1, out2
-
-        x = torch.randn(32768, 768, device=GPU_TYPE)
-        self.check_numeric(f, (x,))
-        self.assertEqual(0, metrics.codegen_mix_order_reduction)
-
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
@@ -76,10 +62,11 @@ class MixOrderReductionTest(TestBase):
             "mean",
         ],
     )
+    @parametrize("dtype", (torch.bfloat16, torch.float))
     @parametrize("swap", (False, True))
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
-    def test_mix_order_reduction(self, name, swap, split_reductions, shape):
+    def test_mix_order_reduction(self, name, dtype, swap, split_reductions, shape):
         # torch.prod does not accept tuple for dim argument
         if name == "prod" and len(shape) == 3:
             self.skipTest("Invalid combination")
@@ -98,7 +85,6 @@ class MixOrderReductionTest(TestBase):
                 return reduction_fn(x, dim=-1), outer_red()
 
         reduction_fn = getattr(torch, name)
-        dtype = torch.float
         x = torch.randn(shape, dtype=dtype, device=GPU_TYPE)
 
         opt_f = torch.compile(
@@ -110,8 +96,8 @@ class MixOrderReductionTest(TestBase):
 
         ref = f(x)
         act = opt_f(x)
-
-        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        tol = 1e-3 if dtype == torch.float else 1e-2
+        self.assertTrue(same(ref, act, tol=tol), f"ref:\n{ref}\nact:\n{act}")
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
@@ -270,11 +256,20 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("split_reductions", (False, True))
-    @parametrize("shape", ((32768, 2048), (32768, 768), (32768 + 1023, 768)))
+    @parametrize(
+        "shape", ((1000000, 256), (32768, 2048), (32768, 768), (32768 + 1023, 768))
+    )
     @parametrize("max_autotune", (False, True))
     @parametrize("initial_xblock", (1, 2))
+    @parametrize("add_1dim", (False, True))
     def test_rms_norm_bwd(
-        self, wdtype, split_reductions, shape, max_autotune, initial_xblock
+        self,
+        wdtype,
+        split_reductions,
+        shape,
+        max_autotune,
+        initial_xblock,
+        add_1dim,
     ):
         # max_autotune can be slow and cost resource, trim down the tests
         # for max autotune
@@ -285,6 +280,9 @@ class MixOrderReductionTest(TestBase):
             and initial_xblock == 1
             and inductor_config.triton.mix_order_reduction
         ):
+            self.skipTest("Skip non-critical tests to save resources.")
+
+        if shape != (1000000, 256) and add_1dim:
             self.skipTest("Skip non-critical tests to save resources.")
 
         def f(x, w, eps):
@@ -307,6 +305,9 @@ class MixOrderReductionTest(TestBase):
         # M, N = 1152 * 500, 384
         M, N = shape
         x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        if add_1dim:
+            x = x[:, None, :]
+
         w = torch.randn(N, dtype=wdtype, device=GPU_TYPE, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
@@ -494,6 +495,141 @@ class MixOrderReductionTest(TestBase):
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
         )
+
+    @parametrize("split_reductions", (False, True))
+    @parametrize("dtype", [torch.bfloat16, torch.float])
+    def test_rms_norm_sharing_weights(self, split_reductions, dtype):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        if dtype is torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
+            self.skipTest("Currently failing on rocm mi200")
+
+        def f(xs, w, eps):
+            ys = []
+            for x in xs:
+                ys.append(F.rms_norm(x, x.shape[-1:], w, eps=eps))
+            return ys
+
+        num_norm = 3
+        M, N = 32768, 768
+        xs = [
+            torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            for _ in range(num_norm)
+        ]
+        w = torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        dys = [torch.randn_like(xs[0]) for _ in range(num_norm)]
+        eps = 1e-5
+
+        ref = f(xs, w, eps)
+        act = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )(xs, w, eps)
+        ref_grads = torch.autograd.grad(ref, [*xs, w], dys)
+        act_grads, (wrapper,) = utils.run_and_get_code(
+            lambda: torch.autograd.grad(act, [*xs, w], dys)
+        )
+        # bfloat16 cause big numerical instability for grad_weight
+        tol = 1e-3 if dtype == torch.float32 else 0.5
+        self.assertTrue(same((ref, ref_grads), (act, act_grads), tol=tol))
+        self.assertEqual(
+            metrics.codegen_mix_order_reduction,
+            num_norm,
+        )
+
+        # a single mix order reduction kernel get shared
+        FileCheck().check_count("MixOrderReductionGrid", 1, exactly=True).run(wrapper)
+
+    @parametrize("split_reductions", (False, True))
+    @parametrize("dtype", [torch.bfloat16, torch.float])
+    @parametrize("has_bias", [False, True])
+    def test_layer_norm_sharing_weights(self, split_reductions, dtype, has_bias):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(xs, w, bias, eps):
+            ys = []
+            for x in xs:
+                ys.append(F.layer_norm(x, x.shape[-1:], w, bias=bias, eps=eps))
+            return ys
+
+        num_norm = 3
+        M, N = 32768, 768
+        xs = [
+            torch.randn(M, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            for _ in range(num_norm)
+        ]
+        w = torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = (
+            torch.randn(N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            if has_bias
+            else None
+        )
+        dys = [torch.randn_like(xs[0]) for _ in range(num_norm)]
+        eps = 1e-5
+
+        ref = f(xs, w, b, eps)
+        act = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )(xs, w, b, eps)
+
+        inputs_for_grad = [*xs, w]
+        if has_bias:
+            inputs_for_grad.append(b)
+        ref_grads = torch.autograd.grad(ref, inputs_for_grad, dys)
+        act_grads, (wrapper,) = utils.run_and_get_code(
+            lambda: torch.autograd.grad(act, inputs_for_grad, dys)
+        )
+        tol = 1e-3 if dtype == torch.float32 else 1e-2
+        if GPU_TYPE == "xpu":
+            tol = 1e-3 if dtype == torch.float32 else 2e-2
+        self.assertTrue(same((ref, ref_grads[:-2]), (act, act_grads[:-2]), tol=tol))
+        if dtype == torch.float32:
+            # bfloat16 cause big numerical instability for grad_weight
+            # and grad_bias
+            torch.testing.assert_close(
+                ref_grads[-2:], act_grads[-2:], atol=tol, rtol=tol
+            )
+        self.assertEqual(
+            metrics.codegen_mix_order_reduction,
+            num_norm,
+        )
+
+        # a single mix order reduction kernel get shared
+        FileCheck().check_count("MixOrderReductionGrid", 1, exactly=True).run(wrapper)
+
+    @inductor_config.patch(split_reductions=False)
+    def test_dont_fuse_nodes_that_introduce_producer_consumer_rel(self):
+        """
+        The test constructs an inner reduction, an outer reduction and
+        a pointwise kernel.
+
+        The inner reduction and outer reduction will be fused first.
+        We don't further fuse the pointwise kernel (with the inner reduction part)
+        since that introduces producer/consumer relationship between
+        the inner and outer reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            out1 = x.sum(dim=1)
+            out2 = x.sum(dim=0, keepdim=True) + x
+            return out1, out2
+
+        x = torch.randn(32768, 768, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(1, metrics.codegen_mix_order_reduction)
+        # two kernels
+        # one is the mix-order reduction kernel
+        # the other is the piontwise kernel
+        self.assertTrue(2, metrics.generated_kernel_count)
 
 
 @inductor_config.patch(

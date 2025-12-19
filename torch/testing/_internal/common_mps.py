@@ -330,15 +330,12 @@ if torch.backends.mps.is_available():
             "linalg.ldl_solve": None,
             "linalg.lstsq": None,
             "linalg.lstsqgrad_oriented": None,
-            "linalg.lu": None,
-            "linalg.lu_solve": None,
             "linalg.matrix_norm": [torch.float32],
             "linalg.norm": [torch.float32],
             "linalg.normsubgradients_at_zero": [torch.float32],
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
-            "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
@@ -704,17 +701,10 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.float32,
             ],  # missing `aten::lu_solve`.
-            "linalg.det": [torch.float16, torch.float32],  # missing aten::lu_solve.out
-            "linalg.slogdet": [
-                torch.float16,
-                torch.float32,
-            ],  # missing aten::lu_solve.out
-            "logdet": [torch.float16, torch.float32],  # missing aten::lu_solve.out
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
-            "atanh": [torch.float32],
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.

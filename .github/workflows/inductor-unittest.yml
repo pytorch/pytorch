@@ -7,9 +7,12 @@ on:
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
+  pull_request:
+    paths:
+      - .github/workflows/inductor-unittest.yml
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
   cancel-in-progress: true
 
 permissions:
@@ -52,7 +55,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
     secrets: inherit
@@ -76,35 +79,33 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-halide-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: ${{ needs.inductor-halide-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
     secrets: inherit
 
-  inductor-pallas-build:
-    name: inductor-pallas-build
+  inductor-pallas-cpu-build:
+    name: inductor-pallas-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
-      cuda-arch-list: '8.9'
-      runner: linux.8xlarge.memory
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.12-pallas
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-pallas", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor-pallas-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
     secrets: inherit
 
-  inductor-pallas-test:
-    name: inductor-pallas-test
+  inductor-pallas-cpu-test:
+    name: inductor-pallas-cpu-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: inductor-pallas-build
+    needs: inductor-pallas-cpu-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
-      docker-image: ${{ needs.inductor-pallas-build.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-pallas-build.outputs.test-matrix }}
+      build-environment: ${{ needs.inductor-pallas-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-pallas-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-pallas-cpu-build.outputs.test-matrix }}
     secrets: inherit
 
   inductor-triton-cpu-build:
@@ -126,7 +127,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-triton-cpu-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: ${{ needs.inductor-triton-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix }}
     secrets: inherit
@@ -153,7 +154,42 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-cpu-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
+    secrets: inherit
+
+  inductor-cpu-core-build:
+    name: inductor-cpu-core-build
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
+      test-matrix: |
+        { include: [
+          { config: "inductor_core", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "inductor_core", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+        ]}
+    secrets: inherit
+
+  inductor-cpu-core-test:
+    name: inductor-cpu-core-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [get-label-type, inductor-cpu-core-build]
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    with:
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
+      docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
+      test-matrix: |
+        { include: [
+          { config: "inductor_core", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "inductor_core", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+        ]}
     secrets: inherit
