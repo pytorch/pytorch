@@ -8517,6 +8517,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusparseSpGEMM_compute", ("hipsparseSpGEMM_compute", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpGEMM_workEstimation", ("hipsparseSpGEMM_workEstimation", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpMatGetSize", ("hipsparseSpMatGetSize", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpMatSetAttribute", ("hipsparseSpMatSetAttribute", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseCsrSetPointers", ("hipsparseCsrSetPointers", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpSM_createDescr", ("hipsparseSpSM_createDescr", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpSM_destroyDescr", ("hipsparseSpSM_destroyDescr", CONV_MATH_FUNC, API_SPECIAL)),
@@ -8561,6 +8562,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("CUSPARSE_SDDMM_ALG_DEFAULT", ("HIPSPARSE_SDDMM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPSM_ALG_DEFAULT", ("HIPSPARSE_SPSM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPSV_ALG_DEFAULT", ("HIPSPARSE_SPSV_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMAT_FILL_MODE", ("HIPSPARSE_SPMAT_FILL_MODE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMAT_DIAG_TYPE", ("HIPSPARSE_SPMAT_DIAG_TYPE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         (
             "CUSPARSE_STATUS_SUCCESS",
             ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPECIAL),
