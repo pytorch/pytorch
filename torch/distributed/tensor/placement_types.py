@@ -726,7 +726,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        max_chunk_size = max([len(shard) for shard in sharded_indices])
+        # First chunk should be one of those biggest chunks.
+        max_chunk_size = len(sharded_indices[0])
         local_pad_size = max_chunk_size - local_tensor.size(self.dim)
         local_tensor_padded = pad_tensor(local_tensor, self.dim, local_pad_size)
 
