@@ -2959,6 +2959,8 @@ make_fallback(aten._grouped_mm, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.miopen_rnn, require_dense)
+make_fallback(aten.miopen_rnn_backward, require_contiguous)
 
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
@@ -7549,7 +7551,10 @@ def with_effects(token, op, *args, **kwargs):
         log.warning(
             "Failed to get schema for %s: %s. Assuming list output", op, error_msg
         )
-        return (token, *result)
+        if isinstance(result, (tuple, list)):
+            return (token, *result)
+        else:
+            return (token, result)
 
     if len(schema.returns) == 0:
         return (token, result)
