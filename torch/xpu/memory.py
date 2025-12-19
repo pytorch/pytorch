@@ -2,7 +2,7 @@ import collections
 import ctypes
 import pickle
 import sys
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import torch
 from torch._memory_snapshot_utils import (
@@ -252,7 +252,7 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
 
 
 def memory_snapshot(
-    mempool_id: Union[tuple[int, int], None] = None,
+    mempool_id: tuple[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     r"""
     Return a snapshot of the XPU memory allocator state across all devices.
@@ -270,9 +270,7 @@ def memory_snapshot(
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
-def _snapshot(
-    device: _device_t = None, augment_with_fx_traces: bool = False
-) -> _Snapshot:
+def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _Snapshot:
     """
     Capture a snapshot of the XPU memory state at the time this function is called.
 
@@ -385,11 +383,12 @@ def _dump_snapshot(
 
 
 def _record_memory_history(
-    enabled: Optional[Literal["state", "all"]] = "all",
-    context: Optional[Literal["state", "alloc", "all"]] = "all",
+    enabled: Literal["state", "all"] | None = "all",
+    context: Literal["state", "alloc", "all"] | None = "all",
     stacks: Literal["python", "all"] = "all",
     max_entries: int = sys.maxsize,
     clear_history: bool = False,
+    skip_actions: list[str] | None = None,
 ) -> None:
     """
     Enable recording of stack traces associated with memory allocations, so you can
@@ -424,12 +423,12 @@ def _record_memory_history(
     works out to ~2us per trace, but can vary depending on stack depth.
 
     Arguments:
-        enabled (Literal[None, "state", "all"], optional):
+        enabled (Literal["state", "all"], optional):
             `None`, disable recording memory history.
             `"state"`, keep information for currently allocated memory.
             `"all"`, additionally keep a history of all alloc/free calls.
             Defaults to "all".
-        context (Literal[None, "state", "alloc", "all"], optional):
+        context (Literal["state", "alloc", "all"], optional):
             `None`, Do not record any tracebacks.
             `"state"`, Record tracebacks for currently allocated memory.
             `"alloc"`, additionally keep tracebacks for alloc calls.
@@ -442,9 +441,32 @@ def _record_memory_history(
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
         clear_history (bool, optional): Clear history when enabling, defaults to False.
+        skip_actions (list[str], optional): List of action types to skip when recording
+            memory history. This can be used to reduce memory overhead by excluding
+            certain types of events from being recorded. Valid action types are:
+
+            - `"alloc"`: Memory allocation events
+            - `"free_requested"`: Free requests (memory marked for freeing)
+            - `"free_completed"`: Completed free operations (memory actually freed)
+            - `"segment_alloc"`: Segment allocation from SYCL runtime
+            - `"segment_free"`: Segment freed back to XPU via SYCL runtime
+            - `"segment_map"`: Segment map events
+            - `"segment_unmap"`: Segment unmap events
+            - `"snapshot"`: Memory snapshot generation events
+            - `"oom"`: Out-of-memory exceptions
+
+            For example, to skip recording free_requested events:
+            `skip_actions=["free_requested"]`
+
+            Defaults to `None` (record all actions).
     """
     torch._C._xpu_recordMemoryHistory(
-        enabled, context, stacks, max_entries, clear_history
+        enabled,
+        context,
+        stacks,
+        max_entries,
+        clear_history,
+        skip_actions if skip_actions is not None else [],
     )
 
 
