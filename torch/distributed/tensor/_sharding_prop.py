@@ -497,7 +497,20 @@ class ShardingPropagator:
             else:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
+        else:
+            # Try decomposition fallback if no explicit strategy registered
+            op_strategy = None
+            from torch.distributed.tensor._decomp_sharding import DecompositionShardingStrategy
 
+            if DecompositionShardingStrategy.can_handle(op_schema.op):
+                try:
+                    op_strategy = DecompositionShardingStrategy.generate_strategy(
+                        op_schema.op, op_schema, self
+                    )
+                except NotImplementedError:
+                    pass
+
+        if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
@@ -655,13 +668,6 @@ class ShardingPropagator:
                 )
             else:
                 raise ValueError("Unsupported op strategy type")
-
-            # associate the output sharding with the output tensor metadata
-            new_output_spec = self._create_output_spec_with_new_tensor_meta(
-                op_schema.op, output_sharding.output_spec, out_tensor_meta
-            )
-            output_sharding.output_spec = new_output_spec
-            return output_sharding
         elif op_schema.op in self.op_to_rules:
             # propagate the sharding with rule
             sharding_prop_func = self.op_to_rules[op_schema.op]
@@ -698,18 +704,17 @@ class ShardingPropagator:
                     # exist, which indicates a reshard is needed
                     output_sharding.output_spec = propagation_res.output_spec
                     output_sharding.needs_redistribute = True
-
-            # associate the output sharding with the output tensor metadata
-            new_output_spec = self._create_output_spec_with_new_tensor_meta(
-                op_schema.op, output_sharding.output_spec, out_tensor_meta
-            )
-            output_sharding.output_spec = new_output_spec
-
-            return output_sharding
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
+
+        # associate the output sharding with the output tensor metadata
+        new_output_spec = self._create_output_spec_with_new_tensor_meta(
+            op_schema.op, output_sharding.output_spec, out_tensor_meta
+        )
+        output_sharding.output_spec = new_output_spec
+        return output_sharding
 
     def _adjust_shape_and_stride_args(
         self,
