@@ -547,30 +547,15 @@ class LazyConstantVariable(LazyVariableTracker):
     def is_python_equal(self, other: VariableTracker) -> bool:
         """Check equality with proper guard handling.
 
-        For two LazyConstantVariables with the same cache (same source), we can
-        safely compare values without additional guards since they share guards.
-        For different caches, we must realize to install proper guards to ensure
-        correctness when values change.
+        Same cache (same source) means we can return True without guards.
+        Otherwise, we must realize to install guards for correctness.
         """
-        if self.is_realized():
-            return self.realize().is_python_equal(other)
-
-        # For LazyConstantVariable comparison
-        if isinstance(other, LazyConstantVariable) and not other.is_realized():
-            # Same cache means same source - can safely compare without new guards
-            if self._cache is other._cache:
-                return True  # Same source, must be equal
-            # Different caches - must realize to install guards since values
-            # could change independently at runtime
-            return self.realize().is_python_equal(other.realize())
-
-        # For ConstantVariable, compare directly (constants have no guards)
-        from .constant import ConstantVariable
-
-        if isinstance(other, ConstantVariable):
-            return self.peek_value() == other.as_python_constant()
-
-        # For other types, realize and compare
+        if (
+            isinstance(other, LazyConstantVariable)
+            and not other.is_realized()
+            and self._cache is other._cache
+        ):
+            return True
         return self.realize().is_python_equal(other)
 
 
