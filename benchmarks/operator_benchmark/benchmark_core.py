@@ -66,6 +66,7 @@ def _create_test(
         tags: a attribute in test config to filter inputs
         OperatorTestCase: a named tuple to save the metadata of an test
         run_backward: a bool parameter indicating backward path
+        bwd_input: for backward tests, specifies which input ('all', 1, 2, 3, etc.) or None for consolidated tests
     """
     test_attrs = copy.deepcopy(orig_test_attrs)
     test_attrs = {k: str(v) for k, v in test_attrs.items()}
@@ -143,32 +144,58 @@ def _build_test(
                     for param in attr.parameters():
                         param.requires_grad = False
 
-        input_name = None
+        # For gradient tests, create a consolidated test that will measure
+        # forward latency + backward latency (all) + backward latency for each input
+        if run_backward and op._num_inputs_require_grads > 0:
+            # Create list to hold all backward test variants
+            backward_ops = []
 
-        # _num_inputs_require_grads is used to track the number of tensors
-        # which use auto_set().
-        if op._num_inputs_require_grads > 0:
+            # Create backward op for all inputs
             input_name = "all"
-        yield _create_test(
-            op, test_attrs, tags, OperatorTestCase, run_backward, input_name
-        )
-
-        # This for loop is only used when auto_set is used.
-        # _pass_count counts how many times init has been called.
-        # _auto_set_counter is reset after init is called.
-        for i in range(op._num_inputs_require_grads):
-            op._pass_count += 1
-            op._auto_set_counter = 0
-
-            # TODO(mingzhe09088): remove this deepcopy when we encounter
-            # performance issue.
-            new_op = copy.deepcopy(op)
-            new_op.init(**init_dict)
-            # Input name index will start from input1
-            input_name = i + 1
-            yield _create_test(
-                new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name
+            backward_all_test = _create_test(
+                op, test_attrs, tags, OperatorTestCase, run_backward, input_name
             )
+            backward_ops.append(('all', backward_all_test))
+
+            # Create backward op for each individual input
+            for i in range(op._num_inputs_require_grads):
+                op._pass_count += 1
+                op._auto_set_counter = 0
+
+                new_op = copy.deepcopy(op)
+                new_op.init(**init_dict)
+                input_name = i + 1
+                bwd_test = _create_test(
+                    new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name
+                )
+                backward_ops.append((f'bwd{input_name}', bwd_test))
+
+            # Create a forward-only test for measuring forward latency
+            forward_op = copy.deepcopy(op)
+            forward_op._pass_count = 0
+            forward_op._auto_set_counter = 0
+            forward_op._set_backward_test(False)
+            forward_op.init(**init_dict)
+            forward_test = _create_test(
+                forward_op, test_attrs, tags, OperatorTestCase, False, None
+            )
+
+            # Store backward variants in the first test case
+            full_test_id, test_case = backward_all_test
+            test_case.backward_variants = backward_ops
+            test_case.forward_test = forward_test
+            test_case.is_consolidated = True
+
+            yield backward_all_test
+        else:
+            # For forward-only tests or tests without auto_set, keep original behavior
+            input_name = None
+            test = _create_test(
+                op, test_attrs, tags, OperatorTestCase, run_backward, input_name
+            )
+            full_test_id, test_case = test
+            test_case.is_consolidated = False
+            yield test
 
 
 class BenchmarkRunner:
@@ -230,6 +257,44 @@ class BenchmarkRunner:
                 print(f"# {self.args.operators}")
 
     def _print_perf_result(self, results, test_case):
+        # Handle consolidated results (dict with multiple metrics)
+        if isinstance(results, dict) and 'forward latency' in results:
+            if self.args.report_aibench:
+                return
+
+            print(
+                f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}"
+            )
+            print(
+                f"# Name: {test_case.test_config.test_name.replace('_bwdall', '')}\n# Input: {test_case.test_config.input_config}"
+            )
+
+            # Print forward latency
+            forward_latency = results['forward latency']['reported_run_time_us'][0]
+            print(f"Forward Latency (us) : {forward_latency:.3f}")
+
+            # Print backward latency (overall)
+            if 'backward latency' in results:
+                bwd_latency = results['backward latency']['reported_run_time_us'][0]
+                print(f"Backward Latency (us) : {bwd_latency:.3f}")
+
+            # Print individual backward latencies
+            for key in sorted(results.keys()):
+                if key.startswith('bwd') and key != 'backward latency':
+                    bwd_latency = results[key]['reported_run_time_us'][0]
+                    print(f"{key.capitalize()} Latency (us) : {bwd_latency:.3f}")
+
+            # Print peak memory from forward pass
+            print(f"Peak Memory (KB) : {results['forward latency']['peak_memory']}")
+
+            # Print memory bandwidth if available
+            if results.get('memory_bandwidth_gb_s') is not None:
+                print(f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}")
+
+            print()
+            return
+
+        # Original single-metric result handling
         if self.args.report_aibench:
             # Output for AIBench
             # Print out per iteration execution time instead of avg time
@@ -274,13 +339,68 @@ class BenchmarkRunner:
                     )
                 print()
 
-    def _perf_result_to_dict(self, results, test_case):
+    def _perf_result_to_dict(self, results, test_case, consolidated=False):
         """This function is the parallel of _print_perf_result, which instead of
-        writing information to terminal, returns a dictionary.
+        writing information to terminal, returns a dictionary or list of dictionaries.
         """
         if self.args.report_aibench:
-            return {}
+            return {} if not consolidated else []
 
+        # Handle consolidated results - return list of dicts
+        if consolidated:
+            test_name = test_case.test_config.test_name.replace('_bwdall', '')
+            input_config = test_case.test_config.input_config
+            runtime = "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager"
+
+            # Parse input_config to extract device and dtype
+            config_dict = {}
+            for item in input_config.split(', '):
+                if ': ' in item:
+                    k, v = item.split(': ', 1)
+                    config_dict[k.strip()] = v.strip()
+
+            device = config_dict.get('device', 'unknown')
+            dtype = config_dict.get('dtype', 'torch.float')
+
+            dict_list = []
+
+            # Forward latency entry - for training tests, mode is still "training"
+            dict_list.append({
+                'test_name': test_name,
+                'input_config': input_config,
+                'runtime': runtime,
+                'run': 'Backward',  # Use Backward to get "training" mode
+                'latency': round(results['forward latency']['reported_run_time_us'][0], 3),
+                'latency unit': 'us',
+                'peak memory': results['forward latency']['peak_memory'],
+                'memory unit': 'KB',
+                'device': device,
+                'dtype': dtype,
+                'metric_name': 'forward latency',  # Actual metric name for dashboard
+            })
+
+            # Backward latency entries - mode is "training"
+            for key in sorted(results.keys()):
+                if key in ['forward latency', 'memory_bandwidth_gb_s']:
+                    continue
+
+                dict_list.append({
+                    'test_name': test_name,
+                    'input_config': input_config,
+                    'runtime': runtime,
+                    'run': 'Backward',  # Used by _output_json to determine mode
+                    'latency': round(results[key]['reported_run_time_us'][0], 3),
+                    'latency unit': 'us',
+                    'peak memory': results[key]['peak_memory'],
+                    'memory unit': 'KB',
+                    'device': device,
+                    'dtype': dtype,
+                    'metric_name': key,  # 'backward latency', 'bwd1', 'bwd2', etc.
+                })
+
+            return dict_list
+
+        # Original single-metric result handling
         out = {
             "test_name": test_case.test_config.test_name,
             "input_config": test_case.test_config.input_config,
@@ -292,6 +412,7 @@ class BenchmarkRunner:
             "latency unit": "us",
             "peak memory": results["peak_memory"],
             "memory unit": "KB",
+            "metric_name": "forward latency",  # Use "forward latency" for all forward passes
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
@@ -519,7 +640,66 @@ class BenchmarkRunner:
 
         return False
 
-    def _output_csv(self, filename, headers, row):
+    def _output_csv(self, filename, headers, row, test_case=None, consolidated_results=None):
+        # Handle consolidated results
+        if consolidated_results is not None:
+            test_name = test_case.test_config.test_name.replace('_bwdall', '')
+
+            # Build row with all metrics
+            row_data = {
+                'Framework': test_case.framework,
+                'Module': test_case.op_bench.module_name(),
+                'Test Name': test_name,
+                'Tag': test_case.test_config.tag,
+                'Input Config': test_case.test_config.input_config,
+                'Forward Latency (us)': consolidated_results['forward latency']['reported_run_time_us'][0],
+            }
+
+            # Add backward latency (renamed from bwdall)
+            if 'backward latency' in consolidated_results:
+                row_data['Backward Latency (us)'] = consolidated_results['backward latency']['reported_run_time_us'][0]
+
+            # Add individual backward latencies
+            for key in sorted(consolidated_results.keys()):
+                if key.startswith('bwd'):
+                    row_data[f'{key.capitalize()} Latency (us)'] = consolidated_results[key]['reported_run_time_us'][0]
+
+            row_data['Peak Memory (KB)'] = consolidated_results['forward latency']['peak_memory']
+
+            # Read existing CSV to get/update headers
+            if os.path.exists(filename):
+                with open(filename) as fd:
+                    lines = list(csv.reader(fd)) or [[]]
+                    existing_headers = lines[0] if lines else []
+            else:
+                existing_headers = []
+                lines = []
+
+            # Merge headers (preserve order, add new ones)
+            all_headers = list(existing_headers)
+            for key in row_data.keys():
+                if key not in all_headers:
+                    all_headers.append(key)
+
+            # Build row matching headers
+            row = [row_data.get(h, '') for h in all_headers]
+
+            # Update lines
+            if not lines:
+                lines = [all_headers]
+            else:
+                lines[0] = all_headers
+
+            lines.append(row)
+
+            # Write CSV
+            with open(filename, 'w') as fd:
+                writer = csv.writer(fd, lineterminator='\n')
+                for line in lines:
+                    writer.writerow(list(line) + [''] * (len(all_headers) - len(line)))
+            return
+
+        # Original single-metric CSV output
         if os.path.exists(filename):
             with open(filename) as fd:
                 lines = list(csv.reader(fd)) or [[]]
@@ -562,6 +742,11 @@ class BenchmarkRunner:
             device = perf_item.get("device", "unknown")
             dtype = perf_item.get("dtype", "torch.float").split(".")[1]
             runtime = perf_item.get("runtime", None)
+            metric_name = perf_item.get("metric_name")
+
+            # Skip entries without metric_name
+            if not metric_name:
+                continue
 
             # Extract mode based on run_type
             mode = None
@@ -638,7 +823,7 @@ class BenchmarkRunner:
                     extra_info={"operator_name": operator_name},
                 ),
                 metric=MetricInfo(
-                    name="latency",
+                    name=metric_name,
                     unit="us",
                     benchmark_values=[latency],
                     target_value=None,
@@ -698,6 +883,147 @@ class BenchmarkRunner:
                     f"# Benchmarking {test_case.framework}: {test_case.op_bench.module_name()}"
                 )
 
+                # Handle consolidated tests (forward + all backward variants)
+                if hasattr(test_case, 'is_consolidated') and test_case.is_consolidated:
+                    # For torch.compile, do compilation warmup once and reuse graphs
+                    if self.use_compile:
+                        # Print test configuration for better visibility
+                        test_name = test_case.test_config.test_name.replace('_bwdall', '')
+                        print(f"# Test: {test_name}")
+                        print(f"# Config: {test_case.test_config.input_config}")
+                        print(f"# Status: Starting compilation (this may take several minutes)...")
+
+                        # Get the "all" variant which has all inputs with gradients
+                        variant_name, bwd_all_test = test_case.backward_variants[0]  # First is "all"
+                        _, bwd_all_tc = bwd_all_test
+                        _, forward_tc = test_case.forward_test
+
+                        # IMPORTANT: Reset compile cache for each test configuration
+                        # This ensures each dtype+op combination gets fresh compilation
+                        # and avoids recompilation limit issues
+                        if hasattr(forward_tc, '_compile_forward_graph'):
+                            forward_tc._compile_forward_graph = None
+                        if hasattr(bwd_all_tc, '_compile_forward_graph'):
+                            bwd_all_tc._compile_forward_graph = None
+
+                        # Compile forward graph once
+                        print("# [1/2] Compiling forward graph...")
+                        import sys
+                        sys.stdout.flush()
+                        self._launch_forward(forward_tc, self.args.warmup_iterations, print_per_iter=False)
+                        print("# [1/2] Forward compilation complete ✓")
+
+                        # Compile backward graph once (using "all" variant)
+                        print("# [2/2] Compiling backward graph...")
+                        sys.stdout.flush()
+                        self._launch_backward(bwd_all_tc, self.args.warmup_iterations, print_per_iter=False)
+                        print("# [2/2] Backward compilation complete ✓")
+                        print("# Status: Running measurements...")
+                        sys.stdout.flush()
+
+                        # Now all variants can reuse the compiled graphs
+                        # Measure forward latency
+                        forward_results = [
+                            self._measure_metrics(
+                                self._launch_forward, forward_tc, self.iters, self.print_per_iter
+                            )
+                            for _ in range(self.num_runs)
+                        ]
+
+                        # Collect all backward metrics - reuse compiled backward graph
+                        backward_metrics = {}
+                        for variant_name, (_, variant_tc) in test_case.backward_variants:
+                            # Skip additional warmup - already compiled
+                            bwd_results = [
+                                self._measure_metrics(
+                                    self._launch_backward, variant_tc, self.iters, self.print_per_iter
+                                )
+                                for _ in range(self.num_runs)
+                            ]
+
+                            # Rename 'all' to 'backward latency'
+                            metric_name = 'backward latency' if variant_name == 'all' else variant_name
+                            backward_metrics[metric_name] = {
+                                'reported_run_time_us': [r[0] for r in bwd_results],
+                                'peak_memory': bwd_results[0][1]
+                            }
+                    else:
+                        # Non-compile mode: original behavior
+                        # Measure forward latency
+                        _, forward_tc = test_case.forward_test
+                        forward_tc.op_bench._pass_count = 0
+                        forward_tc.op_bench._auto_set_counter = 0
+                        launch_func = self._launch_forward
+
+                        # Warmup forward
+                        launch_func(forward_tc, self.args.warmup_iterations, print_per_iter=False)
+                        # Measure forward
+                        forward_results = [
+                            self._measure_metrics(
+                                launch_func, forward_tc, self.iters, self.print_per_iter
+                            )
+                            for _ in range(self.num_runs)
+                        ]
+
+                        # Collect all backward metrics
+                        backward_metrics = {}
+                        for variant_name, (_, variant_tc) in test_case.backward_variants:
+                            launch_func = self._launch_backward
+
+                            # Warmup backward
+                            launch_func(variant_tc, self.args.warmup_iterations, print_per_iter=False)
+                            # Measure backward
+                            bwd_results = [
+                                self._measure_metrics(
+                                    launch_func, variant_tc, self.iters, self.print_per_iter
+                                )
+                                for _ in range(self.num_runs)
+                            ]
+
+                            # Rename 'all' to 'backward latency'
+                            metric_name = 'backward latency' if variant_name == 'all' else variant_name
+                            backward_metrics[metric_name] = {
+                                'reported_run_time_us': [r[0] for r in bwd_results],
+                                'peak_memory': bwd_results[0][1]
+                            }
+
+                    # Consolidate all results
+                    result_dict = {
+                        'forward latency': {
+                            'reported_run_time_us': [r[0] for r in forward_results],
+                            'peak_memory': forward_results[0][1]
+                        }
+                    }
+                    result_dict.update(backward_metrics)
+
+                    # Calculate memory bandwidth if operator provides memory traffic
+                    memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
+                    if memory_traffic_bytes is not None:
+                        forward_time_s = result_dict['forward latency']['reported_run_time_us'][0] / 1e6
+                        result_dict['memory_bandwidth_gb_s'] = (
+                            memory_traffic_bytes / forward_time_s / 1e9
+                        )
+                    else:
+                        result_dict['memory_bandwidth_gb_s'] = None
+
+                    # Print consolidated results
+                    self._print_perf_result(result_dict, test_case)
+
+                    # Output to CSV/JSON
+                    self._output_csv(
+                        output_csv_filename,
+                        None,  # headers will be determined dynamically
+                        None,  # row will be built from result_dict
+                        test_case,
+                        result_dict
+                    )
+
+                    if self.args.output_json or self.args.output_json_for_dashboard:
+                        perf_list.extend(self._perf_result_to_dict(result_dict, test_case, consolidated=True))
+
+                    continue
+
+                # Original non-consolidated test handling
                 if op_test_config.run_backward:
                     launch_func = self._launch_backward
                 else:
