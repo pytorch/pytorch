@@ -269,6 +269,24 @@ def set_stack_trace(stack: list[str]):
         current_meta["stack_trace"] = "".join(stack)
 
 
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def set_current_annotation(annotation_dict: dict):
+    global current_meta
+    if should_preserve_node_meta:
+        saved_custom = current_meta.get("custom")
+        try:
+            if "custom" in current_meta:
+                current_meta["custom"] = annotation_dict
+
+            yield
+        finally:
+            if saved_custom:
+                current_meta["custom"] = saved_custom
+    else:
+        yield
+
+
 def _replace_combine_fn(old, new):
     """
     Combine the old and new annotations by replacing the old annotation with the new one.

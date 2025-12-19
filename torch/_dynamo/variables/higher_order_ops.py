@@ -5136,15 +5136,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         # This flattens the kwargs into lifted args
         assert self._HOP_NAME is not None
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            body_gmod,
-            body_name,
-            body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, self._HOP_NAME)
+
+        # NB: annotation in invoke_subgraph
+        # The subgraph should not inherit the annotation from parent context.
+        # We trace the subgraph once and the subgraph can be used in different calls,
+        # so the parent annotation is not well-defined.
+        with torch.fx.traceback.set_current_annotation({}):
+            (
+                p_args,
+                p_kwargs,
+                example_value,
+                body_r,
+                body_gmod,
+                body_name,
+                body_graph_output_vts,
+            ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, self._HOP_NAME)
 
         if len(p_kwargs) > 0:
             unimplemented(
