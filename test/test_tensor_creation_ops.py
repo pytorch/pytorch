@@ -4135,7 +4135,8 @@ class TestAsArray(TestCase):
             3. Whether the result lives in the expected device
             4. Whether the result has its 'requires_grad' set or not
         """
-        result = torch.asarray(cvt(original), **kwargs)
+        converted_original = cvt(original)
+        result = torch.asarray(converted_original, **kwargs)
         self.assertTrue(isinstance(result, torch.Tensor))
 
         # 1. The storage pointers should be equal only if 'is_alias' is set
@@ -4166,8 +4167,10 @@ class TestAsArray(TestCase):
         if device.index is not None:
             self.assertEqual(device.index, result.device.index)
 
-        # 4. By default, 'requires_grad' is unset
-        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
+        # 4. By default, 'requires_grad' mirrors the original tensor's requires_grad, if
+        # present.
+        original_requires_grad = converted_original.requires_grad if isinstance(converted_original, torch.Tensor) else False
+        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", original_requires_grad))
 
     def _test_alias_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
         original = make_tensor(shape, dtype=dtype, device=device)
@@ -4332,7 +4335,7 @@ class TestAsArray(TestCase):
 
         def check(**kwargs):
             a = torch.asarray(cloned, **kwargs)
-            requires_grad = kwargs.get("requires_grad", False)
+            requires_grad = kwargs.get("requires_grad", cloned.requires_grad)
             self.assertEqual(a.requires_grad, requires_grad)
             # Autograd history shouldn't be retained when requires_grad is False
             self.assertEqual(a.grad_fn is None, not requires_grad)

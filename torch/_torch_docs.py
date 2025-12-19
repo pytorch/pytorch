@@ -1235,7 +1235,7 @@ Alias for :func:`torch.atanh`.
 add_docstr(
     torch.asarray,
     r"""
-asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool] = None, requires_grad: bool = False) -> Tensor # noqa: B950
+asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool] = None, requires_grad: Optional[bool] = None) -> Tensor # noqa: B950
 
 Converts :attr:`obj` to a tensor.
 
@@ -1249,13 +1249,15 @@ Converts :attr:`obj` to a tensor.
 6. a sequence of scalars
 
 When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
-by default, not require a gradient, have the same datatype as :attr:`obj`, be on the
-same device, and share memory with it. These properties can be controlled with the
-:attr:`dtype`, :attr:`device`, :attr:`copy`, and :attr:`requires_grad` keyword arguments.
-If the returned tensor is of a different datatype, on a different device, or a copy is
-requested then it will not share its memory with :attr:`obj`. If :attr:`requires_grad`
-is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
-also a tensor with an autograd history then the returned tensor will have the same history.
+by default, have the same requires_grad as :attr:`obj` (defaulting to False), have the
+same datatype, be on the same device, and share memory with it. These properties can be
+controlled with the :attr:`dtype`, :attr:`device`, :attr:`copy`, and
+:attr:`requires_grad` keyword arguments. If the returned tensor is of a different
+datatype, on a different device, or a copy is requested then it will not share its
+memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
+:attr:`obj` was a tensor with requires_grad set), then the returned tensor will require
+a gradient, and if :attr:`obj` is also a tensor with an autograd history then the
+returned tensor will have the same history.
 
 When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
 buffer protocol then the buffer is interpreted as an array of bytes grouped according to
@@ -1298,10 +1300,10 @@ Keyword args:
            Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
            :attr:`obj` is a Python sequence, the current default device will be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
-           Default: ``False``, which causes the returned tensor not to require a gradient.
-           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
-           is also a tensor with an autograd history then the returned tensor will have
-           the same history.
+           Default: ``None``, which causes requires_grad for the returned tensor to be
+           inferred from :attr:`obj`. If ``True``, then the returned tensor will require
+           a gradient, and if :attr:`obj` is also a tensor with an autograd history then
+           the returned tensor will have the same history.
 
 Example::
 
@@ -1320,12 +1322,16 @@ Example::
     >>> b
     tensor([3., 4., 5.], grad_fn=<AddBackward0>)
     >>> # Shares memory with tensor 'b', with no grad
-    >>> c = torch.asarray(b)
+    >>> c = torch.asarray(b, requires_grad=False)
     >>> c
     tensor([3., 4., 5.])
     >>> # Shares memory with tensor 'b', retaining autograd history
     >>> d = torch.asarray(b, requires_grad=True)
     >>> d
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
+    >>> # Shares memory with tensor 'b', retaining autograd history
+    >>> e = torch.asarray(b)
+    >>> e
     tensor([3., 4., 5.], grad_fn=<AddBackward0>)
 
     >>> array = numpy.array([1, 2, 3])
