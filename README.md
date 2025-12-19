@@ -166,18 +166,13 @@ If you are installing from source, you will need:
 - Visual Studio or Visual Studio Build Tool (Windows only)
 - At least 10 GB of free disk space
 - 30-60 minutes for the initial build (subsequent rebuilds are much faster)
--  PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
+
+\* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
 
 An example of environment setup is shown below:
-
-> [!NOTE]
-> If conda is not in your PATH, you'll need to initialize it first or use the full path to conda.
-> On macOS/Linux with zsh: `eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.zsh hook)"`
-> On macOS/Linux with bash: `eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.bash hook)"`
-> Or use the full path: `<CONDA_INSTALL_DIR>/bin/conda create -y -n <CONDA_NAME>`
 
 * Linux:
 
@@ -186,17 +181,6 @@ $ source <CONDA_INSTALL_DIR>/bin/activate
 $ conda create -y -n <CONDA_NAME>
 $ conda activate <CONDA_NAME>
 ```
-
-* macOS:
-
-```bash
-# If conda is not in PATH, initialize it first:
-$ eval "$(<CONDA_INSTALL_DIR>/bin/conda shell.zsh hook)"  # or shell.bash for bash
-# Or use full path: <CONDA_INSTALL_DIR>/bin/conda create ...
-$ conda create -y -n <CONDA_NAME>
-$ conda activate <CONDA_NAME>
-```
-
 * Windows:
 
 ```bash
@@ -285,9 +269,6 @@ pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
-
-> [!NOTE]
-> On macOS with Apple Silicon (ARM64), you may see warnings during the build about CUDA, FBGEMM, and MKL not being found. These are **expected and normal** - Apple Silicon Macs use the Accelerate framework for BLAS operations instead of MKL, and do not support CUDA. The build will configure itself to use MPS (Metal Performance Shaders) for GPU acceleration instead.
 
 **On Windows**
 
@@ -479,6 +460,11 @@ for docstring conventions.
 >     sphinxext-opengraph sphinx_sitemap matplotlib \
 >     sphinx_copybutton sphinx_design myst-nb sphinxcontrib-mermaid
 > ```
+
+> [!NOTE]
+> **Prerequisites for building documentation:**
+> - Node.js must be installed for math rendering (KaTeX). Install via: `conda install -c conda-forge nodejs` or download from [nodejs.org](https://nodejs.org/)
+> - After installing Node.js, install katex: `npm install -g katex`
 
 ```bash
 cd docs/
