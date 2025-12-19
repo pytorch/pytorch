@@ -218,9 +218,6 @@ static bool isInputCompliesAddmmCudaLt(
     && ( // some shape/stride restrictions
       // Strangely, if mat2 has only 1 row or column, we get
       // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
-      // NOTE: extension to mat1 because mat1/mat2 can be swapped based off
-      // their row-/col-majorness.
-      mat1_sizes[0] > 1 && mat1_sizes[1] > 1 &&
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
       // The last conditions is to skip 16b transA and non-trans-B having
       // leading dim >> rows when they are sliced from a large tensor

@@ -134,6 +134,12 @@ class RNNBase(Module):
             raise TypeError(
                 f"batch_first should be of type bool, got: {type(batch_first).__name__}"
             )
+        if not isinstance(input_size, int):
+            raise TypeError(
+                f"input_size should be of type int, got: {type(input_size).__name__}"
+            )
+        if input_size <= 0:
+            raise ValueError("input_size must be greater than zero")
         if not isinstance(hidden_size, int):
             raise TypeError(
                 f"hidden_size should be of type int, got: {type(hidden_size).__name__}"
@@ -726,9 +732,11 @@ class RNN(RNNBase):
                 # the user believes he/she is passing in.
                 hx = self.permute_hidden(hx, sorted_indices)
 
-        assert hx is not None
+        if hx is None:
+            raise AssertionError("hx must not be None")
         self.check_forward_args(input, hx, batch_sizes)
-        assert self.mode == "RNN_TANH" or self.mode == "RNN_RELU"
+        if self.mode != "RNN_TANH" and self.mode != "RNN_RELU":
+            raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
             if self.mode == "RNN_TANH":
                 result = _VF.rnn_tanh(
