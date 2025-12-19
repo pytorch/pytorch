@@ -13,6 +13,7 @@ from torch.distributed._mesh_layout import _MeshLayout as _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
+    _TORCHCOMM_AVAILABLE,
     _world,
     get_global_rank,
     get_world_size,
@@ -1457,6 +1458,119 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @with_comms(backend="cpu:gloo,cuda:ncclx", _use_torchcomm=True)
+    def test_pg_api_w_torchcomms(self) -> None:
+        ranks = list(range(self.world_size))
+        pg = new_group(
+            backend="cpu:gloo,cuda:ncclx",
+            ranks=ranks,
+            group_desc="new_pg",
+            _use_torchcomm=True,
+        )
+
+        # Test CPU tensor
+        cpu_tensor = torch.ones(3, 3)
+        dist.all_reduce(cpu_tensor, group=pg)
+        expected_cpu_tensor = torch.ones(3, 3) * self.world_size
+        self.assertEqual(cpu_tensor, expected_cpu_tensor)
+
+        # Test GPU tensor
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=pg)
+        expected_gpu_tensor = (
+            torch.ones(3, 3, device=self.device_type) * self.world_size
+        )
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @with_comms(backend="cuda:ncclx", _use_torchcomm=True)
+    def test_pg_api_w_torchcomms_ncclx(self) -> None:
+        ranks = list(range(self.world_size))
+        pg = new_group(
+            backend="cuda:ncclx",
+            ranks=ranks,
+            group_desc="new_pg",
+            _use_torchcomm=True,
+        )
+        # Test GPU tensor
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=pg)
+        expected_gpu_tensor = (
+            torch.ones(3, 3, device=self.device_type) * self.world_size
+        )
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+        # Double check if we do a no-op split, we get the same result
+        split_group_no_op = dist.split_group(pg, [ranks], _use_torchcomm=True)
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_group_no_op)
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+        # First way to do split, this is also how we do split within device mesh
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        split_group = dist.split_group(
+            pg, pg_ranks_by_dim.tolist(), _use_torchcomm=True
+        )
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_group)
+        expected_gpu_tensor = (
+            torch.ones(3, 3, device=self.device_type) * self.world_size // 2
+        )
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+        # Second way to do split when we need to manually add comm into world
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)[self.rank // 4]
+        split_group_2 = pg.split_group(
+            pg_ranks_by_dim.tolist(), group_name="direct_split_test"
+        )
+        # This API directly calls the pybind API, so that we need to manually update the python bookkeeping.
+        _world.add_comm(
+            split_group_2._get_backend(
+                torch.device(f"{self.device_type}:{self.rank}")
+            ).get_comm()
+        )
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_group_2)
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @with_comms(backend="cpu:gloo,cuda:ncclx", _use_torchcomm=True)
+    def test_device_mesh_w_torchcomms(self) -> None:
+        DeviceMesh._use_torchcomm = True
+        os.environ["TORCH_BACKEND"] = "cuda:ncclx"
+        mesh_shape = (2, 2, self.world_size // 4)
+        backend_override = {
+            "pp": "ncclx",
+            "dp": "ncclx",
+            "tp": "ncclx",
+        }
+        mesh_3d = init_device_mesh(
+            self.device_type,
+            mesh_shape,
+            mesh_dim_names=("pp", "dp", "tp"),
+            backend_override=backend_override,
+        )
+        dp_rank = mesh_3d.get_local_rank("dp")
+        expected_dp_rank = 0 if self.rank % 4 <= 1 else 1
+        self.assertEqual(dp_rank, expected_dp_rank)
+
+        # test slicing and pg functionality
+        pp_pg = mesh_3d["pp"].get_group()
+        tensor = torch.ones(3, 3, device=self.device_type) * self.rank
+        dist.all_reduce(tensor, group=pp_pg)
+        expected_tensor = torch.ones(3, 3) * 2 * ((self.rank % 4) + 2)
+        self.assertEqual(tensor, expected_tensor)
+
+        # test flatten functionality
+        flatten_mesh = mesh_3d._flatten()
+        flatten_pg = flatten_mesh.get_group()
+        tensor = torch.ones(3, 3, device=self.device_type) * self.rank
+        dist.all_reduce(tensor, group=flatten_pg)
+        expected_tensor = torch.ones(3, 3) * 28
+        self.assertEqual(tensor, expected_tensor)
+
+        DeviceMesh._use_torchcomm = False
 
 
 class CuTeLayoutTest(TestCase):

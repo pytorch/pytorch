@@ -6,6 +6,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import os
 import sys
 import types
 from collections.abc import Callable, Iterator, Sequence
@@ -396,9 +397,14 @@ class DTensorTestBase(MultiProcessTestCase):
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(
+        self, eager_init, backend: Optional[str] = None, _use_torchcomm: bool = False
+    ) -> None:
         if backend is None:
             backend = self.backend
+
+        # Store _use_torchcomm flag for later use (e.g., when creating device meshes)
+        self._use_torchcomm = _use_torchcomm
 
         requires_gpu = any(
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
@@ -413,6 +419,8 @@ class DTensorTestBase(MultiProcessTestCase):
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
+            "cpu:gloo,cuda:ncclx",
+            "cuda:ncclx",
             "hccl",
             "xccl",
             "fake",
@@ -431,6 +439,11 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
 
+        if _use_torchcomm:
+            os.environ["TORCHCOMM_RANK"] = str(self.rank)
+            os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = "12355"
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecessary overhead.
@@ -440,6 +453,7 @@ class DTensorTestBase(MultiProcessTestCase):
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
             device_id=device_id,
+            _use_torchcomm=_use_torchcomm,
         )
 
     def destroy_pg(self, device_id: Optional[int] = None) -> None:
@@ -464,6 +478,12 @@ class DTensorTestBase(MultiProcessTestCase):
         else:
             dist.barrier(device_ids=[device_id])
 
+        if getattr(self, "_use_torchcomm", False):
+            os.environ["TORCHCOMM_RANK"] = ""
+            os.environ["TORCHCOMM_SIZE"] = ""
+            os.environ["MASTER_ADDR"] = ""
+            os.environ["MASTER_PORT"] = ""
+            dist.distributed_c10d._finalize_comms()
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -515,7 +535,9 @@ TestFunc = Callable[[...], object]
 
 # wrapper to initialize comms (processgroup)
 def with_comms(
-    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
+    eager_init: Union[TestFunc, bool] = False,
+    backend: Optional[str] = None,
+    _use_torchcomm=False,
 ) -> TestFunc:
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
@@ -530,7 +552,7 @@ def with_comms(
                 func(self, *args, **kwargs)
                 return
 
-            self.init_pg(eager_init, backend)
+            self.init_pg(eager_init, backend, _use_torchcomm=_use_torchcomm)
 
             try:
                 func(self, *args, **kwargs)  # type: ignore[misc]
@@ -759,7 +781,9 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(
+        self, eager_init, backend: Optional[str] = None, _use_torchcomm=False
+    ) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
@@ -818,7 +842,9 @@ class LocalDTensorTestBase(DTensorTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(
+        self, eager_init, backend: Optional[str] = None, _use_torchcomm=False
+    ) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
