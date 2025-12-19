@@ -52,14 +52,8 @@ Compound Kernel
 JIT
    Just-In-Time Compilation.
 
-TorchScript
-   An interface to the TorchScript {term}`JIT` compiler and interpreter.
-
 Tracing
    Using `torch.jit.trace` on a function to get an executable that can be optimized
    using just-in-time compilation.
 
-Scripting
-   Using `torch.jit.script` on a function to inspect source code and compile it as
-   {term}`TorchScript` code.
 ```
