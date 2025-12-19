@@ -547,6 +547,33 @@ class OpDispatcher:
                     )
                 )
                 local_args.append(arg)
+            elif isinstance(arg, (list, tuple)):
+                # Handle list/tuple of tensors (e.g., torch.cat)
+                # Unwrap DTensors in the list for both schema and local execution
+                schema_list = []
+                local_list = []
+                for item in arg:
+                    if isinstance(item, dtensor.DTensor):
+                        schema_list.append(item._spec)
+                        local_list.append(item._local_tensor)
+                        if compute_mesh is None:
+                            compute_mesh = item.device_mesh
+                    elif isinstance(item, torch.Tensor):
+                        compute_mesh = compute_mesh or try_find_mesh_from_args(
+                            op_call, args_list
+                        )
+                        replicate_spec = self._try_replicate_spec_for_scalar_tensor(
+                            op_call, item, compute_mesh
+                        )
+                        schema_list.append(replicate_spec)
+                        local_list.append(item)
+                    else:
+                        schema_list.append(item)
+                        local_list.append(item)
+
+                # Preserve the type (list vs tuple)
+                args_schema.append(type(arg)(schema_list))
+                local_args.append(type(arg)(local_list))
             else:
                 # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
                 args_schema.append(arg)
@@ -556,6 +583,8 @@ class OpDispatcher:
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
+                if compute_mesh is None:
+                    compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
                     op_call, args_list
@@ -567,6 +596,33 @@ class OpDispatcher:
                     compute_mesh,
                 )
                 local_kwargs[k] = v
+            elif isinstance(v, (list, tuple)):
+                # Handle list/tuple of tensors in kwargs
+                # Unwrap DTensors in the list for both schema and local execution
+                schema_list = []
+                local_list = []
+                for item in v:
+                    if isinstance(item, dtensor.DTensor):
+                        schema_list.append(item._spec)
+                        local_list.append(item._local_tensor)
+                        if compute_mesh is None:
+                            compute_mesh = item.device_mesh
+                    elif isinstance(item, torch.Tensor):
+                        compute_mesh = compute_mesh or try_find_mesh_from_args(
+                            op_call, args_list
+                        )
+                        replicate_spec = self._try_replicate_spec_for_scalar_tensor(
+                            op_call, item, compute_mesh
+                        )
+                        schema_list.append(replicate_spec)
+                        local_list.append(item)
+                    else:
+                        schema_list.append(item)
+                        local_list.append(item)
+
+                # Preserve the type (list vs tuple)
+                kwargs_schema[k] = type(v)(schema_list)
+                local_kwargs[k] = type(v)(local_list)
             else:
                 # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
                 kwargs_schema[k] = v
