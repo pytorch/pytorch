@@ -2283,6 +2283,25 @@ class TestMaxAutotune(TestCase):
             _, code_out = run_and_get_code(c_f, *args)
             FileCheck().check(output_code_padding_check).run(code_out[0])
 
+    @parametrize("k", (15, 16))
+    @parametrize("dynamic", (False, True))
+    def test_even_k(self, k: int, dynamic: bool):
+        M, N = 21, 31
+        a = torch.randn((M, k), dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn((k, N), dtype=torch.float16, device=GPU_TYPE)
+
+        if dynamic:
+            torch._dynamo.mark_dynamic(a, 1)
+            torch._dynamo.mark_dynamic(b, 0)
+
+        with config.patch({"max_autotune": True}), fresh_cache():
+            _ = torch.compile(torch.mm)(a, b)
+            cache = TritonTemplate.all_templates["mm"]._generated_code_cache._cache
+            cache_key = next(iter(cache))
+
+        self.assertObjectIn(k, (15, 16))
+        self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
