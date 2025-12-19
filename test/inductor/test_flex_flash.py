@@ -369,8 +369,12 @@ class TestFlexFlash(InductorTestCase):
         B, H, S, D = 2, 8, 512, 64
 
         query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
-        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(torch.float8_e4m3fn)
-        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(torch.float8_e4m3fn)
+        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
+            torch.float8_e4m3fn
+        )
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
