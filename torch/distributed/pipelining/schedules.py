@@ -61,8 +61,8 @@ class _ComputationType(str, Enum):
     def from_str(action: str) -> "_ComputationType":
         try:
             return _ComputationType(action)
-        except ValueError:
-            raise RuntimeError(f"Invalid computation type {action}") from None
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid computation type {action}") from exc
 
 
 FORWARD = _ComputationType.FORWARD
