@@ -1678,16 +1678,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         k = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
 
         kernel_options = {"BACKEND": "TRITON_DECODE"}
         compiled_fn = torch.compile(flex_attention, fullgraph=True)

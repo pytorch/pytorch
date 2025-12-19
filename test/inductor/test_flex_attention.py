@@ -2755,8 +2755,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_mixed_dtypes_eager(self, device):
         query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
         out = flex_attention(query, key, value, _identity)
         self.assertEqual(out.shape, query.shape)
         self.assertEqual(out.dtype, query.dtype)
@@ -2764,8 +2768,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_mixed_dtypes_compiled(self, device):
         query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         if device == "cpu":
             with self.assertRaisesRegex(
@@ -2865,16 +2873,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         k = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
         out = flex_attention(q, k, v, _identity).mean()
         with self.assertRaisesRegex(
             ValueError,
@@ -2893,16 +2901,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         k = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        )
+        ).to(torch.float8_e4m3fn)
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
