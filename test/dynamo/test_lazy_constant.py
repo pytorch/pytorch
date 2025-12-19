@@ -82,6 +82,13 @@ class LazyConstantVariableTests(TestCase):
         self.assertGreater(counter.frame_count, 1)
 
     def test_slice_indices_unspecialized_ints(self):
+        """Test that slice indices work with unspecialized ints.
+
+        This tests that LazyConstantVariable properly interacts with the
+        unspecialized int (symint) codepath. When specialize_int=False,
+        integers become symbolic, and slice objects containing these
+        symbolic ints should still work correctly.
+        """
         layers = list(range(10))
 
         def getitem(a, idx):
@@ -163,7 +170,12 @@ class LazyConstantVariableTests(TestCase):
         self.assertGreater(counter.frame_count, 1)
 
     def test_keyword_iskeyword_no_branch(self):
-        """Test keyword.iskeyword without branching on result."""
+        """Test keyword.iskeyword without branching on result.
+
+        Even though we don't branch on the result, iskeyword() needs the
+        actual string value to compute its result, so different strings
+        will still cause recompilation.
+        """
 
         def fn(x, word):
             result = keyword.iskeyword(word)
@@ -183,6 +195,9 @@ class LazyConstantVariableTests(TestCase):
         compiled1 = opt_fn(tensor_input, "notakeyword")
         self.assertEqual(eager1[1], compiled1[1])
         self.assertTrue(same(eager1[0], compiled1[0]))
+
+        # Recompiles because iskeyword needs the actual value
+        self.assertGreater(counter.frame_count, 1)
 
     def test_frozenset_contains(self):
         """Test that frozenset.__contains__ is properly traced."""
@@ -212,7 +227,12 @@ class LazyConstantVariableTests(TestCase):
         self.assertGreater(counter.frame_count, 1)
 
     def test_frozenset_contains_no_branch(self):
-        """Test frozenset.__contains__ without branching on result."""
+        """Test frozenset.__contains__ without branching on result.
+
+        Even though we don't branch on the result, the `in` operator needs
+        the actual value to check membership, so different values will
+        still cause recompilation.
+        """
         valid_options = frozenset({1, 2, 3})
 
         def fn(x, value):
@@ -234,42 +254,78 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager1[1], compiled1[1])
         self.assertTrue(same(eager1[0], compiled1[0]))
 
+        # Recompiles because `in` needs the actual value
+        self.assertGreater(counter.frame_count, 1)
+
+    def test_tensor_method_with_lazy_kwargs(self):
+        """Test that tensor methods work when kwargs contain lazy constants."""
+
+        def fn(x, dim):
+            # sum() with dim kwarg - the dim value goes through as lazy constant
+            return x.sum(dim=dim)
+
+        tensor_input = torch.randn(3, 4, 5)
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # Different dim values should cause recompile since dim affects the output
+        eager0 = fn(tensor_input, 0)
+        compiled0 = opt_fn(tensor_input, 0)
+        self.assertTrue(same(eager0, compiled0))
+
+        eager1 = fn(tensor_input, 1)
+        compiled1 = opt_fn(tensor_input, 1)
+        self.assertTrue(same(eager1, compiled1))
+
+        # This should recompile because dim is used in the computation
+        self.assertGreater(counter.frame_count, 1)
+
     def test_global_constant_passthrough(self):
-        """Test that global constants also benefit from lazy constant optimization."""
-        GLOBAL_STR_1 = "hello"
-        GLOBAL_STR_2 = "world"
-        GLOBAL_INT_1 = 42
+        """Test that global constants benefit from lazy constant optimization.
 
-        def fn_str(t):
-            return t.sin() + 1, GLOBAL_STR_1
-
-        def fn_int(t):
-            return t.cos() + 1, GLOBAL_INT_1
-
+        When a global/closure constant is just passed through without being
+        used in control flow or math, changing its value should not cause
+        recompilation.
+        """
         tensor_input = torch.randn(3)
 
-        # Test string global - changing the global shouldn't cause recompile
-        # if the value is just passed through
+        # Use a mutable container to allow modifying the "global" value
+        global_holder = {"value": "hello"}
+
+        def fn(t):
+            return t.sin() + 1, global_holder["value"]
+
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_str, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter)
 
+        # First call
         result1 = opt_fn(tensor_input)
-        self.assertEqual(result1[1], GLOBAL_STR_1)
+        self.assertEqual(result1[1], "hello")
+        self.assertEqual(counter.frame_count, 1)
 
-        # Modify the closure to use different global
-        def fn_str2(t):
-            return t.sin() + 1, GLOBAL_STR_2
+        # Modify the global and call again - should NOT recompile
+        global_holder["value"] = "world"
+        result2 = opt_fn(tensor_input)
+        self.assertEqual(result2[1], "world")
+        self.assertEqual(counter.frame_count, 1)  # No recompile!
+
+        # Also test with int
+        int_holder = {"value": 42}
+
+        def fn_int(t):
+            return t.cos() + 1, int_holder["value"]
 
         counter2 = CompileCounter()
-        opt_fn2 = torch.compile(fn_str2, backend=counter2)
-        result2 = opt_fn2(tensor_input)
-        self.assertEqual(result2[1], GLOBAL_STR_2)
+        opt_fn2 = torch.compile(fn_int, backend=counter2)
 
-        # Test int global
-        counter3 = CompileCounter()
-        opt_fn3 = torch.compile(fn_int, backend=counter3)
-        result3 = opt_fn3(tensor_input)
-        self.assertEqual(result3[1], GLOBAL_INT_1)
+        result3 = opt_fn2(tensor_input)
+        self.assertEqual(result3[1], 42)
+        self.assertEqual(counter2.frame_count, 1)
+
+        int_holder["value"] = 100
+        result4 = opt_fn2(tensor_input)
+        self.assertEqual(result4[1], 100)
+        self.assertEqual(counter2.frame_count, 1)  # No recompile!
 
 
 if __name__ == "__main__":
