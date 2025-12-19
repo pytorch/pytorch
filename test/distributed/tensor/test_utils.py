@@ -1593,26 +1593,22 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
     @with_comms
     def test_StridedShard_to_replicate(self):
         mesh = init_device_mesh("cuda", (4,))
-        for split_factor in range(19):
-            for tensor_size in range(200):
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
                 a = torch.arange(tensor_size)
                 src_p = (_StridedShard(0, split_factor=split_factor),)
-                try:
-                    a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
-                    logical_shape = self._get_logical_shape(
-                        self._convert_default_order_placements_to_ShardConfig(src_p),
-                        mesh,
-                        0,
-                        a.shape,
-                    )
-                    p = _StridedShard(0, split_factor=split_factor)
-                    a_dt_after_to_replicate = p._to_replicate_tensor(
-                        a_dt.to_local(), mesh, 0, logical_shape
-                    )
-                    b_dt = distribute_tensor(a, mesh, [Replicate()], src_data_rank=None)
-                except Exception:
-                    # Skip cases whose placements are not legit.
-                    continue
+                a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
+                logical_shape = self._get_logical_shape(
+                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                    mesh,
+                    0,
+                    a.shape,
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_after_to_replicate = p._to_replicate_tensor(
+                    a_dt.to_local(), mesh, 0, logical_shape
+                )
+                b_dt = distribute_tensor(a, mesh, [Replicate()], src_data_rank=None)
                 self.assertEqual(
                     a_dt_after_to_replicate,
                     b_dt.to_local(),
