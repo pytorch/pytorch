@@ -9,7 +9,10 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch._dynamo
-from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import (
+    _dynamo_graph_capture_for_export,
+    dynamo_graph_capture_for_export,
+)
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export
@@ -21,6 +24,21 @@ from torch.utils import _pytree as pytree
 
 
 GLOBAL_LIST = []
+
+
+def _register_blockmask_pytree():
+    """Register BlockMask as a pytree node if not already registered."""
+    from torch.nn.attention.flex_attention import BlockMask
+    from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+    if BlockMask not in SUPPORTED_NODES:
+        register_pytree_node(
+            BlockMask,
+            BlockMask._flatten,
+            BlockMask._unflatten,
+            flatten_with_keys_fn=BlockMask._flatten_with_keys,
+            serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+        )
 
 
 class GlobalContext:
@@ -163,18 +181,9 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
+        _register_blockmask_pytree()
 
         def make_mask_closure():
             res = 4
@@ -185,11 +194,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             return fn
 
         class Model(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-
             def forward(self, x):
                 mask_fn = make_mask_closure()
                 block_mask = create_block_mask(
@@ -205,32 +209,17 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         compiled = _dynamo_graph_capture_for_export(module)(x)
         out_compiled, mask_compiled = compiled(x)
 
-        B = 1
-        H = 1
-        Q_LEN = 64
-        KV_LEN = 64
-
         self.assertEqual(out_eager, out_compiled)
-        # they are not same function because dynamo reconstructs them
         self.assertEqual(
-            mask_eager.mask_mod(B, H, Q_LEN, KV_LEN),
-            mask_compiled.mask_mod(B, H, Q_LEN, KV_LEN),
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
         )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_mutated_closure(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
+        _register_blockmask_pytree()
 
         def make_mask_closure():
             res = 1
@@ -242,11 +231,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             return fn
 
         class Model(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-
             def forward(self, x):
                 mask_fn = make_mask_closure()
                 block_mask = create_block_mask(
@@ -262,32 +246,17 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         compiled = _dynamo_graph_capture_for_export(module)(x)
         out_compiled, mask_compiled = compiled(x)
 
-        B = 1
-        H = 1
-        Q_LEN = 64
-        KV_LEN = 64
-
         self.assertEqual(out_eager, out_compiled)
-        # they are not same function because dynamo reconstructs them
         self.assertEqual(
-            mask_eager.mask_mod(B, H, Q_LEN, KV_LEN),
-            mask_compiled.mask_mod(B, H, Q_LEN, KV_LEN),
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
         )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_with_containers(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
+        _register_blockmask_pytree()
 
         def make_mask_closure():
             offsets = [1, 2, 3]
@@ -322,18 +291,9 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_triple_nested(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
+        _register_blockmask_pytree()
 
         def make_mask_closure():
             a = 1
@@ -377,19 +337,9 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_unsupported_class_instance(self):
-        # Test that closure with user-defined class instance raises appropriate error
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
+        _register_blockmask_pytree()
 
         class MaskConfig:
             def __init__(self, offset):
@@ -416,6 +366,44 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "nested function with closure in output"
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_mutually_recursive(self):
+        # Test that mutually recursive closures raise appropriate error
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_closure():
+            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
+            def fn_a(b, h, q, k):
+                if q < 0:
+                    return fn_b(b, h, q, k)  # fn_a captures fn_b
+                return q >= k
+
+            def fn_b(b, h, q, k):
+                if k < 0:
+                    return fn_a(b, h, q, k)  # fn_b captures fn_a
+                return q >= k + 1
+
+            return fn_a
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_closure()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
         ):
             _dynamo_graph_capture_for_export(module)(x)
 

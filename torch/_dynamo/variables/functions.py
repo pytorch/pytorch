@@ -124,6 +124,11 @@ _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
 
+# Raised when get_function() cannot convert a nested function to a Python function.
+class ClosureConversionError(NotImplementedError):
+    pass
+
+
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source():
     return AttrSource(
@@ -1576,18 +1581,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
-        # Used to detect cycles in mutually recursive closures
-        self._converting = False
 
     def self_args(self) -> list[VariableTracker]:
         return []
-
-    def clone(self, **kwargs: Any) -> VariableTracker:
-        # _converting shouldn't be included
-        args = dict(self.__dict__)
-        args.pop("_converting", None)
-        args.update(kwargs)
-        return self.__class__(**args)
 
     def as_python_constant(self):
         return self.get_function()
@@ -1598,22 +1594,29 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self) -> type:
         return types.FunctionType
 
-    def get_function(self) -> types.FunctionType:
-        from .base import AsPythonConstantNotImplementedError, ClosureConversionError
+    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
+        # _converting is used a way to break cycles when
+        # two nested_functions refer to each other.
+        from .base import AsPythonConstantNotImplementedError
 
-        if self._converting:
+        self_id = id(self)
+        if _converting is None:
+            _converting = set()
+        if self_id in _converting:
             raise ClosureConversionError(
                 "cycle detected in mutually recursive closures"
             )
-        self._converting = True
+        _converting.add(self_id)
         try:
-            return self._get_function_impl()
+            return self._get_function_impl(_converting)
         except AsPythonConstantNotImplementedError as e:
-            raise ClosureConversionError(str(e)) from e
+            raise ClosureConversionError(
+                "failed to convert closure cell to Python constant"
+            ) from e
         finally:
-            self._converting = False
+            _converting.discard(self_id)
 
-    def _get_function_impl(self) -> types.FunctionType:
+    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
         closure_cells = None
         if self.closure:
             from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1635,11 +1638,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 #         return n + helper(n - 1)  # helper calls itself
                 #     return helper
                 if cell_contents is self:
-                    from .base import ClosureConversionError
-
                     raise ClosureConversionError("self-referential nested function")
 
-                value = cell_contents.as_python_constant()
+                # If the cell contents is a NestedUserFunctionVariable, call get_function
+                # directly to properly propagate the _converting set for cycle detection
+                if isinstance(cell_contents, NestedUserFunctionVariable):
+                    value = cell_contents.get_function(_converting)
+                else:
+                    value = cell_contents.as_python_constant()
                 cells.append(make_cell(value))
             closure_cells = tuple(cells)
 
@@ -1647,7 +1653,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             self.code.as_python_constant(),
             self.f_globals,
             self.fn_name.as_python_constant(),
-            argdefs=None,  # defaults - will set below if needed
+            argdefs=None,
             closure=closure_cells,
         )
         if self.defaults:

@@ -145,7 +145,6 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import ClosureConversionError, VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -153,6 +152,7 @@ from .variables.builder import (
     wrap_fx_proxy,
 )
 from .variables.ctx_manager import ContextWrappingVariable
+from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
@@ -1697,14 +1697,15 @@ class OutputGraph(OutputGraphCommon):
                         self.export_metadata.out_spec = out_spec.as_python_constant()
                     except ClosureConversionError as e:
                         unimplemented(
-                            gb_type="nested function with closure in output",
-                            context="as_python_constant for out_spec",
+                            gb_type="nested function with non-constructible closure in output",
+                            context=f"as_python_constant for out_spec {out_spec}",
                             explanation=(
                                 "Cannot return a nested function with closure from a compiled function. "
-                                "Dynamo cannot reconstruct the function."
+                                "Dynamo failed to construct the function defined in the compiled region with closure objects."
                             ),
                             hints=[
-                                "Define the function at module scope instead of inside another function"
+                                "Define the function at module scope instead of inside another function "
+                                "Ensure that all closure variables are constants."
                             ],
                             from_exc=e,
                         )
