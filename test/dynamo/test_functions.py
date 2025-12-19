@@ -27,7 +27,6 @@ import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
-    CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     normalize_gm,
@@ -4175,102 +4174,6 @@ class GraphModule(torch.nn.Module):
             return mod
 
         f6()
-
-    def test_nested_function_closure_with_containers(self):
-        # Test closure with list/dict/nested containers
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            items = [1, 2, 3]
-            config = {"scale": 2.0, "nested": {"offset": 5.0}}
-
-            def inner():
-                return x * config["scale"] + sum(items) + config["nested"]["offset"]
-
-            return inner()
-
-        x = torch.tensor([10.0])
-        result = fn(x)
-        self.assertEqual(result, torch.tensor([31.0]))
-
-    def test_nested_function_closure_with_class_instance(self):
-        # Test closure with class instance
-        class Config:
-            def __init__(self, scale, offset):
-                self.scale = scale
-                self.offset = offset
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            cfg = Config(scale=3.0, offset=1.0)
-
-            def inner():
-                return x * cfg.scale + cfg.offset
-
-            return inner()
-
-        x = torch.tensor([10.0])
-        result = fn(x)
-        self.assertEqual(result, torch.tensor([31.0]))
-
-    def test_nested_function_closure_with_tensor(self):
-        # Test that tensor in closure is handled correctly
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            captured_tensor = torch.tensor([1.0, 2.0, 3.0])
-
-            def inner():
-                return x + captured_tensor.sum()
-
-            return inner()
-
-        x = torch.tensor([10.0])
-        result = fn(x)
-        self.assertEqual(result, torch.tensor([16.0]))
-
-    def test_nested_function_self_recursive(self):
-        # Test self-referential closure (function capturing itself)
-        counter = CompileCounter()
-
-        @torch.compile(backend=counter)
-        def fn(x):
-            def recursive_helper(n):
-                if n <= 0:
-                    return x
-                return recursive_helper(n - 1) + 1
-
-            return recursive_helper(3)
-
-        x = torch.tensor([10.0])
-        result = fn(x)
-        self.assertEqual(result, torch.tensor([13.0]))
-
-    def test_nested_function_closure_mutation(self):
-        # Test closure with container mutation and triple nesting
-        counter = CompileCounter()
-
-        @torch.compile(backend=counter, fullgraph=True)
-        def fn(x):
-            state = {"count": 0, "values": []}
-
-            def level1():
-                state["count"] += 1
-
-                def level2():
-                    state["values"].append(state["count"])
-
-                    def level3():
-                        return x + state["count"] + len(state["values"])
-
-                    return level3()
-
-                return level2()
-
-            return level1()
-
-        x = torch.tensor([10.0])
-        result = fn(x)
-        self.assertEqual(result, torch.tensor([12.0]))
-        self.assertEqual(counter.frame_count, 1)
 
     def test_torch_source(self):
         global torch

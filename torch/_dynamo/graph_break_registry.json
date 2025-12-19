@@ -980,17 +980,6 @@
       "Hints": []
     }
   ],
-  "GB2692": [
-    {
-      "Gb_type": "nested function with non-constructible closure in output",
-      "Context": "as_python_constant for out_spec {out_spec}",
-      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo failed to construct the function defined in the compiled region with closure objects.",
-      "Hints": [
-        "Define the function at module scope instead of inside another function ",
-        "Ensure that all closure variables are constants."
-      ]
-    }
-  ],
   "GB0097": [
     {
       "Gb_type": "Side effect on existing deque with limited maxlen",
@@ -1186,6 +1175,15 @@
       "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
       "Hints": [
         "Define the function at module scope instead of inside another function"
+      ]
+    },
+    {
+      "Gb_type": "nested function with non-constructible closure in output",
+      "Context": "as_python_constant for out_spec {out_spec}",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo failed to construct the function defined in the compiled region with closure objects.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function ",
+        "Ensure that all closure variables are constants."
       ]
     }
   ],
@@ -2613,6 +2611,17 @@
       "Explanation": "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported by torch.compile, as there is no equivalent to object type in torch.Tensor. This will be executed eagerly.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB5118": [
+    {
+      "Gb_type": "nested function with non-constructible closure in output",
+      "Context": "as_python_constant for out_spec {out_spec}",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo failed to construct the function defined in the compiled region with closure objects.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function ",
+        "Ensure that all closure variables are constants."
       ]
     }
   ],
