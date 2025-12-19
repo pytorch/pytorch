@@ -351,16 +351,23 @@ def print_time_report() -> None:
 #        with dynamo_timed("metric", dynamo_compile_column_us="metric_us")
 #            ...
 #
-_METRICS_CONTEXT: MetricsContext
-_RUNTIME_METRICS_CONTEXT: RuntimeMetricsContext
+_metrics_context_tls = threading.local()
 
 
 def get_metrics_context() -> MetricsContext:
-    return _METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "metrics_context"):
+        _metrics_context_tls.metrics_context = MetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.metrics_context
 
 
 def get_runtime_metrics_context() -> RuntimeMetricsContext:
-    return _RUNTIME_METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "runtime_metrics_context"):
+        _metrics_context_tls.runtime_metrics_context = RuntimeMetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.runtime_metrics_context
 
 
 class CompileEventLogLevel(enum.Enum):
@@ -1768,11 +1775,6 @@ def record_compilation_metrics(
         log_compilation_event(compilation_metrics)
 
 
-# record_compilation_metrics is called by the singleton MetricsContext exit handler.
-_METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
-_RUNTIME_METRICS_CONTEXT = RuntimeMetricsContext(on_exit=record_compilation_metrics)
-
-
 def set_compilation_metrics_limit(new_size: int) -> None:
     global _compilation_metrics
     while len(_compilation_metrics) > new_size:
@@ -2676,7 +2678,9 @@ dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+# pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
+# pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
@@ -4658,7 +4662,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
-        # pyrefly: ignore [annotation-mismatch]
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
