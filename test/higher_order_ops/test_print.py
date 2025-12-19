@@ -1,9 +1,13 @@
 # Owner(s): ["module: higher order operators"]
 import io
+import os
+import tempfile
 from unittest.mock import patch
 
 import torch
 from torch._functorch.aot_autograd import aot_export_module
+from torch._inductor import config
+from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -252,7 +256,6 @@ x = add_1, y = add_2);  getitem = None
         code uses builtins.print directly rather than calling torch.ops.higher_order.print,
         which is more efficient and avoids unnecessary overhead.
         """
-        from torch._inductor.utils import run_and_get_code
 
         def f(x):
             torch._higher_order_ops.print("value: {val}", val=x)
@@ -287,10 +290,6 @@ x = add_1, y = add_2);  getitem = None
         C++ wrapper uses std::cout which writes to file descriptor 1 (stdout).
         We need to redirect the actual file descriptor to capture the output.
         """
-        import os
-        import tempfile
-
-        from torch._inductor import config
 
         def f(x):
             torch._higher_order_ops.print("C++ print test: value={x}", x=x)
