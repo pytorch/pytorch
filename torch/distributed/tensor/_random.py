@@ -485,53 +485,63 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
 
 class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
     """
-    This subclass of `RNGStateTracker` defines how RNG states should be distributed and
-    synchronized among ranks while emulating the outcome of single GPUs. In particular,
-    whenever invoking a randomized operation on a DTensor, its sharding spec is passed to
-    the C++/Cuda side of pytorch through the RNG state. This resolves the issue that
-    OffsetBasedRNGTracker does not produce the output identical to single GPU executions.
+    RNG tracker that produces random outputs identical to single-GPU execution.
 
-    For example, consider generating x = torch.rand(4) given the current random seed and
-    a global offset. In Cuda's RNG implementation, random numbers are accessed via a triple
-    (seed, thread id, offset).
+    This tracker embeds DTensor sharding metadata into the CUDA RNG state, enabling each
+    GPU thread to compute its correct global tensor index. The combined output from all
+    GPUs matches what a single GPU would produce with the same seed.
 
-    On a single GPU, 4 GPU threads is created and the i-th thread fills the entry x[i]
-    with rand(seed, i, offset). That is, we have
-        | Thread 0        | Thread 1        | Thread 2        | Thread 3        |
-    x = | rand(0, offset) | rand(1, offset) | rand(2, offset) | rand(3, offset) |
-    After the execution of torch.rand(4), the global offset increments by 4, which is the
-    granularity of cuda's RNG offsets.
+    Background: CUDA Philox RNG
+    ---------------------------
+    CUDA's Philox RNG generates random numbers using ``(seed, subsequence, offset)``.
+    Each CUDA thread uses its thread index as the subsequence, producing deterministic
+    outputs. For ``torch.rand(4)`` on a single GPU:
 
-    The global offset increments by the size of the randomness used in each thread, rounded
-    up to the nearest multiple of 4. For instance, if 1000 GPU threads is used to generate
-    7000 random numbers, each thread takes 7 random numbers from Cuda RNG and the global offset
-    increases by 8 afterward.
+    .. code-block:: text
 
-    However, using OffsetBasedRNGTracker along with an un-patched pytorch, it outputs a
-    different tensor given 2 GPUs.
-        | GPU 0                                 | GPU 1                                     |
-        | Thread 0 of GPU 0 | Thread 1 of GPU 0 | Thread 0 of GPU 1   | Thread 1 of GPU 1   |
-    x = | rand(0, offset)   | rand(1, offset)   | rand(0, offset + 4) | rand(1, offset + 4) |
-    Furthermore, after the execution, the global offset increments by 8 instead of 4.
+        Thread:   0                     1                     2                     3
+        Output:   rand(seed,0,offset)   rand(seed,1,offset)   rand(seed,2,offset)   rand(seed,3,offset)
 
-    To resolve the issue, each physical thread of each GPU should fill the entry using the
-    thread id as if there is only one GPU. In the previous example, the output should be
-        | GPU 0                                         | GPU 1                                         |
-        | Thread 0 of GPU 0     | Thread 1 of GPU 0     | Thread 0 of GPU 1     | Thread 1 of GPU 1     |
-    x = | rand(seed, 0, offset) | rand(seed, 1, offset) | rand(seed, 2, offset) | rand(seed, 3, offset) |
-    And after the execution, the global offset should increment by 4.
-    This can be done if we pass the sharding info into Cuda functions that generate these
-    outputs.
+    Why OffsetBasedRNGTracker Produces Different Results
+    -----------------------------------------------------
+    ``OffsetBasedRNGTracker`` adjusts the RNG offset per shard but cannot control
+    thread-to-element mapping. Each GPU starts from thread 0, causing misaligned
+    subsequences. For a size-4 tensor sharded across 4 GPUs:
 
-    To use the feature, set the environment variable VESCALE_SINGLE_DEVICE_RAND=1 before
-    running your veScale code.
+    .. code-block:: text
+
+        GPU 0: rand(seed, 0, offset)      # Correct - matches single-GPU element 0
+        GPU 1: rand(seed, 0, offset+1)    # Wrong - wrong thread and offset
+        GPU 2: rand(seed, 0, offset+1)    # Wrong - wrong thread and offset
+        GPU 3: rand(seed, 0, offset+1)    # Wrong - wrong thread and offset
+
+    How ThreadBasedRNGTracker Achieves Consistency
+    -----------------------------------------------
+    This tracker encodes sharding info (local shape, global offset, global shape, strides)
+    into the RNG state. The CUDA kernel reads this metadata and computes each thread's
+    global element index, using it as the subsequence. Result:
+
+    .. code-block:: text
+
+        GPU 0: rand(seed, 0, offset)    # Thread computes global_idx=0
+        GPU 1: rand(seed, 1, offset)    # Thread computes global_idx=1
+        GPU 2: rand(seed, 2, offset)    # Thread computes global_idx=2
+        GPU 3: rand(seed, 3, offset)    # Thread computes global_idx=3
+
+    This matches single-GPU execution exactly.
+
+    Usage
+    -----
+    .. code-block:: python
+
+        from torch.distributed.tensor._random import _use_thread_rng_tracker
+
+        with _use_thread_rng_tracker(enabled=True):
+            dtensor = torch.randn(4, device_mesh=mesh, placements=placements)
+            # Output matches torch.randn(4) on single GPU with same seed
 
     .. warning::
-        This feature suffers an overhead on the Cuda side as each GPU thread calls one
-        `curand_init` and `curand` per entry. In contrast, without the sharding info, each
-        thread calls one `curand_init` per tensor and one `curand` every 4 entries.
-
-        This feature requires a patched pytorch. The patch is in ......
+        Requires CUDA kernel support in ``aten/src/ATen/native/cuda/DistributionTemplates.h``.
     """
 
     def __init__(
@@ -548,66 +558,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         self.max_threads_per_multi_processor = props.max_threads_per_multi_processor
         self.blocks_per_sm = self.max_threads_per_multi_processor // self.block_size
         self.max_grid = props.multi_processor_count * self.blocks_per_sm
-
-    def get_offset(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        offset_tensor = (self.rng_states[name])[8:16].view(dtype=torch.int64)
-        return int(offset_tensor.item())
-
-    def set_offset(self, name: str, offset: int) -> None:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset]).view(torch.uint8)
-        sharding_spec_tensor = (self.rng_states[name])[16:]
-        self.rng_states[name] = torch.cat(
-            [seed_tensor, offset_tensor, sharding_spec_tensor]
-        )
-
-    def get_sharding_spec(
-        self, name: str
-    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        sharding_spec_tensor = (self.rng_states[name])[16:].view(dtype=torch.int64)
-        local_shape, global_offset, global_shape, global_strides = torch.split(
-            sharding_spec_tensor, sharding_spec_tensor.size(0) // 4
-        )
-        return (
-            tuple(local_shape.tolist()),
-            tuple(global_offset.tolist()),
-            tuple(global_shape.tolist()),
-            tuple(global_strides.tolist()),
-        )
-
-    def set_sharding_spec(
-        self,
-        name: str,
-        sharding_spec: tuple[
-            tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
-        ],
-        offset: int,
-    ) -> None:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8]
-        spec_tensor = torch.tensor(sum(sharding_spec, start=(offset,))).view(
-            torch.uint8
-        )
-        self.rng_states[name] = torch.cat([seed_tensor, spec_tensor])
 
     @contextlib.contextmanager
     def _distribute_region(

@@ -735,14 +735,14 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
-class DistTensorRandomOpsTestND(DTensorTestBase):
+class istTensorRandomOpsSeedConsistencyTest(DTensorTestBase):
     @property
     def world_size(self):
         return 8
 
     @with_comms
     @skip_if_lt_x_gpu(8)
-    def test_dtensor_randn_seed_consistency_with_torch(self):
+    def test_randn_matches_torch_with_same_seed(self):
         """
         Test that DTensor randn produces identical results to torch.randn when using the same seed.
 
@@ -795,7 +795,7 @@ class DistTensorRandomOpsTestND(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(8)
-    def test_dtensor_rng_offset_consistency_across_rank_divergent_execution(self):
+    def test_rng_offset_with_rank_divergent_ops(self):
         """
         Test that DTensor RNG offset tracking remains consistent across rank-divergent execution paths.
 
