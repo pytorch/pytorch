@@ -277,6 +277,7 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
+  GemmParams(const GemmParams&) = default;
   GemmParams& operator=(const GemmParams&) = default;
   ~GemmParams() override = default;
 
