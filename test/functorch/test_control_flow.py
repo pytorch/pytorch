@@ -8356,11 +8356,15 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, x), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x = None
+
         getitem_2: "Sym(u1)" = while_loop[0]
+
         ge: "Sym(u1 >= 1)" = getitem_2 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
+
         gt_1: "Sym(u1 > 0)" = getitem_2 > 0
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
+
         getitem_1: "f32[s77, 3]" = while_loop[1];  while_loop = None
 
         add: "Sym(u1 + 1)" = getitem_2 + 1
@@ -8416,11 +8420,15 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (s27, s77));  cond_fn_0 = body_fn_0 = l_x_ = s27 = None
+
         getitem_4: "Sym(u2)" = while_loop[0]
+
         ge: "Sym(u2 >= 1)" = getitem_4 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
+
         gt_1: "Sym(u2 > 0)" = getitem_4 > 0
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u2 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
+
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
         gt: "Sym(u2 > 0)" = getitem_4 > 0
@@ -8502,6 +8510,7 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (2, 3, 1, 1, 1, 3, item, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = item = sin = None
+
         getitem_8: "Sym(u8)" = while_loop[0]
         getitem_9: "Sym(u9)" = while_loop[1]
         getitem_10: "Sym(u10)" = while_loop[2]
@@ -8509,6 +8518,7 @@ class GraphModule(torch.nn.Module):
         getitem_12: "Sym(u12)" = while_loop[4]
         getitem_13: "Sym(u13)" = while_loop[5]
         getitem_14: "Sym(u14)" = while_loop[6]
+
         getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u8 + 1)" = getitem_8 + 1
@@ -8577,6 +8587,7 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (2, 3, 1, 1, 1, 3, item, sin), ());  cond_fn_0 = body_fn_0 = item = sin = None
+
         getitem_8: "Sym(u15)" = while_loop[0]
         getitem_9: "Sym(u16)" = while_loop[1]
         getitem_10: "Sym(u17)" = while_loop[2]
@@ -8584,6 +8595,7 @@ class GraphModule(torch.nn.Module):
         getitem_12: "Sym(u19)" = while_loop[4]
         getitem_13: "Sym(u20)" = while_loop[5]
         getitem_14: "Sym(u21)" = while_loop[6]
+
         getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u15 + 1)" = getitem_8 + 1
@@ -8645,11 +8657,13 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 2, 2, 3, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
+
         getitem_6: "Sym(u10)" = while_loop[0]
         getitem_7: "Sym(u11)" = while_loop[1]
         getitem_8: "Sym(u12)" = while_loop[2]
         getitem_9: "Sym(u13)" = while_loop[3]
         getitem_10: "Sym(u14)" = while_loop[4]
+
         getitem_5: "f32[s6, 3]" = while_loop[5];  while_loop = None
 
         add: "Sym(u12 + 1)" = getitem_8 + 1
@@ -8709,11 +8723,13 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s77, s27, 2, 2, 3, child), (s27, s77));  cond_fn_0 = body_fn_0 = s77 = s27 = child = None
+
         getitem_10: "Sym(u10)" = while_loop[0]
         getitem_11: "Sym(u11)" = while_loop[1]
         getitem_12: "Sym(u12)" = while_loop[2]
         getitem_13: "Sym(u13)" = while_loop[3]
         getitem_14: "Sym(u14)" = while_loop[4]
+
         out_x: "f32[s77, s27]" = while_loop[5];  while_loop = None
 
         add: "Sym(u12 + 1)" = getitem_12 + 1
@@ -9328,8 +9344,10 @@ class GraphModule(torch.nn.Module):
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
         cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s94, s17, s17, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
+
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
+
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         ret: "f32[u0, s94]" = cond[0];  cond = None
