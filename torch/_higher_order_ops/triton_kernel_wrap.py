@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
-from torch._inductor.ir import TensorBox
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -962,6 +961,7 @@ def identify_mutated_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect all input tensor mutations
     """
+    from torch._inductor.ir import TensorBox
 
     ttir_module = None
     functions = None
