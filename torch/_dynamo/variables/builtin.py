@@ -41,6 +41,7 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
+from ..bytecode_transformation import create_instruction
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
@@ -208,38 +209,32 @@ un_ops = (
 )
 
 
-def _make_binary_op_reconstruct_fn(
-    op: Callable[..., Any],
-) -> Callable[[Any, list[VariableTracker]], None] | None:
-    """Create a reconstruct_fn for a binary operation.
+# Map operator functions to BINARY_OP arg values (Python 3.11+)
+# or to pre-3.11 opnames. Used by _make_binary_op_reconstruct_fn.
+if sys.version_info >= (3, 11):
+    import dis
 
-    Returns a function that generates bytecode to recompute the result
-    by loading the operands and applying the binary operation.
-    Returns None if the operation is not a supported binary operation.
-    """
-    import sys
-
-    from torch._dynamo.bytecode_transformation import create_instruction
-
-    # Map operator functions to BINARY_OP arg values (Python 3.11+)
-    operator_to_binary_op_arg: dict[Callable[..., Any], int] = {
-        operator.add: 0,  # NB_ADD
-        operator.and_: 1,  # NB_AND
-        operator.floordiv: 2,  # NB_FLOOR_DIVIDE
-        operator.lshift: 3,  # NB_LSHIFT
-        operator.matmul: 4,  # NB_MATRIX_MULTIPLY
-        operator.mul: 5,  # NB_MULTIPLY
-        operator.mod: 6,  # NB_REMAINDER
-        operator.or_: 7,  # NB_OR
-        operator.pow: 8,  # NB_POWER
-        operator.rshift: 9,  # NB_RSHIFT
-        operator.sub: 10,  # NB_SUBTRACT
-        operator.truediv: 11,  # NB_TRUE_DIVIDE
-        operator.xor: 12,  # NB_XOR
+    # pyrefly: ignore[missing-attribute]
+    _NB_OP_TO_ARG = {name: idx for idx, (name, _) in enumerate(dis._nb_ops)}
+    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {
+        operator.add: _NB_OP_TO_ARG["NB_ADD"],
+        operator.and_: _NB_OP_TO_ARG["NB_AND"],
+        operator.floordiv: _NB_OP_TO_ARG["NB_FLOOR_DIVIDE"],
+        operator.lshift: _NB_OP_TO_ARG["NB_LSHIFT"],
+        operator.matmul: _NB_OP_TO_ARG["NB_MATRIX_MULTIPLY"],
+        operator.mul: _NB_OP_TO_ARG["NB_MULTIPLY"],
+        operator.mod: _NB_OP_TO_ARG["NB_REMAINDER"],
+        operator.or_: _NB_OP_TO_ARG["NB_OR"],
+        operator.pow: _NB_OP_TO_ARG["NB_POWER"],
+        operator.rshift: _NB_OP_TO_ARG["NB_RSHIFT"],
+        operator.sub: _NB_OP_TO_ARG["NB_SUBTRACT"],
+        operator.truediv: _NB_OP_TO_ARG["NB_TRUE_DIVIDE"],
+        operator.xor: _NB_OP_TO_ARG["NB_XOR"],
     }
-
-    # Map operator functions to pre-3.11 opnames
-    operator_to_binary_opname: dict[Callable[..., Any], str] = {
+    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {}
+else:
+    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {}
+    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {
         operator.add: "BINARY_ADD",
         operator.and_: "BINARY_AND",
         operator.floordiv: "BINARY_FLOOR_DIVIDE",
@@ -255,33 +250,38 @@ def _make_binary_op_reconstruct_fn(
         operator.xor: "BINARY_XOR",
     }
 
-    if op not in operator_to_binary_op_arg:
-        return None
 
-    binary_op_arg = operator_to_binary_op_arg[op]
-    binary_opname = operator_to_binary_opname.get(op)
+def _make_binary_op_reconstruct_fn(
+    op: Callable[..., Any],
+) -> Callable[[Any, list[VariableTracker]], None] | None:
+    """Create a reconstruct_fn for a binary operation.
 
-    def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
-        if len(args) != 2:
-            # Fall back to loading the constant for non-binary ops
-            codegen.append_output(
-                codegen.create_load_const(op(*[a.as_python_constant() for a in args]))
-            )
-            return
+    Returns a function that generates bytecode to recompute the result
+    by loading the operands and applying the binary operation.
+    Returns None if the operation is not a supported binary operation.
+    """
+    if sys.version_info >= (3, 11):
+        if op not in _OPERATOR_TO_BINARY_OP_ARG:
+            return None
+        binary_op_arg = _OPERATOR_TO_BINARY_OP_ARG[op]
 
-        # Reconstruct left operand
-        codegen(args[0])
-        # Reconstruct right operand
-        codegen(args[1])
-
-        # Generate the binary operation instruction
-        if sys.version_info >= (3, 11):
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            codegen(args[0])
+            codegen(args[1])
             codegen.append_output(create_instruction("BINARY_OP", arg=binary_op_arg))
-        else:
-            assert binary_opname is not None
+
+        return reconstruct_fn
+    else:
+        if op not in _OPERATOR_TO_BINARY_OPNAME:
+            return None
+        binary_opname = _OPERATOR_TO_BINARY_OPNAME[op]
+
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            codegen(args[0])
+            codegen(args[1])
             codegen.append_output(create_instruction(binary_opname))
 
-    return reconstruct_fn
+        return reconstruct_fn
 
 
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
@@ -1135,10 +1135,7 @@ class BuiltinVariable(VariableTracker):
                         # realizing lazy args so guards are properly installed.
                         return obj.call_function(
                             tx,
-                            [
-                                v.realize() if isinstance(v, LazyVariableTracker) else v
-                                for v in args
-                            ],
+                            [v.realize() for v in args],
                             kwargs,
                         )
 
@@ -1159,42 +1156,20 @@ class BuiltinVariable(VariableTracker):
                                 # Int might become SymNodeVariable - must realize
                                 return obj.call_function(
                                     tx,
-                                    [
-                                        v.realize()
-                                        if isinstance(v, LazyVariableTracker)
-                                        else v
-                                        for v in args
-                                    ],
+                                    [v.realize() for v in args],
                                     kwargs,
                                 )
                             if val_type is float and not config.specialize_float:
                                 # Float might become SymNodeVariable - must realize
                                 return obj.call_function(
                                     tx,
-                                    [
-                                        v.realize()
-                                        if isinstance(v, LazyVariableTracker)
-                                        else v
-                                        for v in args
-                                    ],
+                                    [v.realize() for v in args],
                                     kwargs,
                                 )
 
-                    try:
-                        return ComputedLazyConstantVariable.create(
-                            fn, list(args), reconstruct_fn
-                        )
-                    except Exception:
-                        # Fall back to realizing all args if constant folding fails
-                        # (e.g., invalid args like complex(1, 1, 1))
-                        return obj.call_function(
-                            tx,
-                            [
-                                v.realize() if isinstance(v, LazyVariableTracker) else v
-                                for v in args
-                            ],
-                            kwargs,
-                        )
+                    return ComputedLazyConstantVariable.create(
+                        fn, list(args), reconstruct_fn
+                    )
 
                 return handle_lazy_constant
             else:
@@ -1202,14 +1177,9 @@ class BuiltinVariable(VariableTracker):
                 # We must realize all LazyVariableTracker (including LazyConstantVariable)
                 # to avoid infinite recursion in handler dispatch - calling obj.call_function()
                 # with unrealized lazy constants would dispatch back to this same handler.
-                def realize_lazy(v: VariableTracker) -> VariableTracker:
-                    if isinstance(v, LazyVariableTracker):
-                        return v.realize()
-                    return v
-
                 return lambda tx, args, kwargs: obj.call_function(
                     tx,
-                    [realize_lazy(v) for v in args],
+                    [v.realize() for v in args],
                     kwargs,
                 )
 
@@ -1395,39 +1365,10 @@ class BuiltinVariable(VariableTracker):
                             )
 
                         if any_unrealized:
-                            # We have unrealized lazy constants - need to realize them
-                            # to install guards, then return the computed result
-                            from .lazy import (
-                                ComputedLazyConstantVariable,
-                                LazyConstantVariable,
-                            )
-                            from .lists import BaseListVariable
+                            # Realize all lazy constants to install guards
+                            from .lazy import LazyVariableTracker
 
-                            # Collect all LazyConstantVariables from args
-                            def collect_lazy_vars(
-                                arg: VariableTracker,
-                            ) -> list[LazyConstantVariable]:
-                                lazy_vars: list[LazyConstantVariable] = []
-                                if isinstance(arg, LazyConstantVariable):
-                                    lazy_vars.append(arg)
-                                elif isinstance(arg, ComputedLazyConstantVariable):
-                                    # pyrefly: ignore[missing-attribute]
-                                    lazy_vars.extend(arg._cache.lazy_vars)
-                                elif isinstance(arg, BaseListVariable):
-                                    # Container type (TupleVariable, ListVariable, etc.)
-                                    for item in arg.items:
-                                        lazy_vars.extend(collect_lazy_vars(item))
-                                return lazy_vars
-
-                            lazy_vars: list[LazyConstantVariable] = []
-                            for arg in args:
-                                lazy_vars.extend(collect_lazy_vars(arg))
-                            for v in kwargs.values():
-                                lazy_vars.extend(collect_lazy_vars(v))
-
-                            # Realize all lazy vars to install guards
-                            for lazy_var in lazy_vars:
-                                lazy_var.realize()
+                            LazyVariableTracker.realize_all((args, kwargs))
 
                         # pyrefly: ignore [unbound-name]
                         return VariableTracker.build(tx, res)
