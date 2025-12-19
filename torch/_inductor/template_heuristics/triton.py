@@ -653,6 +653,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _get_exceeding_shared_memory_checker(
         self,
+        op_name,
     ) -> Optional[Callable[[BaseConfig, int], bool]]:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
@@ -679,7 +680,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 gemm_config.block_m * gemm_config.block_k
                 + gemm_config.block_n * gemm_config.block_k
             )
-            return shared_mem_accum * gemm_config.num_stages > sm_available
+
+            acc_sm = 0
+            if op_name == "addmm":
+                # 4 for fp32 acc and block size
+                acc_sm = 4 * gemm_config.block_m * gemm_config.block_n
+            return shared_mem_accum * gemm_config.num_stages + acc_sm > sm_available
 
         return exceeds
 
@@ -687,11 +693,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         configs: list[BaseConfig],
         dtype_size: int,
+        op_name: str,
     ) -> list[BaseConfig]:
         if dtype_size <= 0:
             return configs
 
-        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
+        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker(op_name)
         if is_exceeding_shared_memory is None:
             return configs
 
@@ -753,7 +760,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Filter out configs that require more shared memory than is available.
         if config.max_autotune_prune_choices_based_on_shared_mem:
             scaled_configs = self._prune_exceeding_max_shared_mem_configs(
-                scaled_configs, dtype_size
+                scaled_configs, dtype_size, op_name
             )
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
