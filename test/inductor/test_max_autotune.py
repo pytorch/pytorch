@@ -3093,9 +3093,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count(
-            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
-        ).check("tl.store").run(code[0])
+        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
+            "tl.store"
+        ).run(code[0])
 
     @config.patch(
         {
@@ -3670,6 +3670,14 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
+        "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+        # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
+        "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_persistent_tma_strided": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_addmm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
+        # END XPU specific skips
     }
 
     @classmethod

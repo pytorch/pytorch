@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    NumberType,
     suggest_memory_format,
     TensorLike,
 )
@@ -3357,7 +3358,8 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    if device_hint(self) == "cpu":
+    # The impl of xpu nonzero_static is different with cuda but aligned with cpu
+    if device_hint(self) in ("cpu", "xpu"):
         return self.new_empty((size, self.dim()), dtype=torch.long)
     else:
         return torch.empty_strided(
@@ -7474,6 +7476,20 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
         memory_format=torch.contiguous_format,
+    )
+
+
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(
+    self: NumberType,
+    boundaries: Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
     )
 
 
