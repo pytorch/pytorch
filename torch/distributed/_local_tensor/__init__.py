@@ -1210,8 +1210,7 @@ class LocalTensorMode(TorchDispatchMode):
     ) -> None:
         local_tensor_mode_list = get_local_tensor_mode_list()
         local_tensor_mode_list.pop()
-        if not local_tensor_mode_list:
-            self.disable_()
+        self.disable_()
         if len(local_tensor_mode_list) > 0:
             if local_tensor_mode_list[-1]._disable:
                 local_tensor_mode_list[-1].disable_()
