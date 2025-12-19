@@ -32,6 +32,7 @@ from typing_extensions import Never
 import torch
 from torch._dynamo.exc import PackageError
 from torch._dynamo.graph_utils import _graph_device_type
+from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import get_code_keys
 from .utils import counters, dynamo_timed, increment_frame
@@ -42,6 +43,20 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper, GuardsState
+
+
+_CODE_CACHE = WeakIdKeyDictionary()
+
+
+def _code_cache(fn):
+    def _(cls, code):
+        if code in _CODE_CACHE:
+            return _CODE_CACHE[code]
+        res = fn(cls, code)
+        _CODE_CACHE[code] = res
+        return res
+
+    return _
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,7 +82,7 @@ class SerializedCode:
     co_lnotab: Optional[str] = None
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def from_code_object(cls, code: types.CodeType) -> "SerializedCode":
         kwargs = {key: getattr(code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
@@ -77,7 +92,7 @@ class SerializedCode:
         return cls(**kwargs)
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def to_code_object(cls, serialized_code: "SerializedCode") -> types.CodeType:
         kwargs = {key: getattr(serialized_code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
