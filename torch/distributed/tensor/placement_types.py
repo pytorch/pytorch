@@ -736,19 +736,30 @@ class _StridedShard(torch._C._distributed.StridedShard):
         if isinstance(replicate_tensor_permuted_padded, funcol.AsyncCollectiveTensor):
             replicate_tensor_permuted_padded = replicate_tensor_permuted_padded.wait()
 
-        if replicate_tensor_permuted_padded.shape[self.dim] > logical_dim_size:
-            replicate_tensor_permuted = unpad_tensor(
-                replicate_tensor_permuted_padded,
-                self.dim,
-                replicate_tensor_permuted_padded.shape[self.dim] - logical_dim_size,
+        # After all_gather, the tensor is [chunk0, chunk1 (may padded), ...].
+        # Each chunk may have padding at the end. Use a single index_select to
+        # both extract non-padding data and reorder to the original positions.
+        #
+        # Build select_indices where select_indices[original_pos] = position in
+        # the padded tensor that holds the element for original_pos.
+        padded_positions = []
+        for i, shard in enumerate(sharded_indices):
+            base_offset = i * max_chunk_size
+            positions = base_offset + torch.arange(
+                len(shard), device=local_tensor.device
             )
-        else:
-            replicate_tensor_permuted = replicate_tensor_permuted_padded
+            padded_positions.append(positions)
 
         permutation = torch.cat(sharded_indices)
+        # Choose the position by skipping padding indices from
+        # replicate_tensor_permuted_padded.
+        select_positions = torch.cat(padded_positions)
+
         inv_permutation = torch.argsort(permutation)
+        select_indices = select_positions.index_select(0, inv_permutation)
+
         replicate_tensor = torch.index_select(
-            replicate_tensor_permuted, self.dim, inv_permutation
+            replicate_tensor_permuted_padded, self.dim, select_indices
         )
 
         return replicate_tensor.contiguous()
@@ -758,21 +769,19 @@ class _StridedShard(torch._C._distributed.StridedShard):
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
         return len(sharded_indices[rank])
 
-    # delete pyre-ignore once separating _StridedShard from Shard
-    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
         rank: int,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
-        return _StridedShard.local_shard_size_and_offset(
-            self, curr_local_size, num_chunks, rank, return_first_offset
+        return self.local_shard_size_and_offset(
+            curr_local_size, num_chunks, rank, return_first_offset
         )
 
-    @staticmethod
     @maybe_run_for_local_tensor
-    def local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
