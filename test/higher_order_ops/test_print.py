@@ -58,6 +58,80 @@ class TestHopPrint(TestCase):
 
         self.assertEqual(ori_printed_output, fx_printed_output)
 
+    def test_positional_args_print(self):
+        """Test print with positional arguments using {} placeholders."""
+
+        def f(x):
+            x = x + x
+            torch._higher_order_ops.print("moo {} {}", 1, 2)
+            x = x * x
+            return x
+
+        x = torch.randn(3, 3)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(printed_output, "moo 1 2")
+
+        fx_f = make_fx(f)(x)
+        new_inp = torch.randn(3, 3)
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            fx_f(new_inp)
+            fx_printed_output = mock_stdout.getvalue().strip()
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(new_inp)
+            ori_printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(ori_printed_output, fx_printed_output)
+
+    def test_mixed_args_kwargs_print(self):
+        """Test print with both positional arguments and keyword arguments."""
+
+        def f(x):
+            x = x + x
+            torch._higher_order_ops.print("moo {} {y}", 1, y=2)
+            x = x * x
+            return x
+
+        x = torch.randn(3, 3)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(printed_output, "moo 1 2")
+
+        fx_f = make_fx(f)(x)
+        new_inp = torch.randn(3, 3)
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            fx_f(new_inp)
+            fx_printed_output = mock_stdout.getvalue().strip()
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(new_inp)
+            ori_printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(ori_printed_output, fx_printed_output)
+
+    def test_positional_args_with_tensor(self):
+        """Test print with positional arguments including tensors."""
+
+        def f(x):
+            x = x + x
+            torch._higher_order_ops.print("tensor: {} value: {}", x, 42)
+            return x
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        expected = f"tensor: {x + x} value: 42"
+        self.assertEqual(printed_output, expected)
+
     def test_print_with_proxy_graph(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -95,6 +169,29 @@ def forward(self, arg0_1):
 
         self.assertEqual(printed_output, f"moo 1 2\nmoo {new_inp}\nmoo 1 2\nyeehop 4")
 
+    def test_print_with_proxy_graph_positional_args(self):
+        """Test print with positional args in proxy graph."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("values: {} {}", 1, 2)
+                torch._higher_order_ops.print("tensor: {}", x)
+                res = x + x
+                torch._higher_order_ops.print("result: {}", res)
+                return (res,)
+
+        inputs = (torch.randn(3),)
+
+        gm = make_fx(M(), tracing_mode="symbolic")(*inputs)
+
+        new_inp = torch.randn(4)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            gm(new_inp)
+            printed_output = mock_stdout.getvalue().strip()
+
+        expected = f"values: 1 2\ntensor: {new_inp}\nresult: {new_inp + new_inp}"
+        self.assertEqual(printed_output, expected)
+
     def test_print_with_side_effect(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -120,6 +217,22 @@ getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add)""",
         )
+        self.assertEqual(len(gs.input_tokens), 1)
+        self.assertEqual(len(gs.output_tokens), 1)
+
+    def test_print_with_side_effect_positional_args(self):
+        """Test print with positional args and side effects."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("values {} {}", 1, 2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, 4)
+                return (res,)
+
+        inputs = (torch.randn(3),)
+
+        gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
 
@@ -188,6 +301,32 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str) -> ()""",
         )
 
+    def test_print_gen_schema_with_args(self):
+        """Test schema generation with positional arguments."""
+        from torch._higher_order_ops.print import print as print_op
+
+        # Test with positional args only
+        schema_args = print_op.gen_schema("Hello {} {}", 1, 2)
+        self.assertExpectedInline(
+            str(schema_args),
+            """print(str format_str, int arg0, int arg1) -> ()""",
+        )
+
+        # Test with mixed args and kwargs
+        schema_mixed = print_op.gen_schema("Hello {} {y}", 1, y=2)
+        self.assertExpectedInline(
+            str(schema_mixed),
+            """print(str format_str, int arg0, *, int y) -> ()""",
+        )
+
+        # Test with tensor positional arg
+        tensor = torch.randn(2, 2)
+        schema_tensor_arg = print_op.gen_schema("Tensor: {}", tensor)
+        self.assertExpectedInline(
+            str(schema_tensor_arg),
+            """print(str format_str, Tensor arg0) -> ()""",
+        )
+
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_reorder_print_no_graph_break(self, backend):
         def f(x):
@@ -221,6 +360,29 @@ x = add_1, y = add_2);  getitem = None
             printed_output,
             f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
         )
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_reorder_print_with_positional_args(self, backend):
+        """Test print with positional args across different backends."""
+
+        def f(x):
+            x1 = x + x
+            torch._higher_order_ops.print("value: {}", x1)
+            x2 = x1 * x1
+            torch._higher_order_ops.print("values: {} {}", x1, x2)
+            x3 = x2 + x2
+            return (x1, x3)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend=backend, fullgraph=True)(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        x1_expected = x * 2
+        x2_expected = x1_expected * x1_expected
+        expected = f"value: {x1_expected}\nvalues: {x1_expected} {x2_expected}"
+        self.assertEqual(printed_output, expected)
 
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_constant_mutation(self, backend):
@@ -281,6 +443,32 @@ x = add_1, y = add_2);  getitem = None
             "Generated code should not call torch.ops.higher_order.print directly",
         )
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_python_wrapper_with_positional_args(self):
+        """Test that the Python wrapper handles positional args correctly."""
+        from torch._inductor.utils import run_and_get_code
+
+        def f(x):
+            torch._higher_order_ops.print("values: {} {}", x, 42)
+            res = x + x
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        # Compile and get the generated code
+        compiled_f = torch.compile(f, backend="inductor")
+        _, codes = run_and_get_code(compiled_f, *inputs)
+
+        # Concatenate all generated code chunks to simplify assertions
+        merged_code = "\n".join(codes)
+
+        # Verify that the merged code uses builtins.print
+        self.assertIn(
+            "builtins.print",
+            merged_code,
+            "Generated code should use builtins.print for print HOP fallback",
+        )
+
     def test_compile_inductor_cpp_wrapper_print(self):
         """Test print with C++ wrapper enabled
 
@@ -334,6 +522,42 @@ x = add_1, y = add_2);  getitem = None
             )
 
             # Verify computation is correct
+            expected = f(*inputs)
+            self.assertTrue(torch.allclose(res, expected))
+
+    def test_compile_inductor_cpp_wrapper_print_positional_args(self):
+        """Test print with C++ wrapper and positional arguments."""
+        import os
+        import tempfile
+
+        from torch._inductor import config
+
+        def f(x):
+            torch._higher_order_ops.print("C++ print: {} {}", x, 42)
+            res = x + x
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        with config.patch({"cpp_wrapper": True}):
+            compiled_f = torch.compile(f, backend="inductor")
+
+            with tempfile.TemporaryFile(mode="w+") as tmp_stdout:
+                original_stdout_fd = os.dup(1)
+                try:
+                    os.dup2(tmp_stdout.fileno(), 1)
+                    res = compiled_f(*inputs)
+                    os.fsync(1)
+                finally:
+                    os.dup2(original_stdout_fd, 1)
+                    os.close(original_stdout_fd)
+
+                tmp_stdout.seek(0)
+                captured_output = tmp_stdout.read().strip()
+
+            # C++ prints with buffer names for tensors and actual values for scalars
+            self.assertEqual(captured_output, "C++ print: <Tensor:arg1_1> 42")
+
             expected = f(*inputs)
             self.assertTrue(torch.allclose(res, expected))
 

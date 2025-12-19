@@ -7297,14 +7297,14 @@ def cond(
 
 
 @register_lowering(torch.ops.higher_order.print, type_promotion_kind=None)
-def print(format_str: str, **kwargs: object):
+def print(format_str: str, *args: object, **kwargs: object):
     from torch._higher_order_ops.print import print as hop_print
 
     # Use FallbackKernel to handle the HOP print
     # The C++ and Python backends will handle codegen separately:
     # - Python: calls torch.ops.higher_order.print() → builtins.print()
     # - C++: generates native printf() call (handled in cpp_wrapper_cpu.py)
-    result = ir.FallbackKernel.create(hop_print, format_str, **kwargs)
+    result = ir.FallbackKernel.create(hop_print, format_str, *args, **kwargs)
     # print returns None, but FallbackKernel.create may return None or []
     # Ensure we return a list for with_effects to unpack
     return result if result is not None else []

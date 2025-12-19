@@ -1565,12 +1565,23 @@ class PythonWrapperCodegen(CodeGen):
 
         # First arg is the format string
         format_str = args[0] if args else ""
+        # Remaining args are positional arguments for format
+        positional_args = args[1:] if len(args) > 1 else ()
 
         # For HOPs, kwargs are stored in node.kwargs directly
         # Use node.kwargs if available, otherwise fall back to unflatten_args kwargs
         actual_kwargs = node.kwargs if node.kwargs else kwargs
 
-        # Build format kwargs - for Python we can directly use the values
+        # Build format args - for positional arguments
+        format_args: list[str] = []
+        for value in positional_args:
+            if isinstance(value, ir.IRNode):
+                # For tensor nodes, reference the buffer
+                format_args.append(value.codegen_reference())
+            else:
+                format_args.append(repr(value))
+
+        # Build format kwargs - for keyword arguments
         format_kwargs: dict[str, str] = {}
         for key, value in actual_kwargs.items():
             if isinstance(value, ir.IRNode):
@@ -1581,11 +1592,21 @@ class PythonWrapperCodegen(CodeGen):
 
         # Generate the print call with formatted string using builtins.print
         # to avoid any potential shadowing of the print name
-        if format_kwargs:
+        if format_args or format_kwargs:
+            args_str = ", ".join(format_args)
             kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
-            self.writeline(f"builtins.print({repr(format_str)}.format({kwargs_str}))")
+            if args_str and kwargs_str:
+                self.writeline(
+                    f"builtins.print({repr(format_str)}.format({args_str}, {kwargs_str}))"
+                )
+            elif args_str:
+                self.writeline(f"builtins.print({repr(format_str)}.format({args_str}))")
+            else:
+                self.writeline(
+                    f"builtins.print({repr(format_str)}.format({kwargs_str}))"
+                )
         else:
-            # No format kwargs, just print the format string directly
+            # No format args or kwargs, just print the format string directly
             self.writeline(f"builtins.print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
