@@ -2789,10 +2789,10 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> TensorLikeType:
-    strides = utils.make_contiguous_strides_for(shape)
-    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+    return TensorMeta(shape=shape, strides=stride, dtype=dtype, device=device)
 
 
 def _uniform_aten(
@@ -2802,9 +2802,10 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> Tensor:
-    a = torch.empty(shape, dtype=dtype, device=device)
+    a = torch.empty_strided(shape, stride=stride, dtype=dtype, device=device)
     a.uniform_(low, high, generator=generator)
     return a
 
@@ -2816,7 +2817,8 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 _uniform_helper = _make_prim(
     schema=(
-        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device, Generator? generator=None) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, "
+        "Device device, SymInt[] stride, Generator? generator=None) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,
