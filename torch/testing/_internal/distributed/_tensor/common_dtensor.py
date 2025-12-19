@@ -478,7 +478,7 @@ class DTensorTestBase(MultiProcessTestCase):
         else:
             dist.barrier(device_ids=[device_id])
 
-        if self._use_torchcomm:
+        if getattr(self, "_use_torchcomm", False):
             os.environ["TORCHCOMM_RANK"] = ""
             os.environ["TORCHCOMM_SIZE"] = ""
             os.environ["MASTER_ADDR"] = ""
