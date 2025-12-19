@@ -1183,6 +1183,8 @@ class LocalTensorMode(TorchDispatchMode):
         self._old_get_coordinate = None
         self._old_get_rank = None
         self._old_get_local_rank = None
+        self._old_is_current_rank_part_of_mesh = None
+        self._old_sym_get_coordinate = None
         self._old_torch_manual_seed: Any = None
         self._old_torch_initial_seed: Any = None
         self._per_rank_rng_states: dict[
@@ -1403,9 +1405,13 @@ class LocalTensorMode(TorchDispatchMode):
         assert self._old_get_coordinate is None
         assert self._old_get_rank is None
         assert self._old_get_local_rank is None
+        assert self._old_is_current_rank_part_of_mesh is None
+        assert self._old_sym_get_coordinate is None
         self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
         self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
         self._old_get_local_rank = DeviceMesh.get_local_rank  # type: ignore[assignment]
+        self._old_is_current_rank_part_of_mesh = DeviceMesh.is_current_rank_part_of_mesh  # type: ignore[assignment]
+        self._old_sym_get_coordinate = DeviceMesh.sym_get_coordinate  # type: ignore[assignment]
         DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
         DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[method-assign]
         DeviceMesh.get_local_rank = _LocalDeviceMesh.get_local_rank  # type: ignore[method-assign]
