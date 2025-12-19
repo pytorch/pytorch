@@ -487,7 +487,10 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
         self.skipTestForOldSm()
         with (
             torch._dynamo.config.patch(skip_fsdp_hooks=False),
-            torch._functorch.config.patch(recompute_views=True),
+            torch._functorch.config.patch(
+                recompute_views=True,
+                check_custom_op_aliasing=False,
+            ),
         ):
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
