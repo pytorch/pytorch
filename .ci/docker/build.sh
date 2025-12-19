@@ -405,7 +405,8 @@ fi
 docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
-       --output "type=docker,compression=${COMPRESSION},compression-level=${COMPRESSION_LEVEL},force-compression=true,name=${tmp_tag}" \
+       --load \
+       --output "type=docker,compression=${COMPRESSION},compression-level=${COMPRESSION_LEVEL},force-compression=true" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "VISION=${VISION:-}" \
@@ -441,6 +442,7 @@ docker buildx build \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
+       -t "$tmp_tag" \
        "$@" \
        .
 
