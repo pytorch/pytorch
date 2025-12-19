@@ -55,11 +55,6 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         fewer tensors than expected. By always creating from input_tensor_meta,
         we ensure each input gets its own tensor with the correct size/stride/offset
         from the view's layout.
-
-        Note: CuteDSL/Triton templates don't need this workaround because they
-        benchmark in a subprocess where BenchmarkRequest.benchmark() is called
-        with out=None, causing it to recreate tensors from TensorMeta rather than
-        using the deduplicated inputs passed from the main process.
         """
         # Always create tensors from input_tensor_meta, ignoring passed-in tensors
         input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
