@@ -704,10 +704,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
                         local_shape[shard_dim] = shard_size
                         local_offset[shard_dim] = shard_offset
 
-                        # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
-                        # it means that this dimension has been already sharded in previous placement.
-                        # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
-                        # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
                         if global_offset[shard_dim] <= local_offset[shard_dim]:
                             global_offset[shard_dim] = local_offset[shard_dim]
                         else:
