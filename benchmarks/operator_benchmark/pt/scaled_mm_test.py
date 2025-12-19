@@ -457,31 +457,23 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
 
         return torch.nn.functional.scaled_mm(x, y, **kwargs)
 
-# FP8 matmul only supports E4M3.
-if _should_generate_scaled_mm_configs():
-    scaled_mm_configs_short = op_bench.config_list(
-        attr_names=["M", "N", "K"],
-        attrs=[
-            [16384, 2048, 7168],   # DSv3 671B
-            [16384, 8192, 5120],   # Llama4 16e
-        ],
-        cross_product_configs={
-            "device": ["cuda"],
-            "float8_dtype": ["e4m3fn"],
-            "output_dtype": ["bfloat16"],
-        },
-        tags=["short"],
-    )
-else:
-    scaled_mm_configs_short = []
-
-# Reduced shapes for faster runs.
-_scaled_mm_long_shapes = [
-    [2048, 2048, 2048],
-    [4096, 2048, 2048],
-    [16384, 2048, 7168],
-    [16384, 8192, 5120],
+MNK_list = [
+    (16384, 8192, 5120),
+    (128000, 8192, 5120),
+    (16384, 1536, 5120),
+    (128000, 1536, 5120),
+    (16384, 2048, 7168),
+    (128000, 2048, 7168),
 ]
+
+_scaled_mm_long_shapes = []
+_seen = set()
+for m, n, k in MNK_list:
+    shape = (m, n, k)
+    if shape in _seen:
+        continue
+    _seen.add(shape)
+    _scaled_mm_long_shapes.append([m, n, k])
 
 # Build long configs in groups so we can gate unsupported (scaling, output_dtype)
 # combinations based on the running platform.
@@ -548,7 +540,7 @@ if _should_generate_scaled_mm_configs():
 
 # Generate tests for scaled_mm (register nothing on unsupported platforms).
 if _should_generate_scaled_mm_configs():
-    _scaled_mm_configs = scaled_mm_configs_short + scaled_mm_configs_long
+    _scaled_mm_configs = scaled_mm_configs_long
 else:
     _scaled_mm_configs = []
 

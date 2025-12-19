@@ -169,26 +169,36 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
 # Reduced shapes for faster runs.
 # Note: K must be divisible by G and (K/G) must be divisible by 32.
-scaled_grouped_mm_configs_short = op_bench.config_list(
-    attr_names=["M", "N", "K", "G"],
-    attrs=[
-        [256, 256, 1024, 4],
-        [512, 256, 2048, 4],
-    ],
-    cross_product_configs={
-        "device": ["cuda"],
-        "scaling": ["mxfp8", "mxfp4", "nvfp4"],
-        "output_dtype": ["bfloat16"],
-    },
-    tags=["short"],
-)
+MNKG_list = [
+    (16384, 8192, 5120, 1),
+    (16384, 8192, 5120, 2),
+    (16384, 8192, 5120, 4),
+    (16384, 8192, 5120, 8),
+    (128000, 8192, 5120, 1),
+    (128000, 8192, 5120, 2),
+    (128000, 8192, 5120, 4),
+    (128000, 8192, 5120, 8),
+    (16384, 1536, 5120, 1),
+    (16384, 1536, 5120, 2),
+    (16384, 1536, 5120, 4),
+    (16384, 1536, 5120, 8),
+    (128000, 1536, 5120, 1),
+    (128000, 1536, 5120, 2),
+    (128000, 1536, 5120, 4),
+    (128000, 1536, 5120, 8),
+    (16384, 2048, 7168, 1),
+    (16384, 2048, 7168, 2),
+    (16384, 2048, 7168, 4),
+    (16384, 2048, 7168, 8),
+    (128000, 2048, 7168, 1),
+    (128000, 2048, 7168, 2),
+    (128000, 2048, 7168, 4),
+    (128000, 2048, 7168, 8),
+]
 
 scaled_grouped_mm_configs_long = op_bench.config_list(
     attr_names=["M", "N", "K", "G"],
-    attrs=[
-        [2048, 2048, 2048, 4],
-        [4096, 2048, 2048, 4],
-    ],
+    attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
     cross_product_configs={
         "device": ["cuda"],
         "scaling": ["mxfp8", "mxfp4", "nvfp4"],
@@ -199,7 +209,7 @@ scaled_grouped_mm_configs_long = op_bench.config_list(
 
 op_bench.generate_pt_test(
     (
-        scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long
+        scaled_grouped_mm_configs_long
         if _should_generate_scaled_grouped_mm_configs()
         else []
     ),
