@@ -5454,6 +5454,139 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
+@contextlib.contextmanager
+def caching_host_allocator_use_host_register(use_cuda_host_register: bool):
+    if use_cuda_host_register:
+        torch.cuda.memory._set_allocator_settings(
+            "pinned_use_cuda_host_register:True,pinned_num_register_threads:8"
+        )
+    try:
+        yield
+    finally:
+        if use_cuda_host_register:
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_cuda_host_register:False"
+            )
+
+
+@contextlib.contextmanager
+def caching_host_allocator_use_background_threads(use_background_threads: bool):
+    if use_background_threads:
+        torch.cuda.memory._set_allocator_settings("pinned_use_background_threads:True")
+    try:
+        yield
+    finally:
+        if use_background_threads:
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_background_threads:False"
+            )
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestCachingHostAllocatorCudaGraph(TestCase):
+    # As soon as pinned host memory allocated by a private pool is
+    # used (by copy_ in this case) during stream capture, it can never
+    # be recycled.
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_no_use(self, use_cuda_host_register):
+        # A pinned host memory block cannot be reused if it is not deleted
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.empty(8, pin_memory=True)
+                data2 = torch.empty(8, pin_memory=True)
+            assert data.data_ptr() != data2.data_ptr()
+            del data2
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_no_use2(self, use_cuda_host_register):
+        # A pinned host memory block can be reused if it is deleted
+        # and has never been used by copy_
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+                assert data2.data_ptr() == data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_use(self, use_cuda_host_register):
+        # A pinned host memory block cannot be reused if it has been used by copy_
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+            assert data2.data_ptr() != old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    @parametrize("use_background_threads", [True, False])
+    @parametrize(
+        "use_memory, delete_memory",
+        [(True, True), (True, False), (False, True), (False, False)],
+    )
+    def test_two_graphs(
+        self, use_background_threads, use_cuda_host_register, use_memory, delete_memory
+    ):
+        # Pinned host memory belongs to private pools, not to
+        # graphs. Therefore, using two graphs that share a pool
+        # instead of one graph does not change any of our invariants.
+        with (
+            caching_host_allocator_use_background_threads(use_background_threads),
+            caching_host_allocator_use_host_register(use_cuda_host_register),
+        ):
+            shared_pool = torch.cuda.graph_pool_handle()
+            graph1 = torch.cuda.CUDAGraph()
+            graph2 = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                graph1, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data = torch.randn(8).pin_memory()
+                if use_memory:
+                    data_gpu = torch.randn(8, device="cuda")
+                    data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+                if delete_memory:
+                    del data
+
+            with torch.cuda.graph(
+                graph2, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data2 = torch.randn(8).pin_memory()
+                if use_memory:
+                    data_gpu = torch.randn(8, device="cuda")
+                    data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+                if delete_memory:
+                    del data2
+
+            if delete_memory and not use_memory:
+                assert new_data_ptr == old_data_ptr
+            else:
+                assert new_data_ptr != old_data_ptr
+
+    def test_unpinned_memory_use(self):
+        # It is allowed to call copy_(non_blocking=True) on pageable
+        # host memory. TODO: We should test that a warning is emitted
+        # here, since we have no way to guarantee that pageable host
+        # memory allocated during stream capture stays alive so long
+        # as the graph is alive.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            data = torch.empty(8)
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data, non_blocking=True)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
@@ -7811,6 +7944,7 @@ class TestFXMemoryProfiler(TestCase):
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
 instantiate_parametrized_tests(TestCompileKernel)
+instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_device_type_tests(TestCudaOptims, globals())
 instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 
