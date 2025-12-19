@@ -272,7 +272,7 @@ class TestAOTInductorPackage(TestCase):
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @unittest.skipIf(
         TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
-        "Test is only supported on CUDA 12.6+",
+        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
     )
     def test_compile_after_package(self):
         self.check_package_cpp_only()
