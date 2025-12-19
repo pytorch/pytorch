@@ -187,7 +187,7 @@ class BenchmarkRunner:
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 100
+        self.iters = 2000
         self.has_explicit_iteration_count = False
         self.multiplier = 2
         self.predefined_minimum_secs = 1
@@ -371,7 +371,7 @@ class BenchmarkRunner:
                 "cuda_sync": cuda_sync,
             },
         )
-        result = timer.adaptive_autorange(min_run_time=0.0001)
+        result = timer.adaptive_autorange(min_run_time=0.001)
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
@@ -447,11 +447,23 @@ class BenchmarkRunner:
                     )
                 )
             if results_are_significant:
+                print(
+                    f"# Iterations used for {test_case.test_config.test_name}: {iters}"
+                )
                 break
 
             # Re-estimate the hopefully-sufficient
             # iteration count, and run the benchmark again...
-            iters = self._predict_num_iter_needed(iters)
+            next_iters = self._predict_num_iter_needed(iters)
+            print(
+                f"# Increasing iterations for {test_case.test_config.test_name}: "
+                f"{iters} -> {next_iters} (last run {run_time_sec:.6f}s)"
+            )
+            iters = next_iters
+        print(
+            f"# Timing samples collected for {test_case.test_config.test_name}: "
+            f"{len(time_trace)}"
+        )
         reported_run_time_us = np.percentile(np.array(time_trace), 50)
         return reported_run_time_us, peak_memory / 1024
 
