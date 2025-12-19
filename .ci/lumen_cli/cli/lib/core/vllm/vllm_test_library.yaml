@@ -87,14 +87,7 @@ vllm_pytorch_compilation_unit_tests:
   title: PyTorch Compilation Unit Tests
   id: vllm_pytorch_compilation_unit_tests
   steps:
-    - pytest -v -s compile/test_pass_manager.py
-    - pytest -v -s compile/test_fusion.py
-    - pytest -v -s compile/test_fusion_attn.py
-    - pytest -v -s compile/test_silu_mul_quant_fusion.py
-    - pytest -v -s compile/distributed/test_sequence_parallelism.py
-    - pytest -v -s compile/distributed/test_async_tp.py
-    - pytest -v -s compile/distributed/test_fusion_all_reduce.py
-    - pytest -v -s compile/test_decorator.py
+    - "find compile/ -maxdepth 1 -name 'test_*.py' -print0 | xargs -0 -n1 -I{} pytest -s -v '{}'"
 
 vllm_language_model_test_extended_generation_28_failure_test:
   title: Language Models Test (Extended Generation) 2.8 release failure
@@ -113,6 +106,38 @@ vllm_distributed_test_2_gpu_28_failure_test:
   num_gpus: 4
   steps:
     - pytest -v -s distributed/test_sequence_parallel.py
+
+vllm_test_attention:
+  title: v1 Attention Test
+  id: vllm_test_attention
+  steps:
+    - pytest -v -s v1/attention
+
+batch_invariance_test:
+  title: Batch Invariance Tests
+  id: batch_invariance_tests
+  env_vars:
+    VLLM_WORKER_MULTIPROC_METHOD: spawn
+  package_install:
+    - pytest-timeout
+    - pytest-forked
+  steps:
+    - pytest -v -s v1/determinism/test_batch_invariance.py
+    - pytest -v -s v1/determinism/test_rms_norm_batch_invariant.py
+
+pytorch_fullgraph_test:
+  title: PyTorch Fullgraph Test
+  id: pytorch_fullgraph_test
+  steps:
+    - pytest -v -s compile/fullgraph/test_full_graph.py -k 'not test_fp8_kv_scale_compile'
+    - pytest -v -s compile/distributed/test_fusions_e2e.py -k 'TRITON and not +quant_fp8 and not Llama-4'
+
+pytorch_fullgraph_smoke_test:
+  title: PyTorch Fullgraph Smoke Test
+  id: pytorch_fullgraph_smoke_test
+  steps:
+    - "find compile/fullgraph -maxdepth 1 -name 'test_*.py' -not -name 'test_full_graph.py' -print0 | xargs -0 -n1 -I{} pytest -s -v '{}'"
+
 
 # TODO(elainewy): need to add g6 with 4 gpus to run this test
 vllm_lora_test:
