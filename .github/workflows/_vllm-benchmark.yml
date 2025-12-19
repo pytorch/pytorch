@@ -93,6 +93,10 @@ jobs:
           set -eux
           ls -laR dist
 
+          # Need to install pip because there might be parts that are not using
+          # uv yet
+          uv pip install pip==25.3
+
           uv pip install \
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
@@ -203,6 +207,5 @@ jobs:
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
           benchmark-name: 'PyTorch x vLLM benchmark'
-          # TODO: SWITCH THIS TO FALSE BEFORE LANDING
-          dry-run: true
+          dry-run: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
