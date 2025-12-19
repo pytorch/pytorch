@@ -427,6 +427,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     with module.graph.inserting_before(node):
                         new_node = module.graph.call_function(
                             torch.ops.higher_order.with_effects,
+                            # pyrefly: ignore [bad-argument-type]
                             (
                                 token_args[0],  # pyrefly: ignore[bad-argument-type]
                                 torch.ops.higher_order.invoke_subgraph,

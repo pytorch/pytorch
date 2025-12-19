@@ -114,6 +114,35 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # not crash
 
     @requires_gpu
+    def test_triton_kernel_ill_formed(self):
+        @triton.jit
+        def ill_formed_kernel(kernel):
+            off_n = tl.program_id(0)
+            seq_len_a = 5
+            if off_n < seq_len_a:
+                out_row_idx = off_n + seq_len_a
+            else:
+                out_row_idx = (off_n + seq_len_a).to(tl.int64)
+            tl.store(kernel, out_row_idx)
+
+        @torch.compile(backend="inductor")
+        def f(x):
+            grid = (x.numel(),)
+            ill_formed_kernel[grid](kernel=x)
+
+        catch_error = False
+        try:
+            t1 = torch.rand(5, device=GPU_TYPE)
+            f(t1)
+        except torch._inductor.exc.InductorError as e:
+            if isinstance(e.inner_exception, triton.compiler.errors.CompilationError):
+                catch_error = True
+        finally:
+            # we assert user custom Triton kernel compile error can be captured
+            # after torch.compile
+            self.assertTrue(catch_error)
+
+    @requires_gpu
     def test_triton_kernel_higher_order_func(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -2556,10 +2585,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(
-        msg="XPU Triton result in nan, "
-        "https://github.com/intel/torch-xpu-ops/issues/2330"
-    )
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
