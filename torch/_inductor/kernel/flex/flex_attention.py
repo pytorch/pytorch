@@ -22,6 +22,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ...utils import can_use_tma
 from .common import (
     build_subgraph_buffer,
     create_indices_fake,
@@ -381,8 +382,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
