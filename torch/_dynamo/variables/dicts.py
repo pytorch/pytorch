@@ -594,8 +594,6 @@ class ConstDictVariable(VariableTracker):
             # unnecessary recompilation when unused keys change.
             # For non-constant keys, we need to guard all keys since the key itself
             # could change behavior.
-            # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
-            # would have been installed by the earlier mutation.
             #
             # IMPORTANT: For LazyConstantVariable keys, we must check for potential
             # aliasing with existing dict keys. If the dict is non-empty, a lazy key
@@ -605,7 +603,7 @@ class ConstDictVariable(VariableTracker):
 
             key_arg = args[0]
             is_constant_like, _, _ = key_arg.try_peek_constant()
-            if not is_constant_like and not tx.output.side_effects.is_modified(self):
+            if not is_constant_like:
                 self.install_dict_keys_match_guard()
             elif (
                 isinstance(key_arg, LazyConstantVariable) and not key_arg.is_realized()
