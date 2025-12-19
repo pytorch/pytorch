@@ -53,18 +53,18 @@ def test_combinations_dynamic_aot_eager():
     torch.testing.assert_close(eager_out, compiled_out)
 
 
-def test_combinations_smaller_repro_170801():
-    # Smaller repro from https://github.com/pytorch/pytorch/issues/170801
+def test_combinations_smaller_repro_163759():
+    # Smaller repro from https://github.com/pytorch/pytorch/issues/163759
     import torch
 
-
-   def f(x):
+    def f(x):
         return torch.combinations(x, r=2)
 
     x = torch.arange(4)
     compiled = torch.compile(f, backend="aot_eager")
 
     torch.testing.assert_close(f(x), compiled(x))
+
 
 
 

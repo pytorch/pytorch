@@ -237,6 +237,30 @@ class CooperativeReductionTests(TestCase):
             torch.rand(20, 20, device=GPU_TYPE),
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
+    def test_quantile_inductor_cuda_dynamic(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163759
+        import torch
+        from torch._inductor import config
+
+        if not torch.cuda.is_available():
+            return
+
+        config.fallback_random = True
+        torch.set_grad_enabled(False)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.quantile(x, 0.75)
+
+        model = Model().cuda()
+        x = torch.randn(10, device=GPU_TYPE)
+
+        eager_out = model(x)
+
+        compiled_model = torch.compile(model, backend="inductor", dynamic=True)
+        compiled_out = compiled_model(x)
+
+        assert_close(eager_out, compiled_out)
 
 
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
