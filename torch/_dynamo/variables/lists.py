@@ -1441,6 +1441,23 @@ class NamedTupleVariable(TupleVariable):
 
         return result
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Override to handle namedtuple constructor semantics."""
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, None)
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return (True, any_unrealized, self.python_type()(values))
+        # NamedTupleType(*iterable)
+        return (True, any_unrealized, self.python_type()(*values))
+
     def as_proxy(self) -> Any:
         assert self.python_type() is not SizeVariable
         if self.is_structseq():

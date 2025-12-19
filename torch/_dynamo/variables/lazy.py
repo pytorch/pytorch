@@ -101,17 +101,7 @@ class ComputedLazyCache:
             # We need to recompute the result symbolically instead of using
             # the pre-computed constant value.
             tx = InstructionTranslator.current_tx()
-
-            # Realize all args (lazy vars are already realized, this handles
-            # ComputedLazyConstantVariable recursively)
-            realized_args = []
-            for arg in self.args:
-                if isinstance(arg, LazyVariableTracker):
-                    realized_args.append(arg.realize())
-                else:
-                    realized_args.append(arg)
-
-            # Re-apply the operation with the realized args
+            realized_args = [arg.realize() for arg in self.args]
             self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
         else:
             # All sources are constants, use the pre-computed value
@@ -555,22 +545,26 @@ class LazyConstantVariable(LazyVariableTracker):
         return hash(self.peek_value())
 
     def is_python_equal(self, other: VariableTracker) -> bool:
-        """Check equality without triggering realization when possible.
+        """Check equality with proper guard handling.
 
-        For two LazyConstantVariables, we can compare their peeked values.
-        For other types, we delegate to standard comparison.
-
-        Note: This does NOT install guards - it's used for dict key lookup
-        during tracing. Guards are installed separately based on dict operations.
+        For two LazyConstantVariables with the same cache (same source), we can
+        safely compare values without additional guards since they share guards.
+        For different caches, we must realize to install proper guards to ensure
+        correctness when values change.
         """
         if self.is_realized():
             return self.realize().is_python_equal(other)
 
-        # For LazyConstantVariable comparison, peek at both values
+        # For LazyConstantVariable comparison
         if isinstance(other, LazyConstantVariable) and not other.is_realized():
-            return self.peek_value() == other.peek_value()
+            # Same cache means same source - can safely compare without new guards
+            if self._cache is other._cache:
+                return True  # Same source, must be equal
+            # Different caches - must realize to install guards since values
+            # could change independently at runtime
+            return self.realize().is_python_equal(other.realize())
 
-        # For ConstantVariable, compare directly
+        # For ConstantVariable, compare directly (constants have no guards)
         from .constant import ConstantVariable
 
         if isinstance(other, ConstantVariable):
