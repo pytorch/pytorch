@@ -1186,7 +1186,6 @@ This class does not support ``__members__`` property.)");
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
-      .def_property_readonly("window", &SymmetricMemory::get_window)
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -1224,6 +1223,7 @@ This class does not support ``__members__`` property.)");
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
+      .def("_get_window", &SymmetricMemory::_get_window)
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(

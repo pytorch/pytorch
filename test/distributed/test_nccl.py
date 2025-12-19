@@ -378,8 +378,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         # This is needed to make sure we don't get blocked the second time we call rendezvous
         # for the same tensor because it will be cached by that moment.
-        handle =symm_mem.rendezvous(tensor, group=group_name)
-        window = handle.get_window()
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+        window = handle._get_window()
         self.assertIsNotNone(window)
 
 

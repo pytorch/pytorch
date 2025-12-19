@@ -96,7 +96,7 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   }
 
-  virtual void* get_window() {
+  virtual void* _get_window() {
     TORCH_CHECK(false, "NYI");
   }
 };

@@ -208,7 +208,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return nullptr;
   };
 
-  void* get_window() override {
+  void* _get_window() override {
     // ncclWindow_t is a vidmem pointer, so we can cast it to void*
     return reinterpret_cast<void*>(buffer_win_);
   }
