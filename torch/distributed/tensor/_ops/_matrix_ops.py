@@ -26,6 +26,9 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
@@ -350,7 +353,7 @@ def gen_single_dim_einsum_strategies(
 
 # TODO enable in a separate PR along with more extensive validation.
 # currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
-# @register_single_dim_strategy(aten.mm.default)
+@register_single_dim_strategy(aten.mm.default)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
