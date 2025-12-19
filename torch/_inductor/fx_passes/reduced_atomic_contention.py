@@ -348,7 +348,7 @@ def _fit_to_memory_budget(
         return 0
 
     except Exception as e:
-        log.debug("Memory check failed: %s, proceeding with %s", e, num_partitions)
+        log.debug("Memory check failed, proceeding with %s", num_partitions)
         return num_partitions  # Assume we have enough memory if we can't check
 
 
