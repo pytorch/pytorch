@@ -11,6 +11,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -1665,6 +1666,40 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         sqnr = compute_error(out_ref, out)
         print(f"SQNR: {sqnr}")
         self.assertGreater(sqnr, 15)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtype_backwards(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 8, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
+        ):
+            out_mixed = (
+                compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
+            ).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)

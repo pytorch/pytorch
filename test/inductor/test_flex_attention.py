@@ -2755,12 +2755,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_mixed_dtypes_eager(self, device):
         query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
-        )
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
-        )
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
         out = flex_attention(query, key, value, _identity)
         self.assertEqual(out.shape, query.shape)
         self.assertEqual(out.dtype, query.dtype)
@@ -2768,12 +2764,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_mixed_dtypes_compiled(self, device):
         query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
-        )
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
-        )
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.float8_e4m3fn, device=device)
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         if device == "cpu":
             with self.assertRaisesRegex(
@@ -2861,6 +2853,65 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         sqnr = compute_error(out_ref, out)
         print(f"SQNR: {sqnr}")
         self.assertGreater(sqnr, 15)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_eager(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+        out = flex_attention(q, k, v, _identity).mean()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
+        ):
+            out.backward()
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_compiled(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+            requires_grad=True,
+        )
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
+        ):
+            out_mixed = (compiled_fn(q, k, v, _identity)).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
