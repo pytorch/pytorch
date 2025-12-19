@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_CUDA,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -71,7 +72,7 @@ def patches(fn):
     return wrapped
 
 
-class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
+class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
     common = check_model
 
     @inductor_config.patch({"freezing": True})
@@ -82,10 +83,10 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
     @parametrize("mid_dim", (1, 8))
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not available")
     @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
-    def test_int8_woq_mm_cuda(
-        self, dtype, batch_size, mid_dim, in_features, out_features
+    def test_int8_woq_mm_gpu(
+        self, device, dtype, batch_size, mid_dim, in_features, out_features
     ):
         def _convert_weight_to_int8pack(w):
             # Move to CPU for quantization calculation, then back to original device
@@ -121,10 +122,10 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype, device="cuda")
-        w = torch.rand((out_features, in_features), dtype=dtype, device="cuda")
+        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype, device=device)
+        w = torch.rand((out_features, in_features), dtype=dtype, device=device)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
-        w_scales = w_scales.to("cuda")
+        w_scales = w_scales.to(device)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
@@ -137,10 +138,10 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
     @parametrize("mid_dim", (1, 8))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not available")
     @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
-    def test_int8_woq_mm_concat_cuda(
-        self, dtype, batch_size, mid_dim, in_features, out_features
+    def test_int8_woq_mm_concat_gpu(
+        self, device, dtype, batch_size, mid_dim, in_features, out_features
     ):
         def _convert_weight_to_int8pack(w):
             # Move to CPU for quantization calculation, then back to original device
@@ -192,10 +193,10 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype, device="cuda")
-        w1 = torch.rand((out_features, in_features), dtype=dtype, device="cuda")
-        w2 = torch.rand((out_features, in_features), dtype=dtype, device="cuda")
-        w3 = torch.rand((out_features, in_features), dtype=dtype, device="cuda")
+        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype, device=device)
+        w1 = torch.rand((out_features, in_features), dtype=dtype, device=device)
+        w2 = torch.rand((out_features, in_features), dtype=dtype, device=device)
+        w3 = torch.rand((out_features, in_features), dtype=dtype, device=device)
         w1_int8pack, w1_scales = _convert_weight_to_int8pack(w1)
         w2_int8pack, w2_scales = _convert_weight_to_int8pack(w2)
         w3_int8pack, w3_scales = _convert_weight_to_int8pack(w3)
@@ -204,7 +205,9 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["woq_matcher_count"], 3)
 
 
-instantiate_device_type_tests(TestSelectAlgorithmCuda, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestSelectAlgorithmGpu, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

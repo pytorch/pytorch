@@ -12386,7 +12386,7 @@ fn
         self.assertTrue(hasattr(traceback.print_exc, "__kwdefaults__"))
         self.assertIs(
             torch._dynamo.trace_rules.lookup(traceback.print_exc),
-            torch._dynamo.variables.SkipFunctionVariable,
+            torch._dynamo.variables.UserFunctionVariable,
         )
 
         def gn(x):
