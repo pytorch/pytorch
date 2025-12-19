@@ -810,8 +810,21 @@ if test_torchinductor.RUN_CPU and has_cpu_pallas():
     make_pallas(test_torchinductor.CpuTests)
 
 
+def _apply_expected_failures(cls):
+    """Apply expected failures to a test class based on sentinel files."""
+    for name in list(dir(cls)):
+        if name.startswith("test_"):
+            key = f"{cls.__name__}.{name}"
+            if key in PALLAS_EXPECTED_FAILURES:
+                fn = getattr(cls, name)
+                if callable(fn):
+                    setattr(cls, name, unittest.expectedFailure(fn))
+    return cls
+
+
 if test_torchinductor.RUN_GPU and has_cuda_pallas():
 
+    @_apply_expected_failures
     class PallasTestsCUDA(PallasTestsMixin, TestCase):
         DEVICE = "cuda"
 

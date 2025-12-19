@@ -2171,7 +2171,7 @@ import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime, reshape_for_mosaic_gpu, MOSAIC_GPU_TILE_SIZE
+from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
 def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
     # Helper for partial reductions: reorders axes and reduces
     # Returns result with keepdims-style shape for proper in-kernel broadcasting
@@ -2228,12 +2228,8 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         # because pallas_call returns a new array (doesn't mutate in-place)
         # For outputs that need read access (scatter), we enable aliasing to read
         # current values, but still need to copy back the result
-        # On Mosaic GPU, we also need to copy back because we pad/flatten tensors
         if interpret_is_cpu:
             # Copy back all outputs on CPU
-            copy_output_indices = list(range(len(output_params)))
-        elif not is_tpu:
-            # Mosaic GPU: copy back all outputs due to padding/flattening
             copy_output_indices = list(range(len(output_params)))
         else:
             copy_output_indices = [
@@ -2373,22 +2369,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
-            # For Mosaic GPU, compute grid based on 2D reshaping pattern
-            # Tensors are reshaped to (num_tiles, MOSAIC_GPU_TILE_SIZE) where each tile is (1, MOSAIC_GPU_TILE_SIZE)
-            if not interpret_is_cpu and not is_tpu:
-                code.writeline(
-                    "# Mosaic GPU: tensors are reshaped to (num_tiles, MOSAIC_GPU_TILE_SIZE)"
-                )
-                code.writeline(
-                    f"num_tiles = max(x.shape[0] for x in [{', '.join(kernel_input_params)}])"
-                )
-                code.writeline("")
-
-            code.writeline("out_specs = tuple(")
-            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
-            code.writeline(")")
-
+            # Compute alias pairs and kernel arg (needed for both paths)
             alias_pairs: list[tuple[int, int]] = []
             for out_idx, name in enumerate(output_params):
                 if name.startswith("out_ptr"):
@@ -2410,60 +2391,92 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
             else:
                 kernel_arg = f"{kernel_name}_kernel,"
-            code.writeline("return pl.pallas_call(")
-            code.writeline("    " + kernel_arg)
 
-            code.writeline("    out_shape=out_specs,")
-            code.writeline(f"    interpret={interpret_literal},")
+            # For Mosaic GPU, we need to compute grid and BlockSpecs based on tensor sizes
+            # Mosaic GPU has constraints:
+            # 1. <=256 elements per dimension for async copies
+            # 2. Minimum 128 elements (warpgroup alignment)
+            is_mosaic_gpu = not interpret_is_cpu and not is_tpu
 
-            # Use mosaic_gpu backend for CUDA devices with BlockSpec and proper tiling
-            if not interpret_is_cpu and not is_tpu:
-                code.writeline("    backend='mosaic_gpu',")
-                code.writeline("    grid=(num_tiles,),")
-
-                # Add in_specs for all inputs with 2D BlockSpec (1, MOSAIC_GPU_TILE_SIZE) tiles
-                in_spec_list = []
+            if is_mosaic_gpu:
+                # Mosaic GPU: flatten, pad to 128 elements, and use BlockSpec tiling
+                # This handles both large tensors (>256) and small tensors (<128)
+                code.writeline("# Mosaic GPU: flatten, pad, and tile for alignment")
+                code.writeline("_TILE_SIZE = 128  # Tile size for Mosaic GPU")
+                code.writeline("# Compute numel and padded size")
+                code.writeline("_numel = 1")
+                code.writeline("for dim in out_shapes[0]:")
+                code.writeline("    _numel *= dim")
+                code.writeline("# Pad to multiple of tile size (minimum 128 for alignment)")
+                code.writeline("_padded_numel = max(_TILE_SIZE, ((_numel + _TILE_SIZE - 1) // _TILE_SIZE) * _TILE_SIZE)")
+                code.writeline("_grid_size = _padded_numel // _TILE_SIZE")
+                code.writeline("# Flatten and pad inputs")
                 for param in kernel_input_params:
-                    in_spec_list.append(
-                        "pl.BlockSpec((1, MOSAIC_GPU_TILE_SIZE), lambda i: (i, 0))"
-                    )
-                code.writeline(f"    in_specs=[{', '.join(in_spec_list)}],")
-                # Add out_specs for all outputs
-                out_spec_list = []
-                for i, _ in enumerate(output_params):
-                    out_spec_list.append(
-                        "pl.BlockSpec((1, MOSAIC_GPU_TILE_SIZE), lambda i: (i, 0))"
-                    )
-                code.writeline(f"    out_specs=[{', '.join(out_spec_list)}],")
+                    code.writeline(f"_{param}_flat = jnp.pad({param}.flatten(), (0, _padded_numel - _numel), mode='constant')")
+                code.writeline("# Create BlockSpec for 1D tiled access")
+                code.writeline("_block_spec = pl.BlockSpec((_TILE_SIZE,), lambda i: (i,))")
+                # Build in_specs list
+                num_inputs = len(kernel_input_params)
+                in_specs_items = ", ".join(["_block_spec"] * num_inputs)
+                code.writeline(f"_in_specs = [{in_specs_items}]")
+                # out_specs - must be a tuple to match out_shape tuple structure
+                num_outputs = len(output_params)
+                out_specs_items = ", ".join(["_block_spec"] * num_outputs)
+                code.writeline(f"_out_specs = ({out_specs_items},)")
+                code.writeline("# Prepare output shape specs (padded 1D)")
+                code.writeline("_out_shape_specs = tuple(")
+                code.writeline("    jax.ShapeDtypeStruct((_padded_numel,), dtype)")
+                code.writeline("    for dtype in out_dtypes")
+                code.writeline(")")
+                # Build flat input args
+                flat_input_args = ", ".join([f"_{param}_flat" for param in kernel_input_params])
+                code.writeline("_result = pl.pallas_call(")
+                code.writeline("    " + kernel_arg)
+                code.writeline("    out_shape=_out_shape_specs,")
+                code.writeline(f"    interpret={interpret_literal},")
+                code.writeline("    backend='mosaic_gpu',")
+                code.writeline("    grid=(_grid_size,),")
+                code.writeline("    in_specs=_in_specs,")
+                code.writeline("    out_specs=_out_specs,")
+                code.writeline("    input_output_aliases={},")
+                code.writeline(")(")
+                code.writeline(f"    {flat_input_args},")
+                code.writeline(")")
+                code.writeline("# Slice and reshape result back to original shape")
+                code.writeline("if isinstance(_result, tuple):")
+                code.writeline("    return tuple(")
+                code.writeline("        r.flatten()[:_numel].reshape(orig_shape)")
+                code.writeline("        for r, orig_shape in zip(_result, out_shapes)")
+                code.writeline("    )")
+                code.writeline("else:")
+                code.writeline("    return _result.flatten()[:_numel].reshape(out_shapes[0])")
             else:
+                code.writeline("out_specs = tuple(")
+                code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
+                code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+                code.writeline(")")
+                code.writeline("return pl.pallas_call(")
+                code.writeline("    " + kernel_arg)
+                code.writeline("    out_shape=out_specs,")
+                code.writeline(f"    interpret={interpret_literal},")
                 code.writeline("    grid=(1,),")
-
-            code.writeline(
-                f"    input_output_aliases={{ {alias_map_literal} }},"
-                if alias_pairs
-                else "    input_output_aliases={},"
-            )
-            code.writeline(")(")
-            if kernel_input_params:
-                code.writeline(f"    {', '.join(kernel_input_params)},")
-            code.writeline(")")
+                code.writeline(
+                    f"    input_output_aliases={{ {alias_map_literal} }},"
+                    if alias_pairs
+                    else "    input_output_aliases={},"
+                )
+                code.writeline(")(")
+                if kernel_input_params:
+                    code.writeline(f"    {', '.join(kernel_input_params)},")
+                code.writeline(")")
 
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
         )
-        is_mosaic_gpu = not interpret_is_cpu and not is_tpu
         with code.indent():
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-
-            # For Mosaic GPU, save original shapes for later slicing
-            if is_mosaic_gpu:
-                code.writeline("# Save original shapes for slicing results back")
-                code.writeline("original_out_shapes = (")
-                for name in output_params:
-                    code.writeline(f"    tuple({name}.shape),")
-                code.writeline(")")
 
             if alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
@@ -2503,41 +2516,12 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous())"
                         )
 
-            # For Mosaic GPU, flatten, pad, and reshape to 2D (num_tiles, 128)
-            if is_mosaic_gpu:
-                code.writeline(
-                    "# Mosaic GPU: reshape tensors to 2D (num_tiles, MOSAIC_GPU_TILE_SIZE)"
-                )
-                # Reshape all JAX arrays to 2D using the imported helper
-                for alias_name in alias_params:
-                    code.writeline(
-                        f"{alias_name}_jax = reshape_for_mosaic_gpu({alias_name}_jax)"
-                    )
-                for ptr in pointer_tail:
-                    code.writeline(f"{ptr}_jax = reshape_for_mosaic_gpu({ptr}_jax)")
-
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            if is_mosaic_gpu:
-                # For Mosaic GPU, use 2D shapes (num_tiles, MOSAIC_GPU_TILE_SIZE)
-                code.writeline("out_shapes = ()")
-                code.writeline("for orig_shape in original_out_shapes:")
-                code.writeline("    numel = 1")
-                code.writeline("    for s in orig_shape:")
-                code.writeline("        numel *= s")
-                code.writeline("    if numel % MOSAIC_GPU_TILE_SIZE != 0:")
-                code.writeline(
-                    "        numel = numel + (MOSAIC_GPU_TILE_SIZE - (numel % MOSAIC_GPU_TILE_SIZE))"
-                )
-                code.writeline("    num_tiles = numel // MOSAIC_GPU_TILE_SIZE")
-                code.writeline(
-                    "    out_shapes = out_shapes + ((num_tiles, MOSAIC_GPU_TILE_SIZE),)"
-                )
-            else:
-                code.writeline(
-                    "out_shapes = ("
-                    + ", ".join([f"tuple({name}.shape)" for name in output_params])
-                    + ",)"
-                )
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in output_params])
+                + ",)"
+            )
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
@@ -2573,21 +2557,6 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             f"res_cpu = jax.device_get(result_values[{idx}])"
                         )
                         code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
-                    elif is_mosaic_gpu:
-                        # For Mosaic GPU, flatten 2D result, slice to original numel, reshape
-                        code.writeline(
-                            "# Flatten 2D result and slice back to original shape"
-                        )
-                        code.writeline("orig_numel = 1")
-                        code.writeline(f"for s in original_out_shapes[{idx}]:")
-                        code.writeline("    orig_numel *= s")
-                        code.writeline(f"result_flat = result_values[{idx}].flatten()")
-                        code.writeline(
-                            f"result_sliced = result_flat[:orig_numel].reshape(original_out_shapes[{idx}])"
-                        )
-                        code.writeline(
-                            f"{name}.copy_(torch.from_dlpack(result_sliced))"
-                        )
                     else:
                         code.writeline(
                             f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
