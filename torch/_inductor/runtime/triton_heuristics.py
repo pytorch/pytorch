@@ -871,8 +871,8 @@ class CachingAutotuner(KernelInterface):
         if (
             not self.custom_kernel
             and launcher.n_spills is not None
-            and launcher.n_spills > self.inductor_meta.get("spill_threshold", 32
-            if torch.version.hip else 16)
+            and launcher.n_spills
+            > self.inductor_meta.get("spill_threshold", 32 if torch.version.hip else 16)
         ):
             log.debug(
                 "Skip config %s because of register spilling: %d",
