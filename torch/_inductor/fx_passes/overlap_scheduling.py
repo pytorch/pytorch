@@ -422,6 +422,7 @@ class OverlapScheduler:
         self.max_compute_pre_fetch = max_compute_pre_fetch
 
         self.last_on_path_node_idx = -1
+        self.fx_nodes_runtime_estimations: dict[fx.Node, float] = {}
 
     def _add_to_ready_queue(self, node: fx.Node) -> None:
         if self.off_compute_path(node):
@@ -598,6 +599,7 @@ class OverlapScheduler:
 
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+            self.fx_nodes_runtime_estimations[n] = val
 
             # Analytical estimations
             val_analytical = estimate_runtime_analytical(n)
@@ -644,6 +646,7 @@ class OverlapScheduler:
 
                 # Benchmark actual size
                 cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=5)
+                self.fx_nodes_runtime_estimations[n] = cuda_val
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)
@@ -1362,6 +1365,49 @@ class OverlapScheduler:
         return self.compute_potential_hidden_nodes(wait_nodes)
 
 
+def _schedule_overlap_bucketing_impl(
+    gm: torch.fx.GraphModule,
+    max_in_flight_gb: float = 5,
+    max_compute_pre_fetch: int = 200,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = False,
+    compute_overlap_multipler: float = 1.0,
+    max_coll_distance: int = 200,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+    max_memory_increase_gb: float | None = 1.0,
+    max_memory_increase_ratio: float | None = 0.05,
+    log_final_collectives_estimations: bool = False,
+    bucket_exposed_first: bool = True,
+    enable_fusion_regions: bool = False,
+) -> tuple[torch.fx.GraphModule, dict[torch.fx.Node, float]]:
+    """Internal implementation for overlap scheduling.
+
+    See schedule_overlap_bucketing() for parameter documentation.
+
+    Returns:
+        A tuple of (optimized_graph_module, runtime_estimations_dict).
+    """
+    overlap_scheduler = OverlapScheduler(
+        gm,
+        compute_overlap_multipler=compute_overlap_multipler,
+        max_in_flight_gb=max_in_flight_gb,
+        max_coll_distance=max_coll_distance,
+        max_compute_pre_fetch=max_compute_pre_fetch,
+        custom_runtime_estimation=custom_runtime_estimation,
+        collective_bucketing=collective_bucketing,
+        insert_overlap_deps=insert_overlap_deps,
+        collective_estimator=collective_estimator,
+        max_memory_increase_gb=max_memory_increase_gb,
+        max_memory_increase_ratio=max_memory_increase_ratio,
+        log_final_collectives_estimations=log_final_collectives_estimations,
+        bucket_exposed_first=bucket_exposed_first,
+        enable_fusion_regions=enable_fusion_regions,
+    )
+    return overlap_scheduler.run(), overlap_scheduler.fx_nodes_runtime_estimations
+
+
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
     max_in_flight_gb: float = 5,
@@ -1401,23 +1447,92 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+
+    Returns:
+        Optimized graph module with overlap scheduling applied.
     """
-    return OverlapScheduler(
-        gm,
-        compute_overlap_multipler=compute_overlap_multipler,
+    gm_optimized, _ = _schedule_overlap_bucketing_impl(
+        gm=gm,
         max_in_flight_gb=max_in_flight_gb,
-        max_coll_distance=max_coll_distance,
         max_compute_pre_fetch=max_compute_pre_fetch,
-        custom_runtime_estimation=custom_runtime_estimation,
         collective_bucketing=collective_bucketing,
         insert_overlap_deps=insert_overlap_deps,
+        compute_overlap_multipler=compute_overlap_multipler,
+        max_coll_distance=max_coll_distance,
+        custom_runtime_estimation=custom_runtime_estimation,
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
         log_final_collectives_estimations=log_final_collectives_estimations,
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
-    ).run()
+    )
+    return gm_optimized
+
+
+def schedule_overlap_bucketing_with_estimations(
+    gm: torch.fx.GraphModule,
+    max_in_flight_gb: float = 5,
+    max_compute_pre_fetch: int = 200,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = False,
+    compute_overlap_multipler: float = 1.0,
+    max_coll_distance: int = 200,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+    max_memory_increase_gb: float | None = 1.0,
+    max_memory_increase_ratio: float | None = 0.05,
+    log_final_collectives_estimations: bool = False,
+    bucket_exposed_first: bool = True,
+    enable_fusion_regions: bool = False,
+) -> tuple[torch.fx.GraphModule, dict[torch.fx.Node, float]]:
+    """Schedule nodes to maximize compute-collective overlap and return runtime estimations.
+
+    This function provides the same optimization as schedule_overlap_bucketing() but also
+    returns the runtime estimations for nodes that were computed during scheduling.
+
+    Args:
+        gm: Input graph module to optimize.
+        max_in_flight_gb: Maximum GB of concurrent collective data. Too much in flight memory
+            can cause memory fragmentation within the CUDA Caching Allocator.
+        max_compute_pre_fetch: Maximum mm nodes to pre fetch. Note: should already be limited by max_in_flight_gb and
+            max_memory_increase_gb
+        collective_bucketing: Enable overlap-preserving collective bucketing.
+        insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
+            compiling with inductor, or for subsequent passes before removing the ops prior to execution.
+        compute_overlap_multipler: Scale factor for compute time used to hide collectives. This can be used
+            to address over or under aggressive overlapping.
+        max_coll_distance: Maximum pre fetch or bucketing candidates. Mainly intended for compile time
+        custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node.
+            If None, uses default estimations. This is currently limited to collectives and compute nodes.
+        collective_estimator: Method for estimating collective runtime. "analytical" uses bandwidth formulas,
+            "benchmark" uses CUDA events with power-of-2 rounding and interpolation.
+        max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
+        max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
+            Uses minimum of absolute and ratio limits when both are specified.
+        enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+
+    Returns:
+        A tuple of (optimized_graph_module, runtime_estimations_dict) where runtime_estimations_dict
+        maps fx.Node to estimated runtime in milliseconds.
+    """
+    return _schedule_overlap_bucketing_impl(
+        gm=gm,
+        max_in_flight_gb=max_in_flight_gb,
+        max_compute_pre_fetch=max_compute_pre_fetch,
+        collective_bucketing=collective_bucketing,
+        insert_overlap_deps=insert_overlap_deps,
+        compute_overlap_multipler=compute_overlap_multipler,
+        max_coll_distance=max_coll_distance,
+        custom_runtime_estimation=custom_runtime_estimation,
+        collective_estimator=collective_estimator,
+        max_memory_increase_gb=max_memory_increase_gb,
+        max_memory_increase_ratio=max_memory_increase_ratio,
+        log_final_collectives_estimations=log_final_collectives_estimations,
+        bucket_exposed_first=bucket_exposed_first,
+        enable_fusion_regions=enable_fusion_regions,
+    )
 
 
 def schedule_overlap_bucketing_from_inductor_configs(
