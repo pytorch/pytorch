@@ -2561,11 +2561,18 @@ def forward(self, arg0_1, arg1_1):
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):
-        kernel = (
-            kernel_inline_asm_single_quotes
-            if quotes == "single"
-            else kernel_inline_asm_double_quotes
-        )
+        if torch.version.cuda:
+            kernel = (
+                kernel_inline_asm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_double_quotes
+            )
+        else:
+            kernel = (
+                kernel_inline_asm_rocm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_rocm_double_quotes
+            )
 
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(inp):
