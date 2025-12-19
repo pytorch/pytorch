@@ -526,10 +526,6 @@ kernel void validate_scatter_indices(
     constant uint64_t& numel [[buffer(2)]],
     device ErrorMessages* error_buffer [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= numel) {
-    return;
-  }
-
   int64_t idx = static_cast<int64_t>(indices[tid]);
 
   if (idx < 0) {

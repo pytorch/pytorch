@@ -174,9 +174,7 @@ static void scatter_mps_general(const Tensor& self_arg,
         id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(kernel_name);
         [encoder setComputePipelineState:pso];
 
-        mtl_setBuffer(encoder, index, 0);
-        mtl_setBytes(encoder, size_limit, 1);
-        mtl_setBytes(encoder, numel, 2);
+        mtl_setArgs(encoder, index, size_limit, numel, stream->getErrorBuffer());
         [encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:3];
 
         mtl_dispatch1DJob(encoder, pso, numel);
