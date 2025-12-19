@@ -1,11 +1,9 @@
-from pt import configs
-
-import operator_benchmark as op_bench
-
 import importlib.util
 import os
 from types import ModuleType
 from typing import Optional
+
+import operator_benchmark as op_bench
 
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
@@ -46,14 +44,18 @@ def _get_test_scaled_matmul_cuda() -> ModuleType:
     if _TEST_SCALED_MATMUL_CUDA_MOD is not None:
         return _TEST_SCALED_MATMUL_CUDA_MOD
 
-    pytorch_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    pytorch_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
     test_file = os.path.join(pytorch_root, "test", "test_scaled_matmul_cuda.py")
     if not os.path.exists(test_file):
         raise RuntimeError(
             f"Expected to find {test_file} to reuse scaled_mm test helpers, but it does not exist."
         )
 
-    spec = importlib.util.spec_from_file_location("_test_scaled_matmul_cuda_bench_import", test_file)
+    spec = importlib.util.spec_from_file_location(
+        "_test_scaled_matmul_cuda_bench_import", test_file
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create import spec for {test_file}")
 
@@ -116,7 +118,10 @@ def _supports_scaled_mm_benchmark() -> tuple[bool, str]:
     cap = torch.cuda.get_device_capability(0)
     if cap >= (9, 0) or cap == (8, 9):
         return True, ""
-    return False, f"unsupported CUDA compute capability {cap[0]}.{cap[1]} (requires >= 9.0 or 8.9)"
+    return (
+        False,
+        f"unsupported CUDA compute capability {cap[0]}.{cap[1]} (requires >= 9.0 or 8.9)",
+    )
 
 
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
@@ -146,7 +151,9 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         self._swizzle_a = swizzle_a
         self._swizzle_b = swizzle_b
 
-    def _init_fp8_tensorwise(self, M: int, N: int, K: int, device: str, helpers: ModuleType) -> None:
+    def _init_fp8_tensorwise(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
         self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
 
         # Base tensors carry grad in backward benches; fp8 tensors are created as leaves.
@@ -193,7 +200,9 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             scale_recipe_b=ScalingType.TensorWise,
         )
 
-    def _init_fp8_rowwise(self, M: int, N: int, K: int, device: str, helpers: ModuleType) -> None:
+    def _init_fp8_rowwise(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
         # Row-wise scaling (per-row A scales and per-column B scales).
         # Mirrors `test_scaled_mm_vs_emulated_row_wise` in test_scaled_matmul_cuda.py.
         self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
@@ -214,8 +223,12 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             requires_grad=self.auto_set(),
         ).t()
 
-        x_scales = helpers.tensor_to_scale(x_base, self.float8_dtype, dim=1).float().detach()  # (M, 1)
-        y_scales = helpers.tensor_to_scale(y_base, self.float8_dtype, dim=0).float().detach()  # (1, N)
+        x_scales = (
+            helpers.tensor_to_scale(x_base, self.float8_dtype, dim=1).float().detach()
+        )  # (M, 1)
+        y_scales = (
+            helpers.tensor_to_scale(y_base, self.float8_dtype, dim=0).float().detach()
+        )  # (1, N)
 
         with torch.no_grad():
             x_lp = (
@@ -251,14 +264,24 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
                 "FP8 BlockWise1x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
             )
         if K % self._FP8_BLOCK_K != 0:
-            raise RuntimeError(f"FP8 BlockWise1x128 requires K divisible by {self._FP8_BLOCK_K}, got K={K}")
+            raise RuntimeError(
+                f"FP8 BlockWise1x128 requires K divisible by {self._FP8_BLOCK_K}, got K={K}"
+            )
 
-        x_hp = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
-        y_hp = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+        x_hp = torch.randn(
+            M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
+        y_hp = torch.randn(
+            N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
 
         with torch.no_grad():
-            x_lp, x_scales = helpers.tensor_to_scale_block(x_hp, self.float8_dtype, 1, self._FP8_BLOCK_K)
-            y_lp, y_scales = helpers.tensor_to_scale_block(y_hp, self.float8_dtype, 1, self._FP8_BLOCK_K)
+            x_lp, x_scales = helpers.tensor_to_scale_block(
+                x_hp, self.float8_dtype, 1, self._FP8_BLOCK_K
+            )
+            y_lp, y_scales = helpers.tensor_to_scale_block(
+                y_hp, self.float8_dtype, 1, self._FP8_BLOCK_K
+            )
 
             x_lp = x_lp.detach().requires_grad_(self.auto_set())
             y_lp = y_lp.detach().requires_grad_(self.auto_set())
@@ -288,13 +311,21 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             raise RuntimeError(
                 "FP8 BlockWise128x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
             )
-        if (M % self._FP8_BLOCK_K) != 0 or (N % self._FP8_BLOCK_K) != 0 or (K % self._FP8_BLOCK_K) != 0:
+        if (
+            (M % self._FP8_BLOCK_K) != 0
+            or (N % self._FP8_BLOCK_K) != 0
+            or (K % self._FP8_BLOCK_K) != 0
+        ):
             raise RuntimeError(
                 f"FP8 BlockWise128x128 requires M,N,K divisible by {self._FP8_BLOCK_K}, got M={M}, N={N}, K={K}"
             )
 
-        x_hp = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
-        y_hp = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+        x_hp = torch.randn(
+            M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
+        y_hp = torch.randn(
+            N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
 
         with torch.no_grad():
             x_lp, x_scales = helpers.tensor_to_scale_block(
@@ -324,12 +355,16 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             scale_recipe_b=ScalingType.BlockWise128x128,
         )
 
-    def _init_mx_blockwise(self, M: int, N: int, K: int, device: str, *, mx_format: str) -> None:
+    def _init_mx_blockwise(
+        self, M: int, N: int, K: int, device: str, *, mx_format: str
+    ) -> None:
         # MX uses BlockWise1x32 with swizzled scales on CUDA.
         if device != "cuda":
             raise RuntimeError(f"MX scaling requires CUDA device, got: {device}")
         if torch.version.hip is not None:
-            raise RuntimeError("MXFP benchmarks are only wired for CUDA swizzled scales (non-HIP).")
+            raise RuntimeError(
+                "MXFP benchmarks are only wired for CUDA swizzled scales (non-HIP)."
+            )
 
         # Important cuBLASLt requirement: mat_b must be column-major.
         # We satisfy this by passing a transpose view (non-contiguous) for `mat_b`.
@@ -338,11 +373,19 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         # reference implementation used by test/test_scaled_matmul_cuda.py.
         from torch.testing._internal.common_quantized import to_blocked, to_mxfp
 
-        x_hp = torch.randn(M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
-        y_hp = torch.randn(N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set())
+        x_hp = torch.randn(
+            M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
+        y_hp = torch.randn(
+            N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
+        )
 
-        scale_a, x_lp = to_mxfp(x_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format)
-        scale_b, y_lp = to_mxfp(y_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format)
+        scale_a, x_lp = to_mxfp(
+            x_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format
+        )
+        scale_b, y_lp = to_mxfp(
+            y_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format
+        )
 
         scale_a = to_blocked(scale_a)
         scale_b = to_blocked(scale_b)
@@ -456,6 +499,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             kwargs["swizzle_b"] = self._swizzle_b
 
         return torch.nn.functional.scaled_mm(x, y, **kwargs)
+
 
 MNK_list = [
     (16384, 8192, 5120),

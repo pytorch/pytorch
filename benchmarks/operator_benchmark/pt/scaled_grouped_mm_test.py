@@ -1,20 +1,20 @@
-from pt import configs  # noqa: F401
-
-import operator_benchmark as op_bench
-
 import importlib.util
 import os
 from types import ModuleType
 from typing import Optional
 
+from pt import configs  # noqa: F401
+
+import operator_benchmark as op_bench
+
 import torch
-from torch.nn.functional import ScalingType
 from torch.testing._internal.common_cuda import (
-    IS_SM90,
     IS_SM100,
+    IS_SM90,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
 )
 from torch.torch_version import TorchVersion
+
 
 """
 Operator microbenchmarks for `scaled_grouped_mm`.
@@ -31,7 +31,9 @@ def _should_generate_scaled_grouped_mm_configs() -> bool:
     # - PyTorch 2.9+ (scaled_grouped_mm introduced)
     # - CUDA: compute capability exactly 9.0 (SM90) or 10.0 (SM100) and CUDA 12.8+
     # - ROCm: MI300+ (gfx94x) grouped GEMM support
-    if TorchVersion(torch.__version__) < "2.9" or not hasattr(torch.nn.functional, "scaled_grouped_mm"):
+    if TorchVersion(torch.__version__) < "2.9" or not hasattr(
+        torch.nn.functional, "scaled_grouped_mm"
+    ):
         return False
     if not torch.cuda.is_available():
         return False
@@ -56,7 +58,9 @@ def _get_test_scaled_matmul_cuda() -> ModuleType:
     if _TEST_SCALED_MATMUL_CUDA_MOD is not None:
         return _TEST_SCALED_MATMUL_CUDA_MOD
 
-    pytorch_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    pytorch_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
     test_file = os.path.join(pytorch_root, "test", "test_scaled_matmul_cuda.py")
     if not os.path.exists(test_file):
         raise RuntimeError(
@@ -95,13 +99,17 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         helpers = _get_test_scaled_matmul_cuda()
 
         if output_dtype != "bfloat16":
-            raise ValueError("scaled_grouped_mm benchmark currently supports bfloat16 output only")
+            raise ValueError(
+                "scaled_grouped_mm benchmark currently supports bfloat16 output only"
+            )
         self.output_dtype = torch.bfloat16
 
         if device != "cuda":
             raise ValueError("scaled_grouped_mm benchmark is CUDA-only")
         if torch.version.hip is not None and not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
-            raise ValueError("scaled_grouped_mm benchmark requires ROCm MI300+ (gfx94x) grouped GEMM support")
+            raise ValueError(
+                "scaled_grouped_mm benchmark requires ROCm MI300+ (gfx94x) grouped GEMM support"
+            )
 
         if scaling not in ("mxfp8", "mxfp4", "nvfp4"):
             raise ValueError(f"Unsupported scaling format: {scaling}")
@@ -219,5 +227,3 @@ op_bench.generate_pt_test(
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
-
-
