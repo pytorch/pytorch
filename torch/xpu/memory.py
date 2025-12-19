@@ -2,7 +2,7 @@ import collections
 import ctypes
 import pickle
 import sys
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional
 
 import torch
 from torch._memory_snapshot_utils import (
@@ -19,8 +19,6 @@ if not _is_compiled():
     # Define dummy base classes
     torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
 
-_device_t = Union[Device, str, int, None]
-
 
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
@@ -35,7 +33,7 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
-def reset_peak_memory_stats(device: _device_t = None) -> None:
+def reset_peak_memory_stats(device: Device = None) -> None:
     r"""Reset the "peak" stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Peak stats correspond to the
@@ -50,7 +48,7 @@ def reset_peak_memory_stats(device: _device_t = None) -> None:
     return torch._C._xpu_resetPeakMemoryStats(device)
 
 
-def reset_accumulated_memory_stats(device: _device_t = None) -> None:
+def reset_accumulated_memory_stats(device: Device = None) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Accumulated stats correspond to
@@ -65,7 +63,7 @@ def reset_accumulated_memory_stats(device: _device_t = None) -> None:
     return torch._C._xpu_resetAccumulatedMemoryStats(device)
 
 
-def memory_stats_as_nested_dict(device: _device_t = None) -> dict[str, Any]:
+def memory_stats_as_nested_dict(device: Device = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.xpu.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -73,7 +71,7 @@ def memory_stats_as_nested_dict(device: _device_t = None) -> dict[str, Any]:
     return torch._C._xpu_memoryStats(device)
 
 
-def memory_stats(device: _device_t = None) -> dict[str, Any]:
+def memory_stats(device: Device = None) -> dict[str, Any]:
     r"""Return a dictionary of XPU memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -129,7 +127,7 @@ def memory_stats(device: _device_t = None) -> dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_allocated(device: _device_t = None) -> int:
+def memory_allocated(device: Device = None) -> int:
     r"""Return the current GPU memory occupied by tensors in bytes for a given device.
 
     Args:
@@ -145,7 +143,7 @@ def memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device: _device_t = None) -> int:
+def max_memory_allocated(device: Device = None) -> int:
     r"""Return the maximum GPU memory occupied by tensors in bytes for a given device.
 
     By default, this returns the peak allocated memory since the beginning of
@@ -162,7 +160,7 @@ def max_memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device: _device_t = None) -> int:
+def memory_reserved(device: Device = None) -> int:
     r"""Return the current GPU memory managed by the caching allocator in bytes for a given device.
 
     Args:
@@ -173,7 +171,7 @@ def memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device: _device_t = None) -> int:
+def max_memory_reserved(device: Device = None) -> int:
     r"""Return the maximum GPU memory managed by the caching allocator in bytes for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
@@ -190,7 +188,7 @@ def max_memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
-def mem_get_info(device: _device_t = None) -> tuple[int, int]:
+def mem_get_info(device: Device = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device.
 
     Args:
@@ -207,7 +205,7 @@ def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     return torch._C._xpu_getMemoryInfo(device)
 
 
-def get_per_process_memory_fraction(device: _device_t = None) -> float:
+def get_per_process_memory_fraction(device: Device = None) -> float:
     r"""
     Retrieve the memory fraction currently set for a process on a given XPU device.
     This fraction represents the portion of the total device memory that
@@ -227,7 +225,7 @@ def get_per_process_memory_fraction(device: _device_t = None) -> float:
     return torch._C._xpu_getMemoryFraction(device)
 
 
-def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -> None:
+def set_per_process_memory_fraction(fraction: float, device: Device = None) -> None:
     r"""
     Set the memory fraction for a single process on XPU device.
     This function limits the amount of memory that the caching allocator can allocate
@@ -387,12 +385,11 @@ def _dump_snapshot(
 
 
 def _record_memory_history(
-    enabled: Literal["state", "all"] = "all",
-    context: Literal["state", "alloc", "all"] = "all",
+    enabled: Optional[Literal["state", "all"]] = "all",
+    context: Optional[Literal["state", "alloc", "all"]] = "all",
     stacks: Literal["python", "all"] = "all",
     max_entries: int = sys.maxsize,
     clear_history: bool = False,
-    skip_actions: Optional[list[str]] = None,
 ) -> None:
     """
     Enable recording of stack traces associated with memory allocations, so you can
@@ -445,32 +442,9 @@ def _record_memory_history(
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
         clear_history (bool, optional): Clear history when enabling, defaults to False.
-        skip_actions (list[str], optional): List of action types to skip when recording
-            memory history. This can be used to reduce memory overhead by excluding
-            certain types of events from being recorded. Valid action types are:
-
-            - `"alloc"`: Memory allocation events
-            - `"free_requested"`: Free requests (memory marked for freeing)
-            - `"free_completed"`: Completed free operations (memory actually freed)
-            - `"segment_alloc"`: Segment allocation from SYCL runtime
-            - `"segment_free"`: Segment freed back to XPU via SYCL runtime
-            - `"segment_map"`: Segment mapped events
-            - `"segment_unmap"`: Segment unmapped events
-            - `"snapshot"`: Memory snapshot generation events
-            - `"oom"`: Out-of-memory exceptions
-
-            For example, to skip recording free_requested events:
-            `skip_actions=["free_requested"]`
-
-            Defaults to None (record all actions).
     """
     torch._C._xpu_recordMemoryHistory(
-        enabled,
-        context,
-        stacks,
-        max_entries,
-        clear_history,
-        skip_actions if skip_actions is not None else [],
+        enabled, context, stacks, max_entries, clear_history
     )
 
 
