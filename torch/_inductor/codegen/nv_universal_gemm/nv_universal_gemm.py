@@ -1,4 +1,10 @@
 # mypy: allow-untyped-defs
+"""
+NVIDIA Universal GEMM (NVGEMM) backend for PyTorch Inductor.
+
+This module provides integration with the cutlass_api library to enable
+high-performance GEMM kernels for NVIDIA GPUs.
+"""
 import itertools
 import random
 from typing import Any, Optional, Union
@@ -18,15 +24,15 @@ from torch._inductor.ir import (
     TensorBox,
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
-from torch._inductor.utils import ensure_cutlass_api_available
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
 
 log = getArtifactLogger(__name__, "output_code")
 
 
-class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
-    """Benchmark request for cutlass_api kernels."""
+class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for NVIDIA Universal GEMM kernels."""
 
     def __init__(
         self,
@@ -46,7 +52,7 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         *input_tensors: torch.Tensor,
         out: Optional[torch.Tensor] = None,
     ) -> float:
-        """Benchmark the cutlass_api kernel.
+        """Benchmark the NVIDIA Universal GEMM kernel.
 
         Override the base class to always create tensors from input_tensor_meta.
         This is necessary because input_nodes may be ReinterpretViews that share
@@ -65,7 +71,7 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return self.do_bench(fn, *input_tensors, out=out)
 
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
-        """Create a function to run the cutlass_api kernel."""
+        """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
 
         a, b = input_tensors
@@ -92,9 +98,9 @@ class CutlassAPIBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         pass
 
 
-class CutlassAPIGemmCaller(ChoiceCaller):
+class NVUniversalGemmCaller(ChoiceCaller):
     """
-    ChoiceCaller for cutlass_api GEMM kernels.
+    ChoiceCaller for NVIDIA Universal GEMM kernels.
 
     Wraps a cutlass_api kernel and integrates with Inductor's autotuning.
     """
@@ -113,14 +119,14 @@ class CutlassAPIGemmCaller(ChoiceCaller):
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"cutlass_api {kernel.metadata.kernel_name}",
+            description=f"nv_universal_gemm {kernel.metadata.kernel_name}",
         )
         self.kernel = kernel
         self.accumulator_type = accumulator_type
 
-        output_buffer = Buffer(name="cutlass_api_out", layout=layout)
+        output_buffer = Buffer(name="nv_universal_gemm_out", layout=layout)
 
-        self.bmreq = CutlassAPIBenchmarkRequest(
+        self.bmreq = NVUniversalGemmBenchmarkRequest(
             kernel_name=name,
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(output_buffer),
@@ -129,16 +135,16 @@ class CutlassAPIGemmCaller(ChoiceCaller):
         )
 
     def __str__(self) -> str:
-        return f"CutlassAPIGemmCaller({self.kernel.metadata.kernel_name})"
+        return f"NVUniversalGemmCaller({self.kernel.metadata.kernel_name})"
 
     def benchmark(self, *args, out) -> float:
         return self.bmreq.benchmark(*args, out=out)
 
     def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
-        from torch._inductor.ir import CutlassAPIGemmBuffer
+        from torch._inductor.ir import NVUniversalGemmBuffer
 
         return TensorBox.create(
-            CutlassAPIGemmBuffer(
+            NVUniversalGemmBuffer(
                 layout=self.layout,
                 inputs=self.input_nodes,
                 kernel=self.kernel,
@@ -153,12 +159,12 @@ class CutlassAPIGemmCaller(ChoiceCaller):
         return self.bmreq.make_run_fn
 
     def hash_key(self) -> str:
-        return f"cutlass_api_{self.kernel.metadata.kernel_name}"
+        return f"nv_universal_gemm_{self.kernel.metadata.kernel_name}"
 
     def info_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "backend": "cutlass_api",
+            "backend": "nv_universal_gemm",
             "kernel_name": self.kernel.metadata.kernel_name,
         }
 
@@ -177,21 +183,21 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
         return None
 
 
-def add_cutlass_api_gemm_choices(
+def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
     input_nodes: list[Buffer],
     accumulator_type: Optional[torch.dtype] = None,
 ) -> None:
     """
-    Add cutlass_api GEMM kernels to the autotune choices.
+    Add NVIDIA Universal GEMM kernels to the autotune choices.
 
     Queries cutlass_api for compatible kernels and adds them as autotune choices.
     """
-    if ensure_cutlass_api_available():
+    if ensure_nv_universal_gemm_available():
         import cutlass_api
     else:
-        log.debug("cutlass_api not available, skipping cutlass_api choices")
+        log.debug("cutlass_api not available, skipping NVIDIA Universal GEMM choices")
         return
 
     if accumulator_type is None:
@@ -225,28 +231,29 @@ def add_cutlass_api_gemm_choices(
         return
     cc_int = int(cc)
 
-    try:
-        kernels = cutlass_api.get_kernels(args=args, cc=cc_int)
-    except Exception:
-        log.debug("Failed to get cutlass_api kernels", exc_info=True)
+    kernels = cutlass_api.get_kernels(args=args, cc=cc_int)
+    if not kernels:
+        log.debug("No compatible NVIDIA Universal GEMM kernels found")
         return
 
+    # Filter out kernels that require a workspace buffer.
+    # TODO(nikhilap): Add workspace support to enable these kernels.
+    kernels = [k for k in kernels if k.get_workspace_size(args) == 0]
     if not kernels:
-        log.debug("No compatible cutlass_api kernels found")
         return
 
     # Limit kernels to profile if configured
-    if config.cuda.cutlass_api_max_profiling_configs:
+    if config.cuda.nvgemm_max_profiling_configs:
         kernels = random.sample(
             kernels,
-            min(len(kernels), config.cuda.cutlass_api_max_profiling_configs),
+            min(len(kernels), config.cuda.nvgemm_max_profiling_configs),
         )
 
     num_added = 0
     for kernel in kernels:
-        name = f"cutlass_api_gemm_{next(CutlassAPIGemmCaller.index_counter)}"
+        name = f"nv_universal_gemm_{next(NVUniversalGemmCaller.index_counter)}"
         try:
-            caller = CutlassAPIGemmCaller(
+            caller = NVUniversalGemmCaller(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
@@ -256,6 +263,6 @@ def add_cutlass_api_gemm_choices(
             choices.append(caller)
             num_added += 1
         except Exception:
-            log.debug("Failed to create cutlass_api choice", exc_info=True)
+            log.debug("Failed to create NVIDIA Universal GEMM choice", exc_info=True)
 
-    log.debug("Added %d cutlass_api GEMM choices", num_added)
+    log.debug("Added %d NVIDIA Universal GEMM choices", num_added)

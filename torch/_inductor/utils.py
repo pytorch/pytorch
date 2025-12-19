@@ -1976,10 +1976,10 @@ def ensure_cute_available() -> bool:
 
 
 @functools.lru_cache(maxsize=1)
-def ensure_cutlass_api_available() -> bool:
-    """Check if CUTLASS universal GEMM API is importable; cache the result for reuse.
+def ensure_nv_universal_gemm_available() -> bool:
+    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
 
-    Call ensure_cute_available.cache_clear() after installing cutlass_api
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
     in the same interpreter to retry the import.
     """
     try:
@@ -2086,13 +2086,13 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-def use_cutlass_api_gemm_template(
+def use_nv_universal_gemm_template(
     layout: Layout, m: _IntLike, n: _IntLike, k: _IntLike, mat_a: IRNode, mat_b: IRNode
 ) -> bool:
     """
-    Returns True if we can use the cutlass_api kernel for gemm.
+    Returns True if we can use the NVIDIA Universal GEMM kernel for gemm.
     Required conditions:
-        1. CuTeDSL backend is enabled
+        1. NVGEMM backend is enabled
         2. cutlass_api is available
         3. We are on a Blackwell arch
         4. The dtype is fp16 or bf16
@@ -2101,15 +2101,20 @@ def use_cutlass_api_gemm_template(
         7. A and B base pointers are 16B aligned
         8. n and k are divisible by 16
         9. Non-unit strides are divisible by 16
+        10. Not in AOT Inductor mode (requires runtime JIT compilation)
     """
-    if not ensure_cutlass_api_available():
+    if not ensure_nv_universal_gemm_available():
         return False
 
-    if not _use_autotune_backend("CUTEDSL"):
+    if not _use_autotune_backend("NVGEMM"):
         return False
 
     from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
     from .virtualized import V
+
+    # NVIDIA Universal GEMM requires runtime JIT compilation which is not compatible with AOTI
+    if V.aot_compilation:
+        return False
 
     if not is_gpu(layout.device.type):
         return False
@@ -2130,7 +2135,7 @@ def use_cutlass_api_gemm_template(
     if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
         return False
 
-    # TODO(nikhilap) There is a bug in the Cutlass API, their compatibility check does not catch these failure cases
+    # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch these failure cases
     if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
         return False
     if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
