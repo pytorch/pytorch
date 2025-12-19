@@ -132,7 +132,8 @@ struct BacktraceData {
 };
 
 struct PrintData {
-  size_t frame;
+  size_t frame_curr; // frame being printed
+  size_t frame_prev; // last frame to be printed
   backtrace_state* bt_state;
   std::ostringstream os;
 };
@@ -157,7 +158,13 @@ void print_syminfo_callback(
     uintptr_t symval,
     uintptr_t /* symsize */) {
   PrintData* pdata = (PrintData*)data;
-  pdata->os << "frame #" << (pdata->frame++) << ": ";
+
+  // See print_pcinfo_callback
+  if (pdata->frame_curr == pdata->frame_prev) {
+    return; // skip inlined frame
+  }
+
+  pdata->os << "frame #" << pdata->frame_curr << ": ";
   pdata->os << std::hex << std::showbase;
   if (symname != nullptr) {
     pdata->os << symname << " + " << (pc - symval) << '\n';
@@ -165,6 +172,7 @@ void print_syminfo_callback(
     pdata->os << '(' << pc << ")\n";
   }
   pdata->os << std::noshowbase << std::dec;
+  pdata->frame_prev = pdata->frame_curr;
 }
 
 int print_pcinfo_callback(
@@ -175,6 +183,15 @@ int print_pcinfo_callback(
     const char* function) {
   PrintData* pdata = (PrintData*)data;
 
+  // According to libbacktrace's documentation, backtrace_pcinfo
+  // might invoke the callback more than once if the PC happens
+  // to describe an inlined call. GDB seems to not be printing
+  // these inlined calls. To match it's behavior, we only print
+  // the first time this function is invoked on a PC.
+  if (pdata->frame_curr == pdata->frame_prev) {
+    return 0; // skip inlined frame
+  }
+
   if (function == nullptr) {
     return backtrace_syminfo(
         pdata->bt_state, pc, print_syminfo_callback, error_callback, data);
@@ -182,9 +199,10 @@ int print_pcinfo_callback(
 
   int status = 0;
   char* demangled = abi::__cxa_demangle(function, nullptr, nullptr, &status);
-  pdata->os << "frame #" << (pdata->frame++) << ": "
+  pdata->os << "frame #" << pdata->frame_curr << ": "
             << (status == 0 ? demangled : function) << " at "
             << (filename ? filename : "???") << ':' << lineno << '\n';
+  pdata->frame_prev = pdata->frame_curr;
   free(demangled);
   return 0;
 }
@@ -215,13 +233,15 @@ class GetBacktraceImpl {
 
   std::string symbolize() const {
     PrintData pdata;
-    pdata.frame = 0;
+    pdata.frame_curr = 0;
+    pdata.frame_prev = -1;
     pdata.bt_state = state();
 
-    for (uintptr_t pc : backtrace_.pcs) {
+    for (size_t i = 0; i < backtrace_.pcs.size(); ++i) {
+      pdata.frame_curr = i;
       backtrace_pcinfo(
           pdata.bt_state,
-          pc,
+          backtrace_.pcs[i],
           print_pcinfo_callback,
           error_callback,
           (void*)&pdata);
