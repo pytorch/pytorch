@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 def blocks(pf: PythonFile) -> list[Block]:
     blocks: list[Block] = []
 
-    starts_block = ("class", "def").__contains__
-    it = (i for i, t in enumerate(pf.tokens) if starts_block(t.string))
+    it = (i for i, t in enumerate(pf.tokens) if t.string in ("class", "def"))
     blocks = [_make_block(pf, i) for i in it]
 
     for i, parent in enumerate(blocks):
@@ -61,9 +60,8 @@ def _add_full_names(
 
 
 def _make_block(pf: PythonFile, begin: int) -> Block:
-    name = ""
+    name = docstring = ""
     end = 0
-    docstring = ""
 
     for i in range(begin + 1, len(pf.tokens)):
         t = pf.tokens[i]

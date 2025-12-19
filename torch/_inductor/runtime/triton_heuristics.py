@@ -868,8 +868,10 @@ class CachingAutotuner(KernelInterface):
         # control over the kernel code; (ii) there is empirical evidence that
         # for some (complicated) custom Triton kernels, a register-spilling
         # config may yield the best latency.
-        if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
-            "spill_threshold", 16
+        if (
+            not self.custom_kernel
+            and launcher.n_spills is not None
+            and launcher.n_spills > self.inductor_meta.get("spill_threshold", 16)
         ):
             log.debug(
                 "Skip config %s because of register spilling: %d",
@@ -3409,6 +3411,7 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
+    """Generate persistent reductions + mix-order if available"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
@@ -3425,6 +3428,10 @@ def persistent_reduction(
     inductor_meta[persistent_reduction_key] = True
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
+
+    max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
+        "max_autotune_pointwise"
+    )
 
     if inductor_meta.get("RSPLIT_SIZE"):
         new_configs = []
@@ -3452,21 +3459,21 @@ def persistent_reduction(
                 c.num_warps = max(c.num_warps, 1)
                 new_configs.append(c)
 
-                # less warps so potentially each sm can run more thread blocks
-                # Inside each thread block, we handle the split sequentially,
-                # more thread blocks is beneficial here.
-                newc = copy.deepcopy(c)
-                newc.num_warps = 2
-                new_configs.append(newc)
+                if max_autotune_enabled:
+                    # less warps so potentially each sm can run more thread blocks
+                    # Inside each thread block, we handle the split sequentially,
+                    # more thread blocks is beneficial here.
+                    newc = copy.deepcopy(c)
+                    newc.num_warps = 2
+                    new_configs.append(newc)
             else:
                 # more warps for larger rows
                 new_configs.append(c)
 
-                if c.num_warps < 32:
+                if max_autotune_enabled and c.num_warps < 32:
                     newc = copy.deepcopy(c)
                     newc.num_warps *= 2
                     new_configs.append(newc)
-
         configs = unique_configs(new_configs)
 
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
