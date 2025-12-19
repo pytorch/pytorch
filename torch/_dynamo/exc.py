@@ -167,7 +167,7 @@ class Unsupported(TorchDynamoException):
         msg: str,
         *,
         case_name: Optional[str] = None,
-        real_stack: None | StackSummary = None,
+        real_stack: StackSummary | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -265,7 +265,9 @@ class RecompileLimitExceeded(Unsupported):
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
 class StepUnsupported(TorchDynamoException):
-    def __init__(self) -> None:
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+        self.msg = msg
         self.real_stack = torch._guards.TracingContext.extract_stack()
 
 
@@ -385,7 +387,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     return observed_exception_map[exc_type]
 
 
@@ -502,12 +504,11 @@ def format_graph_break_message(
   Explanation: {explanation}
 {hints_str}
 
-  Developer debug context: {context}
-"""
+  Developer debug context: {context}"""
     documentation_link = get_gbid_documentation_link(gb_type)
 
     if documentation_link:
-        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+        msg += f"\n\n For more details about this graph break, please visit: {documentation_link}"
 
     return msg
 

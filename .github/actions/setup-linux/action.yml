@@ -64,7 +64,7 @@ runs:
           echo "pip3 is already installed."
         else
           echo "pip3 not found, installing..."
-          uv run pip install pip==25.3 --system
+          uv tool install pip
         fi
 
     - name: Preserve github env variables for use in docker

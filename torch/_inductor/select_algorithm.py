@@ -19,7 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -44,6 +44,8 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import (
+    AsyncAutotuner,
+    PrecompileThreadPool,
     TensorMeta,
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
@@ -1235,6 +1237,7 @@ class TritonTemplateKernel(TritonKernel):
                         # after the remapping.
                         # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
+                    # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
                 else:
                     mask_vars: list[str] = []
@@ -2830,40 +2833,91 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
-
-            def get_timings(hint_override: Optional[int] = None):
-                filtered_choices = [
-                    c
-                    for c in choices
-                    if not hasattr(c, "hint_override")
-                    or c.hint_override == hint_override
+            if config.pipeline_max_autotune_gemm:
+                assert not config.epilogue_fusion and not config.prologue_fusion, (
+                    "Pipelined autotuning not compatible yet with fusion benchmarking, will cause contention on gpu"
+                )
+                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
+                    "Pipelined autotuning not compatible yet with subgraph choices"
+                )
+                extern_kernels = [
+                    c for c in choices if AlgorithmSelectorCache._is_extern(c)
                 ]
-                timings = self.do_autotuning(
+                # Make sure the autotune subprocess for benchmarking is fed as much as possible
+                # Extern kernels do not have to precompile, so can feed them before triton
+                AsyncAutotuner.start(extern_kernels, inputs_key)
+                triton_kernels = [
+                    c for c in choices if not AlgorithmSelectorCache._is_extern(c)
+                ]
+                precompile_instance = PrecompileThreadPool.get_instance()
+                precompile_future = precompile_instance.submit(
+                    self.do_autotuning,
                     name,
                     input_nodes,
                     layout,
                     input_gen_fns,
                     inputs_key,
-                    filtered_choices,
+                    triton_kernels,
                     precompile_fn,
-                    hint_override=hint_override,
-                    best_config_future=best_config_future,
                 )
-                min_extern_choice = float("inf")
-                for choice, timing in timings.items():
-                    if isinstance(choice, ExternKernelCaller):
-                        min_extern_choice = min(min_extern_choice, timing)
 
-                timings = {
-                    choice: time
-                    for choice, time in timings.items()
-                    if (
-                        time <= min_extern_choice
-                        or not isinstance(choice, ExternKernelCaller)
+                def get_timings(hint_override: Optional[int] = None):
+                    assert not hint_override, (
+                        "Hint not supported with pipelined autotuning"
                     )
-                }
+                    # Await precompilation future, thread pool
+                    precompile_start_ts = time.time()
+                    precompile_future.result()
+                    precompile_elapse = time.time() - precompile_start_ts
 
-                return timings
+                    # Await autotuning in subproc pool
+                    autotune_start_ts = time.time()
+                    results = AsyncAutotuner.get_results(choices, inputs_key)
+                    autotune_wait_ts = time.time() - autotune_start_ts
+                    AlgorithmSelectorCache.log_results(
+                        name,
+                        input_nodes,
+                        results,
+                        precompile_elapse,
+                        autotune_wait_ts,
+                    )
+
+                    return results
+            else:
+
+                def get_timings(hint_override: Optional[int] = None):
+                    filtered_choices = [
+                        c
+                        for c in choices
+                        if not hasattr(c, "hint_override")
+                        or c.hint_override == hint_override
+                    ]
+                    timings = self.do_autotuning(
+                        name,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        inputs_key,
+                        filtered_choices,
+                        precompile_fn,
+                        hint_override=hint_override,
+                        best_config_future=best_config_future,
+                    )
+                    min_extern_choice = float("inf")
+                    for choice, timing in timings.items():
+                        if isinstance(choice, ExternKernelCaller):
+                            min_extern_choice = min(min_extern_choice, timing)
+
+                    timings = {
+                        choice: time
+                        for choice, time in timings.items()
+                        if (
+                            time <= min_extern_choice
+                            or not isinstance(choice, ExternKernelCaller)
+                        )
+                    }
+
+                    return timings
 
             # We take the union of allowed prologue inputs from all choices,
             # and, within benchmark fusion, don't allow prologue fusion for
@@ -3052,12 +3106,17 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         precompile_start_ts = time.time()
-        with dynamo_timed(
-            f"{name}_template_precompiling",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="compile_time_autotune_time_us",
-        ):
+
+        if not config.pipeline_max_autotune_gemm:
+            with dynamo_timed(
+                f"{name}_template_precompiling",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
+                precompile_fn()
+        else:
             precompile_fn()
+
         precompile_elapse = time.time() - precompile_start_ts
         log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
         # Prune anything that failed to compile
@@ -3092,6 +3151,10 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
+
+        if config.pipeline_max_autotune_gemm:
+            AsyncAutotuner.start(choices, inputs_key)
+            return
 
         autotune_start_ts = time.time()
 
@@ -3300,7 +3363,11 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        executor = ThreadPoolExecutor(max_workers=num_workers)
+        if config.pipeline_max_autotune_gemm:
+            executor = PrecompileThreadPool.get_instance()
+        else:
+            executor = ThreadPoolExecutor(max_workers=num_workers)
+
         async_compile = torch._inductor.async_compile.AsyncCompile()
 
         futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
@@ -3394,7 +3461,9 @@ class AlgorithmSelectorCache(PersistentCache):
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
-            executor.shutdown(wait=True)
+            if not config.pipeline_max_autotune_gemm:
+                # pyrefly: ignore [missing-attribute]
+                executor.shutdown(wait=True)
 
         self.precompile_cache[precompile_key] = wait_on_futures
 
@@ -3426,7 +3495,8 @@ class AlgorithmSelectorCache(PersistentCache):
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-        for input_node in input_nodes:
+
+        for i, input_node in enumerate(input_nodes):
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
                     unique_example_inputs[input_node.get_name()]
@@ -3434,32 +3504,41 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 base = unique_example_inputs[input_node.get_name()]
                 base = base if base._base is None else base._base
-                sizes = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        size,
+
+                if i in input_gen_fns:
+                    # Use tensor's actual shape from input_gen_fn
+                    generated_tensor = unique_example_inputs[input_node.get_name()]
+                    sizes = tuple(generated_tensor.size())
+                    strides = tuple(generated_tensor.stride())
+                    storage_offset = generated_tensor.storage_offset()
+                else:
+                    # Use IR node's shape resolved via size hints
+                    sizes = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            size,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for size in input_node.get_size()
+                    )
+                    strides = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            stride,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for stride in input_node.get_stride()
+                    )
+                    storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                        input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
                     )
-                    for size in input_node.get_size()
-                )
-                strides = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        stride,
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    )
-                    for stride in input_node.get_stride()
-                )
-                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
 
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
                 needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, storage_offset
+                    sizes, strides, cast(int, storage_offset)
                 )
                 current_size = base.storage().size()
 
@@ -4321,6 +4400,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
+            or torch._inductor.config.pipeline_max_autotune_gemm
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
