@@ -212,7 +212,6 @@ for op in ops:
         self.assertEqual(r, "")
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
-    @skipIfRocm
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch
