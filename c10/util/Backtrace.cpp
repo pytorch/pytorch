@@ -160,11 +160,6 @@ void print_syminfo_callback(
     uintptr_t /* symsize */) {
   PrintData* pdata = (PrintData*)data;
 
-  // See print_pcinfo_callback
-  if (pdata->frame_curr == pdata->frame_prev) {
-    return; // skip inlined frame
-  }
-
   Dl_info info;
   bool dladdr_success = dladdr((void*)pc, &info) != 0;
 
@@ -175,7 +170,7 @@ void print_syminfo_callback(
   } else if (dladdr_success && info.dli_sname != nullptr) {
     pdata->os << info.dli_sname;
   } else if (dladdr_success) {
-    pdata->os << "<start_offset>+" << (pc - (uintptr_t)info.dli_fbase);
+    pdata->os << "<+" << (pc - (uintptr_t)info.dli_fbase) << '>';
   } else {
     pdata->os << '<' << pc << '>';
   }
@@ -185,7 +180,6 @@ void print_syminfo_callback(
   }
 
   pdata->os << '\n' << std::noshowbase << std::dec;
-  pdata->frame_prev = pdata->frame_curr;
 }
 
 int print_pcinfo_callback(
@@ -201,13 +195,15 @@ int print_pcinfo_callback(
   // to describe an inlined call. GDB seems to not be printing
   // these inlined calls. To match it's behavior, we only print
   // the first time this function is invoked on a PC.
-  if (pdata->frame_curr == pdata->frame_prev) {
-    return 0; // skip inlined frame
+  if (std::exchange(pdata->frame_prev, pdata->frame_curr) ==
+      pdata->frame_curr) {
+    return 0;
   }
 
   if (function == nullptr) {
-    return backtrace_syminfo(
+    backtrace_syminfo(
         pdata->bt_state, pc, print_syminfo_callback, error_callback, data);
+    return 0;
   }
 
   int status = 0;
@@ -215,7 +211,6 @@ int print_pcinfo_callback(
   pdata->os << "frame #" << pdata->frame_curr << ": "
             << (status == 0 ? demangled : function) << " from "
             << (filename ? filename : "???") << ':' << lineno << '\n';
-  pdata->frame_prev = pdata->frame_curr;
   free(demangled);
   return 0;
 }
