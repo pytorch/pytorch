@@ -53,7 +53,7 @@ def _onnx_op(
 # Basic arithmetic operations
 def _add_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Add-13 for torch.compile purposes."""
-    return A.clone()
+    return torch.add(A, B)
 
 
 @_onnx_op("Add", 13, _add_13_fake_impl)
@@ -525,9 +525,7 @@ def cast_13(input: torch.Tensor, *, to: int) -> torch.Tensor:
     return input.to(target_dtype)
 
 
-def _concat_13_fake_impl(
-    *tensors: torch.Tensor, axis: int = 0
-) -> torch.Tensor:
+def _concat_13_fake_impl(*tensors: torch.Tensor, axis: int = 0) -> torch.Tensor:
     """Fake implementation for Concat-13 for torch.compile purposes."""
     return tensors[0].clone()
 
@@ -572,7 +570,13 @@ def _conv_11_fake_impl(
         )
     elif spatial_dims == 1:
         return torch.nn.functional.conv1d(
-            X, W, B, stride=strides[0], padding=padding[0], dilation=dilations[0], groups=group
+            X,
+            W,
+            B,
+            stride=strides[0],
+            padding=padding[0],
+            dilation=dilations[0],
+            groups=group,
         )
     elif spatial_dims == 3:
         return torch.nn.functional.conv3d(
@@ -616,7 +620,13 @@ def conv_11(
         )
     elif spatial_dims == 1:
         return torch.nn.functional.conv1d(
-            X, W, B, stride=strides[0], padding=padding[0], dilation=dilations[0], groups=group
+            X,
+            W,
+            B,
+            stride=strides[0],
+            padding=padding[0],
+            dilation=dilations[0],
+            groups=group,
         )
     elif spatial_dims == 3:
         return torch.nn.functional.conv3d(
@@ -636,7 +646,9 @@ def _dft_20_fake_impl(
 ) -> torch.Tensor:
     """Fake implementation for DFT-20 for torch.compile purposes."""
     # Normalize axis to positive index
-    normalized_axis = axis if axis >= 0 else input.ndim + axis - 1  # -1 for the complex dimension
+    normalized_axis = (
+        axis if axis >= 0 else input.ndim + axis - 1
+    )  # -1 for the complex dimension
 
     # Determine output shape along the FFT axis
     if inverse:
@@ -702,7 +714,9 @@ def dft_20(
         if onesided:
             result = torch.fft.irfft(complex_input, n=n, dim=axis)
             # Convert real result back to [..., 2] format with zero imaginary part
-            result_complex = torch.view_as_real(torch.complex(result, torch.zeros_like(result)))
+            result_complex = torch.view_as_real(
+                torch.complex(result, torch.zeros_like(result))
+            )
             return result_complex
         else:
             result = torch.fft.ifft(complex_input, n=n, dim=axis)
@@ -721,7 +735,7 @@ def dft_20(
 
 def _div_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Div-13 for torch.compile purposes."""
-    return A.clone()
+    return torch.div(A, B)
 
 
 @_onnx_op("Div", 13, _div_13_fake_impl)
@@ -732,7 +746,8 @@ def div_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 def _expand_13_fake_impl(input: torch.Tensor, shape: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Expand-13 for torch.compile purposes."""
-    return input.clone()
+    target_shape = shape.tolist()
+    return torch.empty(target_shape, dtype=input.dtype, device=input.device)
 
 
 @_onnx_op("Expand", 13, _expand_13_fake_impl)
@@ -746,7 +761,7 @@ def _gather_13_fake_impl(
     data: torch.Tensor, indices: torch.Tensor, *, axis: int = 0
 ) -> torch.Tensor:
     """Fake implementation for Gather-13 for torch.compile purposes."""
-    return data.clone()
+    return torch.gather(data, axis, indices)
 
 
 @_onnx_op("Gather", 13, _gather_13_fake_impl)
@@ -759,7 +774,7 @@ def gather_13(
 
 def _matmul_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Fake implementation for MatMul-13 for torch.compile purposes."""
-    return torch.empty(A.shape[:-1] + B.shape[-1:], dtype=A.dtype, device=A.device)
+    return torch.matmul(A, B)
 
 
 @_onnx_op("MatMul", 13, _matmul_13_fake_impl)
@@ -771,10 +786,14 @@ def matmul_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 # Element-wise Min/Max operations
 def _max_13_fake_impl(*data_tensors: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Max-13 for torch.compile purposes."""
-    result = data_tensors[0]
+    if not data_tensors:
+        raise ValueError("Max requires at least one input")
+    result_shape = data_tensors[0].shape
     for tensor in data_tensors[1:]:
-        result = torch.maximum(result, tensor)
-    return result
+        result_shape = torch.broadcast_shapes(result_shape, tensor.shape)
+    return torch.empty(
+        result_shape, dtype=data_tensors[0].dtype, device=data_tensors[0].device
+    )
 
 
 @_onnx_op("Max", 13, _max_13_fake_impl)
@@ -891,10 +910,14 @@ def max_pool_12(
 
 def _min_13_fake_impl(*data_tensors: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Min-13 for torch.compile purposes."""
-    result = data_tensors[0]
+    if not data_tensors:
+        raise ValueError("Min requires at least one input")
+    result_shape = data_tensors[0].shape
     for tensor in data_tensors[1:]:
-        result = torch.minimum(result, tensor)
-    return result
+        result_shape = torch.broadcast_shapes(result_shape, tensor.shape)
+    return torch.empty(
+        result_shape, dtype=data_tensors[0].dtype, device=data_tensors[0].device
+    )
 
 
 @_onnx_op("Min", 13, _min_13_fake_impl)
@@ -908,7 +931,7 @@ def min_13(*data_tensors: torch.Tensor) -> torch.Tensor:
 
 def _mul_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Mul-13 for torch.compile purposes."""
-    return A.clone()
+    return torch.mul(A, B)
 
 
 @_onnx_op("Mul", 13, _mul_13_fake_impl)
@@ -919,7 +942,9 @@ def mul_13(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 def _pow_13_fake_impl(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Pow-13 for torch.compile purposes."""
-    return X.clone()
+    return torch.empty(
+        torch.broadcast_shapes(X.shape, Y.shape), dtype=X.dtype, device=X.device
+    )
 
 
 @_onnx_op("Pow", 13, _pow_13_fake_impl)
@@ -932,7 +957,12 @@ def _range_11_fake_impl(
     start: torch.Tensor, limit: torch.Tensor, delta: torch.Tensor
 ) -> torch.Tensor:
     """Fake implementation for Range-11 for torch.compile purposes."""
-    return start.clone()
+    # Calculate number of elements: ceil((limit - start) / delta)
+    start_val = start.item()
+    limit_val = limit.item()
+    delta_val = delta.item()
+    num_elements = max(0, int((limit_val - start_val) / delta_val))
+    return torch.empty(num_elements, dtype=start.dtype, device=start.device)
 
 
 @_onnx_op("Range", 11, _range_11_fake_impl)
@@ -953,7 +983,18 @@ def _reduce_max_13_fake_impl(
     data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
 ) -> torch.Tensor:
     """Fake implementation for ReduceMax-13 for torch.compile purposes."""
-    return data.clone()
+    if axes is None:
+        if keepdims:
+            return torch.empty([1] * data.ndim, dtype=data.dtype, device=data.device)
+        else:
+            return torch.empty((), dtype=data.dtype, device=data.device)
+    output_shape = list(data.shape)
+    for axis in sorted(axes, reverse=True):
+        if keepdims:
+            output_shape[axis] = 1
+        else:
+            output_shape.pop(axis)
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("ReduceMax", 13, _reduce_max_13_fake_impl)
@@ -973,7 +1014,18 @@ def _reduce_mean_13_fake_impl(
     data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
 ) -> torch.Tensor:
     """Fake implementation for ReduceMean-13 for torch.compile purposes."""
-    return data.clone()
+    if axes is None:
+        if keepdims:
+            return torch.empty([1] * data.ndim, dtype=data.dtype, device=data.device)
+        else:
+            return torch.empty((), dtype=data.dtype, device=data.device)
+    output_shape = list(data.shape)
+    for axis in sorted(axes, reverse=True):
+        if keepdims:
+            output_shape[axis] = 1
+        else:
+            output_shape.pop(axis)
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("ReduceMean", 13, _reduce_mean_13_fake_impl)
@@ -990,7 +1042,18 @@ def _reduce_min_13_fake_impl(
     data: torch.Tensor, *, axes: Optional[list[int]] = None, keepdims: bool = True
 ) -> torch.Tensor:
     """Fake implementation for ReduceMin-13 for torch.compile purposes."""
-    return data.clone()
+    if axes is None:
+        if keepdims:
+            return torch.empty([1] * data.ndim, dtype=data.dtype, device=data.device)
+        else:
+            return torch.empty((), dtype=data.dtype, device=data.device)
+    output_shape = list(data.shape)
+    for axis in sorted(axes, reverse=True):
+        if keepdims:
+            output_shape[axis] = 1
+        else:
+            output_shape.pop(axis)
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("ReduceMin", 13, _reduce_min_13_fake_impl)
@@ -1023,7 +1086,14 @@ def _reshape_13_fake_impl(
     data: torch.Tensor, shape: torch.Tensor, *, allowzero: bool = False
 ) -> torch.Tensor:
     """Fake implementation for Reshape-13 for torch.compile purposes."""
-    return data.clone()
+    target_shape = shape.tolist()
+    if not allowzero:
+        # Replace 0 with corresponding input dimension
+        target_shape = [
+            target_shape[i] if target_shape[i] != 0 else data.shape[i]
+            for i in range(len(target_shape))
+        ]
+    return torch.reshape(data, target_shape)
 
 
 @_onnx_op("Reshape", 13, _reshape_13_fake_impl)
@@ -1194,7 +1264,7 @@ def rotary_embedding_23(
 # Shape operations
 def _shape_13_fake_impl(data: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Shape-13 for torch.compile purposes."""
-    return torch.tensor(data.shape, device=data.device)
+    return torch.empty(len(data.shape), dtype=torch.int64, device=data.device)
 
 
 @_onnx_op("Shape", 13, _shape_13_fake_impl)
@@ -1224,7 +1294,20 @@ def _slice_13_fake_impl(
     steps: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Fake implementation for Slice-13 for torch.compile purposes."""
-    return data.clone()
+    starts_list = starts.tolist()
+    ends_list = ends.tolist()
+    axes_list = axes.tolist() if axes is not None else list(range(len(starts_list)))
+    steps_list = steps.tolist() if steps is not None else [1] * len(starts_list)
+
+    output_shape = list(data.shape)
+    for i, axis in enumerate(axes_list):
+        dim_size = data.shape[axis]
+        start = max(0, min(starts_list[i], dim_size))
+        end = max(0, min(ends_list[i], dim_size))
+        step = steps_list[i]
+        output_shape[axis] = max(0, (end - start + step - 1) // step)
+
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("Slice", 13, _slice_13_fake_impl)
@@ -1258,9 +1341,26 @@ def _split_13_fake_impl(
     num_outputs: Optional[int] = None,
 ) -> tuple[torch.Tensor, ...]:
     """Fake implementation for Split-13 for torch.compile purposes."""
-    if num_outputs is None:
-        num_outputs = 2
-    return tuple(input.clone() for _ in range(num_outputs))
+    if split is not None:
+        split_sizes = split.tolist()
+        outputs = []
+        for size in split_sizes:
+            output_shape = list(input.shape)
+            output_shape[axis] = size
+            outputs.append(
+                torch.empty(output_shape, dtype=input.dtype, device=input.device)
+            )
+        return tuple(outputs)
+    else:
+        if num_outputs is None:
+            num_outputs = input.shape[axis]
+        size = input.shape[axis] // num_outputs
+        output_shape = list(input.shape)
+        output_shape[axis] = size
+        return tuple(
+            torch.empty(output_shape, dtype=input.dtype, device=input.device)
+            for _ in range(num_outputs)
+        )
 
 
 @_onnx_op("Split", 13, _split_13_fake_impl)
@@ -1288,13 +1388,20 @@ def _squeeze_13_fake_impl(
     data: torch.Tensor, axes: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     """Fake implementation for Squeeze-13 for torch.compile purposes."""
-    return data.clone()
+    if axes is None:
+        # Squeeze all dimensions of size 1
+        output_shape = [s for s in data.shape if s != 1]
+    else:
+        axes_list = sorted(axes.tolist(), reverse=True)
+        output_shape = list(data.shape)
+        for axis in axes_list:
+            if output_shape[axis] == 1:
+                output_shape.pop(axis)
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("Squeeze", 13, _squeeze_13_fake_impl)
-def squeeze_13(
-    data: torch.Tensor, axes: Optional[torch.Tensor] = None
-) -> torch.Tensor:
+def squeeze_13(data: torch.Tensor, axes: Optional[torch.Tensor] = None) -> torch.Tensor:
     """Squeeze-13 https://onnx.ai/onnx/operators/onnx__Squeeze.html"""
     if axes is None:
         # Squeeze all dimensions of size 1
@@ -1311,7 +1418,7 @@ def squeeze_13(
 # Sub operations
 def _sub_13_fake_impl(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Sub-13 for torch.compile purposes."""
-    return A.clone()
+    return torch.sub(A, B)
 
 
 @_onnx_op("Sub", 13, _sub_13_fake_impl)
@@ -1325,7 +1432,10 @@ def _transpose_13_fake_impl(
     data: torch.Tensor, *, perm: Optional[list[int]] = None
 ) -> torch.Tensor:
     """Fake implementation for Transpose-13 for torch.compile purposes."""
-    return data.clone()
+    if perm is None:
+        perm = list(range(data.ndim - 1, -1, -1))
+    output_shape = [data.shape[i] for i in perm]
+    return torch.empty(output_shape, dtype=data.dtype, device=data.device)
 
 
 @_onnx_op("Transpose", 13, _transpose_13_fake_impl)
@@ -1340,11 +1450,13 @@ def transpose_13(
 
 
 # Unsqueeze operations
-def _unsqueeze_13_fake_impl(
-    data: torch.Tensor, axes: torch.Tensor
-) -> torch.Tensor:
+def _unsqueeze_13_fake_impl(data: torch.Tensor, axes: torch.Tensor) -> torch.Tensor:
     """Fake implementation for Unsqueeze-13 for torch.compile purposes."""
-    return data.clone()
+    axes_list = sorted(axes.tolist())
+    result = data
+    for axis in axes_list:
+        result = torch.unsqueeze(result, axis)
+    return result
 
 
 @_onnx_op("Unsqueeze", 13, _unsqueeze_13_fake_impl)
@@ -1702,4 +1814,3 @@ def attention_23(
         )
 
     return output, present_key, present_value, qk_output
-
