@@ -457,24 +457,6 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaBusyWaitForFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::busy_wait_for_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cudaClearFlag(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    at::cuda::clear_flag();
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // We need to ensure that as long as a thread will NEVER loose the GIL as long
 // as it holds the CUDA mutex. Otherwise another thread might be scheduled and
 // try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
@@ -1063,8 +1045,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
-#ifndef USE_ROCM
-      // NVIDIA-only properties
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_property_readonly(
           "clock_rate",
           [](const cudaDeviceProp&) {
@@ -1085,19 +1067,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
           })
       .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
-          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+          "shared_memory_per_multiprocessor",
+          &cudaDeviceProp::sharedMemPerMultiprocessor)
+
+#ifndef USE_ROCM
+      // NVIDIA-only properties
       .def_readonly(
           "shared_memory_per_block_optin",
           &cudaDeviceProp::sharedMemPerBlockOptin)
-      .def_readonly(
-          "shared_memory_per_multiprocessor",
-          &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
-#if USE_ROCM
-      // ROCm: expose shared_memory_per_block for shared memory based pruning
-      .def_readonly(
-          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
-#endif
+
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
       // HIP-only property; reuse name attribute for CUDA builds
@@ -2108,11 +2087,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
     {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
-    {"_cuda_busy_wait_for_flag",
-     THCPModule_cudaBusyWaitForFlag,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_clear_flag", THCPModule_cudaClearFlag, METH_NOARGS, nullptr},
     {"_cuda_lock_mutex", THCPModule_cudaLockMutex, METH_NOARGS, nullptr},
     {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS, nullptr},
     {"_cuda_set_sync_debug_mode",

@@ -26,9 +26,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
-     runOnRocmArch, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -1150,7 +1150,6 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    @unittest.skipIf((not TEST_WITH_ROCM) and _get_torch_cuda_version() < (12, 1), "Test is fixed on cuda 12.1 update 1.")
     def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):
         # See https://github.com/pytorch/pytorch/issues/94772, https://github.com/pytorch/pytorch/issues/105359
         # This test crashes with `cusolver error: CUSOLVER_STATUS_EXECUTION_FAILED` on cuda 11.8,
@@ -2832,6 +2831,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.double, torch.cdouble)
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
+
+        if torch.version.hip and isRocmArchAnyOf(MI200_ARCH) and dtype is torch.complex128:
+            self.skipTest("Currently failing on rocm mi200")
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
