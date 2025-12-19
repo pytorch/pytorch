@@ -9859,6 +9859,28 @@ class TestSDPA(TestCaseMPS):
         # 1 kB different maximum allowed value
         torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=1e-3, rtol=1e-3)
 
+    def test_sdpa_batch_size_and_non_contiguous(self):
+        dtype = torch.float32
+        for contiguous in [True, False]:
+            for batch_size in [1, 2]:
+                B, H, S, D = batch_size, 12, 7, 64
+
+                if contiguous:
+                    q = torch.randn(B, H, S, D, dtype=dtype)
+                    k = torch.randn(B, H, S, D, dtype=dtype)
+                    v = torch.randn(B, H, S, D, dtype=dtype)
+                else:
+                    q = torch.randn(B, S, H * D, dtype=dtype).view(B, S, H, D).transpose(1, 2)
+                    k = torch.randn(B, S, H * D, dtype=dtype).view(B, S, H, D).transpose(1, 2)
+                    v = torch.randn(B, S, H * D, dtype=dtype).view(B, S, H, D).transpose(1, 2)
+
+                out_cpu = F.scaled_dot_product_attention(q, k, v)
+                out_mps = F.scaled_dot_product_attention(q.to("mps"), k.to("mps"), v.to("mps")).cpu()
+
+                diff = (out_cpu - out_mps).abs().max().item()
+                torch.testing.assert_close(out_cpu, out_mps)
+
+
     def generate_qkv(self, batch: int, NH: int, q_len: int, s_len: int, head_dim: int, layout: str, dtype: torch.dtype):
         if layout == "contiguous":
             q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
