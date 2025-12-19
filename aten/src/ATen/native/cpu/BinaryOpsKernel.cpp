@@ -1430,6 +1430,18 @@ void shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
       });
 } // shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator)
 
+void ldexp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(0), "ldexp_cpu", [&] {
+    using float_t = scalar_t;
+    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(1), "ldexp_cpu_exp", [&] {
+      using int_t = scalar_t;
+      cpu_kernel(iter, [](float_t x, int_t exp) -> float_t {
+        return static_cast<float_t>(std::ldexp(static_cast<double>(x), exp));
+      });
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel)
@@ -1486,6 +1498,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel)
+REGISTER_DISPATCH(ldexp_stub, ldexp_kernel)
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel)
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel)
