@@ -749,7 +749,12 @@ def _gen_transform_infos_non_cached(
     dst_shard_order = dst_spec.shard_order
     # DTensorSpec should automatically generate shard_order, and it can be () if
     # no shard.
-    assert src_shard_order is not None and dst_shard_order is not None
+    try:
+        assert src_shard_order is not None and dst_shard_order is not None
+    except:
+        drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
+        transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
+        return transform_infos
     # Determine which transform strategy to use:
     # 1. Non-standard device order → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
