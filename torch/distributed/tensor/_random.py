@@ -27,8 +27,9 @@ _rng_tracker: Optional["_RNGStateTracker"] = None
 _USE_THREAD_RNG_TRACKER: bool = False
 
 
+@contextlib.contextmanager
 def _use_thread_rng_tracker(enabled: bool = True):
-    global _use_thread_rng_tracker
+    global _USE_THREAD_RNG_TRACKER
     old_value = _USE_THREAD_RNG_TRACKER
     _USE_THREAD_RNG_TRACKER = enabled
     try:
@@ -532,8 +533,12 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         This feature requires a patched pytorch. The patch is in ......
     """
 
-    def __init__(self, device_type: str = "cuda"):
-        super().__init__(device_type)
+    def __init__(
+        self,
+        device_mesh: DeviceMesh,
+        run_state_sync: bool = True,
+    ):
+        super().__init__(device_mesh, run_state_sync)
         # source: aten/src/ATen/native/cuda/DistributionTemplates.h
         self.block_size = 256
         self.unroll = 4
