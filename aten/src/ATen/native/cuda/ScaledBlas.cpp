@@ -11,8 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -61,10 +60,9 @@ class cublasCommonArgs;
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
@@ -664,7 +662,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
 

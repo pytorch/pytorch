@@ -11,15 +11,9 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/tunable/Tunable.h>
-#include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
 #ifdef USE_MSLK
@@ -56,7 +50,38 @@
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace at::cuda::scaled {
+namespace at::scaled {
+
+/**
+ * Track concrete implementations available
+ */
+enum class ScaledGemmImplementation {
+  NONE = 0,
+  TENSORWISE_TENSORWISE = 1,
+  ROWWISE_ROWWISE = 2,
+  BLOCK_128x128_1x128 = 3,
+  BLOCK_1x128_128x128 = 4,
+  BLOCK_1x128_1x128 = 5,
+  MXFP8_MXFP8 = 6,
+  NVFP4_NVFP4 = 7,
+  NVFP4_NVFP4_SINGLE_SCALE = 8,
+  MXFP4_MXFP4 = 9,
+};
+
+/**
+ * Convert passed int (enum) from python back into a
+ * strictly-typed enum
+ */
+template <class EnumType, class ArrayType>
+std::vector<EnumType> convert_int_to_enum(ArrayType& v) {
+  std::vector<EnumType> converted;
+  converted.reserve(v.size());
+
+  for (auto vi : v) {
+    converted.push_back(static_cast<EnumType>(vi));
+  }
+  return converted;
+}
 
 /**
  * Both inputs must be fp8,
@@ -266,4 +291,4 @@ bool check_mxfp4_recipe(c10::ScalarType type_a,
   return true;
 }
 
-} // namespace at::native::cuda::blas::scaled
+} // namespace at::scaled
