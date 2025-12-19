@@ -12,7 +12,7 @@ class Print(HigherOrderOperator):
     print(format_str, *args, **kwargs) -> None
 
     This Higher Order Operator (HOP) provides a functional version of print for use in PyTorch graphs.
-    It supports two calling conventions:
+    It supports the calling conventions of print(format_str.format(*args, **kwargs)):
 
     1. Format string with keyword arguments (named placeholders):
        torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
@@ -88,16 +88,10 @@ def print_impl(format_str: str, *args: object, **kwargs: object) -> None:
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }
-    new_args = pytree.tree_map_only(
+    new_args, new_kwargs = pytree.tree_map_only(
         tuple(map_types.keys()),
         lambda a: map_types[type(a)](a),
-        args,
-        lambda a: isinstance(a, tuple(map_types.keys())),
-    )
-    new_kwargs = pytree.tree_map_only(
-        tuple(map_types.keys()),
-        lambda a: map_types[type(a)](a),
-        kwargs,
+        (args, kwargs),
         lambda a: isinstance(a, tuple(map_types.keys())),
     )
     #  Use built-in print to avoid recursion with the HOP print
