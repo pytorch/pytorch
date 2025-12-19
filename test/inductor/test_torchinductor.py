@@ -125,6 +125,7 @@ from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
+    FxCompileMode,
 )
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
@@ -5006,6 +5007,7 @@ class CommonTemplate:
         ),
     )
     @parametrize("nhwc", (False, True))
+    @with_tf32_off
     def test_conv2d_backward_parametrized(
         self,
         channels_groups: list,
@@ -5020,7 +5022,13 @@ class CommonTemplate:
         groups = channels_groups[2]
 
         if is_dynamic_shape_enabled() and (dilation != 1 or groups == 1):
-            self.skipTest("Expected failure under dynamic shapes:")
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            # TODO: Remove this workaround once TF32 settings are properly passed to subprocess
+            # Currently, subprocess mode starts with default TF32 settings (cudnn.allow_tf32=True)
+            # even if parent process has set allow_tf32=False.
+            self.skipTest("Expected failure under subprocess compile mode")
 
         def fn(grad_output, inp, weight):
             conv_backward = torch.ops.aten.convolution_backward.default(
@@ -5053,21 +5061,20 @@ class CommonTemplate:
             atol = 2e-4
             rtol = 0.001
 
-        with torch.backends.cudnn.flags(enabled=True, allow_tf32=False):
-            weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
-            if nhwc:
-                weight = weight.to(memory_format=torch.channels_last)
-            self.common(
-                fn,
-                (
-                    torch.randn([2, out_channels, output_h, output_w]),
-                    torch.randn([2, in_channels, input_h, input_w]),
-                    weight,
-                ),
-                atol=atol,
-                rtol=rtol,
-                check_lowp=False,
-            )
+        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        if nhwc:
+            weight = weight.to(memory_format=torch.channels_last)
+        self.common(
+            fn,
+            (
+                torch.randn([2, out_channels, output_h, output_w]),
+                torch.randn([2, in_channels, input_h, input_w]),
+                weight,
+            ),
+            atol=atol,
+            rtol=rtol,
+            check_lowp=False,
+        )
 
     @parametrize(
         "use_block_ptr",
