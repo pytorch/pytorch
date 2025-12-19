@@ -18026,6 +18026,32 @@ def forward(self, x, y):
             str(ep.graph)
         )
 
+    def test_bucketize_scalar_export(self):
+        class BucketizeScalar(torch.nn.Module):
+            def __init__(self, scalar_value, out_int32=False):
+                super().__init__()
+                self.scalar_value = scalar_value
+                self.out_int32 = out_int32
+
+            def forward(self, boundaries):
+                return torch.bucketize(
+                    self.scalar_value, boundaries, out_int32=self.out_int32
+                )
+
+        test_cases = [
+            (5, torch.tensor([1, 3, 7, 9]), False, torch.int64),
+            (2.5, torch.tensor([1.0, 2.0, 3.0, 4.0]), False, torch.int64),
+            (5, torch.tensor([1, 3, 7, 9]), True, torch.int32),
+        ]
+
+        for scalar_value, boundaries, out_int32, expected_dtype in test_cases:
+            model = BucketizeScalar(scalar_value, out_int32)
+            exported = export(model, (boundaries,))
+            eager_result = model(boundaries)
+            export_result = exported.module()(boundaries)
+            self.assertEqual(eager_result, export_result)
+            self.assertEqual(export_result.dtype, expected_dtype)
+
 
 if __name__ == "__main__":
     run_tests()

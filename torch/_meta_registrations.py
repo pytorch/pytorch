@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    NumberType,
     suggest_memory_format,
     TensorLike,
 )
@@ -3357,7 +3358,8 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    if device_hint(self) == "cpu":
+    # The impl of xpu nonzero_static is different with cuda but aligned with cpu
+    if device_hint(self) in ("cpu", "xpu"):
         return self.new_empty((size, self.dim()), dtype=torch.long)
     else:
         return torch.empty_strided(
@@ -3704,7 +3706,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
+    expected_dim = 2 if w.fake_device.type == "xpu" else 4
+    torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
         lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
@@ -3713,7 +3716,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+    dim_n = w.size(0) if w.fake_device.type == "xpu" else w.size(0) * 8
+    return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int4pack_mm_for_cpu])
@@ -7474,6 +7478,20 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
         memory_format=torch.contiguous_format,
+    )
+
+
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(
+    self: NumberType,
+    boundaries: Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
     )
 
 
