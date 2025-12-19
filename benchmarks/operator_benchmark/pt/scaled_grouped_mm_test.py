@@ -20,6 +20,24 @@ reusing the same conversion helpers as `test/test_scaled_matmul_cuda.py`.
 _TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
 
 
+def _supports_scaled_grouped_mm_benchmark() -> tuple[bool, str]:
+    # `scaled_grouped_mm` was introduced in PyTorch 2.9.
+    if not hasattr(torch.nn.functional, "scaled_grouped_mm"):
+        return False, "torch.nn.functional.scaled_grouped_mm requires PyTorch 2.9+"
+    if not torch.cuda.is_available():
+        return False, "CUDA not available"
+    # This benchmark is currently CUDA-only (non-HIP).
+    if torch.version.hip is not None:
+        return False, "ROCm not supported by this benchmark"
+
+    # Keep in sync with torch._scaled_grouped_mm support:
+    # "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+"
+    major, minor = torch.cuda.get_device_capability(0)
+    if (major, minor) not in ((9, 0), (10, 0)):
+        return False, f"unsupported CUDA compute capability {major}.{minor} (requires 9.0 or 10.0)"
+    return True, ""
+
+
 def _get_test_scaled_matmul_cuda() -> ModuleType:
     """
     Reuse scale/quantization helpers from `test/test_scaled_matmul_cuda.py`.
@@ -171,9 +189,15 @@ scaled_grouped_mm_configs_long = op_bench.config_list(
     tags=["long"],
 )
 
-op_bench.generate_pt_test(
-    scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long, ScaledGroupedMMBenchmark
-)
+_SUPPORTED, _SKIP_REASON = _supports_scaled_grouped_mm_benchmark()
+if _SUPPORTED:
+    op_bench.generate_pt_test(
+        scaled_grouped_mm_configs_short + scaled_grouped_mm_configs_long,
+        ScaledGroupedMMBenchmark,
+    )
+else:
+    # Don't register any tests on unsupported platforms; the runner will emit an empty result set.
+    print(f"# Skipping scaled_grouped_mm benchmarks: {_SKIP_REASON}")
 
 
 if __name__ == "__main__":

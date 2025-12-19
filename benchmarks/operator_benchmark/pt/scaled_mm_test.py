@@ -93,6 +93,28 @@ def _supports_fp8_rowwise_fp32_output() -> bool:
     return torch.cuda.get_device_capability(0) == (9, 0)
 
 
+def _supports_scaled_mm_benchmark() -> tuple[bool, str]:
+    # `scaled_mm` was introduced in PyTorch 2.9.
+    if not hasattr(torch.nn.functional, "scaled_mm"):
+        return False, "torch.nn.functional.scaled_mm requires PyTorch 2.9+"
+
+    if not torch.cuda.is_available():
+        return False, "CUDA not available"
+
+    # Mirror torch._scaled_mm support message:
+    # "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+"
+    if torch.version.hip is not None:
+        arch = torch.cuda.get_device_properties(0).gcnArchName
+        if "gfx94" in arch:
+            return True, ""
+        return False, f"unsupported ROCm arch {arch} (requires MI300+ / gfx94x)"
+
+    cap = torch.cuda.get_device_capability(0)
+    if cap >= (9, 0) or cap == (8, 9):
+        return True, ""
+    return False, f"unsupported CUDA compute capability {cap[0]}.{cap[1]} (requires >= 9.0 or 8.9)"
+
+
 class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     _MX_BLOCK_SIZE: int = 32
     _NVFP4_BLOCK_SIZE: int = 16
@@ -512,10 +534,13 @@ if _supports_fp8_deepseek_blockwise_scaling():
         tags=["long"],
     )
 
-# Generate tests for scaled_mm
-op_bench.generate_pt_test(
-    scaled_mm_configs_short + scaled_mm_configs_long, ScaledMMBenchmark
-)
+# Generate tests for scaled_mm (only register on supported platforms).
+_SUPPORTED, _SKIP_REASON = _supports_scaled_mm_benchmark()
+if _SUPPORTED:
+    op_bench.generate_pt_test(scaled_mm_configs_short + scaled_mm_configs_long, ScaledMMBenchmark)
+else:
+    # Don't register any tests on unsupported platforms; the runner will emit an empty result set.
+    print(f"# Skipping scaled_mm benchmarks: {_SKIP_REASON}")
 
 
 if __name__ == "__main__":
