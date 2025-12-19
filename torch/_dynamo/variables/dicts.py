@@ -536,11 +536,7 @@ class ConstDictVariable(VariableTracker):
             # when unused keys change.
             # For non-constant keys, we need to guard all keys since the key itself
             # could change behavior.
-            # Skip if the dict has already been modified - a DICT_KEYS_MATCH guard
-            # would have been installed by the earlier mutation.
-            if not args[
-                0
-            ].is_python_constant() and not tx.output.side_effects.is_modified(self):
+            if not args[0].is_python_constant():
                 self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
