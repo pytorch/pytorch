@@ -246,6 +246,17 @@ class FakeTensorTest(TestCase):
         ) as exc:
             torch.nextafter(fake_x, fake_y)
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_one_dim_one_elem(self):
+        with FakeTensorMode():
+            base = torch.zeros((1, 2), device="cuda")
+            src = torch.tensor([1.0])
+            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
+            self.assertEqual(out.shape, (1, 2))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
