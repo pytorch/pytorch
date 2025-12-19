@@ -910,8 +910,6 @@ class FakeTensor(Tensor):
         common_device = None
         has_scalar_only_inputs = False
         is_cpu_single_value = None
-        is_cpu_zero_dim = None
-        is_cpu_one_dim_one_elem = None
 
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
