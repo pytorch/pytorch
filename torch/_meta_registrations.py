@@ -3869,8 +3869,7 @@ def meta__dyn_quant_pack_4bit_weight(
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
     kleidi_supported = (
-        torch.backends.kleidiai.is_available()
-        and torch._C._cpu._is_arm_bf16_supported()
+        torch.backends.kleidiai.is_available() and torch._C.cpu._is_arm_bf16_supported()
     )
 
     use_kleidiai_packing = kleidi_supported and (
