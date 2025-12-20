@@ -27,9 +27,9 @@ Kernel
 
 Compound Operation
    A Compound Operation is composed of other operations. Its kernel is usually
-   device-agnostic. Normally it doesn't have its own derivative functions defined.
-   Instead, AutoGrad automatically computes its derivative based on operations it
-   uses.
+   device-agnostic. There are two variants of this: Composite Implicit Autograd, where no
+   autograd formula is required as it is derived implicitly from the operations composing this
+   one. And Composite Explicit Autograd, where there is an explicit autograd formula.
 
 Composite Operation
    Same as {term}`Compound Operation`.
