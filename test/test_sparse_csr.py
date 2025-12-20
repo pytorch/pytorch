@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUSPARSE_GENER
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
+     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
@@ -1532,7 +1532,6 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNoSparseGeneric
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
@@ -1820,7 +1819,6 @@ class TestSparseCSR(TestCase):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
@@ -1970,7 +1968,6 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
