@@ -880,8 +880,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         if TEST_CUDA:
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_9_extension"))
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_10_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -910,8 +910,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                     install_directories.append(os.path.join(root, directory))
 
         for extension_name in [
-            "libtorch_agnostic_2_9_extension",
-            "libtorch_agnostic_2_10_extension",
+            "libtorch_agn_2_9_extension",
+            "libtorch_agn_2_10_extension",
         ]:
             for root, directories, _ in os.walk(
                 os.path.join(cpp_extensions, extension_name, "install")
@@ -1581,10 +1581,10 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--dynamo-disable-gc-after-compile",
-        action="store_true",
-        default=sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
-        help="Disables the run_gc_after_compile dynamo config option",
+        "--dynamo-gc-after-compile",
+        action=argparse.BooleanOptionalAction,
+        default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
+        help="Controls the run_gc_after_compile dynamo config option",
     )
 
     args, extra = parser.parse_known_args()
@@ -2076,6 +2076,20 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+    tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
+    if tests_to_include_env:
+        # Parse env var tests to module names (strips .py suffix and ::method)
+        env_tests = {parse_test_module(t) for t in tests_to_include_env.split()}
+
+        if options.include != TESTS:
+            # --include was explicitly provided, intersect with env var
+            cli_tests = {parse_test_module(t) for t in options.include}
+            options.include = list(env_tests & cli_tests)
+        else:
+            # No explicit --include, use env var tests
+            options.include = list(env_tests)
+
+        options.enable_td = False
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)
@@ -2155,7 +2169,7 @@ def main():
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
 
-    if options.dynamo_disable_gc_after_compile:
+    if not options.dynamo_gc_after_compile:
         os.environ["TORCH_DYNAMO_RUN_GC_AFTER_COMPILE"] = "0"
 
     elif options.inductor:
