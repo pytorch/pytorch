@@ -1592,7 +1592,7 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
 
     @with_comms
     def test_StridedShard_to_replicate(self):
-        mesh = init_device_mesh("cuda", (4,))
+        mesh = self.build_device_mesh()
         for split_factor in range(2, 17):
             for tensor_size in range(1, 200):
                 a = torch.arange(tensor_size)
