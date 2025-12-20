@@ -394,6 +394,10 @@ EXPECTED_FAILURES = {
     ("cuda", "matmul", "aot_eager_decomp_partition", "batch_invariance", None): "matmul has numerical differences across batch sizes",
     ("cuda", "matmul", "inductor_default", "batch_invariance", None): "matmul has numerical differences across batch sizes",
     ("cuda", "matmul", "inductor_numerics", "batch_invariance", None): "matmul has numerical differences across batch sizes",
+    # bmm is not batch-invariant due to floating-point associativity
+    ("cuda", "bmm", "aot_eager_decomp_partition", "batch_invariance", torch.float32): "bmm has numerical differences across batch sizes",
+    ("cuda", "bmm", "inductor_default", "batch_invariance", torch.float32): "bmm has numerical differences across batch sizes",
+    ("cuda", "bmm", "inductor_numerics", "batch_invariance", torch.float32): "bmm has numerical differences across batch sizes",
     # nn.functional.linear is not batch-invariant (uses matmul internally)
     ("cuda", "nn.functional.linear", "aot_eager_decomp_partition", "batch_invariance", None): "linear has numerical differences across batch sizes",
     ("cuda", "nn.functional.linear", "inductor_default", "batch_invariance", None): "linear has numerical differences across batch sizes",
