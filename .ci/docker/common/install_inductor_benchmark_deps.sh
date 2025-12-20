@@ -49,6 +49,13 @@ fi
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
 
+# NS: This is an insane hack, why are we installing wheels here?
+if [[ "${DESIRED_CUDA}" == 13.* ]]; then
+  echo "Well show me the way to the next CuDNN install"
+  echo "Oh don't ask why, Oh don't ask why"
+  pip_install nvidia-cudnn-cu13==9.15.1.9
+fi
+
 install_torchbench
 install_huggingface
 install_timm

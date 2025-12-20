@@ -455,15 +455,15 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   [annotate] forward
-  [nn.Mod] Foo
+    [nn.Mod] Foo
     [annotate] Foo
-    [nn.Mod] Foo.l1
+      [nn.Mod] Foo.l1
         aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
         aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
         )
 
-        for backend in ["eager", "aot_eager", "inductor"]:
-            with DebugMode() as debug_mode:
+        for backend in ["aot_eager", "inductor"]:
+            with DebugMode(run_compile_with_interpreter=True) as debug_mode:
                 torch.compile(mod, backend=backend, fullgraph=True)(x)
 
             if backend == "inductor":
@@ -475,12 +475,14 @@ class TestDTensorDebugMode(TestCase):
                 self.assertExpectedInline(
                     debug_mode.debug_string(),
                     """\
+  [aot_eager region (compile)] enter
   [annotate] Foo
     aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
-    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+  [aot_eager region (compile)] exit""",
                 )
 
-    def test_nn_module(self):
+    def test_nn_module_in_eager(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -507,15 +509,15 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  [nn.Mod] Bar
-    [nn.Mod] Bar.abc
-      [nn.Mod] Bar.abc.l1
+    [nn.Mod] Bar
+      [nn.Mod] Bar.abc
+        [nn.Mod] Bar.abc.l1
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-      [nn.Mod] Bar.abc.l2
+        [nn.Mod] Bar.abc.l2
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-    [nn.Mod] Bar.xyz
+      [nn.Mod] Bar.xyz
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
@@ -539,6 +541,136 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_nn_module=True) as debug_mode:
             fn(inp)
 
+    def test_nn_module_in_compiled_regions(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x).relu())
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l3 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l3(x + 2.0)
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(self.foo(x))
+
+        # Only region of module is compiled, test nn.Mod call hierarchy
+        mod = Baz()
+        mod.foo = torch.compile(mod.foo, backend="aot_eager", fullgraph=True)
+        inp = torch.randn(4, 4)
+        with DebugMode(
+            record_nn_module=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            mod(inp).sum()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [nn.Mod] Baz
+    [aot_eager region (compile)] enter
+      [nn.Mod (compile)] L['self'].l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    [aot_eager region (compile)] exit
+      [nn.Mod] Baz.bar
+        aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+        [nn.Mod] Baz.bar.l3
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::sum(t: f32[4, 4])  ->  t: f32[]""",
+        )
+
+        # Entire region is aot-eager compiled, with backwards
+        mod = torch.compile(Baz(), backend="aot_eager", fullgraph=True)
+        inp = torch.randn(4, 4)
+        with DebugMode(
+            record_nn_module=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out = mod(inp).sum()
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [aot_eager region (compile)] enter
+    [nn.Mod (compile)] L['self'].foo
+      [nn.Mod (compile)] L['self'].foo.l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].foo.l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    [nn.Mod (compile)] L['self'].bar
+      aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].bar.l3
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+  [aot_eager region (compile)] exit
+    aten::sum(t: f32[4, 4])  ->  t: f32[]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
+    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
+  [aot_eager region (compile)] enter
+    [nn.Mod (compile)] L['self'].bar
+      [nn.Mod (compile)] L['self'].bar.l3
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+    [nn.Mod (compile)] L['self'].foo
+      [nn.Mod (compile)] L['self'].foo.l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::threshold_backward(t: f32[4, 4], t: f32[4, 4], 0)  ->  t: f32[4, 4]
+      [nn.Mod (compile bwd)] L['self'].foo.l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+  [aot_eager region (compile)] exit
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]""",
+        )
+
     def test_record_function(self):
         def fn(x, y):
             z = x @ y
@@ -548,7 +680,7 @@ class TestDTensorDebugMode(TestCase):
 
         x = torch.randn(8, 4, requires_grad=True)
         y = torch.randn(4, 2, requires_grad=True)
-        with DebugMode() as debug_mode:
+        with DebugMode(run_compile_with_interpreter=True) as debug_mode:
             with torch.profiler.record_function("FWD"):
                 out = torch.compile(fn, backend="aot_eager")(x, y)
             out.backward()
@@ -557,17 +689,21 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   [record function] FWD
+    [aot_eager region (compile)] enter
       aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
       aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
       aten::sum(t: f32[8, 2])  ->  t: f32[]
       aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
       aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+    [aot_eager region (compile)] exit
       aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
       aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+  [aot_eager region (compile)] enter
     aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
     aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
     aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
+  [aot_eager region (compile)] exit
     aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
     aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
         )
