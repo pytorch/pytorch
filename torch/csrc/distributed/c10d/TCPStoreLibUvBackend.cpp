@@ -10,8 +10,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.h>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
 

@@ -1,7 +1,7 @@
 #include <c10/util/Exception.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
+#include <torch/csrc/distributed/c10d/Store.h>
+#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.h>
 #include <chrono>
 #include <exception>
 #include <vector>

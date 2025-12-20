@@ -7,8 +7,8 @@
 
 #include <gtest/gtest.h>
 
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
+#include <torch/csrc/distributed/c10d/TCPStore.h>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int defaultTimeout = 20;

@@ -5,7 +5,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/thread_name.h>
 #include <caffe2/utils/threadpool/WorkersPool.h>
-#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 namespace c10d::control_plane {

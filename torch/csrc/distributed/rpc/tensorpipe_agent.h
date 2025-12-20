@@ -6,8 +6,8 @@
 #include <thread>
 
 #include <c10/core/thread_pool.h>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
+#include <torch/csrc/distributed/c10d/Store.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <utility>
 

@@ -12,11 +12,11 @@
 
 #include <pybind11/chrono.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/Work.hpp>
-#include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/Types.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/Work.h>
+#include <torch/csrc/distributed/c10d/Store.h>
+#include <torch/csrc/distributed/c10d/Types.h>
+#include <torch/csrc/distributed/c10d/Utils.h>
 
 namespace c10d {
 

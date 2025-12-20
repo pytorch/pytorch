@@ -1,10 +1,10 @@
-#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.h>
 
 #include <deque>
 
 #include <ATen/core/functional.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {

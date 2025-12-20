@@ -1,6 +1,6 @@
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Backend.h>
 
 namespace c10d {
 

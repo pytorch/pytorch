@@ -5,7 +5,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/torch.h>
 #include <algorithm>
-#include <torch/csrc/distributed/c10d/NanCheck.hpp>
+#include <torch/csrc/distributed/c10d/NanCheck.h>
 #include <stdint.h>
 
 namespace c10d {

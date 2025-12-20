@@ -1,7 +1,7 @@
-#include <torch/csrc/distributed/c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.h>
 
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/Utils.h>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 
 #include <functional>
 
@@ -18,8 +18,8 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/comm.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/logger.h>
 #include <utility>
 
 namespace c10d {

@@ -1,6 +1,6 @@
 #ifdef USE_C10D_UCC
 #include <gtest/gtest.h>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.h>
 
 #include <utility>
 #include <vector>

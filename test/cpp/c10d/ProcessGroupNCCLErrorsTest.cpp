@@ -5,10 +5,10 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.h>
 #include <utility>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"

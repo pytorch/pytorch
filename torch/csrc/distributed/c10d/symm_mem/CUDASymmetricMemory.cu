@@ -1,7 +1,7 @@
-#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.h>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>

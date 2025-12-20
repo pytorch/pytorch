@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/FlightRecorderDetail.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorderDetail.h>
 
 namespace c10d {
 

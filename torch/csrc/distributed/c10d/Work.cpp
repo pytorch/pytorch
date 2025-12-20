@@ -1,8 +1,8 @@
 #include <ATen/ThreadLocalState.h>
-#include <distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/cuda/StreamBlock.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/Work.h>
 #include <utility>
 
 namespace c10d {

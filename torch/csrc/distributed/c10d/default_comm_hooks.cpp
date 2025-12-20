@@ -1,9 +1,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/torch.h>
 
 namespace c10d {

@@ -7,13 +7,13 @@
 #endif
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.h>
+#include <torch/csrc/distributed/c10d/GroupRegistry.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.h>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>

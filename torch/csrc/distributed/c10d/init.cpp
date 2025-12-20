@@ -1,59 +1,59 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/Functional.hpp>
-#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
-#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.h>
+#include <torch/csrc/distributed/c10d/Functional.h>
+#include <torch/csrc/distributed/c10d/GroupRegistry.h>
+#include <torch/csrc/distributed/c10d/TCPStore.h>
+#include <torch/csrc/distributed/c10d/Utils.h>
+#include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.h>
+#include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.h>
+#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.h>
 #include <string_view>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
-#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.h>
 #endif
-#include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/FakeProcessGroup.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.h>
+#include <torch/csrc/distributed/c10d/PyProcessGroup.h>
 
 #ifdef USE_C10D_GLOO
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.h>
 #endif
 
 #ifdef USE_C10D_XCCL
-#include <torch/csrc/distributed/c10d/ProcessGroupXCCL.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupXCCL.h>
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.h>
+#include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.h>
 #endif
 
 #ifdef USE_C10D_MPI
-#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.h>
 #endif
 
 #ifdef USE_C10D_UCC
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.h>
 #endif
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
+#include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
-#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/distributed/c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/logger.h>
+#include <torch/csrc/distributed/c10d/reducer.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>

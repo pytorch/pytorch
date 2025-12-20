@@ -22,15 +22,15 @@
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/NanCheck.hpp>
-#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.h>
+#include <torch/csrc/distributed/c10d/NanCheck.h>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.h>
 #include <torch/torch.h>
 #include <optional>
 

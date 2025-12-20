@@ -8,9 +8,9 @@
 #include <mutex>
 #include <vector>
 
-#include <torch/csrc/distributed/c10d/FlightRecorderDetail.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorderDetail.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.h>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.h>
 
 namespace c10d {
 control_plane::RegisterHandler dumpHandler{

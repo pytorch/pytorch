@@ -6,13 +6,13 @@
 #include <utility>
 
 #include <c10/util/thread_name.h>
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #ifdef _WIN32
-#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
+#include <torch/csrc/distributed/c10d/WinSockUtils.h>
 #else
-#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
+#include <torch/csrc/distributed/c10d/UnixSockUtils.h>
 #endif
 
 #include <torch/csrc/distributed/c10d/socket.h>
