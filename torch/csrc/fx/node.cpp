@@ -802,6 +802,31 @@ static PyObject* NodeBase_update_kwarg(
 
 // replace_input_with(old_input, new_input): Loop through input nodes and
 // replace
+static bool call_replace_hook_with_keywords(
+    PyObject* hook,
+    PyObject* old_node,
+    PyObject* new_name,
+    PyObject* user) {
+  THPObjectPtr kwargs(PyDict_New());
+  if (!kwargs) {
+    return false;
+  }
+  if (PyDict_SetItemString(kwargs.get(), "old", old_node) < 0 ||
+      PyDict_SetItemString(kwargs.get(), "new", new_name) < 0 ||
+      PyDict_SetItemString(kwargs.get(), "user", user) < 0) {
+    return false;
+  }
+  THPObjectPtr args(PyTuple_New(0));
+  if (!args) {
+    return false;
+  }
+  THPObjectPtr hook_result(PyObject_Call(hook, args.get(), kwargs.get()));
+  if (!hook_result) {
+    return false;
+  }
+  return true;
+}
+
 static PyObject* NodeBase_replace_input_with(
     PyObject* self,
     PyObject* const* args,
@@ -818,6 +843,8 @@ static PyObject* NodeBase_replace_input_with(
   PyObject* new_input = args[1];
 
   // Check for replace hooks on the graph's owning module
+  // Note: Only access .name if there are actually hooks to call, matching
+  // Python's behavior where `if replace_hooks:` is falsy for empty list.
   THPObjectPtr owning_module(
       PyObject_GetAttrString(node->graph, "owning_module"));
   if (owning_module && owning_module.get() != Py_None) {
@@ -826,13 +853,16 @@ static PyObject* NodeBase_replace_input_with(
     if (replace_hooks && replace_hooks.get() != Py_None &&
         PySequence_Check(replace_hooks)) {
       Py_ssize_t num_hooks = PySequence_Size(replace_hooks);
-      THPObjectPtr new_input_name(PyObject_GetAttrString(new_input, "name"));
-      for (Py_ssize_t i = 0; i < num_hooks; i++) {
-        THPObjectPtr hook(PySequence_GetItem(replace_hooks, i));
-        if (hook) {
-          THPObjectPtr hook_result(PyObject_CallFunction(
-              hook, "OOO", old_input, new_input_name.get(), self));
-          if (!hook_result) {
+      if (num_hooks > 0) {
+        THPObjectPtr new_input_name(PyObject_GetAttrString(new_input, "name"));
+        if (!new_input_name) {
+          return nullptr;
+        }
+        for (Py_ssize_t i = 0; i < num_hooks; i++) {
+          THPObjectPtr hook(PySequence_GetItem(replace_hooks, i));
+          if (hook &&
+              !call_replace_hook_with_keywords(
+                  hook.get(), old_input, new_input_name.get(), self)) {
             return nullptr;
           }
         }
@@ -1038,19 +1068,21 @@ static PyObject* NodeBase_replace_all_uses_with(
     // Call replace hooks
     // Access .name via attribute lookup to match Python semantics (raises
     // AttributeError if replace_with doesn't have .name)
+    // Note: Only access .name if there are actually hooks to call, matching
+    // Python's behavior where `if replace_hooks:` is falsy for empty list.
     if (replace_hooks && PySequence_Check(replace_hooks.get())) {
       Py_ssize_t num_hooks = PySequence_Size(replace_hooks.get());
-      THPObjectPtr replace_with_name(
-          PyObject_GetAttrString(replace_with, "name"));
-      if (!replace_with_name) {
-        return nullptr; // Raises AttributeError naturally
-      }
-      for (Py_ssize_t j = 0; j < num_hooks; j++) {
-        THPObjectPtr hook(PySequence_GetItem(replace_hooks.get(), j));
-        if (hook) {
-          THPObjectPtr hook_result(PyObject_CallFunction(
-              hook, "OOO", self, replace_with_name.get(), use_node));
-          if (!hook_result) {
+      if (num_hooks > 0) {
+        THPObjectPtr replace_with_name(
+            PyObject_GetAttrString(replace_with, "name"));
+        if (!replace_with_name) {
+          return nullptr; // Raises AttributeError naturally
+        }
+        for (Py_ssize_t j = 0; j < num_hooks; j++) {
+          THPObjectPtr hook(PySequence_GetItem(replace_hooks.get(), j));
+          if (hook &&
+              !call_replace_hook_with_keywords(
+                  hook.get(), self, replace_with_name.get(), use_node)) {
             return nullptr;
           }
         }
@@ -1224,8 +1256,10 @@ static PyObject* NodeBase__rename(PyObject* self, PyObject* candidate) {
     return nullptr;
   }
 
-  // Set self.name = new_name
-  Py_SETREF(node->name, new_name.release());
+  // Set self.name = new_name via __setattr__ so replace hooks fire
+  if (PyObject_SetAttrString(self, "name", new_name.get()) < 0) {
+    return nullptr;
+  }
 
   // Call graph._graph_namespace._rename_object(self, name)
   THPObjectPtr rename_obj(
@@ -1271,8 +1305,8 @@ static PyObject* NodeBase_getstate(
     return nullptr;
   if (PyDict_SetItemString(dict.get(), "target", node->target) < 0)
     return nullptr;
-  if (PyDict_SetItemString(dict.get(), "type", node->target) < 0)
-    return nullptr; // Note: Python uses target here (bug?), keeping compatible
+  if (PyDict_SetItemString(dict.get(), "type", node->type) < 0)
+    return nullptr;
 
   THPObjectPtr sort_key(NodeBase_get_sort_key(self, nullptr));
   if (!sort_key) {
@@ -1530,12 +1564,10 @@ static int NodeBase_setattro(
         while (PyDict_Next(node->users, &pos, &user_key, &user_value)) {
           for (Py_ssize_t i = 0; i < num_hooks; i++) {
             THPObjectPtr hook(PySequence_GetItem(replace_hooks, i));
-            if (hook) {
-              THPObjectPtr hook_result(
-                  PyObject_CallFunction(hook, "OOO", self, value, user_key));
-              if (!hook_result) {
-                return -1;
-              }
+            if (hook &&
+                !call_replace_hook_with_keywords(
+                    hook.get(), self, value, user_key)) {
+              return -1;
             }
           }
         }

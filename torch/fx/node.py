@@ -259,7 +259,7 @@ class Node(_NodeBase):
       in the Graph printout.
     """
 
-    # Type annotations for the members
+    # Type annotations for the members (some implemented in C++ via _NodeBase)
     _args: tuple["Argument", ...]
     _kwargs: dict[str, "Argument"]
     graph: "Graph"
@@ -272,6 +272,14 @@ class Node(_NodeBase):
     _sort_key: Any
     _repr_fn: Optional[Callable[["Node"], str]]
     meta: dict[str, Any]
+
+    # Properties implemented in C++ (_NodeBase) - type stubs in torch/_C/__init__.pyi
+    args: tuple["Argument", ...]
+    kwargs: dict[str, "Argument"]
+    next: "Node"
+    prev: "Node"
+    all_input_nodes: list["Node"]
+    stack_trace: Optional[str]
 
     @staticmethod
     def _pretty_print_target(target: object) -> str:
