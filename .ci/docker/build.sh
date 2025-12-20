@@ -401,49 +401,52 @@ else
   docker buildx use pytorch-builder
 fi
 
-# Build with zstd compression
+# Common build args
+BUILD_ARGS=(
+  --build-arg "BUILD_ENVIRONMENT=${image}"
+  --build-arg "LLVMDEV=${LLVMDEV:-}"
+  --build-arg "VISION=${VISION:-}"
+  --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
+  --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+  --build-arg "GLIBC_VERSION=${GLIBC_VERSION}"
+  --build-arg "CLANG_VERSION=${CLANG_VERSION}"
+  --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}"
+  --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
+  --build-arg "GCC_VERSION=${GCC_VERSION}"
+  --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+  --build-arg "NINJA_VERSION=${NINJA_VERSION:-}"
+  --build-arg "KATEX=${KATEX:-}"
+  --build-arg "ROCM_VERSION=${ROCM_VERSION:-}"
+  --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
+  --build-arg "IMAGE_NAME=${IMAGE_NAME}"
+  --build-arg "UCX_COMMIT=${UCX_COMMIT}"
+  --build-arg "UCC_COMMIT=${UCC_COMMIT}"
+  --build-arg "TRITON=${TRITON}"
+  --build-arg "TRITON_CPU=${TRITON_CPU}"
+  --build-arg "ONNX=${ONNX}"
+  --build-arg "DOCS=${DOCS}"
+  --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}"
+  --build-arg "EXECUTORCH=${EXECUTORCH}"
+  --build-arg "HALIDE=${HALIDE}"
+  --build-arg "PALLAS=${PALLAS}"
+  --build-arg "TPU=${TPU}"
+  --build-arg "XPU_VERSION=${XPU_VERSION}"
+  --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}"
+  --build-arg "ACL=${ACL:-}"
+  --build-arg "OPENBLAS=${OPENBLAS:-}"
+  --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}"
+  --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}"
+  --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}"
+)
+
+# First build: load into Docker daemon for local verification
 docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
        --load \
-       --output "type=docker,compression=${COMPRESSION},compression-level=${COMPRESSION_LEVEL},force-compression=true" \
-       --build-arg "BUILD_ENVIRONMENT=${image}" \
-       --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "VISION=${VISION:-}" \
-       --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
-       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
-       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
-       --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
-       --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
-       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
-       --build-arg "GCC_VERSION=${GCC_VERSION}" \
-       --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
-       --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
-       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
-       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
-       --build-arg "TRITON=${TRITON}" \
-       --build-arg "TRITON_CPU=${TRITON_CPU}" \
-       --build-arg "ONNX=${ONNX}" \
-       --build-arg "DOCS=${DOCS}" \
-       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "HALIDE=${HALIDE}" \
-       --build-arg "PALLAS=${PALLAS}" \
-       --build-arg "TPU=${TPU}" \
-       --build-arg "XPU_VERSION=${XPU_VERSION}" \
-       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
-       --build-arg "ACL=${ACL:-}" \
-       --build-arg "OPENBLAS=${OPENBLAS:-}" \
-       --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
-       --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       "${BUILD_ARGS[@]}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
-       "$@" \
        .
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
@@ -520,4 +523,18 @@ if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
 elif [ "$HAS_TRITON" = "yes" ]; then
   echo "expecting triton to not be installed, but it is"
   exit 1
+fi
+
+# Second build: push to registry with zstd compression (uses buildx cache, so it's fast)
+# Only run if we have a registry tag to push (passed via $@)
+if [[ $# -gt 0 ]]; then
+  echo "Pushing image with zstd compression..."
+  docker buildx build \
+         ${progress_flag} \
+         --push \
+         --output "type=image,compression=${COMPRESSION},compression-level=${COMPRESSION_LEVEL},force-compression=true" \
+         "${BUILD_ARGS[@]}" \
+         -f $(dirname ${DOCKERFILE})/Dockerfile \
+         "$@" \
+         .
 fi
