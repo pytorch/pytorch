@@ -2,6 +2,9 @@ name: docker-zstd-validation
 
 on:
   pull_request:
+    paths:
+      - .ci/docker/**
+      - .github/workflows/docker-zstd-validation.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
@@ -39,19 +42,28 @@ jobs:
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
 
-      - name: Calculate post-zstd docker tag
+      - name: Calculate docker tags
         id: calculate-tag
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Post-zstd tag from current HEAD (PR branch)
           POST_ZSTD_TAG=$(git rev-parse HEAD:".ci/docker")
           echo "post_zstd_tag=${POST_ZSTD_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "Post-zstd tag: ${POST_ZSTD_TAG}"
-          echo "Pre-zstd tag: ${{ inputs.pre_zstd_tag }}"
+          echo "Post-zstd tag (HEAD): ${POST_ZSTD_TAG}"
+
+          # Pre-zstd tag from the merge base (main branch)
+          MERGE_BASE=$(git merge-base HEAD "${BASE_SHA}")
+          PRE_ZSTD_TAG=$(git rev-parse "${MERGE_BASE}:".ci/docker"")
+          echo "pre_zstd_tag=${PRE_ZSTD_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Pre-zstd tag (merge-base ${MERGE_BASE}): ${PRE_ZSTD_TAG}"
 
       - name: Get pre-zstd image size
         id: pre-size
         env:
-          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.pre_zstd_tag }}
         run: |
+          echo "Checking image: ${PRE_IMAGE}"
           SIZE=$(docker manifest inspect "${PRE_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
           echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
           echo "Pre-zstd ${{ matrix.label }} image size: ${SIZE} MB"
@@ -61,6 +73,7 @@ jobs:
         env:
           POST_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.post_zstd_tag }}
         run: |
+          echo "Checking image: ${POST_IMAGE}"
           SIZE=$(docker manifest inspect "${POST_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
           echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
           echo "Post-zstd ${{ matrix.label }} image size: ${SIZE} MB"
@@ -68,7 +81,7 @@ jobs:
       - name: Pull pre-zstd image and time it
         id: pull-pre
         env:
-          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.pre_zstd_tag }}
         run: |
           echo "Pulling pre-zstd image: ${PRE_IMAGE}"
           START_TIME=$(date +%s.%N)
@@ -80,7 +93,7 @@ jobs:
 
       - name: Clean up pre-zstd image
         env:
-          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.pre_zstd_tag }}
         run: |
           docker rmi "${PRE_IMAGE}" || true
           docker system prune -f
