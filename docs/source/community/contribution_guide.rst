@@ -94,7 +94,7 @@ here is the basic process.
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/stable/community/persons_of_interest.html>`_
+      `Persons of Interest <https://docs.pytorch.org/docs/stable/community/persons_of_interest.html>`_
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
