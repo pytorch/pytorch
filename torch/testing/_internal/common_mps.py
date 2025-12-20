@@ -705,7 +705,6 @@ if torch.backends.mps.is_available():
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
-            "atanh": [torch.float32],
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
