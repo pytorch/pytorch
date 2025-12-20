@@ -37,10 +37,10 @@ def create_int8_compensation(
     w_scale: ir.TensorBox,
 ) -> tuple[
     bool,
-    Union[ir.TensorBox, ir.ShapeAsConstantBuffer],
-    Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]],
+    ir.TensorBox,
+    Optional[ir.TensorBox],
 ]:
-    x_w_scale: Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]] = None
+    x_w_scale: Optional[ir.TensorBox] = None
     use_int8_fast_compensation_path = all(
         isinstance(item, ir.TensorBox)
         and item.get_name() in V.graph.constants
