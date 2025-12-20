@@ -16,167 +16,89 @@
 
 #pragma once
 
-#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include <c10/core/Device.h>
-#include <c10/util/Exception.h>
 
 namespace at::cuda {
 
 template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
-struct DeviceThreadHandlePool
-    : public std::enable_shared_from_this<
-          DeviceThreadHandlePool<Handle_t, Create, Destroy>> {
- private:
-  struct Handle {
-    Handle_t handle;
+struct HandleRaii {
+  Handle_t handle{nullptr};
 
-    Handle(bool create = false) : handle(nullptr) {
-      if (create)
-        Create(&handle);
-    }
-
-    // std::vector.emplace() and push_back() may route through temporaries and
-    // call copy/move constructors along the way.  If this is the case, we don't
-    // want the destructors of temporaries to call cudnnDestroy on the handle.
-    // We can achieve safety (for the narrow case of stashing within
-    // std::vectors) by making Handle moveable but not copyable, and
-    // transferring handle ownership to the latest constructed object.  This is
-    // not a substitute for full-blown reference counting, but reference
-    // counting may be overkill here. Another alternative is to wrap the saved
-    // Handles in unique_ptrs, i.e., unordered_map<int,
-    // vector<unique_ptr<Handle>>> created_handles;
-    Handle(const Handle& rhs) = delete;
-
-    // Following
-    // https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-    Handle(Handle&& rhs) noexcept : Handle() {
-      std::swap(handle, rhs.handle);
-    }
-
-    // operator= takes argument by value
-    Handle& operator=(Handle rhs) {
-      std::swap(handle, rhs.handle);
-      return *this;
-    }
-
-    ~Handle() {
-      if (handle)
-        Destroy(handle);
-    }
-  };
-
-  std::mutex mutex;
-
-  // Handles are lazily created as different threads request them,
-  // but are never destroyed until the end of the process.
-  // The maximum number of handles this process will create for each device is
-  // equal to the high-water mark of the number of concurrently active threads
-  // that request handles for that device. When threads terminate, they release
-  // their handles back into the pool for reuse. Otherwise, new handles would be
-  // created every time new threads were spawned, resulting in poor performance
-  // for Python modules that repeatedly or frequently spawned new sets of
-  // threads (like DataParallel, which creates a new set of threads for each
-  // forward pass).
-  //
-  // To prevent potential deadlocks, we explicitly choose not to cap the number
-  // of handles that are created per device.
-  // Example of danger: If we cap the max handles at 4, and 5 threads are
-  // sharing a device, only 4 can make forward progress at any time. The other 4
-  // will not release their handles until they exit, so the fifth cannot make
-  // progress until then.  This is not a problem...UNLESS all 5 threads attempt
-  // some sort of synchronization at an intermediate point (ie, before any of
-  // them have exited).  We have no way to anticipate or enforce that user
-  // threads will not attempt such intermediate synchronization. The only way to
-  // ensure safety is to avoid imposing a cap on the number of handles.
-  std::unordered_map<c10::DeviceIndex, std::vector<Handle>> created_handles;
-  std::unordered_map<c10::DeviceIndex, std::vector<Handle_t>> available_handles;
-
- public:
-  // PoolWindow lazily creates and caches the handles that a particular thread
-  // is using, so in the common case handle access doesn't incur either handle
-  // creation or a mutex lock.
-  class PoolWindow {
-   public:
-    PoolWindow(std::weak_ptr<DeviceThreadHandlePool> parent)
-        : weak_parent(std::move(parent)) {}
-
-    ~PoolWindow() {
-      release();
-    }
-
-    Handle_t reserve(c10::DeviceIndex device) {
-      // If this thread already has a handle for this device, return it
-      auto [handle_it, inserted] =
-          my_handles.try_emplace(device, Handle_t{nullptr});
-
-      // if this thread does not have a handle, get one from the pool.
-      // The pool might allocate a new handle if no handles are available.
-      if (inserted) {
-        auto pool = weak_parent.lock();
-        TORCH_CHECK(pool, "Cannot create handle during program termination");
-        handle_it->second = pool->getHandle(device);
-      }
-
-      return handle_it->second;
-    }
-
-   private:
-    // Stores the per-device handles currently owned by this thread
-    std::unordered_map<c10::DeviceIndex, Handle_t> my_handles;
-
-    std::weak_ptr<DeviceThreadHandlePool> weak_parent;
-
-    // Called by the dtor. Releases this thread's handles back into the pool.
-    void release() {
-      if (!my_handles.empty()) {
-        auto parent = weak_parent.lock();
-        if (!parent) {
-          // If this thread exits after atexit handlers have completed, the
-          // cuda context itself may be invalid, so we must leak the handles.
-          return;
-        }
-
-        parent->releaseHandles(my_handles);
-      }
-    }
-  };
-
-  void releaseHandles(std::unordered_map<c10::DeviceIndex, Handle_t>& handles) {
-    std::lock_guard<std::mutex> lock(mutex);
-    for (auto [device, handle] : handles)
-      available_handles[device].push_back(handle);
-    handles.clear();
+  HandleRaii() {
+    Create(&handle);
   }
 
-  Handle_t getHandle(c10::DeviceIndex device) {
-    std::lock_guard<std::mutex> lock(mutex);
-
-    std::vector<Handle_t>& handles = available_handles[device];
-    if (!handles.empty()) {
-      Handle_t handle = handles.back();
-      handles.pop_back();
-      return handle;
-    }
-
-    // In local testing, I do observe that emplace_back sometimes routes through
-    // temporaries that incur move-constructor and destructor calls. See
-    // comments in Handle above.
-    return created_handles[device].emplace_back(true /*create*/).handle;
+  ~HandleRaii() {
+    if (handle != nullptr)
+      Destroy(std::exchange(handle, nullptr));
   }
 
-  // Warning:
-  // If you want to change this function, be aware that this function will be
-  // called by multiple threads and there is no mutex guarding the call of this
-  // function, so make sure your implementation is thread-safe.
-  std::unique_ptr<PoolWindow> newPoolWindow() {
-    // The returned pointer will be owned by a thread local variable
-    // so that different threads does not share the same PoolWindow.
-    return std::make_unique<PoolWindow>(this->weak_from_this());
-  }
+  HandleRaii(const HandleRaii&) = delete;
+  HandleRaii& operator=(const HandleRaii&) = delete;
+  HandleRaii(HandleRaii&&) = delete;
+  HandleRaii& operator=(HandleRaii&&) = delete;
 };
+
+template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
+struct GlobalHandleStorage {
+  using HandleStorage = HandleRaii<Handle_t, Create, Destroy>;
+  std::mutex mutex;
+  std::unordered_multimap<c10::DeviceIndex, HandleStorage> handles;
+};
+
+template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
+class ThreadLocalHandleStorage {
+public:
+  explicit ThreadLocalHandleStorage(GlobalHandleStorage<Handle_t, Create, Destroy>& global)
+    : global_(global) {}
+
+  Handle_t reserve(c10::DeviceIndex device) {
+    { // this thread already has a handle for device
+      auto it = handles_.find(device);
+      if (it != handles_.end()) {
+        return it->second.handle;
+      }
+    }
+
+    { // use a handle from the global pool if available
+      std::unique_lock<std::mutex> lock(global_.mutex);
+      auto node = global_.handles.extract(device);
+      lock.unlock();
+
+      auto it = handles_.insert(std::move(node)).position;
+      if (it != handles_.end()) {
+        return it->second.handle;
+      }
+    }
+
+    // allocate a new handle. operator[] with default construct
+    return handles_[device].handle;
+  }
+
+  ~ThreadLocalHandleStorage() {
+    if (handles_.empty())
+      return;
+
+    // release handles back to the global pool
+    std::lock_guard<std::mutex> lock(global_.mutex);
+    global_.handles.merge(std::move(handles_));
+  }
+
+private:
+  using HandleStorage = HandleRaii<Handle_t, Create, Destroy>;
+  GlobalHandleStorage<Handle_t, Create, Destroy>& global_;
+  std::unordered_map<c10::DeviceIndex, HandleStorage> handles_;
+};
+
+template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
+Handle_t reserveHandle(c10::DeviceIndex device) {
+  static GlobalHandleStorage<Handle_t, Create, Destroy> global;
+  thread_local ThreadLocalHandleStorage<Handle_t, Create, Destroy> local(global);
+  return local.reserve(device);
+}
+
 } // namespace at::cuda

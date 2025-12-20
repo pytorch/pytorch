@@ -50,8 +50,6 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 #endif
 }
 
-using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
-
 // ugly hack until hipblasSetWorkspace exists
 #include <rocblas/rocblas.h>
 
@@ -102,9 +100,6 @@ void destroyCublasHandle(cublasHandle_t handle) {
   cublasDestroy(handle);
 #endif
 }
-
-using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
-
 } // namespace
 
 WorkspaceMapWithMutex& cublas_handle_stream_to_workspace() {
@@ -333,22 +328,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
 #endif
 
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasPoolType>(
-      new CuBlasPoolType(), [](CuBlasPoolType* p) {
-        // Leak the memory.
-      });
-  thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
-
-  auto handle = myPoolWindow->reserve(device);
+  auto handle = at::cuda::reserveHandle<cublasHandle_t, createCublasHandle, destroyCublasHandle>(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
@@ -386,24 +366,7 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
-      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
-        // Leak the memory.
-      });
-  thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
-
-  auto handle = myPoolWindow->reserve(device);
-  return handle;
+  return at::cuda::reserveHandle<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>(device);
 #else
   return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
 #endif

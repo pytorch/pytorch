@@ -23,25 +23,13 @@ void destroyCudssHandle(cudssHandle_t handle) {
     cudssDestroy(handle);
 #endif
 }
-
-using CudssPoolType = DeviceThreadHandlePool<cudssHandle_t, createCudssHandle, destroyCudssHandle>;
-
 } // namespace
 
 cudssHandle_t getCurrentCudssHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-  static auto pool = std::make_shared<CudssPoolType>();
-  thread_local std::unique_ptr<CudssPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
-
-  auto handle = myPoolWindow->reserve(device);
+  auto handle = at::cuda::reserveHandle<cudssHandle_t, createCudssHandle, destroyCudssHandle>(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDSS_CHECK(cudssSetStream(handle, stream));
   return handle;
