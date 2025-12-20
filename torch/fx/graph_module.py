@@ -11,7 +11,7 @@ import traceback
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -87,7 +87,7 @@ class _EvalCacheLoader:
 
     # Part of the loader protocol (PEP 302)
     # linecache will use this method when trying to find source code
-    def get_source(self, module_name) -> Optional[str]:
+    def get_source(self, module_name) -> str | None:
         if module_name in self.eval_cache:
             return self.eval_cache[module_name]
         return None
@@ -492,7 +492,7 @@ class GraphModule(torch.nn.Module):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         class_name: str = "GraphModule",
     ):
@@ -621,7 +621,7 @@ class GraphModule(torch.nn.Module):
         self.recompile()
 
     @compatibility(is_backward_compatible=False)
-    def to_folder(self, folder: Union[str, os.PathLike], module_name: str = "FxModule"):
+    def to_folder(self, folder: str | os.PathLike, module_name: str = "FxModule"):
         """Dumps out module to ``folder`` with ``module_name`` so that it can be
         imported with ``from <folder> import <module_name>``
 
@@ -647,7 +647,7 @@ class {module_name}(torch.nn.Module):
         super().__init__()
 """
 
-        def _gen_model_repr(module_name: str, module: torch.nn.Module) -> Optional[str]:
+        def _gen_model_repr(module_name: str, module: torch.nn.Module) -> str | None:
             safe_reprs = [
                 nn.Linear,
                 nn.Conv1d,
