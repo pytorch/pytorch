@@ -1,0 +1,187 @@
+# mypy: allow-untyped-defs
+
+import itertools
+
+import torch
+from torch._decomp import decomposition_table
+from torch._ops import OpOverload
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._op_schema import OpSchema, OpStrategy
+from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._sharding_prop import ShardingPropagator
+from torch.distributed.tensor._utils import (
+    ExplicitRedistributionContext,
+    ImplicitRedistributionError,
+    try_find_mesh_from_args,
+)
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._pytree import tree_flatten, tree_map_only, tree_unflatten
+
+
+# figure out how to properly cache
+def _trace_decomposition(op_schema: OpSchema) -> torch.fx.GraphModule:
+    from torch._guards import detect_fake_mode
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    decomp_fn = decomposition_table[op_schema.op]
+    fake_mode = detect_fake_mode() or FakeTensorMode()
+    with fake_mode:
+        args = op_schema.gen_fake_args()
+        kwargs = op_schema.gen_fake_kwargs()
+        return make_fx(lambda *a: decomp_fn(*a, **kwargs))(*args)
+
+
+def _extract_input_specs(op_schema: OpSchema) -> tuple[DTensorSpec | object, ...]:
+    """
+    Extract input specs from OpSchema, preserving structure to match FX graph placeholders.
+
+    Since make_fx creates one placeholder per positional arg (with nested structures preserved),
+    we return args_schema directly without flattening.
+    """
+    return op_schema.args_schema
+
+
+class DecompShardingInterpreter(torch.fx.Interpreter):
+    def __init__(
+        self,
+        module: torch.fx.GraphModule,
+        mesh: DeviceMesh,
+        sharding_prop: ShardingPropagator,
+    ):
+        super().__init__(module)
+        self.sharding_prop = sharding_prop
+        self.mesh = mesh
+
+    def call_function(self, target, args, kwargs):
+        if not isinstance(target, OpOverload):
+            return super().call_function(target, args, kwargs)
+
+        node_schema = OpSchema(target, args, kwargs)
+        sharding = self.sharding_prop.propagate_op_sharding(node_schema)
+        return sharding.output_spec  # type: ignore[possibly-undefined]
+
+    def output(self, target, args, kwargs):
+        result = args[0]
+        return tree_map_only(DTensorSpec, lambda s: s.placements[0], result)  # type: ignore[possibly-undefined]
+
+
+class DecompShardingStrategy:
+    @classmethod
+    def has_decomp(cls, op: OpOverload) -> bool:
+        return op in decomposition_table
+
+    @classmethod
+    def propagate_strategy(
+        cls, op_schema: OpSchema, sharding_prop: ShardingPropagator
+    ) -> OpStrategy | None:
+        graph = _trace_decomposition(op_schema)
+        print(graph)
+        placements = cls._get_candidate_placements(graph, op_schema)
+        try:
+            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+        except ValueError:
+            # how did we get here?
+            # most likely we recursively traced a decomp for a factory method that doesn't take DTensor inputs.
+            return None
+
+        # Build single mesh dim strategies
+        single_dim_strategies = []
+        interp = DecompShardingInterpreter(graph, mesh, sharding_prop)
+        for placement in placements:
+            try:
+                output = cls._propagate_through_decomp(interp, placement, op_schema)
+            except NotImplementedError:
+                # immediately return; some op doesn't have a sharding strategy
+                # maybe the error message should be more descriptive, saying we tried the decomp route.
+                return None
+            except (ImplicitRedistributionError, RuntimeError):
+                # I feel like we shouldn't catch RuntimeErrors? But seeing this with view strategies.
+                # If redistribution found, just skip this placement.
+                continue
+
+            output_placements = (
+                [output] if not isinstance(output, tuple) else list(output)
+            )
+            placement_list = output_placements + list(placement)
+            single_dim_strategies.append(placement_list)
+
+        if not single_dim_strategies:
+            raise AssertionError(
+                "Sharding propagation should have at least produced the full Replicate() strategy"
+            )
+
+        n_outputs = len(output_placements)  # type: ignore[possibly-undefined]
+        strategy_schema = sharding_prop._wrap_with_op_strategy(op_schema)
+
+        return expand_to_full_mesh_op_strategy(
+            mesh,
+            strategy_schema,
+            single_dim_strategies,
+            input_index=n_outputs,
+        )
+
+    @classmethod
+    def _propagate_through_decomp(
+        cls,
+        interpreter: DecompShardingInterpreter,
+        placement: tuple[Placement | None],
+        op_schema: OpSchema,
+    ) -> list[Placement]:
+        tensor_specs = _extract_input_specs(op_schema)
+
+        # Flatten to zip with placements, then unflatten back to original structure
+        flat_specs, spec = tree_flatten(list(tensor_specs))
+        input_specs_flat = [
+            DTensorSpec(interpreter.mesh, (p,), tensor_meta=s.tensor_meta)  # type: ignore[arg-type]
+            if isinstance(s, DTensorSpec)
+            else s
+            for s, p in zip(flat_specs, placement)
+        ]
+        input_specs = tree_unflatten(input_specs_flat, spec)
+
+        with ExplicitRedistributionContext(strict=True):
+            return interpreter.run(*input_specs)
+
+    @classmethod
+    def _get_candidate_placements(
+        cls, graph: torch.fx.GraphModule, op_schema: OpSchema
+    ) -> list[tuple[Placement | None]]:
+        tensor_specs = _extract_input_specs(op_schema)
+        placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+
+        # Flatten tensor_specs to match placeholders
+        flat_specs, _ = tree_flatten(list(tensor_specs))
+        assert len(placeholders) == len(flat_specs), (
+            f"Mismatch between placeholders ({len(placeholders)}) and specs ({len(flat_specs)}). "
+            f"Placeholders: {[n.name for n in placeholders]}, "
+            f"Flat specs: {flat_specs}"
+        )
+
+        candidates: list[list[Placement] | list[None]] = []
+        for spec, node in zip(flat_specs, placeholders):
+            if not isinstance(spec, DTensorSpec):
+                candidates.append([None])
+                continue
+
+            options: set[Placement] = {Replicate()}
+            for placement in spec.placements:
+                if isinstance(placement, (Shard, _StridedShard)):
+                    for i in range(spec.ndim):
+                        options.add(
+                            Shard(i)
+                            if isinstance(placement, Shard)
+                            else _StridedShard(i, split_factor=placement.split_factor)
+                        )
+                elif isinstance(placement, Partial):
+                    options.add(placement)  # is this unsafe?
+            candidates.append(list(options))
+
+        return list(itertools.product(*candidates))  # type: ignore[arg-type]

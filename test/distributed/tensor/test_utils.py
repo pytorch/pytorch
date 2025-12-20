@@ -28,6 +28,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_tensor_info,
     ExplicitRedistributionContext,
+    ImplicitRedistributionError,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import (
@@ -1543,7 +1544,9 @@ class TestExplicitRedistribute(LocalTensorTestBase):
 
             # explicit redistribute works too
             with ExplicitRedistributionContext():
-                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                with self.assertRaisesRegex(
+                    ImplicitRedistributionError, "Implicit redistribution"
+                ):
                     torch.matmul(dx, dA)
             with ExplicitRedistributionContext(mode="warn"):
                 with self.assertLogs(
@@ -1574,7 +1577,9 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 loss = dY.sum()
 
                 # we now see the error during backwards
-                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                with self.assertRaisesRegex(
+                    ImplicitRedistributionError, "Implicit redistribution"
+                ):
                     loss.backward(retain_graph=True)
 
                 with ExplicitRedistributionContext(strict=False):
@@ -1586,7 +1591,9 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     loss.backward(retain_graph=True)
 
                 # and re-enable
-                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                with self.assertRaisesRegex(
+                    ImplicitRedistributionError, "Implicit redistribution"
+                ):
                     loss.backward(retain_graph=True)
 
 
