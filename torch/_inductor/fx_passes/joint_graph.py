@@ -546,7 +546,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 )
 
                 unpacked_output = output_node.args[0][0]
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore [bad-argument-type, bad-assignment]
                 output_node.args = (unpacked_output,)
                 if "val" in output_node.meta:
                     output_node.meta["val"] = output_node.meta["val"][0]
