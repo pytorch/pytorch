@@ -398,6 +398,7 @@ def raise_observed_exception(
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
+    from .symbolic_convert import ExceptionVals
     from .variables import BuiltinVariable, ConstantVariable, VariableTracker
 
     # Wrap any non-VariableTracker args in ConstantVariable
@@ -415,6 +416,8 @@ def raise_observed_exception(
         wrapped_args,
         kwargs or {},
     )
+    assert isinstance(exception_vt, ExceptionVals)
+    tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages

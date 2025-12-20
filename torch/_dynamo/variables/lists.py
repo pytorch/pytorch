@@ -1442,7 +1442,7 @@ class NamedTupleVariable(TupleVariable):
         return result
 
     def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Override to handle namedtuple constructor semantics."""
+        """Override to handle namedtuple vs structseq constructor differences."""
         values = []
         any_unrealized = False
         for item in self.items:
