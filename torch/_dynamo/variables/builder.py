@@ -34,7 +34,6 @@ import operator
 import random
 import re
 import sys
-import traceback
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -207,7 +206,6 @@ from .functions import (
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
-    TracebackVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -1323,8 +1321,6 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
-        elif value is traceback.clear_frames:
-            return TracebackVariable(source=self.source)
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
@@ -2106,12 +2102,12 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-                return self._wrap_lazy_constant(value, self.wrap_symint)
+                return self.wrap_symint(value)
 
             return self._wrap_lazy_constant(value)
         elif type(value) is float:
             if not config.specialize_float:
-                return self._wrap_lazy_constant(value, self.wrap_symfloat)
+                return self.wrap_symfloat(value)
 
             return self._wrap_lazy_constant(value)
         elif type(value) in (bool, str):
@@ -2126,20 +2122,8 @@ class VariableBuilder:
     def _wrap_lazy_constant(
         self,
         value: Union[int, float, bool, str],
-        wrap_fn: Optional[Callable[[Union[int, float]], VariableTracker]] = None,
     ) -> VariableTracker:
-        """Wrap a primitive constant, deferring guard installation if allowed.
-
-        If wrap_fn is provided, this value should become a SymNodeVariable
-        (e.g., when specialize_int/float is False). In that case, we should NOT
-        use LazyConstantVariable because:
-        1. SymNodeVariable is not a constant - operations should go through the graph
-        2. LazyConstantVariable would install CONSTANT_MATCH guards on realization,
-           causing unnecessary recompiles
-        """
-        if wrap_fn is not None:
-            # This will become a SymNodeVariable - don't use LazyConstantVariable
-            return wrap_fn(value)
+        """Wrap a primitive constant, deferring guard installation if allowed."""
         if not self.allow_lazy_constant:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
