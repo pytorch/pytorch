@@ -43,6 +43,7 @@ from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._logging import warning_once
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -272,7 +273,6 @@ def _ensure_annotate_decorated():
 
         # Register no-op lowering for inductor backend
         from torch._inductor.lowering import register_lowering
-        from torch._logging import warning_once
 
         @register_lowering(torch.ops.debug_mode_ops.annotate)
         def _annotate_lowering(tag: str) -> None:
@@ -465,30 +465,6 @@ class _RedistributeCall(_DebugCall):
         yield self.call_depth
 
 
-class _NNModuleCall(_DebugCall):
-    """Designates entering an nn.Module's forward method"""
-
-    def __init__(self, module_name: str, call_depth: int, stack: bool = False) -> None:
-        super().__init__(call_depth, stack=stack)
-        self.module_name = module_name
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        pass  # nothing to stringify
-
-    def render(self, attributes: list[str]) -> str:
-        return f"[nn.Mod] {self.module_name}"
-
-    def __iter__(self):
-        yield from [
-            f"[nn.Mod] {self.module_name}",
-            (),
-            {},
-            self.call_depth,
-        ]
-
-
 class _TritonKernelCall(_DebugCall):
     """Triton kernel call from Inductor"""
 
@@ -579,25 +555,18 @@ class _AnnotateCall(_DebugCall):
     """Custom annotation call"""
 
     def __init__(
-        self, tag: Any, is_profiler_record: bool, call_depth: int, stack: bool = False
+        self, tag: Any, header: str, call_depth: int, stack: bool = False
     ) -> None:
         super().__init__(call_depth, stack=stack)
         self.tag = tag
-        self.is_profiler_record = is_profiler_record
+        self.header = header
 
     def render(self, attributes: list[str]) -> str:
-        if self.is_profiler_record:
-            return f"[record function] {self.tag}"
-        else:
-            return f"[annotate] {self.tag}"
+        return f"[{self.header}] {self.tag}"
 
     def __iter__(self):
         yield from [
-            (
-                f"[record function] {self.tag}"
-                if self.is_profiler_record
-                else f"[annotate] {self.tag}"
-            ),
+            f"[{self.header}] {self.tag}",
             (),
             {},
             self.call_depth,
@@ -650,8 +619,8 @@ def _get_call_name(call: _DebugCall) -> str:
         return _get_op_name(call.op)
     elif isinstance(call, _TritonKernelCall):
         return call.kernel_name
-    elif isinstance(call, _NNModuleCall):
-        return call.module_name
+    elif isinstance(call, _AnnotateCall):
+        return f"[{call.header}] {call.tag}"
     elif isinstance(call, _RedistributeCall):
         return REDISTRIBUTE_FUNC
     else:
@@ -669,6 +638,68 @@ def _annotate_fake(tag: str) -> None:
     return None
 
 
+class DebugInterpreter(torch.fx.Interpreter):
+    """
+    Interpreter class for running aot_eager compiled regions when DebugMode is active,
+    instead of using the compiled code. This gives us access to fx.Node metadata to decorate
+    and contextualize DebugMode logs (e.g. nn_module_stack, stack_trace, compiled region boundaries).
+
+    Note: this is currently only enabled with DebugMode(run_compile_with_interpreter=True).
+    """
+
+    def __init__(self, module, backend):
+        super().__init__(module)
+        self.mode = get_active_debug_mode()
+        if self.mode is None:
+            raise RuntimeError("No DebugMode is currently active")
+
+        # for tracking initial nn_module_stack
+        self.base_nn_module_stack = list(self.mode.current_nn_module_stack)
+
+        # annotate start of region
+        self.backend = backend
+        self.mode.operators.append(
+            _AnnotateCall(
+                "enter", f"{self.backend} region (compile)", self.mode.call_depth
+            )
+        )
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        # handling of nn.Module stack
+        if (
+            self.mode.record_nn_module  # type: ignore[attr-defined]
+            and n.op not in ["placeholder", "output"]
+        ):
+            self.mode._handle_fx_nn_module_stack(  # type: ignore[attr-defined]
+                self.base_nn_module_stack,
+                n.meta.get("nn_module_stack", {}),
+                n.meta.get("fwd_nn_module_stack", {}),
+            )
+        return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        if self.mode is None:
+            raise RuntimeError("No DebugMode is currently active")
+        result = super().run(*args)
+
+        # reset nn.Module stack to pre-compiled region value
+        if len(self.mode.current_nn_module_stack) < len(self.base_nn_module_stack):
+            warning_once(
+                log, "unexpected handling of nn_module_stack in DebugInterpreter"
+            )
+        while len(self.mode.current_nn_module_stack) > len(self.base_nn_module_stack):
+            self.mode._exit_nn_module_call()
+
+        # annotate end of region
+        self.mode.operators.append(
+            _AnnotateCall(
+                "exit", f"{self.backend} region (compile)", self.mode.call_depth
+            )
+        )
+
+        return result
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -684,6 +715,7 @@ class DebugMode(TorchDispatchMode):
         record_ids=False,
         record_profiler_context=True,
         record_localtensor=True,
+        run_compile_with_interpreter=False,
     ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -707,7 +739,7 @@ class DebugMode(TorchDispatchMode):
         # Optional list[str] of tensor attributes, to be annotated in the string dump.
         self.record_tensor_attributes = record_tensor_attributes or []
 
-        # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
+        # Uses ModTracker to record nn.Module entrances.
         # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
@@ -735,6 +767,10 @@ class DebugMode(TorchDispatchMode):
         # Currently does not preserve contexts inside torch.compile-d regions.
         self.record_profiler_context: bool = record_profiler_context
 
+        # For aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
+        # and uses it at runtime for node metadata visibility.
+        self.run_compile_with_interpreter: bool = run_compile_with_interpreter
+
         self.reset()
 
     def reset(self) -> None:
@@ -743,10 +779,10 @@ class DebugMode(TorchDispatchMode):
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
         self.ignored_record_functions = 0
+        self.current_nn_module_stack = []
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
-        # self._track_tensor_ids(result)
         self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
@@ -812,7 +848,9 @@ class DebugMode(TorchDispatchMode):
             self.ignored_record_functions += 1
             return
 
-        call = _AnnotateCall(tag, True, self.call_depth, stack=self.record_stack_trace)
+        call = _AnnotateCall(
+            tag, "record function", self.call_depth, stack=self.record_stack_trace
+        )
         self.operators.append(call)
         self.call_depth += 1
 
@@ -931,6 +969,18 @@ class DebugMode(TorchDispatchMode):
         if self.record_stack_trace:
             self.anomaly_for_traces.__exit__(*args)
 
+    def _enter_nn_module_call(self, fqn, header):
+        call = _AnnotateCall(
+            fqn, header, self.call_depth + 1, stack=self.record_stack_trace
+        )
+        self.operators.append(call)
+        self.current_nn_module_stack.append(fqn)
+        self.call_depth += 1
+
+    def _exit_nn_module_call(self):
+        self.call_depth -= 1
+        self.current_nn_module_stack.pop()
+
     def module_tracker_setup(self) -> None:
         from torch.distributed._tools.mod_tracker import ModTracker
 
@@ -939,14 +989,58 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth))
-            self.call_depth += 1
+            self._enter_nn_module_call(fqn, "nn.Mod")
 
         # module post-fw hook: decrement call depth
         def post_fw_hook(module, input, output) -> None:
-            self.call_depth -= 1
+            self._exit_nn_module_call()
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
+
+    def _handle_fx_nn_module_stack(
+        self,
+        base_stack: list[str],
+        nn_module_stack: dict[str, tuple[str, Any]] | None,
+        fwd_nn_module_stack: dict[str, tuple[str, Any]] | None,
+    ) -> None:
+        """
+        Called when DebugInterpreter observes nn_module_stack or fwd_nn_module_stack metadata
+        from executing the compiled GraphModule.
+
+        If the current module stack is mismatched with what's currently tracked in DebugMode
+        (current_nn_module_stack), we adjust call depth and add new [nn.Module] log entries accordingly.
+        """
+
+        nn_module_stack = nn_module_stack or {}
+        fwd_nn_module_stack = fwd_nn_module_stack or {}
+        if nn_module_stack and fwd_nn_module_stack:
+            raise AssertionError(
+                "Expecting at most one of nn_module_stack and fwd_nn_module_stack."
+            )
+
+        is_fwd = nn_module_stack
+        stack = nn_module_stack if is_fwd else fwd_nn_module_stack
+
+        # forward stack
+        current_stack = self.current_nn_module_stack
+        new_stack = base_stack + [v[0] for v in stack.values()]
+
+        entered = set(new_stack) - set(current_stack)
+        exited = set(current_stack) - set(new_stack)
+
+        # Decrement depth for exited modules
+        for _ in exited:
+            self._exit_nn_module_call()
+        if self.call_depth < 0:
+            raise AssertionError("Unexpectedly, DebugMode call_depth is negative")
+
+        # Add [nn.Module] entries for newly entered modules
+        for fqn in sorted(entered):
+            self._enter_nn_module_call(
+                fqn, "nn.Mod (compile)" if is_fwd else "nn.Mod (compile bwd)"
+            )
+
+        self.current_nn_module_stack = new_stack
 
     @contextlib.contextmanager
     def record_redistribute_calls(
@@ -1203,7 +1297,7 @@ class DebugMode(TorchDispatchMode):
 
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
-        call = _AnnotateCall(tag, False, self.call_depth, self.record_stack_trace)
+        call = _AnnotateCall(tag, "annotate", self.call_depth, self.record_stack_trace)
         self.operators.append(call)
 
     @staticmethod
