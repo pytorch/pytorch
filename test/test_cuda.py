@@ -7358,9 +7358,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             max_smem = (
-                65536
-                if get_device_properties().gcnArchName not in ["gfx950"]
-                else 160 * 1024
+                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin

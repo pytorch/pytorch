@@ -1739,7 +1739,7 @@ def insert_observers_for_model(
             ) = node_name_to_match_result_with_qconfig.get(  # type: ignore[assignment]
                 node.name, (None, None, None, None, None)
             )
-            equalization_qconfig = equalization_config_map.get(node.name, None)
+            equalization_qconfig = equalization_config_map.get(node.name)
 
             this_node_dtype_info = node.meta["target_dtype_info"]
             if "val" in node.meta:
@@ -1792,7 +1792,7 @@ def insert_observers_for_model(
                         for user in node.args[0].users:
                             # Checks if there exists another user being quantized
                             is_user_quantized = node_name_to_qconfig.get(
-                                user.name, None
+                                user.name
                             ) is not None or (
                                 user.op == "call_module"
                                 and isinstance(
