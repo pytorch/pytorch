@@ -55,6 +55,28 @@ struct HandleRaii {
 // GlobalHandleStorage is the pool of handles that are available for use
 // This needs to be protected by a mutex because multiple threads might
 // try to remove/add handles from/to this pool.
+//
+// Handles are lazily created as different threads request them, but are never
+// destroyed until the end of the process. The maximum number of handles this
+// process will create for each device is equal to the high-water mark of the
+// number of concurrently active threads that request handles for that device.
+// When threads terminate, they release their handles back into the pool for
+// reuse. Otherwise, new handles would be created every time new threads were
+// spawned, resulting in poor performance for Python modules that repeatedly or
+// frequently spawned new sets of threads (like DataParallel, which creates a
+// new set of threads for each forward pass).
+//
+// To prevent potential deadlocks, we explicitly choose not to cap the number
+// of handles that are created per device.
+//
+// Example of danger: If we cap the max handles at 4, and 5 threads are sharing
+// a device, only 4 can make forward progress at any time. The other 4 will not
+// release their handles until they exit, so the fifth cannot make progress
+// until then.  This is not a problem...UNLESS all 5 threads attempt some sort
+// of synchronization at an intermediate point (ie, before any of them have
+// exited).  We have no way to anticipate or enforce that user threads will not
+// attempt such intermediate synchronization. The only way to ensure safety is
+// to avoid imposing a cap on the number of handles.
 template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
 struct GlobalHandleStorage {
 private:
