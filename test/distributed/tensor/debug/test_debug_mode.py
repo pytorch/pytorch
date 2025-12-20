@@ -206,6 +206,48 @@ class TestDTensorDebugMode(TestCase):
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
+    def test_stack_trace_in_compiled_region(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 4)
+                self.l2 = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                x = x + 2
+                x = self.l1(x)
+                x = x.relu()
+                x = self.l2(x)
+                x = x.sum()
+                return x
+
+        x = torch.randn(16, 8)
+        model = torch.compile(Foo(), backend="aot_eager", fullgraph=True)
+
+        # test forward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out = model(x)
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("x = x + 2" in op_calls[0].stack_trace)
+        self.assertTrue("x = self.l1(x)" in op_calls[1].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[3].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[-1].stack_trace)
+
+        # test backward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out.backward()
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("out.backward()" in op_calls[0].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[1].stack_trace)
+        self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
+
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
