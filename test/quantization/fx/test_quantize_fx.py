@@ -9647,8 +9647,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_qat_embeddingbag_linear(self):
         for device in get_supported_device_types():
             # Quantization backends (qnnpack, fbgemm, onednn) only support CPU tensors
-            # Skip CUDA device for quantization tests
-            if device == 'cuda':
+            # Skip other device for quantization tests (e.g. CUDA)
+            if device != 'cpu':
                 continue
 
             class EmbeddingBagLinear(torch.nn.Module):
