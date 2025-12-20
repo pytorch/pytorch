@@ -16,7 +16,7 @@ import pickle
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -1135,7 +1135,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ):
     global type_trace_db
 
@@ -1274,7 +1274,7 @@ def script(
     optimize: None = None,
     _frames_up: int = 0,
     _rcb: Callable[[str], Any] | None = None,
-    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
+    example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Any:
     r"""Script the function.
 
