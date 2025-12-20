@@ -2,6 +2,7 @@
 # pyre-strict
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
@@ -1089,11 +1090,14 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(result, 10)
         self.assertEqual(call_count, 1)
 
-        # Verify memory cache has the result
-        cache_key = interfaces._make_key(None, 5)
+        # Verify memory cache has the result as CacheEntry
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
         memory_hit = persistent._memoizer._cache.get(cache_key)
         self.assertIsNotNone(memory_hit)
-        self.assertEqual(memory_hit.value, 10)
+        # Cache now stores CacheEntry with encoded_params and encoded_result
+        cache_entry = memory_hit.value
+        self.assertEqual(cache_entry.encoded_result, 10)
+        self.assertEqual(cache_entry.encoded_params, {"args": (5,), "kwargs": {}})
 
         # Verify disk cache has the result (pickled)
         disk_hit = persistent._disk_cache.get(cache_key)
@@ -1112,11 +1116,16 @@ class InterfacesTest(TestMixin, TestCase):
         # Setup: create a persistent memoizer and store only to disk
         persistent = interfaces.PersistentMemoizer(sub_dir=self.sub_dir())
 
-        # Store a value directly to disk cache only
-        cache_key = interfaces._make_key(None, 5)
+        # Store a value directly to disk cache only (as CacheEntry)
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
         import pickle
 
-        pickled_value = pickle.dumps(10)
+        # Cache now stores CacheEntry with encoded_params and encoded_result
+        cache_entry = interfaces.CacheEntry(
+            encoded_params={"args": (5,), "kwargs": {}},
+            encoded_result=10,
+        )
+        pickled_value = pickle.dumps(cache_entry)
         persistent._disk_cache.insert(cache_key, pickled_value)
 
         # Verify it's not in memory cache yet
@@ -1137,7 +1146,9 @@ class InterfacesTest(TestMixin, TestCase):
         # Verify memory cache was populated from disk
         memory_hit = persistent._memoizer._cache.get(cache_key)
         self.assertIsNotNone(memory_hit)
-        self.assertEqual(memory_hit.value, 10)
+        # Memory cache should now contain the CacheEntry
+        cache_entry = memory_hit.value
+        self.assertEqual(cache_entry.encoded_result, 10)
 
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
@@ -1170,7 +1181,7 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(result2, 10)
 
         # Clear memory cache to simulate a new process
-        cache_key = interfaces._make_key(None, 5)
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
         persistent._memoizer._cache = impls._InMemoryCacheImpl()
 
         # Third call - memory miss, disk hit, populates memory
@@ -1210,7 +1221,7 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(result2, 10)
 
         # Verify nothing was cached
-        cache_key = interfaces._make_key(None, 5)
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
         memory_hit = persistent._memoizer._cache.get(cache_key)
         self.assertIsNone(memory_hit)
         disk_hit = persistent._disk_cache.get(cache_key)
@@ -1262,6 +1273,249 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(call_count, 2)
         self.assertEqual(result1, 10)
         self.assertEqual(result2, 10)
+
+    # ============= Memoizer._dump_to_disk Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_creates_json_file(self) -> None:
+        """Test that _dump_to_disk creates a JSON file with cached entries.
+
+        Verifies that when _dump_to_disk is called, it creates a JSON file
+        containing the cached entries in a human-readable format.
+        """
+        # Setup: create a memoizer and cache some values
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+        compute(10)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: JSON file was created with correct structure
+        self.assertTrue(memoizer._shared_cache_filepath.exists())
+
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertIn("cache_size", data)
+        self.assertEqual(data["cache_size"], 2)
+
+        # Verify entries have correct format
+        for entry in data["cache_entries"].values():
+            self.assertIn("params", entry)
+            self.assertIn("result", entry)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_with_sub_key(self) -> None:
+        """Test that _dump_to_disk uses sub_key for nested structure.
+
+        Verifies that when a Memoizer is initialized with a sub_key,
+        the cache entries are stored under cache_entries[sub_key].
+        """
+        # Setup: create a memoizer with sub_key and cache a value
+        sub_key = "test_sub_key"
+        memoizer = interfaces.Memoizer(sub_key=sub_key)
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: entries are stored under the sub_key
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertIn(sub_key, data["cache_entries"])
+
+        # The sub_key should contain the cache entries
+        sub_entries = data["cache_entries"][sub_key]
+        self.assertEqual(len(sub_entries), 1)
+
+        # Verify entry format
+        for entry in sub_entries.values():
+            self.assertIn("params", entry)
+            self.assertIn("result", entry)
+            self.assertEqual(entry["result"], 10)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_merges_with_existing(self) -> None:
+        """Test that _dump_to_disk merges with existing cache data.
+
+        Verifies that when multiple Memoizer instances dump to the same file,
+        their entries are merged additively.
+        """
+        # Setup: create first memoizer and cache a value
+        memoizer1 = interfaces.Memoizer()
+
+        @memoizer1.record()
+        def compute1(x: int) -> int:
+            return x * 2
+
+        compute1(5)
+        memoizer1._dump_to_disk()
+
+        # Create second memoizer and cache a different value
+        memoizer2 = interfaces.Memoizer()
+
+        @memoizer2.record()
+        def compute2(x: int) -> int:
+            return x * 3
+
+        compute2(10)
+
+        # Execute: dump second memoizer to disk
+        memoizer2._dump_to_disk()
+
+        # Assert: both entries are in the file
+        with open(memoizer1._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertEqual(data["cache_size"], 2)
+        self.assertEqual(len(data["cache_entries"]), 2)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_skips_empty_cache(self) -> None:
+        """Test that _dump_to_disk does nothing when cache is empty.
+
+        Verifies that when _dump_to_disk is called on an empty cache,
+        no file is created.
+        """
+        # Setup: create a memoizer with no cached values
+        memoizer = interfaces.Memoizer()
+
+        # Ensure the file doesn't exist beforehand
+        if memoizer._shared_cache_filepath.exists():
+            memoizer._shared_cache_filepath.unlink()
+
+        # Execute: dump the empty cache
+        memoizer._dump_to_disk()
+
+        # Assert: no file was created
+        self.assertFalse(memoizer._shared_cache_filepath.exists())
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_handles_corrupt_file(self) -> None:
+        """Test that _dump_to_disk handles corrupt JSON files gracefully.
+
+        Verifies that when the existing cache file contains invalid JSON,
+        _dump_to_disk starts fresh and overwrites the corrupt file.
+        """
+        # Setup: create a memoizer and cache a value
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+
+        # Create a corrupt JSON file
+        memoizer._shared_cache_filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(memoizer._shared_cache_filepath, "w") as f:
+            f.write("{ invalid json content")
+
+        # Execute: dump the cache (should handle corrupt file)
+        memoizer._dump_to_disk()
+
+        # Assert: file now contains valid JSON with our entry
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertEqual(data["cache_size"], 1)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_stores_encoded_params_and_result(self) -> None:
+        """Test that _dump_to_disk stores both encoded params and result.
+
+        Verifies that the dumped JSON contains both the encoded parameters
+        and the encoded result for each cache entry, making it useful for debugging.
+        """
+        # Setup: create a memoizer with custom encoder and cache a value
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int, y: int) -> int:
+            return x + y
+
+        compute(5, 10)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: entry contains both params and result
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        # Get the single entry
+        entries = data["cache_entries"]
+        self.assertEqual(len(entries), 1)
+
+        entry = next(iter(entries.values()))
+        self.assertEqual(entry["result"], 15)
+        self.assertEqual(entry["params"]["args"], [5, 10])
+        self.assertEqual(entry["params"]["kwargs"], {})
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_multiple_sub_keys(self) -> None:
+        """Test that multiple Memoizers with different sub_keys coexist.
+
+        Verifies that Memoizers with different sub_keys store their entries
+        under separate namespaces in the same JSON file.
+        """
+        # Setup: create two memoizers with different sub_keys
+        memoizer1 = interfaces.Memoizer(sub_key="feature_a")
+        memoizer2 = interfaces.Memoizer(sub_key="feature_b")
+
+        @memoizer1.record()
+        def compute_a(x: int) -> int:
+            return x * 2
+
+        @memoizer2.record()
+        def compute_b(x: int) -> int:
+            return x * 3
+
+        compute_a(5)
+        compute_b(10)
+
+        # Execute: dump both caches
+        memoizer1._dump_to_disk()
+        memoizer2._dump_to_disk()
+
+        # Assert: both sub_keys exist with their respective entries
+        with open(memoizer1._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("feature_a", data["cache_entries"])
+        self.assertIn("feature_b", data["cache_entries"])
+
+        # Verify each sub_key has one entry with correct result
+        feature_a_entries = data["cache_entries"]["feature_a"]
+        feature_b_entries = data["cache_entries"]["feature_b"]
+
+        self.assertEqual(len(feature_a_entries), 1)
+        self.assertEqual(len(feature_b_entries), 1)
+
+        self.assertEqual(next(iter(feature_a_entries.values()))["result"], 10)
+        self.assertEqual(next(iter(feature_b_entries.values()))["result"], 30)
 
 
 if __name__ == "__main__":
