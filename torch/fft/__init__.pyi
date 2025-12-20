@@ -49,7 +49,7 @@ def ifft2(
 def fftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,
@@ -59,7 +59,7 @@ def fftn(
 def ifftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,
@@ -110,7 +110,7 @@ def irfft2(
 def rfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,
@@ -120,7 +120,7 @@ def rfftn(
 def irfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,
@@ -171,7 +171,7 @@ def ihfft2(
 def hfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,
@@ -181,7 +181,7 @@ def hfftn(
 def ihfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
-    dim: Sequence[int] | None = None,
+    dim: int | list[int] | tuple[int, ...] | None = None,
     norm: str | None = None,
     *,
     out: Tensor | None = None,

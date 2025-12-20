@@ -63,8 +63,8 @@ def norm(
 
 def vector_norm(
     input: Tensor,
-    ord: float | int = 2,
-    dim: int | tuple[int, ...] | None = None,
+    ord: float | int | complex | bool = 2,
+    dim: int | tuple[int, ...] | list[int] | None = None,
     keepdim: bool = False,
     *,
     dtype: torch.dtype | None = None,
@@ -75,7 +75,7 @@ def vector_norm(
 def matrix_norm(
     input: Tensor,
     ord: float | int | str = "fro",
-    dim: tuple[int, int] = (-2, -1),
+    dim: tuple[int, int] | tuple[int, ...] | list[int] = (-2, -1),
     keepdim: bool = False,
     *,
     dtype: torch.dtype | None = None,
