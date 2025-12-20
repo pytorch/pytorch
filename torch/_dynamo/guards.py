@@ -2899,9 +2899,9 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(value, torch._subclasses.FakeTensor):
                 if value.pytype is not None:
                     pytype = value.pytype
-                else:
-                    # Default to torch.Tensor for cross-compilation support.
-                    # When compiling with fake tensors, we expect real tensors at runtime.
+                elif torch._dynamo.config.enable_aot_compile:
+                    # Default to torch.Tensor when aot precompiling to add cross-compilation support.
+                    # When precompiling with fake tensors, we expect real tensors at runtime.
                     pytype = torch.Tensor
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
