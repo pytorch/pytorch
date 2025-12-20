@@ -960,16 +960,16 @@ static PyObject* NodeBase_replace_all_uses_with(
     return nullptr;
   }
 
-  // propagate_meta only works when replace_with is a Node
+  // propagate_meta copies self.meta to replace_with.meta
+  // Access .meta via attribute lookup to match Python semantics (raises
+  // AttributeError if replace_with doesn't have .meta)
   if (propagate_meta) {
-    if (!is_node(replace_with)) {
-      PyErr_SetString(
-          PyExc_TypeError,
-          "propagate_meta=True requires replace_with to be a Node");
-      return nullptr;
+    THPObjectPtr replace_with_meta(
+        PyObject_GetAttrString(replace_with, "meta"));
+    if (!replace_with_meta) {
+      return nullptr; // Raises AttributeError naturally
     }
-    NodeBase* replace_with_node = reinterpret_cast<NodeBase*>(replace_with);
-    if (PyDict_Size(replace_with_node->meta) != 0) {
+    if (PyDict_Size(replace_with_meta.get()) != 0) {
       PyErr_SetString(
           PyExc_AssertionError,
           "Called node.replace_all_uses_with(replace_with, propagate_meta=True), "
@@ -979,7 +979,7 @@ static PyObject* NodeBase_replace_all_uses_with(
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
     while (PyDict_Next(node->meta, &pos, &key, &value)) {
-      if (PyDict_SetItem(replace_with_node->meta, key, value) < 0) {
+      if (PyDict_SetItem(replace_with_meta.get(), key, value) < 0) {
         return nullptr;
       }
     }
@@ -1036,18 +1036,20 @@ static PyObject* NodeBase_replace_all_uses_with(
     }
 
     // Call replace hooks
+    // Access .name via attribute lookup to match Python semantics (raises
+    // AttributeError if replace_with doesn't have .name)
     if (replace_hooks && PySequence_Check(replace_hooks.get())) {
       Py_ssize_t num_hooks = PySequence_Size(replace_hooks.get());
-      // Get name from replace_with (if it's a Node) or use replace_with itself
-      PyObject* replace_with_name = replace_with;
-      if (is_node(replace_with)) {
-        replace_with_name = reinterpret_cast<NodeBase*>(replace_with)->name;
+      THPObjectPtr replace_with_name(
+          PyObject_GetAttrString(replace_with, "name"));
+      if (!replace_with_name) {
+        return nullptr; // Raises AttributeError naturally
       }
       for (Py_ssize_t j = 0; j < num_hooks; j++) {
         THPObjectPtr hook(PySequence_GetItem(replace_hooks.get(), j));
         if (hook) {
           THPObjectPtr hook_result(PyObject_CallFunction(
-              hook, "OOO", self, replace_with_name, use_node));
+              hook, "OOO", self, replace_with_name.get(), use_node));
           if (!hook_result) {
             return nullptr;
           }
