@@ -216,9 +216,6 @@ function install_torchrec_and_fbgemm() {
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
-    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
-    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
-
     # Find rocm_version.h header file for ROCm version extract
     rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
     if [ ! -f "$rocm_version_h" ]; then

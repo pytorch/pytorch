@@ -892,7 +892,7 @@ def _sdpa_handler(
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
+    logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
     # sharding propagation
     # TODO: remove the context parallel strategy from the default propagation
@@ -1323,7 +1323,8 @@ class _ContextParallel(ParallelStyle):
             return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+                partial(self.sdpa_input_fn, mesh=mesh),
+                with_kwargs=True,
             )
             module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
             return module
@@ -1333,18 +1334,18 @@ class _ContextParallel(ParallelStyle):
     def flex_input_fn(
         self, module: nn.Module | None, args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
+        # We don't care about other args, and these argument order must be consistent
+        # with the signature of flex_attention.
+        expected_arg_names = ("query", "key", "value")
         args_list = list(args)
-        for idx, name in enumerate(
-            ("query", "key", "value", "score_mod", "block_mask")
-        ):
+        for idx, name in enumerate(expected_arg_names):
             if idx >= len(args):
                 args_list.append(kwargs.pop(name, None))
 
-        query, key, value, score_mod, block_mask = args_list[:5]
+        query, key, value = args_list[: len(expected_arg_names)]
         assert isinstance(query, torch.Tensor)
         assert isinstance(key, torch.Tensor)
         assert isinstance(value, torch.Tensor)
-        assert isinstance(block_mask, BlockMask | tuple)
 
         key = key.contiguous()
         value = value.contiguous()
@@ -1355,6 +1356,9 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
+        for idx in range(len(args), len(expected_arg_names)):
+            kwargs[expected_arg_names[idx]] = args_list[idx]
+        args_list = args_list[: len(args)]
         return tuple(args_list), kwargs
 
     def sdpa_input_fn(

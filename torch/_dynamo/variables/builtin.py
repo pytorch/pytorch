@@ -1037,7 +1037,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -2749,6 +2749,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
