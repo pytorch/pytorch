@@ -28,13 +28,19 @@ void destroyCuDNNHandle(cudnnHandle_t /*handle*/) {
   //   cudnnDestroy(handle);
   // #endif
 }
+
+using CudnnPoolType = at::cuda::DeviceThreadHandlePool<
+    cudnnHandle_t,
+    createCuDNNHandle,
+    destroyCuDNNHandle>;
+
 } // namespace
 
 cudnnHandle_t getCudnnHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
-  auto handle = at::cuda::reserveHandle<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>(device);
+  auto handle = CudnnPoolType::reserve(device);
   AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }

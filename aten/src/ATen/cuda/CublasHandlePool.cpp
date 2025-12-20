@@ -50,6 +50,8 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 #endif
 }
 
+using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
+
 // ugly hack until hipblasSetWorkspace exists
 #include <rocblas/rocblas.h>
 
@@ -100,6 +102,9 @@ void destroyCublasHandle(cublasHandle_t handle) {
   cublasDestroy(handle);
 #endif
 }
+
+using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+
 } // namespace
 
 WorkspaceMapWithMutex& cublas_handle_stream_to_workspace() {
@@ -328,7 +333,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
 #endif
 
-  auto handle = at::cuda::reserveHandle<cublasHandle_t, createCublasHandle, destroyCublasHandle>(device);
+  auto handle = CuBlasPoolType::reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
@@ -366,7 +371,7 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-  return at::cuda::reserveHandle<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>(device);
+  return CuBlasLtPoolType::reserve(device);
 #else
   return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
 #endif

@@ -20,13 +20,16 @@ void destroyCusparseHandle(cusparseHandle_t handle) {
     cusparseDestroy(handle);
 #endif
 }
+
+using CuSparsePoolType = DeviceThreadHandlePool<cusparseHandle_t, createCusparseHandle, destroyCusparseHandle>;
+
 } // namespace
 
 cusparseHandle_t getCurrentCUDASparseHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
-  auto handle = at::cuda::reserveHandle<cusparseHandle_t, createCusparseHandle, destroyCusparseHandle>(device);
+  auto handle = CuSparsePoolType::reserve(device);
   TORCH_CUDASPARSE_CHECK(cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }

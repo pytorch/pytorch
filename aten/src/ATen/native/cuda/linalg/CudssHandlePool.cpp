@@ -23,13 +23,16 @@ void destroyCudssHandle(cudssHandle_t handle) {
     cudssDestroy(handle);
 #endif
 }
+
+using CudssPoolType = DeviceThreadHandlePool<cudssHandle_t, createCudssHandle, destroyCudssHandle>;
+
 } // namespace
 
 cudssHandle_t getCurrentCudssHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
-  auto handle = at::cuda::reserveHandle<cudssHandle_t, createCudssHandle, destroyCudssHandle>(device);
+  auto handle = CudssPoolType::reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDSS_CHECK(cudssSetStream(handle, stream));
   return handle;

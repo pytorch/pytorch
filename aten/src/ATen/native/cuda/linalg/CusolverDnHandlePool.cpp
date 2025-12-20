@@ -21,13 +21,16 @@ void destroyCusolverDnHandle(cusolverDnHandle_t handle) {
     cusolverDnDestroy(handle);
 #endif
 }
+
+using CuSolverDnPoolType = DeviceThreadHandlePool<cusolverDnHandle_t, createCusolverDnHandle, destroyCusolverDnHandle>;
+
 } // namespace
 
 cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
-  auto handle = at::cuda::reserveHandle<cusolverDnHandle_t, createCusolverDnHandle, destroyCusolverDnHandle>(device);
+  auto handle = CuSolverDnPoolType::reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUSOLVER_CHECK(cusolverDnSetStream(handle, stream));
   return handle;
