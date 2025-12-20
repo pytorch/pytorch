@@ -41,7 +41,12 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import (
+    create_binary_op,
+    create_call_method,
+    create_compare_op,
+    create_load_method,
+)
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
@@ -209,79 +214,52 @@ un_ops = (
 )
 
 
-# Map operator functions to BINARY_OP arg values (Python 3.11+)
-# or to pre-3.11 opnames. Used by _make_binary_op_reconstruct_fn.
-if sys.version_info >= (3, 11):
-    import dis
-
-    # pyrefly: ignore[missing-attribute]
-    _NB_OP_TO_ARG = {name: idx for idx, (name, _) in enumerate(dis._nb_ops)}
-    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {
-        operator.add: _NB_OP_TO_ARG["NB_ADD"],
-        operator.and_: _NB_OP_TO_ARG["NB_AND"],
-        operator.floordiv: _NB_OP_TO_ARG["NB_FLOOR_DIVIDE"],
-        operator.lshift: _NB_OP_TO_ARG["NB_LSHIFT"],
-        operator.matmul: _NB_OP_TO_ARG["NB_MATRIX_MULTIPLY"],
-        operator.mul: _NB_OP_TO_ARG["NB_MULTIPLY"],
-        operator.mod: _NB_OP_TO_ARG["NB_REMAINDER"],
-        operator.or_: _NB_OP_TO_ARG["NB_OR"],
-        operator.pow: _NB_OP_TO_ARG["NB_POWER"],
-        operator.rshift: _NB_OP_TO_ARG["NB_RSHIFT"],
-        operator.sub: _NB_OP_TO_ARG["NB_SUBTRACT"],
-        operator.truediv: _NB_OP_TO_ARG["NB_TRUE_DIVIDE"],
-        operator.xor: _NB_OP_TO_ARG["NB_XOR"],
-    }
-    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {}
-else:
-    _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {}
-    _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {
-        operator.add: "BINARY_ADD",
-        operator.and_: "BINARY_AND",
-        operator.floordiv: "BINARY_FLOOR_DIVIDE",
-        operator.lshift: "BINARY_LSHIFT",
-        operator.matmul: "BINARY_MATRIX_MULTIPLY",
-        operator.mul: "BINARY_MULTIPLY",
-        operator.mod: "BINARY_MODULO",
-        operator.or_: "BINARY_OR",
-        operator.pow: "BINARY_POWER",
-        operator.rshift: "BINARY_RSHIFT",
-        operator.sub: "BINARY_SUBTRACT",
-        operator.truediv: "BINARY_TRUE_DIVIDE",
-        operator.xor: "BINARY_XOR",
-    }
-
-
 def _make_binary_op_reconstruct_fn(
     op: Callable[..., Any],
 ) -> Callable[[Any, list[VariableTracker]], None] | None:
-    """Create a reconstruct_fn for a binary operation.
+    """Create a reconstruct_fn for a binary, comparison, or method operation.
 
     Returns a function that generates bytecode to recompute the result
-    by loading the operands and applying the binary operation.
-    Returns None if the operation is not a supported binary operation.
+    by loading the operands and applying the operation.
+    Returns None if the operation is not supported.
     """
-    if sys.version_info >= (3, 11):
-        if op not in _OPERATOR_TO_BINARY_OP_ARG:
-            return None
-        binary_op_arg = _OPERATOR_TO_BINARY_OP_ARG[op]
+    # Check if this operator is supported by create_binary_op or create_compare_op
+    binary_op_inst = create_binary_op(op)
+    compare_op_inst = create_compare_op(op)
+
+    if binary_op_inst is not None:
 
         def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
             codegen(args[0])
             codegen(args[1])
-            codegen.append_output(create_instruction("BINARY_OP", arg=binary_op_arg))
+            codegen.append_output(create_binary_op(op))
+
+        return reconstruct_fn
+    elif compare_op_inst is not None:
+
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            codegen(args[0])
+            codegen(args[1])
+            codegen.append_output(create_compare_op(op))
+
+        return reconstruct_fn
+    elif op is str.format:
+        # str.format(format_str, *args) -> format_str.format(*args)
+        # Bytecode: LOAD format_str, LOAD_METHOD 'format', LOAD args..., CALL_METHOD
+        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
+            # First arg is the format string
+            codegen(args[0])
+            # Load the 'format' method
+            codegen.append_output(create_load_method("format"))
+            # Load remaining args
+            for arg in args[1:]:
+                codegen(arg)
+            # Call the method
+            codegen.extend_output(create_call_method(len(args) - 1))
 
         return reconstruct_fn
     else:
-        if op not in _OPERATOR_TO_BINARY_OPNAME:
-            return None
-        binary_opname = _OPERATOR_TO_BINARY_OPNAME[op]
-
-        def reconstruct_fn(codegen: Any, args: list[VariableTracker]) -> None:
-            codegen(args[0])
-            codegen(args[1])
-            codegen.append_output(create_instruction(binary_opname))
-
-        return reconstruct_fn
+        return None
 
 
 BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
@@ -1093,6 +1071,23 @@ class BuiltinVariable(VariableTracker):
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
+        # Special handling for isinstance with lazy constants.
+        # isinstance only needs to know the TYPE of the value, not the specific value.
+        # LazyConstantVariable.python_type() only installs a TYPE_MATCH guard,
+        # not a CONSTANT_MATCH guard, so changing the value won't cause recompilation.
+        if fn is isinstance and len(arg_types) == 2:
+            first_arg_is_lazy = issubclass(
+                arg_types[0], (LazyConstantVariable, ComputedLazyConstantVariable)
+            )
+            if first_arg_is_lazy and not has_kwargs:
+
+                def handle_isinstance(tx, args, kwargs):
+                    # python_type() on lazy constants installs TYPE_MATCH guard,
+                    # not CONSTANT_MATCH guard, so no recompilation on value change.
+                    return obj.call_isinstance(tx, args[0], args[1])
+
+                return handle_isinstance
+
         if any(issubclass(t, LazyVariableTracker) for t in arg_types):
             # Check if we can handle this lazily (all args are lazy/computed lazy constants
             # or regular constants, and the op can be constant-folded)
@@ -1107,15 +1102,7 @@ class BuiltinVariable(VariableTracker):
                 )
                 for t in arg_types
             )
-            # Comparison operators should NOT be lazy - they typically affect control flow
-            # and need to trigger realization to install guards
-            is_comparison_op = fn in supported_comparison_ops.values()
-            if (
-                all_constant_like
-                and obj.can_constant_fold_through()
-                and not has_kwargs
-                and not is_comparison_op
-            ):
+            if all_constant_like and obj.can_constant_fold_through() and not has_kwargs:
                 # Return a ComputedLazyConstantVariable instead of realizing.
                 # This allows operations on lazy constants to remain lazy, deferring
                 # guard installation until the result is actually used.
@@ -1184,7 +1171,7 @@ class BuiltinVariable(VariableTracker):
                 )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -2941,6 +2928,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
