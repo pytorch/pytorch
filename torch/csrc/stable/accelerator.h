@@ -23,7 +23,7 @@ inline void delete_device_guard(void* ptr) {
 /**
  * @brief Device index type for stable ABI.
  *
- * @note Minimum compatible version: PyTorch 2.9.
+ * Minimum compatible version: PyTorch 2.9.
  */
 using DeviceIndex = int32_t;
 
@@ -35,10 +35,11 @@ using StreamId = int64_t; // this is from c10/core/Stream.h
  * RAII class that sets the current device to the specified device index
  * on construction and restores the previous device on destruction.
  *
- * @note Minimum compatible version: PyTorch 2.9.
+ * Minimum compatible version: PyTorch 2.9.
  */
 class DeviceGuard {
  public:
+  /// \private
   explicit DeviceGuard() = delete;
 
   /**
@@ -46,7 +47,7 @@ class DeviceGuard {
    *
    * @param device_index The device index to set as the current device.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   explicit DeviceGuard(DeviceIndex device_index)
       : guard_(nullptr, delete_device_guard) {
@@ -60,7 +61,7 @@ class DeviceGuard {
    *
    * @param device_index The new device index to set.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   void set_index(DeviceIndex device_index) {
     TORCH_ERROR_CODE_CHECK(
@@ -105,7 +106,7 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
  *
  * @return The current device index.
  *
- * @note Minimum compatible version: PyTorch 2.9.
+ * Minimum compatible version: PyTorch 2.9.
  */
 inline DeviceIndex getCurrentDeviceIndex() {
   DeviceIndex device_index;

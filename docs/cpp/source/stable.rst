@@ -16,13 +16,108 @@ registration macros (``TORCH_LIBRARY``, ``TORCH_LIBRARY_IMPL``, etc.).
 Use these when building custom operators that need to maintain binary
 compatibility across PyTorch versions.
 
-.. doxygendefine:: STABLE_TORCH_LIBRARY
+``STABLE_TORCH_LIBRARY(ns, m)``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. doxygendefine:: STABLE_TORCH_LIBRARY_IMPL
+Defines a library of operators in a namespace using the stable ABI.
 
-.. doxygendefine:: STABLE_TORCH_LIBRARY_FRAGMENT
+This is the stable ABI equivalent of ``TORCH_LIBRARY``. Use this macro to
+define operator schemas that will maintain binary compatibility across
+PyTorch versions. Only one ``STABLE_TORCH_LIBRARY`` block can exist per
+namespace; use ``STABLE_TORCH_LIBRARY_FRAGMENT`` for additional definitions
+in the same namespace from different translation units.
 
-.. doxygendefine:: TORCH_BOX
+**Parameters:**
+
+- ``ns`` - The namespace in which to define operators (e.g., ``myops``).
+- ``m`` - The name of the StableLibrary variable available in the block.
+
+**Example:**
+
+.. code-block:: cpp
+
+   STABLE_TORCH_LIBRARY(myops, m) {
+       m.def("my_op(Tensor input, int size) -> Tensor");
+       m.def("another_op(Tensor a, Tensor b) -> Tensor");
+   }
+
+Minimum compatible version: PyTorch 2.9.
+
+``STABLE_TORCH_LIBRARY_IMPL(ns, k, m)``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Registers operator implementations for a specific dispatch key using the stable ABI.
+
+This is the stable ABI equivalent of ``TORCH_LIBRARY_IMPL``. Use this macro
+to provide implementations of operators for a specific dispatch key (e.g.,
+CPU, CUDA) while maintaining binary compatibility across PyTorch versions.
+
+.. note::
+
+   All kernel functions registered with this macro must be boxed using
+   the ``TORCH_BOX`` macro.
+
+**Parameters:**
+
+- ``ns`` - The namespace in which the operators are defined.
+- ``k`` - The dispatch key (e.g., ``CPU``, ``CUDA``).
+- ``m`` - The name of the StableLibrary variable available in the block.
+
+**Example:**
+
+.. code-block:: cpp
+
+   STABLE_TORCH_LIBRARY_IMPL(myops, CPU, m) {
+       m.impl("my_op", TORCH_BOX(my_cpu_kernel));
+   }
+
+   STABLE_TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+       m.impl("my_op", TORCH_BOX(my_cuda_kernel));
+   }
+
+Minimum compatible version: PyTorch 2.9.
+
+``STABLE_TORCH_LIBRARY_FRAGMENT(ns, m)``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Extends operator definitions in an existing namespace using the stable ABI.
+
+This is the stable ABI equivalent of ``TORCH_LIBRARY_FRAGMENT``. Use this macro
+to add additional operator definitions to a namespace that was already
+created with ``STABLE_TORCH_LIBRARY``.
+
+**Parameters:**
+
+- ``ns`` - The namespace to extend.
+- ``m`` - The name of the StableLibrary variable available in the block.
+
+Minimum compatible version: PyTorch 2.9.
+
+``TORCH_BOX(func)``
+^^^^^^^^^^^^^^^^^^^
+
+Wraps a function to conform to the stable boxed kernel calling convention.
+
+This macro takes an unboxed kernel function and generates a boxed wrapper
+that can be registered with the stable library API.
+
+**Parameters:**
+
+- ``func`` - The unboxed kernel function to wrap.
+
+**Example:**
+
+.. code-block:: cpp
+
+   Tensor my_kernel(const Tensor& input, int64_t size) {
+       return input.reshape({size});
+   }
+
+   STABLE_TORCH_LIBRARY_IMPL(my_namespace, CPU, m) {
+       m.impl("my_op", TORCH_BOX(my_kernel));
+   }
+
+Minimum compatible version: PyTorch 2.9.
 
 Tensor Class
 ------------
@@ -55,6 +150,7 @@ construction and restores the previous device on destruction.
    :members:
 
 .. doxygenfunction:: torch::stable::accelerator::getCurrentDeviceIndex
+
 
 Stream Utilities
 ----------------
@@ -96,9 +192,35 @@ These macros provide stable ABI equivalents for CUDA error checking.
 They wrap CUDA API calls and kernel launches, providing detailed error
 messages using PyTorch's error formatting.
 
-.. doxygendefine:: STD_CUDA_CHECK
+``STD_CUDA_CHECK(EXPR)``
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. doxygendefine:: STD_CUDA_KERNEL_LAUNCH_CHECK
+Checks the result of a CUDA API call and throws an exception on error.
+Users of this macro are expected to include ``cuda_runtime.h``.
+
+**Example:**
+
+.. code-block:: cpp
+
+   STD_CUDA_CHECK(cudaMalloc(&ptr, size));
+   STD_CUDA_CHECK(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost));
+
+Minimum compatible version: PyTorch 2.9.
+
+``STD_CUDA_KERNEL_LAUNCH_CHECK()``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Checks for errors from the most recent CUDA kernel launch. Equivalent to
+``STD_CUDA_CHECK(cudaGetLastError())``.
+
+**Example:**
+
+.. code-block:: cpp
+
+   my_kernel<<<blocks, threads, 0, stream>>>(args...);
+   STD_CUDA_KERNEL_LAUNCH_CHECK();
+
+Minimum compatible version: PyTorch 2.9.
 
 Header-Only Utilities
 ---------------------
@@ -226,6 +348,7 @@ Tensor Manipulation
 
 .. doxygenfunction:: torch::stable::pad
 
+
 Device and Type Conversion
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -233,17 +356,11 @@ Device and Type Conversion
 
 .. doxygenfunction:: torch::stable::to(const torch::stable::Tensor &self, torch::stable::Device device, bool non_blocking, bool copy)
 
-In-Place Operations
-^^^^^^^^^^^^^^^^^^^
-
 .. doxygenfunction:: torch::stable::fill_
 
 .. doxygenfunction:: torch::stable::zero_
 
 .. doxygenfunction:: torch::stable::copy_
-
-Math Operations
-^^^^^^^^^^^^^^^
 
 .. doxygenfunction:: torch::stable::matmul
 
@@ -256,6 +373,11 @@ Math Operations
 .. doxygenfunction:: torch::stable::sum_out
 
 .. doxygenfunction:: torch::stable::subtract
+
+.. doxygenfunction:: torch::stable::parallel_for
+
+.. doxygenfunction:: torch::stable::get_num_threads
+
 
 Parallelization Utilities
 ^^^^^^^^^^^^^^^^^^^^^^^^^

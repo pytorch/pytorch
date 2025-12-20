@@ -32,7 +32,7 @@ using DeviceIndex = torch::stable::accelerator::DeviceIndex;
 /**
  * @brief A stable version of c10::Device.
  *
- * @note Minimum compatible version: PyTorch 2.9.
+ * Minimum compatible version: PyTorch 2.9.
  */
 class Device {
  private:
@@ -57,7 +57,7 @@ class Device {
    * @param type The type of device (e.g., DeviceType::CPU, DeviceType::CUDA).
    * @param index The device index. Default is -1 (current device).
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
@@ -74,20 +74,25 @@ class Device {
    * @param device_string A string describing the device (e.g., "cuda:0",
    * "cpu").
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   /* implicit */ Device(const std::string& device_string);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
   // Copy and move constructors can be default
+  /// \private
   Device(const Device& other) = default;
+  /// \private
   Device(Device&& other) noexcept = default;
 
   // Copy and move assignment operators can be default
+  /// \private
   Device& operator=(const Device& other) = default;
+  /// \private
   Device& operator=(Device&& other) noexcept = default;
 
   // Destructor can be default
+  /// \private
   ~Device() = default;
 
   /**
@@ -96,7 +101,7 @@ class Device {
    * @param other The device to compare with.
    * @return true if both type and index match, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool operator==(const Device& other) const noexcept {
     return type() == other.type() && index() == other.index();
@@ -108,7 +113,7 @@ class Device {
    * @param other The device to compare with.
    * @return true if type or index differ, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool operator!=(const Device& other) const noexcept {
     return !(*this == other);
@@ -119,7 +124,7 @@ class Device {
    *
    * @param index The new device index.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   void set_index(DeviceIndex index) {
     index_ = index;
@@ -130,7 +135,7 @@ class Device {
    *
    * @return The DeviceType of this device.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   DeviceType type() const noexcept {
     return type_;
@@ -141,7 +146,7 @@ class Device {
    *
    * @return The device index, or -1 if no specific index is set.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   DeviceIndex index() const noexcept {
     return index_;
@@ -152,7 +157,7 @@ class Device {
    *
    * @return true if index is not -1, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool has_index() const noexcept {
     return index_ != -1;
@@ -163,7 +168,7 @@ class Device {
    *
    * @return true if the device type is CUDA, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cuda() const noexcept {
     return type_ == DeviceType::CUDA;
@@ -174,7 +179,7 @@ class Device {
    *
    * @return true if the device type is CPU, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;

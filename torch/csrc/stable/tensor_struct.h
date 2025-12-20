@@ -42,7 +42,7 @@ using torch::headeronly::ScalarType;
  * strides, device, dtype). Other tensor operations (like ``empty_like``) exist
  * as standalone functions outside of this struct.
  *
- * @note Minimum compatible version: PyTorch 2.9.
+ * Minimum compatible version: PyTorch 2.9.
  */
 class Tensor {
  private:
@@ -55,7 +55,7 @@ class Tensor {
    * Creates a new stable::Tensor by allocating an uninitialized tensor handle.
    * The ownership of the handle is managed internally via shared_ptr.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   Tensor() {
     AtenTensorHandle ret;
@@ -73,7 +73,7 @@ class Tensor {
    * @param ath The AtenTensorHandle to wrap. Ownership is transferred to this
    *            Tensor.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   explicit Tensor(AtenTensorHandle ath)
       : ath_(ath, [](AtenTensorHandle ath) {
@@ -82,15 +82,20 @@ class Tensor {
 
   // Copy and move constructors can be default cuz the underlying handle is a
   // shared_ptr
+  /// \private
   Tensor(const Tensor& other) = default;
+  /// \private
   Tensor(Tensor&& other) noexcept = default;
 
   // Copy and move assignment operators can be default cuz the underlying handle
   // is a shared_ptr
+  /// \private
   Tensor& operator=(const Tensor& other) = default;
+  /// \private
   Tensor& operator=(Tensor&& other) noexcept = default;
 
   // Destructor can be default: shared ptr has custom deletion logic
+  /// \private
   ~Tensor() = default;
 
   /**
@@ -98,7 +103,7 @@ class Tensor {
    *
    * @return The underlying AtenTensorHandle.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   AtenTensorHandle get() const {
     return ath_.get();
@@ -114,7 +119,7 @@ class Tensor {
    *
    * @return A void pointer to the tensor's data storage.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   void* data_ptr() const {
     void* data_ptr;
@@ -128,7 +133,7 @@ class Tensor {
    *
    * @return A mutable void pointer to the tensor's data storage.
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   void* mutable_data_ptr() const {
     void* data_ptr{};
@@ -141,7 +146,7 @@ class Tensor {
    *
    * @return A const void pointer to the tensor's data storage.
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   const void* const_data_ptr() const {
     const void* data_ptr{};
@@ -155,7 +160,7 @@ class Tensor {
    * @tparam T The type to cast the data pointer to.
    * @return A mutable pointer to the tensor's data cast to type T*.
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   template <typename T>
   T* mutable_data_ptr() const;
@@ -167,7 +172,7 @@ class Tensor {
    * const-qualified.
    * @return A const pointer to the tensor's data cast to type const T*.
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
@@ -179,7 +184,7 @@ class Tensor {
    *                      during backpropagation.
    * @return A reference to this Tensor.
    *
-   * @note Minimum compatible version: PyTorch 2.10.
+   * Minimum compatible version: PyTorch 2.10.
    */
   const Tensor& set_requires_grad(bool requires_grad) const {
     TORCH_ERROR_CODE_CHECK(torch_set_requires_grad(ath_.get(), requires_grad));
@@ -192,7 +197,7 @@ class Tensor {
    *
    * @return The number of dimensions (rank) of the tensor.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   int64_t dim() const {
     int64_t dim;
@@ -205,7 +210,7 @@ class Tensor {
    *
    * @return The total number of elements across all dimensions.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   int64_t numel() const {
     int64_t numel;
@@ -227,7 +232,7 @@ class Tensor {
    *
    * @return An IntHeaderOnlyArrayRef containing the size of each dimension.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   IntHeaderOnlyArrayRef sizes() const {
     int64_t* sizes;
@@ -243,7 +248,7 @@ class Tensor {
    *
    * @return An IntHeaderOnlyArrayRef containing the stride of each dimension.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   IntHeaderOnlyArrayRef strides() const {
     int64_t* strides;
@@ -260,7 +265,7 @@ class Tensor {
    *
    * @return true if the tensor is contiguous, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool is_contiguous() const {
     bool is_contiguous;
@@ -275,7 +280,7 @@ class Tensor {
    * @param dim The dimension index to query.
    * @return The stride of the specified dimension.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   int64_t stride(int64_t dim) const {
     int64_t stride;
@@ -286,6 +291,7 @@ class Tensor {
   // This is almost the same API as the one in TensorBase.h, except
   // we add a check that the returned device_index is within the
   // range of int8_t.
+  /// \private
   int8_t get_device() const {
     int32_t device_index;
     TORCH_ERROR_CODE_CHECK(
@@ -307,7 +313,7 @@ class Tensor {
    *
    * @return The device index as DeviceIndex (int32_t).
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   DeviceIndex get_device_index() const {
     int32_t device_index;
@@ -321,7 +327,7 @@ class Tensor {
    *
    * @return true if the tensor is on a CUDA device, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cuda() const {
     int32_t device_type;
@@ -335,7 +341,7 @@ class Tensor {
    *
    * @return true if the tensor is on the CPU, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool is_cpu() const {
     int32_t device_type;
@@ -350,7 +356,7 @@ class Tensor {
    * @param dim The dimension index to query.
    * @return The size of the specified dimension.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   int64_t size(int64_t dim) const {
     int64_t size;
@@ -363,7 +369,7 @@ class Tensor {
    *
    * @return true if the tensor is defined, false otherwise.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   bool defined() const {
     bool defined;
@@ -379,7 +385,7 @@ class Tensor {
    *
    * @return The storage offset in number of elements.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   int64_t storage_offset() const {
     int64_t storage_offset;
@@ -393,7 +399,7 @@ class Tensor {
    *
    * @return The element size in bytes.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   size_t element_size() const {
     int32_t dtype;
@@ -407,7 +413,7 @@ class Tensor {
    *
    * @return The ScalarType of the tensor.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   ScalarType scalar_type() const;
 
@@ -417,7 +423,7 @@ class Tensor {
    *
    * @return The Device on which the tensor resides.
    *
-   * @note Minimum compatible version: PyTorch 2.9.
+   * Minimum compatible version: PyTorch 2.9.
    */
   Device device() const;
 

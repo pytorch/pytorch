@@ -21,7 +21,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 /// device as the input tensor. This version does not support kwargs (device,
 /// dtype, layout, memory_format) - kwargs support may be added in the future.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor whose properties will be used for the new
 /// tensor.
@@ -50,8 +50,9 @@ inline torch::stable::Tensor empty_like(const torch::stable::Tensor& self) {
 /// Fills the input tensor with the specified scalar value in-place and returns
 /// it. This has identical semantics to the existing fill_.Scalar op.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note The value parameter is typed as double, but represents a Scalar.
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note The value parameter is typed as double
 ///       This is because Scalar.h is currently not header-only.
 ///
 /// @param self The tensor to fill.
@@ -69,8 +70,9 @@ inline torch::stable::Tensor fill_(
 /// Returns a new tensor that is a narrowed version of the input tensor. The
 /// dimension dim is narrowed from start to start + length.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note The start and length parameters are typed as int64_t because SymInt
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note The start and length parameters
 ///       is not yet header-only.
 ///
 /// @param self The input tensor to narrow.
@@ -97,10 +99,10 @@ inline torch::stable::Tensor narrow(
 /// device and layout from the input tensor. This version only supports the
 /// dtype kwarg. For the full kwargs version, use PyTorch 2.10+.
 ///
-/// @note Minimum compatible version: PyTorch 2.9. For full kwargs support, use
+/// Minimum compatible version: PyTorch 2.9. For full kwargs support, use
 /// PyTorch 2.10+.
 ///
-/// @param self The input tensor whose device and layout will be inherited.
+/// @param self The input tensor whose device
 /// @param size The desired size of the output tensor.
 /// @param dtype Optional scalar type for the tensor elements. If not provided,
 ///              inherits from self.
@@ -148,7 +150,7 @@ inline torch::stable::Tensor new_empty(
 /// device and layout from the input tensor. This version only supports the
 /// dtype kwarg. For the full kwargs version, use PyTorch 2.10+.
 ///
-/// @note Minimum compatible version: PyTorch 2.9. For full kwargs support, use
+/// Minimum compatible version: PyTorch 2.9. For full kwargs support, use
 /// PyTorch 2.10+.
 ///
 /// @param self The input tensor whose device and layout will be inherited.
@@ -200,8 +202,9 @@ inline torch::stable::Tensor new_zeros(
 /// is applied symmetrically to each dimension, with the padding sizes specified
 /// in reverse order (last dimension first).
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note The pad parameter is typed as IntHeaderOnlyArrayRef because SymInt is
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note The pad parameter is typed
 ///       not yet header-only.
 ///
 /// @param self The input tensor to pad.
@@ -230,11 +233,11 @@ inline torch::stable::Tensor pad(
 /// with the reduced dimension having size 1. Otherwise, the reduced dimension
 /// is removed.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor.
 /// @param dim The dimension along which to compute the maximum.
-/// @param keepdim Whether to retain the reduced dimension. Defaults to false.
+/// @param keepdim Whether to retain
 /// @return A tensor containing the maximum values along the specified
 /// dimension.
 inline torch::stable::Tensor amax(
@@ -254,8 +257,9 @@ inline torch::stable::Tensor amax(
 /// input, with the reduced dimensions having size 1. Otherwise, the reduced
 /// dimensions are removed.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note The dims parameter is typed as IntHeaderOnlyArrayRef because SymInt
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note The dims parameter is typed
 ///       is not yet header-only.
 ///
 /// @param self The input tensor.
@@ -281,7 +285,7 @@ inline torch::stable::Tensor amax(
 /// Returns a tensor that is a transposed version of the input, with dimensions
 /// dim0 and dim1 swapped. The returned tensor shares storage with the input.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor.
 /// @param dim0 The first dimension to transpose.
@@ -311,7 +315,7 @@ inline torch::stable::Tensor transpose(
 /// Fills the input tensor with zeros in-place and returns it. Unlike the
 /// tensor method version (t.zero_()), this is called as a function: zero_(t).
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The tensor to fill with zeros.
 /// @return The input tensor, now filled with zeros.
@@ -334,7 +338,7 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
 /// in-place and returns the destination tensor. The tensors must be
 /// broadcastable.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The destination tensor (modified in-place).
 /// @param src The source tensor to copy from.
@@ -365,8 +369,9 @@ inline torch::stable::Tensor copy_(
 /// Returns a copy of the input tensor. The returned tensor has the same data
 /// and type as the input, but is stored in a new memory location.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note Optional memory_format kwarg support may be added in the future.
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note Optional memory_format kwarg support
 ///
 /// @param self The input tensor to clone.
 /// @return A new tensor with copied data.
@@ -391,7 +396,7 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 /// If start_dim or end_dim are specified, only dimensions starting from
 /// start_dim to end_dim are flattened.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor to flatten.
 /// @param start_dim The first dimension to flatten. Defaults to 0.
@@ -422,10 +427,10 @@ inline torch::stable::Tensor flatten(
 /// position. The returned tensor shares the same underlying data with the input
 /// tensor.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor.
-/// @param dim The index at which to insert the singleton dimension. Negative
+/// @param dim The index at which to insert
 ///            values are supported.
 /// @return A tensor with an additional dimension.
 inline torch::stable::Tensor unsqueeze(
@@ -450,10 +455,10 @@ inline torch::stable::Tensor unsqueeze(
 /// removed. The returned tensor shares the same underlying data with the input
 /// tensor.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The input tensor.
-/// @param dim The dimension to squeeze. If this dimension is not of size one,
+/// @param dim The dimension to squeeze.
 ///            the tensor is returned unchanged.
 /// @return A tensor with the specified dimension removed (if size was 1).
 inline torch::stable::Tensor squeeze(
@@ -478,8 +483,9 @@ inline torch::stable::Tensor squeeze(
 /// This function returns a view of the original tensor with the given dimension
 /// removed.
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
-/// @note The index parameter is typed as int64_t because SymInt is not yet
+/// Minimum compatible version: PyTorch 2.9.
+///
+/// @note The index parameter is typed
 ///       header-only.
 ///
 /// @param self The input tensor.
@@ -511,7 +517,7 @@ inline torch::stable::Tensor select(
 /// the dimensionality of the tensors (see PyTorch documentation for details on
 /// broadcasting rules for matmul).
 ///
-/// @note Minimum compatible version: PyTorch 2.9.
+/// Minimum compatible version: PyTorch 2.9.
 ///
 /// @param self The first input tensor.
 /// @param other The second input tensor.
@@ -541,9 +547,9 @@ inline torch::stable::Tensor matmul(
 /// parallel. grain_size controls the minimum work size per thread for efficient
 /// parallelization.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
-/// @tparam F The callable type that accepts (int64_t begin, int64_t end).
+/// @tparam F The callable type
 /// @param begin The start of the iteration range.
 /// @param end The end of the iteration range (exclusive).
 /// @param grain_size The minimum number of iterations per thread.
@@ -570,9 +576,9 @@ inline void parallel_for(
 ///
 /// Provides a stable interface to at::get_num_threads.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
-/// @return The number of threads used by the parallel backend.
+/// @return The number of threads
 inline uint32_t get_num_threads() {
   uint32_t num_threads;
   TORCH_ERROR_CODE_CHECK(torch_get_num_threads(&num_threads));
@@ -585,7 +591,7 @@ inline uint32_t get_num_threads() {
 /// This function supports full tensor creation options including device,
 /// dtype, layout, and memory format.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param size The desired size of the output tensor.
 /// @param dtype Optional scalar type for the tensor elements.
@@ -621,7 +627,7 @@ inline torch::stable::Tensor empty(
 /// but with the specified shape. When possible, the returned tensor will be
 /// a view of the input.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param shape The desired output shape.
@@ -643,7 +649,7 @@ inline torch::stable::Tensor reshape(
 /// different shape. The returned tensor shares the same data and must have
 /// the same number of elements.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param size The desired output shape.
@@ -665,7 +671,7 @@ inline torch::stable::Tensor view(
 /// The tensor does not own the data, so the caller must ensure the data
 /// remains valid for the lifetime of the tensor.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param data Pointer to the data buffer.
 /// @param sizes The size of each dimension of the tensor.
@@ -711,7 +717,7 @@ inline torch::stable::Tensor from_blob(
 /// Converts a tensor to the specified dtype, layout, device, and/or memory
 /// format. Returns a new tensor with the specified properties.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param dtype Optional target scalar type.
@@ -753,7 +759,7 @@ inline torch::stable::Tensor to(
 /// Moves the tensor to the specified device. This is a convenience wrapper
 /// around the full to() function.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param device The target device.
@@ -783,10 +789,10 @@ inline torch::stable::Tensor to(
 /// tensor. If the input tensor is already contiguous in the specified memory
 /// format, the input tensor is returned.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
-/// @param memory_format The desired memory format. Defaults to Contiguous.
+/// @param memory_format The desired memory format.
 /// @return A contiguous tensor.
 inline torch::stable::Tensor contiguous(
     const torch::stable::Tensor& self,
@@ -807,7 +813,7 @@ inline torch::stable::Tensor contiguous(
 /// This version supports all tensor creation kwargs. For versions < 2.10,
 /// a simpler overload that only takes dtype is available.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -843,7 +849,7 @@ inline torch::stable::Tensor new_empty(
 /// This version supports all tensor creation kwargs. For versions < 2.10,
 /// a simpler overload that only takes dtype is available.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -878,7 +884,7 @@ inline torch::stable::Tensor new_zeros(
 /// Computes the sum of the input tensor along the specified dimensions.
 /// If dim is not provided, sums over all dimensions.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param self The input tensor.
 /// @param dim Optional dimensions to reduce. If not provided, reduces all
@@ -908,7 +914,7 @@ inline torch::stable::Tensor sum(
 /// storing the result in the provided output tensor. Following C++ convention,
 /// the out parameter comes first.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.10.
 ///
 /// @param out The output tensor (modified in-place).
 /// @param self The input tensor.
@@ -941,8 +947,9 @@ inline torch::stable::Tensor& sum_out(
 /// Subtracts the other tensor from self, with an optional scaling factor alpha.
 /// Computes: self - alpha * other.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
-/// @note The alpha parameter is typed as double because the underlying C shim
+/// Minimum compatible version: PyTorch 2.10.
+///
+/// @note The alpha parameter is typed as double
 ///       API uses double for the Scalar parameter.
 ///
 /// @param self The input tensor.
@@ -963,8 +970,9 @@ inline torch::stable::Tensor subtract(
 ///
 /// Creates a tensor of the specified size filled with the given value.
 ///
-/// @note Minimum compatible version: PyTorch 2.10.
-/// @note The fill_value parameter is typed as double because the underlying
+/// Minimum compatible version: PyTorch 2.10.
+///
+/// @note The fill_value parameter is typed
 ///       C shim API uses double for the Scalar parameter.
 ///
 /// @param size The desired size of the output tensor.
