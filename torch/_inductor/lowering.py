@@ -6369,6 +6369,8 @@ def pow(a, b):
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
+    elif isinstance(b, float) and b == -0.5:
+        return rsqrt(a)
     elif isinstance(b, int) and b == 1:
         return clone(a)
 
@@ -6408,6 +6410,26 @@ def pow(a, b):
             return fallback_pow_tensor_scalar(a, b)
         else:
             return fallback_pow_tensor_tensor(a, b)
+    
+    if isinstance(a, ir.TensorBox) and isinstance(b, Number):
+        b_dtype = ir.get_constant_dtype(b)
+        a_dtype = a.get_dtype()
+        if b_dtype != a_dtype:
+            b = ir.Constant(
+                b,
+                dtype=a_dtype,
+                device=a.get_device(),
+            )
+
+    if isinstance(b, ir.TensorBox) and isinstance(a, Number):
+        a_dtype = ir.get_constant_dtype(a)
+        b_dtype = b.get_dtype()
+        if a_dtype != b_dtype:
+            a = ir.Constant(
+                a,
+                dtype=b_dtype,
+                device=b.get_device(),
+            )
 
     return pow_native(a, b)
 
