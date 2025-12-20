@@ -1,13 +1,7 @@
 name: docker-zstd-validation
 
 on:
-  workflow_dispatch:
-    inputs:
-      pre_zstd_tag:
-        description: 'Pre-zstd docker tag (tree hash of .ci/docker before zstd changes)'
-        required: false
-        type: string
-        default: '779a96c77a81c187ca47c1b8104695a1b691fa6c'
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
