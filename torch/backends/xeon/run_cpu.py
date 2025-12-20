@@ -1,4 +1,4 @@
-﻿# mypy: allow-untyped-defs 
+# mypy: allow-untyped-defs 
 """
 This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
@@ -206,6 +206,18 @@ class _CPUinfo:
                         self.logical_core_node_map[int(cpuinfo[0])] = int(node_id)
                 self.node_physical_cores.append(cur_node_physical_core)
                 self.node_logical_cores.append(cur_node_logical_core)
+
+    def _physical_core_nums(self):
+        overall_core_num = 0
+        for phycisal_core_list in self.node_physical_cores:
+            overall_core_num += len(phycisal_core_list)
+        return overall_core_num
+
+    def _logical_core_nums(self):
+        overall_core_num = 0
+        for logical_core_list in self.node_logical_cores:
+            overall_core_num += len(logical_core_list)
+        return overall_core_num
 
     def get_node_physical_cores(self, node_id):
         if node_id < 0 or node_id > self.node_nums - 1:
@@ -505,8 +517,14 @@ but you specify %s cores in core_list",
 please make sure ninstances <= total_cores)"
                     )
                 if args.skip_cross_node_cores:
+                    logger.warning(
+                        f"with --skip-cross-node-cores set, "
+                        f"the first {args.ninstances} sub-numa node(s) will be used "
+                        f"to launch {args.ninstances} instance(s), "
+                        f"each node for 1 instance."
+                    )
                     if args.ninstances > self.cpuinfo.node_nums:
-                        raise RuntimeError(
+                        raise AssertionError(
                             f"--ninstances should not be larger than numa node number \
 when --skip-cross-node-cores is set"
                         )
@@ -517,6 +535,11 @@ when --skip-cross-node-cores is set"
                         cores.extend(per_node_cores)
                         args.ncores_per_instance.append(len(per_node_cores))
                 else:
+                    logger.warning(
+                        f"all the CPU cores on the machine will be distributed "
+                        f"as evenly as possible to each instance. It is possible "
+                        f"that some cores in an instance may cross the numa node."
+                    )
                     args.ncores_per_instance = [len(cores) // args.ninstances] * args.ninstances
             elif args.ncores_per_instance != [-1]:
                 if args.skip_cross_node_cores:
