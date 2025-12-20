@@ -717,6 +717,7 @@ python_ref_db: list[OpInfo] = [
             ),
             # AssertionError: Reference result was farther (0.09746177145360499) from the precise
             # computation than the torch result was (0.09111555632069855)
+            # See https://github.com/pytorch/pytorch/pull/170856 for more details.
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
