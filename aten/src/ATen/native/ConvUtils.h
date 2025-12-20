@@ -8,6 +8,10 @@
 
 #include <utility>
 
+#ifdef USE_ROCM
+#include <ATen/cuda/CUDAContextLight.h>
+#endif
+
 namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
@@ -367,7 +371,22 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
   // enabled by default for ROCm >= 7.0.0 with miopen 3.5
   int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
   bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
-  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(is_miopen_3_5);
+
+  // Enable NHWC by default only for MI series datacenter GPUs
+  // Consumer Radeon GPUs (gfx11xx) have poor NHWC performance
+  // See https://github.com/pytorch/pytorch/issues/170764
+  bool default_nhwc = is_miopen_3_5;
+#ifdef USE_ROCM
+  if (is_miopen_3_5) {
+    // Check GPU architecture
+    std::string gcn_arch = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+    // MI series GPUs: gfx90a (MI210/250), gfx942 (MI300), gfx950 (MI350)
+    default_nhwc = (gcn_arch.find("gfx90a") != std::string::npos ||
+                    gcn_arch.find("gfx942") != std::string::npos ||
+                    gcn_arch.find("gfx950") != std::string::npos);
+  }
+#endif
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(default_nhwc);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
