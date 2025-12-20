@@ -553,6 +553,10 @@ def broadcast_symbolic_shapes(a, b):
     We give the shapes 0 and 1 concrete values, while all other shapes
     are symbolic sympy formulas.
     """
+    b = tuple(b)
+    if not a or a == b:
+        return b
+
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.is_size_one_or_false(y):
@@ -1000,16 +1004,19 @@ def where(cond, a, b):
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promotion_kind=None)
 def broadcast_tensors(*inputs):
-    if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
-        return broadcast_tensors(*inputs[0])
+    if len(inputs) == 1:
+        if isinstance(inputs[0], (list, tuple)):
+            return broadcast_tensors(*inputs[0])
+        return inputs
     target: list[sympy.Expr] = functools.reduce(
-        broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
+        broadcast_symbolic_shapes, (x.get_size() for x in inputs), ()
     )
     outputs = []
     for x in inputs:
-        sizes = x.get_size()
+        if (sizes := tuple(x.get_size())) == target:
+            pass
 
-        if len(sizes) != len(target) or any(
+        elif len(sizes) != len(target) or any(
             V.graph.sizevars.is_size_one_or_false(a)
             != V.graph.sizevars.is_size_one_or_false(b)
             for a, b in zip(sizes, target)
@@ -3923,7 +3930,24 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    from .utils import _fx_node_is_input_dependent_cudagraph_unsafe
+
     op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+
+    # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
+    # because boolean indices trigger .nonzero() during CUDA graph capture
+    # When graph_partition is enabled, skip - partitioning handles this
+    fx_node = V.graph.current_node
+    if (
+        not config.graph_partition
+        and fx_node is not None
+        and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
+    ):
+        msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
+        if stack_trace := fx_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
@@ -7286,6 +7310,8 @@ def triton_kernel_wrap_(
 def cond(
     pred, true_fn, false_fn, operands
 ) -> list[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]]:
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -7298,7 +7324,9 @@ def cond(
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    if any(
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
+    if not config.graph_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
@@ -7346,7 +7374,13 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
+            # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
+            saved_current_node = V.graph.current_node
+            try:
+                V.graph.current_node = node
+                V.graph.env[node] = V.graph.run_node(node)
+            finally:
+                V.graph.current_node = saved_current_node
 
     if output is None:
         raise RuntimeError("No output node found in graph")
