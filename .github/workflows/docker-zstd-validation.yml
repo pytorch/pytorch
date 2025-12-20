@@ -1,0 +1,127 @@
+name: docker-zstd-validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      pre_zstd_tag:
+        description: 'Pre-zstd docker tag (tree hash of .ci/docker before zstd changes)'
+        required: false
+        type: string
+        default: '779a96c77a81c187ca47c1b8104695a1b691fa6c'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_REGISTRY: 308535385114.dkr.ecr.us-east-1.amazonaws.com
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions: read-all
+
+jobs:
+  validate-zstd-pull-speed:
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.12xlarge
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - docker-image-name: pytorch-linux-jammy-py3.10-clang12
+            label: cpu
+          - docker-image-name: pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+            label: cuda
+          - docker-image-name: pytorch-linux-jammy-rocm-n-py3
+            label: rocm
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Calculate post-zstd docker tag
+        id: calculate-tag
+        run: |
+          POST_ZSTD_TAG=$(git rev-parse HEAD:".ci/docker")
+          echo "post_zstd_tag=${POST_ZSTD_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Post-zstd tag: ${POST_ZSTD_TAG}"
+          echo "Pre-zstd tag: ${{ inputs.pre_zstd_tag }}"
+
+      - name: Get pre-zstd image size
+        id: pre-size
+        env:
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+        run: |
+          SIZE=$(docker manifest inspect "${PRE_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
+          echo "Pre-zstd ${{ matrix.label }} image size: ${SIZE} MB"
+
+      - name: Get post-zstd image size
+        id: post-size
+        env:
+          POST_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.post_zstd_tag }}
+        run: |
+          SIZE=$(docker manifest inspect "${POST_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
+          echo "Post-zstd ${{ matrix.label }} image size: ${SIZE} MB"
+
+      - name: Pull pre-zstd image and time it
+        id: pull-pre
+        env:
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+        run: |
+          echo "Pulling pre-zstd image: ${PRE_IMAGE}"
+          START_TIME=$(date +%s.%N)
+          docker pull "${PRE_IMAGE}"
+          END_TIME=$(date +%s.%N)
+          PULL_TIME=$(echo "${END_TIME} - ${START_TIME}" | bc)
+          echo "pull_time=${PULL_TIME}" >> "${GITHUB_OUTPUT}"
+          echo "Pre-zstd pull time: ${PULL_TIME} seconds"
+
+      - name: Clean up pre-zstd image
+        env:
+          PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ inputs.pre_zstd_tag }}
+        run: |
+          docker rmi "${PRE_IMAGE}" || true
+          docker system prune -f
+
+      - name: Pull post-zstd image and time it
+        id: pull-post
+        env:
+          POST_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.post_zstd_tag }}
+        run: |
+          echo "Pulling post-zstd image: ${POST_IMAGE}"
+          START_TIME=$(date +%s.%N)
+          docker pull "${POST_IMAGE}"
+          END_TIME=$(date +%s.%N)
+          PULL_TIME=$(echo "${END_TIME} - ${START_TIME}" | bc)
+          echo "pull_time=${PULL_TIME}" >> "${GITHUB_OUTPUT}"
+          echo "Post-zstd pull time: ${PULL_TIME} seconds"
+
+      - name: Summary
+        run: |
+          echo "## ${{ matrix.label }} Image Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Pre-zstd (gzip) | Post-zstd | Improvement |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-----------------|-----------|-------------|" >> $GITHUB_STEP_SUMMARY
+
+          PRE_SIZE=${{ steps.pre-size.outputs.size_mb }}
+          POST_SIZE=${{ steps.post-size.outputs.size_mb }}
+          SIZE_REDUCTION=$(echo "scale=2; (1 - ${POST_SIZE} / ${PRE_SIZE}) * 100" | bc)
+
+          PRE_PULL=${{ steps.pull-pre.outputs.pull_time }}
+          POST_PULL=${{ steps.pull-post.outputs.pull_time }}
+          PULL_IMPROVEMENT=$(echo "scale=2; (1 - ${POST_PULL} / ${PRE_PULL}) * 100" | bc)
+
+          echo "| Size (MB) | ${PRE_SIZE} | ${POST_SIZE} | ${SIZE_REDUCTION}% smaller |" >> $GITHUB_STEP_SUMMARY
+          echo "| Pull Time (s) | ${PRE_PULL} | ${POST_PULL} | ${PULL_IMPROVEMENT}% faster |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
