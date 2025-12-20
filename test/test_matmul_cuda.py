@@ -19,7 +19,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
-    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
@@ -281,8 +280,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
