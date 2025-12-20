@@ -53,7 +53,6 @@ class _Block(TypedDict):
     address: int
     state: str
     frames: list[_Frame]
-    forward_frames: NotRequired[list[str]]
 
 
 class _Segment(TypedDict):
@@ -74,7 +73,6 @@ class _TraceEntry(TypedDict):
     action: str
     addr: NotRequired[int]
     frames: list[_Frame]
-    forward_frames: NotRequired[list[str]]
     size: int
     stream: int
     device_free: NotRequired[int]
@@ -830,7 +828,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore [import-error,missing-module-attribute]
+        # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -909,6 +907,7 @@ def _record_memory_history_legacy(
     clear_history=False,
     compile_context=False,
     global_record_annotations=False,
+    skip_actions=None,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -920,6 +919,8 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
+        skip_actions if skip_actions is not None else [],
     )
 
 
@@ -991,6 +992,23 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        skip_actions (list[str], optional): List of action types to skip when recording
+            memory history. This can be used to reduce memory overhead by excluding
+            certain types of events from being recorded. Valid action types are:
+
+            - `"alloc"`: Memory allocation events
+            - `"free_requested"`: Free requests (memory marked for freeing)
+            - `"free_completed"`: Completed free operations (memory actually freed)
+            - `"segment_alloc"`: Segment allocation from cudaMalloc
+            - `"segment_free"`: Segment freed back to CUDA via cudaFree
+            - `"oom"`: Out-of-memory exceptions
+            - `"snapshot"`: Memory snapshot generation events
+
+            For example, to skip recording free_requested events:
+            `skip_actions=["free_requested"]`
+
+            Defaults to None (record all actions).
+
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
@@ -1007,6 +1025,7 @@ def _record_memory_history_impl(
     clear_history: bool = False,
     compile_context: bool = False,
     global_record_annotations: bool = False,
+    skip_actions: list[str] | None = None,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -1016,6 +1035,8 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
+        skip_actions if skip_actions is not None else [],
     )
 
 
@@ -1406,6 +1427,7 @@ class MemPool(_MemPool):
         use_on_oom: bool = False,
         no_split: bool = False,
     ):
+        # pyrefly: ignore [bad-argument-count]
         super().__init__(allocator, True, use_on_oom, no_split)
 
     @property

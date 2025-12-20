@@ -256,6 +256,7 @@ def set_logs(
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
     compute_dependencies: bool = False,
+    caching: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -456,6 +457,9 @@ def set_logs(
         hierarchical_compile (:class:`bool`):
             Whether to emit debug info for hierarchical compilation. Default: ``False``
 
+        caching (:class:`bool`):
+            Whether to emit detailed Inductor caching information. Default: ``False``
+
     Example::
 
         >>> # xdoctest: +SKIP
@@ -570,6 +574,7 @@ def set_logs(
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
         compute_dependencies=compute_dependencies,
+        caching=caching,
     )
 
 

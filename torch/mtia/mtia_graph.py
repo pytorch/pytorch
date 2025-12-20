@@ -13,6 +13,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
     """
     Return an opaque token representing the id of a graph memory pool.
     """
+    # pyrefly: ignore [missing-attribute]
     return torch._C._mtia_graphPoolHandle()
 
 
@@ -77,7 +78,8 @@ class graph:
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
-        assert self.capture_stream is not None
+        if self.capture_stream is None:
+            raise AssertionError("capture_stream must not be None")
         self.stream_ctx = torch.mtia.stream(self.capture_stream)
         self.mtia_graph = mtia_graph
 

@@ -161,7 +161,6 @@ static bool isInputCompliesAddmmCudaLt(
 
   const auto mat1_sizes = mat1.sizes();
   const auto mat2_sizes = mat2.sizes();
-  #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
   return (beta.toComplexDouble() == 1.0
     // NOTE: row-major result is important when bias is 1D.
@@ -203,9 +202,6 @@ static bool isInputCompliesAddmmCudaLt(
     && ( // some shape/stride restrictions
       // Strangely, if mat2 has only 1 row or column, we get
       // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
-      // NOTE: extension to mat1 because mat1/mat2 can be swapped based off
-      // their row-/col-majorness.
-      mat1_sizes[0] > 1 && mat1_sizes[1] > 1 &&
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
       // The last conditions is to skip 16b transA and non-trans-B having
       // leading dim >> rows when they are sliced from a large tensor
@@ -231,7 +227,6 @@ static bool isInputCompliesAddmmCudaLt(
       #endif
     )
   );
-  #endif
 
   // no compliance by default
   return false;
@@ -877,7 +872,6 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
   cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(
@@ -896,14 +890,6 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   if (!result.is_same(*args.result)) {
     result.copy_(*args.result);
   }
-#else
-#if !defined(USE_ROCM) && defined(CUDA_VERSION)
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
-#else
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
-#endif
-#endif
-
   return result;
 }
 
