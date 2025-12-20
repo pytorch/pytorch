@@ -13059,6 +13059,9 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # ROCm hipSOLVER has nondeterministic backward for complex types
+           # https://github.com/pytorch/pytorch/issues/164193
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('chunk',
