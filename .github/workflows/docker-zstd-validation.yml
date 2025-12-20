@@ -64,7 +64,16 @@ jobs:
           PRE_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.pre_zstd_tag }}
         run: |
           echo "Checking image: ${PRE_IMAGE}"
-          SIZE=$(docker manifest inspect "${PRE_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          MANIFEST=$(docker manifest inspect "${PRE_IMAGE}")
+          # Check if this is a manifest list (multi-arch) or single manifest
+          if echo "${MANIFEST}" | jq -e '.manifests' > /dev/null 2>&1; then
+            # Manifest list - get linux/amd64 digest and inspect that
+            DIGEST=$(echo "${MANIFEST}" | jq -r '.manifests[] | select(.platform.architecture == "amd64" and .platform.os == "linux") | .digest')
+            SIZE=$(docker manifest inspect "${PRE_IMAGE}@${DIGEST}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          else
+            # Single manifest
+            SIZE=$(echo "${MANIFEST}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          fi
           echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
           echo "Pre-zstd ${{ matrix.label }} image size: ${SIZE} MB"
 
@@ -74,7 +83,16 @@ jobs:
           POST_IMAGE: ${{ env.DOCKER_REGISTRY }}/pytorch/ci-image:${{ matrix.docker-image-name }}-${{ steps.calculate-tag.outputs.post_zstd_tag }}
         run: |
           echo "Checking image: ${POST_IMAGE}"
-          SIZE=$(docker manifest inspect "${POST_IMAGE}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          MANIFEST=$(docker manifest inspect "${POST_IMAGE}")
+          # Check if this is a manifest list (multi-arch) or single manifest
+          if echo "${MANIFEST}" | jq -e '.manifests' > /dev/null 2>&1; then
+            # Manifest list - get linux/amd64 digest and inspect that
+            DIGEST=$(echo "${MANIFEST}" | jq -r '.manifests[] | select(.platform.architecture == "amd64" and .platform.os == "linux") | .digest')
+            SIZE=$(docker manifest inspect "${POST_IMAGE}@${DIGEST}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          else
+            # Single manifest
+            SIZE=$(echo "${MANIFEST}" | jq '[.layers[].size, .config.size] | add / 1024 / 1024')
+          fi
           echo "size_mb=${SIZE}" >> "${GITHUB_OUTPUT}"
           echo "Post-zstd ${{ matrix.label }} image size: ${SIZE} MB"
 
