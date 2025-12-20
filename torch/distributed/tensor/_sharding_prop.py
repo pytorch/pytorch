@@ -505,6 +505,15 @@ class ShardingPropagator:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
 
+        else:
+            # try operator decomposition path
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
+
+            op_strategy = None
+            if DecompShardingStrategy.has_decomp(op_schema.op):
+                op_strategy = DecompShardingStrategy.propagate_strategy(op_schema, self)
+
+        if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
