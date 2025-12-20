@@ -4637,6 +4637,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
+    @skipIfMPS
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
             def __init__(self):
