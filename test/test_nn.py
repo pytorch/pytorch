@@ -9606,10 +9606,11 @@ class TestNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp)
 
     def test_one_hot(self, device):
-        # cuda throws device assert for invalid data
+        # cuda & mps throws device assert for invalid data
         # xla ignores out of bound indices
         if (
             self.device_type != 'cuda'
+            and self.device_type != 'mps'
             and self.device_type != 'xla'
         ):
             with self.assertRaises(RuntimeError):
